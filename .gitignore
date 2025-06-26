@@ -1,0 +1,52 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Test files and outputs
+*.bin
+*.mkv
+*.mp4
+*.mov
+*.avi
+test_*
+sample_*
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
+
+# Environment files
+.env
+.env.local
+
+# Profiling data
+*.prof
+flamegraph.svg
+
+# Coverage reports
+tarpaulin-report.html
+cobertura.xml
+lcov.info

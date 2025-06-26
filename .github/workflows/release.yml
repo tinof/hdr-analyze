@@ -1,0 +1,287 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_id: ${{ steps.create_release.outputs.id }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: HDR-Analyze ${{ github.ref }}
+          body: |
+            ## HDR-Analyze Release ${{ github.ref }}
+            
+            ### Download the appropriate binary for your platform:
+            
+            - **Windows**: `hdr-analyze-${{ github.ref }}-x86_64-pc-windows-msvc.zip`
+            - **macOS (Intel)**: `hdr-analyze-${{ github.ref }}-x86_64-apple-darwin.tar.gz`
+            - **macOS (Apple Silicon)**: `hdr-analyze-${{ github.ref }}-aarch64-apple-darwin.tar.gz`
+            - **Linux**: `hdr-analyze-${{ github.ref }}-x86_64-unknown-linux-gnu.tar.gz`
+            
+            ### Prerequisites
+            - FFmpeg must be installed and available in your system PATH
+            
+            ### Usage
+            ```bash
+            # Basic analysis
+            ./hdr_analyzer_mvp -i input.mkv -o measurements.bin
+            
+            # With advanced optimizer (recommended)
+            ./hdr_analyzer_mvp -i input.mkv -o measurements.bin --enable-optimizer
+            ```
+            
+            ### What's New
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for detailed changes.
+            
+            ### Support
+            - Report issues: [GitHub Issues](https://github.com/${{ github.repository }}/issues)
+            - Documentation: [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+          draft: false
+          prerelease: false
+
+  build:
+    name: Build
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: hdr-analyze-x86_64-unknown-linux-gnu.tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: hdr-analyze-x86_64-apple-darwin.tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: hdr-analyze-aarch64-apple-darwin.tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: hdr-analyze-x86_64-pc-windows-msvc.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install FFmpeg (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install FFmpeg (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install ffmpeg
+
+      - name: Install FFmpeg (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install ffmpeg
+
+      - name: Build Binary
+        run: cargo build --verbose --locked --release --target ${{ matrix.target }}
+
+      - name: Build Archive (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          binary_name="hdr_analyzer_mvp"
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            binary_name="${binary_name}.exe"
+          fi
+          
+          # Create staging directory
+          staging="hdr-analyze-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$staging"
+          
+          # Copy binary
+          cp "target/${{ matrix.target }}/release/$binary_name" "$staging/"
+          
+          # Copy documentation
+          cp README.md "$staging/"
+          cp CHANGELOG.md "$staging/"
+          cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE file not found, skipping"
+          
+          # Create archive
+          tar czf "${{ matrix.name }}" "$staging"
+          echo "ASSET=${{ matrix.name }}" >> $GITHUB_ENV
+
+      - name: Build Archive (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          binary_name="hdr_analyzer_mvp.exe"
+          
+          # Create staging directory
+          staging="hdr-analyze-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$staging"
+          
+          # Copy binary
+          cp "target/${{ matrix.target }}/release/$binary_name" "$staging/"
+          
+          # Copy documentation
+          cp README.md "$staging/"
+          cp CHANGELOG.md "$staging/"
+          cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE file not found, skipping"
+          
+          # Create archive
+          7z a "${{ matrix.name }}" "$staging"
+          echo "ASSET=${{ matrix.name }}" >> $GITHUB_ENV
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./${{ env.ASSET }}
+          asset_name: ${{ env.ASSET }}
+          asset_content_type: application/octet-stream
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Run Tests
+        run: cargo test --verbose --locked
+
+      - name: Run Clippy
+        run: cargo clippy --release -- -D warnings
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run Security Audit
+        run: cargo audit
+
+  update-release-notes:
+    name: Update Release Notes
+    needs: [create-release, build, test, security-audit]
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update Release with Build Status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const release_id = ${{ needs.create-release.outputs.release_id }};
+            const tag_name = context.ref.replace('refs/tags/', '');
+
+            // Get current release
+            const { data: release } = await github.rest.repos.getRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release_id
+            });
+
+            // Update release body with success status
+            const updatedBody = release.body + `
+
+            ---
+
+            ### Build Status ✅
+
+            All builds completed successfully and passed quality checks:
+            - ✅ Cross-platform builds (Windows, macOS, Linux)
+            - ✅ Test suite passed
+            - ✅ Code quality checks (clippy, formatting)
+            - ✅ Security audit passed
+
+            ### Installation Verification
+
+            After downloading, verify the binary works:
+            \`\`\`bash
+            # Check version and help
+            ./hdr_analyzer_mvp --help
+
+            # Test with a sample file
+            ./hdr_analyzer_mvp -i sample.mkv -o test.bin
+            \`\`\`
+
+            ### Checksums
+
+            For security verification, check the SHA256 checksums of downloaded files.
+            `;
+
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release_id,
+              body: updatedBody
+            });
+
+  notify-completion:
+    name: Notify Release Completion
+    needs: [create-release, build, test, security-audit, update-release-notes]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Release Status Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release ID**: ${{ needs.create-release.outputs.release_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Status**: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Status**: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Audit**: ${{ needs.security-audit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Release is now available at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
