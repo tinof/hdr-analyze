@@ -1,8 +1,34 @@
 # HDR-Analyze: Dynamic HDR Metadata Generator
 
-A powerful, open-source command-line tool for analyzing HDR10 video files to generate dynamic metadata for Dolby Vision conversion.
+A powerful, open-source workspace containing tools for analyzing HDR10 video files to generate dynamic metadata for Dolby Vision conversion.
 
-This tool implements advanced, research-backed algorithms to analyze video on a per-frame and per-scene basis, creating measurement files that can be used by tools like `dovi_tool` to produce high-quality Dolby Vision Profile 8.1 content from a standard HDR10 source.
+This workspace implements advanced, research-backed algorithms to analyze video on a per-frame and per-scene basis, creating measurement files that can be used by tools like `dovi_tool` to produce high-quality Dolby Vision Profile 8.1 content from a standard HDR10 source.
+
+## Project Structure
+
+This is a Rust workspace containing two main components:
+
+```
+hdr_project/
+├── Cargo.toml              # Workspace configuration
+├── README.md               # This file
+├── LICENSE                 # MIT License
+├── CHANGELOG.md            # Version history
+├── CONTRIBUTING.md         # Contribution guidelines
+├── hdr_analyzer_mvp/       # Main HDR analysis tool
+│   ├── Cargo.toml
+│   └── src/
+│       └── main.rs
+└── verifier/               # Measurement file verification tool
+    ├── Cargo.toml
+    └── src/
+        └── main.rs
+```
+
+### Workspace Members
+
+- **`hdr_analyzer_mvp`**: The main HDR analysis application that processes video files and generates madVR-compatible measurement files
+- **`verifier`**: A utility tool for reading, validating, and inspecting madVR measurement files
 
 ## Key Features
 
@@ -23,33 +49,80 @@ This tool implements advanced, research-backed algorithms to analyze video on a 
 
 ## Installation
 
-Clone the repository and build the release binary:
+Clone the repository and build all workspace members:
 
 ```bash
 git clone https://github.com/your-username/hdr-analyze.git
 cd hdr-analyze
-cargo build --release
+cargo build --release --workspace
 ```
 
-The executable will be located at `./target/release/hdr_analyzer_mvp`.
+This will build both tools. The executables will be located at:
+- Main analyzer: `./target/release/hdr_analyzer_mvp`
+- Verifier tool: `./target/release/verifier`
+
+### Building Individual Tools
+
+You can also build specific workspace members:
+
+```bash
+# Build only the main analyzer
+cargo build --release -p hdr_analyzer_mvp
+
+# Build only the verifier tool
+cargo build --release -p verifier
+```
 
 ## Usage
 
-The tool is simple to run from the command line.
+### HDR Analyzer Tool
 
-### Standard Analysis (without optimizer):
+The main analysis tool can be run in several ways:
 
+#### Using the built executable:
+
+**Standard Analysis (without optimizer):**
 ```bash
 ./target/release/hdr_analyzer_mvp -i "path/to/your/video.mkv" -o "measurements.bin"
 ```
 
-### Analysis with Advanced Optimizer Enabled:
-
-To generate dynamic per-frame target_nits, use the `--enable-optimizer` flag. This is highly recommended for the best quality.
-
+**Analysis with Advanced Optimizer Enabled:**
 ```bash
 ./target/release/hdr_analyzer_mvp -i "path/to/your/video.mkv" -o "measurements_optimized.bin" --enable-optimizer
 ```
+
+#### Using cargo run (from workspace root):
+
+**Standard Analysis:**
+```bash
+cargo run -p hdr_analyzer_mvp -- -i "path/to/your/video.mkv" -o "measurements.bin"
+```
+
+**With Optimizer:**
+```bash
+cargo run -p hdr_analyzer_mvp -- -i "path/to/your/video.mkv" -o "measurements_optimized.bin" --enable-optimizer
+```
+
+### Verifier Tool
+
+The verifier tool can inspect and validate measurement files:
+
+#### Using the built executable:
+```bash
+./target/release/verifier "measurements.bin"
+```
+
+#### Using cargo run:
+```bash
+cargo run -p verifier -- "measurements.bin"
+```
+
+The verifier will display detailed information about the measurement file including:
+- File format validation
+- Scene and frame statistics
+- Peak brightness analysis
+- Histogram integrity checks
+- Optimizer data (if present)
 
 ## Arguments
 
@@ -74,6 +147,17 @@ This tool is a robust V1.0, but there is always room for improvement. Future enh
 - Allowing user-configurable parameters for the optimizer heuristics.
 
 Contributions are welcome! Please feel free to open an issue or submit a pull request.
+
+## Acknowledgements & Dependencies
+
+This project is built with the help of several excellent open-source libraries. We extend our gratitude to their authors and contributors.
+
+- **`madvr_parse`**: The core library used for reading and writing madVR measurement files. This project would not be possible without it.
+  - **License:** MIT
+  - **Copyright:** (c) 2025 quietvoid
+- **`clap`**: For robust and user-friendly command-line argument parsing.
+- **`anyhow`**: For simple and effective error handling.
+- **`byteorder`**: For low-level binary data serialization.
 
 ## License
 

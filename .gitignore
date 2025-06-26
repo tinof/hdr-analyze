@@ -50,3 +50,4 @@ flamegraph.svg
 tarpaulin-report.html
 cobertura.xml
 lcov.info
+codebase.md
