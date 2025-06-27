@@ -340,7 +340,7 @@ fn run_analysis_pipeline(
 
     // Scene detection filter with frame output
     ffmpeg_args.push("-vf".to_string());
-    ffmpeg_args.push("scdet=threshold=15,metadata=print".to_string());
+    ffmpeg_args.push("scdet=threshold=4,metadata=print".to_string());
 
     // Output raw RGB24 frames to stdout
     ffmpeg_args.push("-f".to_string());
