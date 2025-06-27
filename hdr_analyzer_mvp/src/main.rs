@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
-use byteorder::{LittleEndian, WriteBytesExt};
 use clap::Parser;
+use madvr_parse::{MadVRHeader, MadVRMeasurements, MadVRScene, MadVRFrame};
 use std::collections::VecDeque;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -25,21 +25,7 @@ struct Cli {
 }
 
 // --- Data Structures ---
-#[derive(Debug, Default, Clone)]
-struct MvpScene {
-    start: u32,
-    end: u32,
-    peak_nits: u32,
-    scene_avg_pq: f64, // Average Picture Level for the entire scene
-}
-
-#[derive(Debug, Default)]
-struct MvpFrame {
-    peak_pq: f64,
-    avg_pq: f64,
-    lum_histogram: Vec<f64>, // Should have 256 elements
-    target_nits: Option<u16>,
-}
+// Using official MadVRScene and MadVRFrame structs from madvr_parse crate
 
 // --- Constants for PQ Conversion ---
 const ST2084_Y_MAX: f64 = 10000.0;
@@ -342,8 +328,8 @@ fn get_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>)> {
 /// * `input_path` - Path to the input video file
 ///
 /// # Returns
-/// `Result<Vec<MvpScene>>` - Vector of detected scenes with start/end frame numbers
-fn detect_scenes(input_path: &str) -> Result<Vec<MvpScene>> {
+/// `Result<Vec<MadVRScene>>` - Vector of detected scenes with start/end frame numbers
+fn detect_scenes(input_path: &str) -> Result<Vec<MadVRScene>> {
     println!("Scene detection in progress (this may take a moment for large files)...");
 
     // Use lower resolution for scene detection to speed up processing
@@ -402,30 +388,33 @@ fn detect_scenes(input_path: &str) -> Result<Vec<MvpScene>> {
     let mut start_frame = 0u32;
 
     for &cut_frame in &scene_cuts {
-        scenes.push(MvpScene {
+        scenes.push(MadVRScene {
             start: start_frame,
             end: cut_frame,
             peak_nits: 0,      // Will be calculated later
-            scene_avg_pq: 0.0, // Will be calculated later
+            avg_pq: 0.0,       // Will be calculated later
+            ..Default::default() // Let the library handle other fields
         });
         start_frame = cut_frame + 1;
     }
 
     // Add final scene if there are any cuts
     if !scene_cuts.is_empty() {
-        scenes.push(MvpScene {
+        scenes.push(MadVRScene {
             start: start_frame,
             end: u32::MAX, // Will be updated with actual frame count
             peak_nits: 0,
-            scene_avg_pq: 0.0, // Will be calculated later
+            avg_pq: 0.0, // Will be calculated later
+            ..Default::default() // Let the library handle other fields
         });
     } else {
         // No scene cuts detected, create single scene
-        scenes.push(MvpScene {
+        scenes.push(MadVRScene {
             start: 0,
             end: u32::MAX, // Will be updated with actual frame count
             peak_nits: 0,
-            scene_avg_pq: 0.0, // Will be calculated later
+            avg_pq: 0.0, // Will be calculated later
+            ..Default::default() // Let the library handle other fields
         });
     }
 
@@ -448,13 +437,13 @@ fn detect_scenes(input_path: &str) -> Result<Vec<MvpScene>> {
 /// * `total_frames` - Optional total frame count for progress tracking
 ///
 /// # Returns
-/// `Result<Vec<MvpFrame>>` - Vector of analyzed frame data
+/// `Result<Vec<MadVRFrame>>` - Vector of analyzed frame data
 fn analyze_frames(
     input_path: &str,
     width: u32,
     height: u32,
     total_frames: Option<u32>,
-) -> Result<Vec<MvpFrame>> {
+) -> Result<Vec<MadVRFrame>> {
     let mut child = Command::new("ffmpeg")
         .args(["-i", input_path, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
         .stdout(Stdio::piped())
@@ -585,8 +574,8 @@ fn analyze_frames(
 /// * `height` - Frame height in pixels
 ///
 /// # Returns
-/// `Result<MvpFrame>` - Analyzed frame data with PQ values and histogram
-fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<MvpFrame> {
+/// `Result<MadVRFrame>` - Analyzed frame data with PQ values and histogram
+fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<MadVRFrame> {
     let pixel_count = (width * height) as usize;
     let mut histogram = vec![0f64; 256];
     let mut max_byte = 0u8;
@@ -633,11 +622,12 @@ fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<Mv
     // Calculate average PQ from the histogram
     let avg_pq = calculate_avg_pq_from_histogram(&histogram);
 
-    Ok(MvpFrame {
-        peak_pq,
+    Ok(MadVRFrame {
+        peak_pq_2020: peak_pq, // Use the correct field name from madvr_parse
         avg_pq,
         lum_histogram: histogram,
         target_nits: None, // Will be set by optimizer if enabled
+        ..Default::default() // Let the library handle other fields
     })
 }
 
@@ -650,7 +640,7 @@ fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<Mv
 /// # Arguments
 /// * `scenes` - Mutable slice of scene data to update
 /// * `frames` - Frame analysis data to aggregate
-fn precompute_scene_stats(scenes: &mut [MvpScene], frames: &[MvpFrame]) {
+fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
     println!("Computing scene-based statistics...");
 
     for scene in scenes.iter_mut() {
@@ -662,7 +652,7 @@ fn precompute_scene_stats(scenes: &mut [MvpScene], frames: &[MvpFrame]) {
 
             // Calculate average PQ for the entire scene
             let total_avg_pq: f64 = scene_frames.iter().map(|f| f.avg_pq).sum();
-            scene.scene_avg_pq = total_avg_pq / scene_frames.len() as f64;
+            scene.avg_pq = total_avg_pq / scene_frames.len() as f64;
         }
     }
 }
@@ -681,7 +671,7 @@ fn precompute_scene_stats(scenes: &mut [MvpScene], frames: &[MvpFrame]) {
 ///
 /// # Arguments
 /// * `frames` - Mutable slice of frame data to optimize
-fn run_optimizer_pass(frames: &mut [MvpFrame]) {
+fn run_optimizer_pass(frames: &mut [MadVRFrame]) {
     const ROLLING_WINDOW_SIZE: usize = 240; // 240 frames as recommended by research
 
     let mut rolling_avg_queue: VecDeque<f64> = VecDeque::with_capacity(ROLLING_WINDOW_SIZE);
@@ -706,7 +696,7 @@ fn run_optimizer_pass(frames: &mut [MvpFrame]) {
             rolling_avg_queue.iter().sum::<f64>() / rolling_avg_queue.len() as f64;
 
         // Convert peak PQ to nits for decision making
-        let peak_nits = pq_to_nits(frame.peak_pq) as u32;
+        let peak_nits = pq_to_nits(frame.peak_pq_2020) as u32;
 
         // Find highlight knee (99th percentile)
         let highlight_knee_nits = find_highlight_knee_nits(&frame.lum_histogram);
@@ -800,143 +790,66 @@ fn apply_advanced_heuristics(
 /// `Result<()>` - Ok(()) on successful write, Err on failure
 fn write_measurement_file(
     output_path: &str,
-    scenes: &[MvpScene],
-    frames: &[MvpFrame],
+    scenes: &[MadVRScene],
+    frames: &[MadVRFrame],
     enable_optimizer: bool,
 ) -> Result<()> {
-    let file = std::fs::File::create(output_path).context("Failed to create output file")?;
-    let mut writer = BufWriter::new(file);
-
-    // Update scenes with actual frame count and peak nits
-    let mut updated_scenes = scenes.to_vec();
-    let frame_count = frames.len() as u32;
-
-    // Update the last scene's end frame
-    if let Some(last_scene) = updated_scenes.last_mut() {
-        if last_scene.end == u32::MAX {
-            last_scene.end = frame_count.saturating_sub(1);
-        }
-    }
-
-    // Calculate peak nits for each scene
-    for scene in &mut updated_scenes {
-        let start_idx = scene.start as usize;
-        let end_idx = (scene.end as usize + 1).min(frames.len());
-
-        if start_idx < frames.len() && start_idx < end_idx {
-            let scene_frames = &frames[start_idx..end_idx];
-            let max_peak_pq = scene_frames
-                .iter()
-                .map(|f| f.peak_pq)
-                .fold(0.0f64, f64::max);
-
-            // Convert PQ back to nits for storage
-            // This is a simplified reverse conversion for MVP
-            let nits = (max_peak_pq * ST2084_Y_MAX) as u32;
-            scene.peak_nits = nits.min(10000);
-        }
-    }
-
-    // Calculate maxcll (maximum content light level)
-    let maxcll = frames
-        .iter()
-        .map(|f| (f.peak_pq * ST2084_Y_MAX) as u32)
+    // 1. Create the Header
+    let maxcll = frames.iter()
+        .map(|f| pq_to_nits(f.peak_pq_2020) as u32)
         .max()
-        .unwrap_or(0)
-        .min(10000);
+        .unwrap_or(0);
 
-    // Determine flags based on optimizer usage
-    let flags = if enable_optimizer { 3 } else { 2 };
+    let header = MadVRHeader {
+        version: 5,
+        header_size: 32,
+        scene_count: scenes.len() as u32,
+        frame_count: frames.len() as u32,
+        flags: if enable_optimizer { 3 } else { 2 },
+        maxcll,
+        ..Default::default() // Let the library handle other default values
+    };
 
-    // Write magic code
-    writer
-        .write_all(b"mvr+")
-        .context("Failed to write magic code")?;
-
-    // Write header
-    writer
-        .write_u32::<LittleEndian>(5)
-        .context("Failed to write version")?; // version
-    writer
-        .write_u32::<LittleEndian>(32)
-        .context("Failed to write header_size")?; // header_size
-    writer
-        .write_u32::<LittleEndian>(updated_scenes.len() as u32)
-        .context("Failed to write scene_count")?;
-    writer
-        .write_u32::<LittleEndian>(frame_count)
-        .context("Failed to write frame_count")?;
-    writer
-        .write_u32::<LittleEndian>(flags)
-        .context("Failed to write flags")?;
-    writer
-        .write_u32::<LittleEndian>(maxcll)
-        .context("Failed to write maxcll")?;
-    writer
-        .write_u32::<LittleEndian>(0)
-        .context("Failed to write maxfall")?; // maxfall (MVP: 0)
-    writer
-        .write_u32::<LittleEndian>(0)
-        .context("Failed to write avgfall")?; // avgfall (MVP: 0)
-
-    // Write scenes block
-    // First: scene starts
-    for scene in &updated_scenes {
-        writer
-            .write_u32::<LittleEndian>(scene.start)
-            .context("Failed to write scene start")?;
+    // 2. Create the top-level Measurements object
+    // We need to create new vectors with the data since the structs don't implement Clone
+    let mut owned_scenes = Vec::new();
+    for scene in scenes {
+        owned_scenes.push(MadVRScene {
+            start: scene.start,
+            end: scene.end,
+            peak_nits: scene.peak_nits,
+            avg_pq: scene.avg_pq,
+            ..Default::default()
+        });
     }
 
-    // Second: scene ends + 1
-    for scene in &updated_scenes {
-        writer
-            .write_u32::<LittleEndian>(scene.end + 1)
-            .context("Failed to write scene end")?;
-    }
-
-    // Third: scene peak nits
-    for scene in &updated_scenes {
-        writer
-            .write_u32::<LittleEndian>(scene.peak_nits)
-            .context("Failed to write scene peak nits")?;
-    }
-
-    // Write frames block
+    let mut owned_frames = Vec::new();
     for frame in frames {
-        // Write peak_pq_2020 as u16
-        let peak_pq_2020 = (frame.peak_pq * 64000.0).round() as u16;
-        writer
-            .write_u16::<LittleEndian>(peak_pq_2020)
-            .context("Failed to write peak_pq_2020")?;
-
-        // Write histogram (256 u16 values)
-        for &hist_value in &frame.lum_histogram {
-            let hist_u16 = (hist_value * 640.0).round() as u16;
-            writer
-                .write_u16::<LittleEndian>(hist_u16)
-                .context("Failed to write histogram value")?;
-        }
+        owned_frames.push(MadVRFrame {
+            peak_pq_2020: frame.peak_pq_2020,
+            avg_pq: frame.avg_pq,
+            lum_histogram: frame.lum_histogram.clone(),
+            target_nits: frame.target_nits,
+            ..Default::default()
+        });
     }
 
-    // (Phase 3) Write the custom per-frame target nits block if optimizer was enabled
-    if enable_optimizer {
-        println!("Writing custom target nits block...");
-        for frame in frames {
-            // If a frame has a target, write it. Otherwise, write 0 as a default.
-            let target_nits = frame.target_nits.unwrap_or(0);
-            writer
-                .write_u16::<LittleEndian>(target_nits)
-                .context("Failed to write target_nits")?;
-        }
-    }
+    let measurements = MadVRMeasurements {
+        header,
+        scenes: owned_scenes,
+        frames: owned_frames,
+    };
 
-    writer.flush().context("Failed to flush output file")?;
+    // 3. Let the library do all the hard work!
+    println!("Serializing measurement data using madvr_parse library...");
+    let binary_data = measurements.write_measurements()
+        .context("Failed to serialize measurements using madvr_parse library")?;
 
-    println!(
-        "Successfully wrote measurement file with {} scenes and {} frames",
-        updated_scenes.len(),
-        frame_count
-    );
+    // 4. Write the resulting bytes to a file
+    std::fs::write(output_path, binary_data)
+        .context("Failed to write binary data to output file")?;
+
+    println!("Successfully wrote measurement file.");
     println!("MaxCLL: {} nits", maxcll);
 
     Ok(())
