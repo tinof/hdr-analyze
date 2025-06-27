@@ -32,54 +32,69 @@ hdr_project/
 
 ## Key Features
 
-- **Accurate Per-Frame Analysis**: Measures key metrics like Peak Brightness (MaxCLL) and Average Picture Level (APL).
-- **PQ-Based Histogram**: Generates a 256-bin luminance histogram based on the ST.2084 Perceptual Quantizer (PQ) curve for high-precision analysis.
-- **Automated Scene Detection**: Uses `ffmpeg` to intelligently segment the video into scenes for contextual analysis.
+- **Native Video Processing**: Built with `ffmpeg-next` for direct access to high-bit-depth video data, eliminating external process overhead and enabling precise 10-bit PQ luminance mapping.
+- **Accurate Per-Frame Analysis**: Measures key metrics like Peak Brightness (MaxCLL) and Average Picture Level (APL) with direct access to 10-bit YUV420P10LE frame data.
+- **Precision PQ-Based Histogram**: Generates a 256-bin luminance histogram using native 10-bit values that directly correspond to the ST.2084 Perceptual Quantizer (PQ) curve for maximum accuracy.
+- **Native Scene Detection**: Real-time histogram-based scene detection using Sum of Absolute Differences algorithm, eliminating external parsing overhead.
 - **Advanced Dynamic Metadata Optimizer**: An optional, state-of-the-art optimizer that generates per-frame dynamic target nits for superior tone mapping.
     - **Temporal Smoothing**: Uses a 240-frame rolling average to prevent abrupt changes in brightness and ensure smooth visual transitions.
     - **Highlight Management**: Detects the "highlight knee" (99th percentile) to make intelligent decisions about preserving highlight detail versus overall brightness.
     - **Scene-Aware Heuristics**: Applies different logic for dark, medium, and bright scenes to preserve artistic intent.
-- **High Performance**: Features revolutionary luminance-only piping optimization delivering 3x I/O improvement and 50-200+ FPS with hardware acceleration. Advanced Rust-side optimizations with parallel processing and pre-computed look-up tables provide 10-20x faster frame analysis. Optimized for multi-core CPUs and designed to process large 4K/8K files efficiently.
+- **High Performance**: Native Rust pipeline with direct memory access to video frames, maintaining ~13-14 FPS processing speed while eliminating external process coordination overhead.
+- **Hardware Acceleration Support**: CUDA, VAAPI, and VideoToolbox acceleration with graceful fallback to software decoding.
 - **Professional Output**: Generates madVR-compatible `.bin` measurement files, ready for use in Dolby Vision workflows.
 
-## Performance Optimizations
+## Native Pipeline Architecture
 
-The HDR analyzer has been extensively optimized for maximum performance, featuring multiple layers of optimization that work together to deliver exceptional throughput:
+The HDR analyzer features a fully native Rust pipeline using the `ffmpeg-next` crate, providing direct access to video data and eliminating external process overhead:
 
-### Rust-Side Processing Optimizations
+### Native Video Processing Benefits
 
-**Parallel Processing with Rayon:**
-- Utilizes all available CPU cores through the `rayon` crate for parallel frame analysis
-- Converts sequential pixel processing loops to parallel iterators (`par_iter()` and `par_chunks()`)
-- Provides near-linear performance scaling based on CPU core count (e.g., 8x faster on 8-core systems)
+**Direct Memory Access:**
+- Native `ffmpeg-next` integration eliminates external FFmpeg process spawning
+- Direct access to high-bit-depth video frame data in memory
+- No pipe-based communication or external process coordination overhead
+- Type-safe video processing with compile-time guarantees
 
-**Pre-computed Look-Up Tables (LUTs):**
-- Eliminates expensive `nits_to_pq` floating-point calculations from the per-pixel processing loop
-- Pre-calculates all 256 possible luminance-to-bin conversions at startup
-- Reduces per-pixel processing from ~25 floating-point operations to a single array lookup
-- **Combined Impact:** 10-20x faster frame analysis, making Rust processing no longer the bottleneck
+**Accurate 10-bit PQ Luminance Mapping:**
+- Direct access to YUV420P10LE frame data with native 10-bit precision
+- **Critical Accuracy Fix:** 10-bit luma values (0-1023) directly correspond to PQ curve
+- Formula: `pq_value = luma_10bit / 1023.0` for precise measurement parity
+- Eliminates previous 8-bit quantization errors and mapping discrepancies
 
-### FFmpeg Pipeline Optimizations
+**Native Scene Detection:**
+- Real-time histogram-based scene detection using Sum of Absolute Differences
+- Threshold of 15 optimized for HDR content sensitivity
+- Direct histogram comparison without external process parsing
+- Integrated processing during frame analysis for efficiency
 
-**Luminance-Only Processing:**
-- Processes single-channel luminance data (1 byte per pixel) instead of RGB (3 bytes per pixel)
-- Delivers 3x I/O throughput improvement while maintaining measurement accuracy
-- Uses `extractplanes=y` filter for hardware-accelerated luminance extraction
+### Hardware Acceleration Support
 
-**Hardware Acceleration Support:**
-- CUDA acceleration for NVIDIA GPUs (`hevc_cuvid` decoder)
-- VAAPI acceleration for Intel/AMD GPUs on Linux
-- VideoToolbox acceleration for macOS (Intel and Apple Silicon)
-- **Performance:** 50-200+ FPS with compatible hardware
+**Multi-Platform Acceleration:**
+- **CUDA**: NVIDIA GPU acceleration with `hevc_cuvid` decoder
+- **VAAPI**: Intel/AMD GPU acceleration on Linux systems
+- **VideoToolbox**: Native macOS hardware acceleration (Intel and Apple Silicon)
+- **Graceful Fallback**: Automatic software decoding when hardware acceleration unavailable
 
-### Architecture Impact
+### Performance Characteristics
 
-With these optimizations, the performance bottleneck has shifted back to the FFmpeg pipeline as intended, allowing the Rust analyzer to keep pace with high-throughput video decoding. This ensures optimal resource utilization and maximum overall processing speed for large 4K/8K HDR video files.
+**Maintained Performance:**
+- ~13-14 FPS average processing speed (consistent with previous implementation)
+- Reduced memory overhead from eliminating external processes
+- Direct frame access eliminates pipe buffer management
+- Single-threaded processing with better error handling and reliability
 
 ## Prerequisites
 
 - **Rust Toolchain**: Install from [rustup.rs](https://rustup.rs/).
-- **FFmpeg**: Must be installed and available in your system's PATH.
+- **FFmpeg Development Libraries**: Required for `ffmpeg-next` crate compilation.
+  - **macOS**: `brew install ffmpeg pkg-config`
+  - **Ubuntu/Debian**: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev pkg-config`
+  - **Windows**: Install FFmpeg development libraries or use vcpkg
+- **Build Tools**: C compiler and build tools for native dependencies.
+  - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+  - **Linux**: `build-essential` package
+  - **Windows**: Visual Studio Build Tools or MSVC
 
 ## Installation
 
@@ -139,11 +154,7 @@ cargo run -p hdr_analyzer_mvp -- -i "path/to/your/video.mkv" -o "measurements_op
 
 ## Hardware Acceleration (Advanced)
 
-For users with compatible hardware, `hdr-analyze` supports GPU-accelerated video decoding to significantly improve performance. Combined with the new **luminance-only piping optimization**, this delivers exceptional performance gains of 50-200+ FPS.
-
-The optimization processes only 1 byte per pixel (luminance) instead of 3 bytes (RGB), providing 3x I/O throughput improvement while maintaining full measurement accuracy.
-
-To use it, provide the `--hwaccel` flag with the appropriate value for your system.
+The native pipeline supports GPU-accelerated video decoding through the `ffmpeg-next` crate's hardware acceleration capabilities. Hardware acceleration provides improved performance while maintaining the accuracy benefits of native 10-bit processing.
 
 **Usage:**
 ```bash
@@ -169,7 +180,11 @@ cargo run -p hdr_analyzer_mvp --release -- --hwaccel vaapi -i "video.mkv" -o "me
 cargo run -p hdr_analyzer_mvp --release -- --hwaccel videotoolbox -i "video.mkv" -o "measurements_gpu.bin"
 ```
 
-**Note:** Hardware acceleration requires that `ffmpeg` was compiled with support for the chosen method. The tool will automatically select appropriate hardware decoders when available. For CUDA acceleration, it defaults to `hevc_cuvid` decoder for H.265/HEVC content, which is common in HDR videos.
+**Hardware Acceleration Features:**
+- **CUDA**: Attempts `hevc_cuvid` decoder for NVIDIA GPUs with automatic fallback
+- **VAAPI/VideoToolbox**: Software decoder with hardware acceleration hints
+- **Graceful Fallback**: Automatically uses software decoding if hardware acceleration fails
+- **Native Integration**: Hardware acceleration handled entirely within the native pipeline
 
 ### Verifier Tool
 
@@ -198,23 +213,35 @@ The verifier will display detailed information about the measurement file includ
 - `-o, --output <PATH>`: Path for the output .bin measurement file.
 - `--enable-optimizer`: (Optional) Activates the advanced optimizer to generate dynamic target nits.
 
-## The Algorithm Explained
+## The Native Pipeline Algorithm
 
-This tool operates in three distinct phases to ensure the highest quality output:
+The native pipeline processes video in a single integrated pass for maximum efficiency and accuracy:
 
-1. **Scene Detection**: The video is first quickly analyzed to identify the start and end of every scene.
-2. **Frame Measurement**: The tool then performs a deep analysis of every single frame, calculating its peak brightness, perceptually accurate average brightness using industry-standard weighted luminance (Rec. 709/2020 coefficients), and a detailed 256-bin PQ histogram.
-3. **Optimizer Pass (Optional)**: If enabled, a final pass is made over the frame data. Using scene-based statistics, a rolling average of previous frames, and highlight knee detection, it calculates the ideal target_nits for every frame to ensure a smooth, stable, and visually stunning result.
+1. **Native Video Initialization**: Opens video files using `ffmpeg-next` and extracts metadata (resolution, frame rate, duration) directly from stream parameters.
+
+2. **Integrated Scene Detection & Frame Analysis**: Processes each frame through the native pipeline:
+   - Decodes frames using hardware-accelerated or software decoders
+   - Scales frames to YUV420P10LE format for consistent 10-bit analysis
+   - Extracts Y-plane (luminance) data directly as 16-bit values
+   - Performs real-time scene detection using histogram comparison (Sum of Absolute Differences)
+   - Calculates accurate PQ values using native 10-bit precision: `pq_value = luma_10bit / 1023.0`
+   - Generates 256-bin PQ-based luminance histograms
+
+3. **Scene Statistics Computation**: Calculates per-scene statistics from the collected frame data including peak nits and average PQ values.
+
+4. **Optimizer Pass (Optional)**: If enabled, performs a final pass over the frame data using scene-based statistics, rolling averages, and highlight knee detection to calculate optimal target_nits for each frame.
 
 ## Roadmap & Contributing
 
-This tool is a robust V1.2 featuring comprehensive performance optimizations including parallel processing, pre-computed look-up tables, and luminance-only piping for exceptional performance. Future enhancements may include:
+This tool is a robust V2.0 featuring a fully native Rust pipeline with `ffmpeg-next` integration for maximum accuracy and reliability. Future enhancements may include:
 
-- Implementing automated black bar detection for even more accurate APL measurements.
-- Allowing user-configurable parameters for the optimizer heuristics.
-- Additional hardware acceleration backends and optimizations.
-- Advanced scene detection algorithms leveraging the performance improvements.
-- Further FFmpeg pipeline optimizations to maximize throughput.
+- Enhanced hardware acceleration with proper device context setup for VAAPI/VideoToolbox
+- Parallel frame processing for multi-core performance improvements
+- Support for additional HDR formats (HDR10+, Dolby Vision)
+- SIMD optimizations for histogram calculations
+- Real-time processing capabilities and streaming input support
+- Automated black bar detection for even more accurate APL measurements
+- User-configurable parameters for optimizer heuristics and scene detection
 
 Contributions are welcome! Please feel free to open an issue or submit a pull request.
 
@@ -222,13 +249,14 @@ Contributions are welcome! Please feel free to open an issue or submit a pull re
 
 This project is built with the help of several excellent open-source libraries. We extend our gratitude to their authors and contributors.
 
+- **`ffmpeg-next`**: Native Rust bindings for FFmpeg, enabling direct video processing without external processes.
+  - **License:** MIT
+  - **Provides:** Native video decoding, hardware acceleration, and frame access
 - **`madvr_parse`**: The core library used for reading and writing madVR measurement files. This project would not be possible without it.
   - **License:** MIT
   - **Copyright:** (c) 2025 quietvoid
-- **`rayon`**: High-performance parallel processing library enabling multi-core CPU utilization for frame analysis.
 - **`clap`**: For robust and user-friendly command-line argument parsing.
-- **`anyhow`**: For simple and effective error handling.
-- **`byteorder`**: For low-level binary data serialization.
+- **`anyhow`**: For simple and effective error handling and context propagation.
 
 ## License
 

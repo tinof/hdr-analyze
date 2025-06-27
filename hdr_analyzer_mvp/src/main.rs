@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use madvr_parse::{MadVRHeader, MadVRMeasurements, MadVRScene, MadVRFrame};
-use rayon::prelude::*;
 use std::collections::VecDeque;
-use std::io::{BufReader, Read, Write};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
+use std::io::Write;
 use std::time::{Duration, Instant};
+
+// Native FFmpeg imports
+use ffmpeg_next as ffmpeg;
+use ffmpeg_next::{format, media, codec, frame, software};
 
 // --- Command Line Interface ---
 #[derive(Parser)]
@@ -44,21 +44,7 @@ const ST2084_C2: f64 = (2413.0 / 4096.0) * 32.0;
 const ST2084_C3: f64 = (2392.0 / 4096.0) * 32.0;
 
 // --- Formulas ---
-/// Convert nits (cd/m²) to PQ (Perceptual Quantizer) value using ST.2084 standard.
-///
-/// This function implements the ST.2084 EOTF (Electro-Optical Transfer Function)
-/// to convert absolute luminance values in nits to PQ code values in the range [0.0, 1.0].
-///
-/// # Arguments
-/// * `nits` - Luminance value in nits (cd/m²), typically in range [0, 10000]
-///
-/// # Returns
-/// PQ value in range [0.0, 1.0] where 1.0 represents 10,000 nits
-fn nits_to_pq(nits: u32) -> f64 {
-    let y = nits as f64 / ST2084_Y_MAX;
-    ((ST2084_C1 + ST2084_C2 * y.powf(ST2084_M1)) / (1.0 + ST2084_C3 * y.powf(ST2084_M1)))
-        .powf(ST2084_M2)
-}
+// nits_to_pq function removed - no longer needed in native pipeline
 
 /// Calculate average PQ from histogram data.
 ///
@@ -144,37 +130,7 @@ fn find_highlight_knee_nits(histogram: &[f64]) -> f64 {
     1000.0
 }
 
-/// Create a pre-computed look-up table for luminance to bin index conversion.
-///
-/// This function pre-calculates the expensive `nits_to_pq` conversion and bin index
-/// calculation for all possible 8-bit luminance values (0-255). This eliminates
-/// the need to perform floating-point power calculations for each pixel during
-/// frame analysis, providing a significant performance improvement.
-///
-/// # Returns
-/// Array of 256 bin indices corresponding to luminance values 0-255
-fn create_luminance_to_bin_lut() -> [usize; 256] {
-    let mut lut = [0; 256];
-
-    for i in 0..=255 {
-        let luminance = i as u8;
-
-        // Convert 8-bit luminance to a linear float (0.0-1.0)
-        let linear_lum = luminance as f64 / 255.0;
-        // Scale to a nit value (0-10000)
-        let pixel_nits = linear_lum * 10000.0;
-        // Convert nits to a PQ value (0.0-1.0)
-        let pixel_pq = nits_to_pq(pixel_nits as u32);
-
-        // A pixel's PQ value (0.0 to 1.0) maps directly to the 256 bins
-        let bin_index = (pixel_pq * 255.0).round() as usize;
-        let bin_index = bin_index.min(255); // Clamp to be safe
-
-        lut[i] = bin_index;
-    }
-
-    lut
-}
+// create_luminance_to_bin_lut function removed - no longer needed in native pipeline
 
 /// Format duration as MM:SS for user-friendly display.
 ///
@@ -192,12 +148,12 @@ fn format_duration(duration: Duration) -> String {
 
 
 
-/// Main entry point for the HDR analyzer.
+/// Main entry point for the HDR analyzer with native FFmpeg pipeline.
 ///
-/// This function orchestrates the complete HDR analysis pipeline:
-/// 1. Extracts video information (resolution, frame count)
-/// 2. Performs scene detection using ffmpeg
-/// 3. Analyzes each frame to generate PQ histograms and peak/average values
+/// This function orchestrates the complete HDR analysis pipeline using native FFmpeg:
+/// 1. Initializes native video processing with ffmpeg-next
+/// 2. Performs direct scene detection and frame analysis with accurate 10-bit PQ mapping
+/// 3. Generates PQ histograms and peak/average values from native frame data
 /// 4. Optionally runs the advanced optimizer to generate dynamic target nits
 /// 5. Writes the results to a madVR-compatible .bin measurement file
 ///
@@ -206,394 +162,409 @@ fn format_duration(duration: Duration) -> String {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    println!("HDR Analyzer MVP - Starting analysis of: {}", cli.input);
+    println!("HDR Analyzer MVP (Native Pipeline) - Starting analysis of: {}", cli.input);
 
-    // Step 1: Get video info using ffprobe
-    let (width, height, total_frames) = get_video_info(&cli.input)?;
+    // Step 1: Get video info using native FFmpeg
+    let (width, height, total_frames, input_context) = get_native_video_info(&cli.input)?;
     println!("Video resolution: {}x{}", width, height);
     if let Some(frames) = total_frames {
         println!("Total frames: {}", frames);
     }
 
-    // Step 2: Consolidated scene detection and frame analysis
-    println!("Starting consolidated analysis pipeline...");
-    let (mut scenes, mut frames) = run_analysis_pipeline(&cli, width, height, total_frames)?;
+    // Step 2: Native scene detection and frame analysis
+    println!("Starting native analysis pipeline...");
+    let (mut scenes, mut frames) = run_native_analysis_pipeline(&cli, width, height, total_frames, input_context)?;
     println!("Detected {} scenes and analyzed {} frames", scenes.len(), frames.len());
 
-    // Step 4: Fix scene end frames and compute scene statistics
+    // Step 3: Fix scene end frames and compute scene statistics
     fix_scene_end_frames(&mut scenes, frames.len());
     precompute_scene_stats(&mut scenes, &frames);
 
-    // Step 5: Run advanced optimizer if enabled
+    // Step 4: Run advanced optimizer if enabled
     if cli.enable_optimizer {
         println!("Running intelligent optimizer pass...");
         run_optimizer_pass(&mut frames);
     }
 
-    // Step 6: Assemble and write the .bin file
+    // Step 5: Assemble and write the .bin file
     println!("Writing measurement file: {}", cli.output);
     write_measurement_file(&cli.output, &scenes, &frames, cli.enable_optimizer)?;
 
-    println!("Analysis complete!");
+    println!("Native analysis complete!");
     Ok(())
 }
 
-/// Get video resolution and frame count using ffprobe.
+/// Native video information extraction using ffmpeg-next.
 ///
-/// This function uses ffprobe to extract essential video metadata needed for analysis.
-/// Frame count extraction is optional as some formats don't support it reliably.
+/// This function replaces the external ffprobe process with native FFmpeg library calls
+/// to extract essential video metadata needed for analysis.
 ///
 /// # Arguments
 /// * `input_path` - Path to the input video file
 ///
 /// # Returns
-/// `Result<(u32, u32, Option<u32>)>` - (width, height, optional_frame_count)
-fn get_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>)> {
-    // Get resolution
-    let resolution_output = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height",
-            "-of",
-            "csv=s=x:p=0",
-            input_path,
-        ])
-        .output()
-        .context("Failed to execute ffprobe - make sure ffmpeg is installed")?;
+/// `Result<(u32, u32, Option<u32>, format::context::Input)>` - (width, height, optional_frame_count, input_context)
+fn get_native_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>, format::context::Input)> {
+    // Initialize FFmpeg
+    ffmpeg::init().context("Failed to initialize FFmpeg")?;
 
-    if !resolution_output.status.success() {
-        anyhow::bail!(
-            "ffprobe failed: {}",
-            String::from_utf8_lossy(&resolution_output.stderr)
-        );
+    // Open input file
+    let input_context = format::input(input_path)
+        .context("Failed to open input video file")?;
+
+    // Find the best video stream
+    let video_stream = input_context
+        .streams()
+        .best(media::Type::Video)
+        .context("No video stream found in input file")?;
+
+    let video_params = video_stream.parameters();
+
+    // Extract width and height from video parameters
+    let (width, height) = match video_params.medium() {
+        media::Type::Video => {
+            // Get decoder context to access width/height
+            let decoder_context = codec::context::Context::from_parameters(video_params)
+                .context("Failed to create decoder context")?;
+            let decoder = decoder_context.decoder().video()
+                .context("Failed to create video decoder")?;
+            (decoder.width(), decoder.height())
+        }
+        _ => return Err(anyhow::anyhow!("Stream is not a video stream")),
+    };
+
+    // Try to estimate frame count from duration and frame rate
+    let frame_count = if video_stream.duration() != ffmpeg::ffi::AV_NOPTS_VALUE {
+        let duration = video_stream.duration();
+        let time_base = video_stream.time_base();
+        let avg_frame_rate = video_stream.avg_frame_rate();
+
+        if avg_frame_rate.numerator() > 0 && avg_frame_rate.denominator() > 0 {
+            let duration_seconds = (duration as f64) * f64::from(time_base);
+            let fps = avg_frame_rate.numerator() as f64 / avg_frame_rate.denominator() as f64;
+            Some((duration_seconds * fps) as u32)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    println!("Native video info: {}x{}", width, height);
+    if let Some(frames) = frame_count {
+        println!("Estimated frames: {}", frames);
     }
 
-    let resolution_str = String::from_utf8(resolution_output.stdout)
-        .context("Invalid UTF-8 in ffprobe output")?
-        .trim()
-        .to_string();
-
-    let parts: Vec<&str> = resolution_str.split('x').collect();
-    if parts.len() != 2 {
-        anyhow::bail!("Invalid resolution format: {}", resolution_str);
-    }
-
-    let width: u32 = parts[0].parse().context("Invalid width")?;
-    let height: u32 = parts[1].parse().context("Invalid height")?;
-
-    // Try to get frame count (this might fail for some formats, so it's optional)
-    let frame_count = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-count_packets",
-            "-show_entries",
-            "stream=nb_read_packets",
-            "-of",
-            "csv=p=0",
-            input_path,
-        ])
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout)
-                    .ok()?
-                    .trim()
-                    .parse::<u32>()
-                    .ok()
-            } else {
-                None
-            }
-        });
-
-    Ok((width, height, frame_count))
+    Ok((width, height, frame_count, input_context))
 }
 
-/// Consolidated analysis pipeline that performs both scene detection and frame analysis
-/// using a single ffmpeg process with multiple output streams.
+/// Native analysis pipeline using ffmpeg-next for direct video processing.
 ///
-/// This function eliminates the performance bottleneck of running separate ffmpeg processes
-/// by using one process that outputs both scene detection metadata (via stderr) and
-/// raw frame data (via stdout) simultaneously. Two dedicated threads process these streams
-/// concurrently to prevent pipe buffer overflow.
+/// This function replaces the external ffmpeg process with native FFmpeg library calls
+/// to perform both scene detection and frame analysis. It provides direct access to
+/// high-bit-depth video data for accurate luminance mapping and histogram-based scene detection.
 ///
 /// # Arguments
 /// * `cli` - Command line interface containing input path and hardware acceleration settings
 /// * `width` - Video width in pixels
 /// * `height` - Video height in pixels
 /// * `total_frames` - Optional total frame count for progress tracking
+/// * `input_context` - Native FFmpeg input context
 ///
 /// # Returns
 /// `Result<(Vec<MadVRScene>, Vec<MadVRFrame>)>` - Tuple of detected scenes and analyzed frames
-fn run_analysis_pipeline(
+fn run_native_analysis_pipeline(
     cli: &Cli,
     width: u32,
     height: u32,
     total_frames: Option<u32>,
+    mut input_context: format::context::Input,
 ) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>)> {
-    // Create pre-computed look-up table for optimal performance
-    println!("Creating luminance-to-bin look-up table...");
-    let lut = create_luminance_to_bin_lut();
-    println!("Consolidated pipeline in progress (this may take a moment for large files)...");
+    println!("Starting native analysis pipeline...");
 
-    // Build ffmpeg command with both scene detection and frame output
-    let mut ffmpeg_args = Vec::new();
+    // Find the best video stream
+    let video_stream = input_context
+        .streams()
+        .best(media::Type::Video)
+        .context("No video stream found")?;
+    let video_stream_index = video_stream.index();
 
-    // Input arguments with optional hardware acceleration
-    if let Some(accel) = &cli.hwaccel {
-        println!("Attempting to use hardware acceleration: {}", accel);
-        ffmpeg_args.push("-hwaccel".to_string());
-        ffmpeg_args.push(accel.clone());
+    // Set up decoder with hardware acceleration if requested
+    let decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
+        .context("Failed to create decoder context from stream parameters")?;
 
-        // Add decoder-specific flags based on acceleration type
-        match accel.as_str() {
-            "cuda" => {
-                ffmpeg_args.push("-c:v".to_string());
-                ffmpeg_args.push("hevc_cuvid".to_string());
-            }
-            "vaapi" => {
-                // VAAPI decoders are typically auto-selected
-            }
-            "videotoolbox" => {
-                // VideoToolbox decoders are auto-selected when hwaccel is specified
-                // No explicit decoder needed
-            }
-            _ => {
-                println!("Warning: Unknown hardware acceleration type '{}', proceeding with basic hwaccel flag", accel);
-            }
-        }
-    }
-
-    // Standard input
-    ffmpeg_args.push("-i".to_string());
-    ffmpeg_args.push(cli.input.clone());
-
-    // Scene detection filter with luminance extraction
-    ffmpeg_args.push("-vf".to_string());
-
-    // Build filter chain and determine pixel format based on hardware acceleration compatibility
-    let (filter_chain, pixel_format, bytes_per_pixel) = if let Some(accel) = &cli.hwaccel {
-        match accel.as_str() {
-            "videotoolbox" => {
-                // VideoToolbox requires explicit format conversion before extractplanes
-                ("scdet=threshold=2,metadata=print,format=yuv420p10le,extractplanes=y".to_string(), "gray".to_string(), 1usize)
-            }
-            "vaapi" => {
-                // VAAPI hardware acceleration with luminance extraction
-                ("hwdownload,format=yuv420p10le,scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
-            }
-            "cuda" => {
-                // CUDA hardware acceleration with luminance extraction
-                ("hwdownload,format=yuv420p10le,scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
-            }
-            _ => {
-                // Unknown acceleration type, use basic hardware acceleration pipeline
-                ("hwdownload,format=yuv420p10le,scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
-            }
-        }
+    let mut decoder = if let Some(hwaccel) = &cli.hwaccel {
+        println!("Attempting to use hardware acceleration: {}", hwaccel);
+        setup_hardware_decoder(decoder_context, hwaccel)?
     } else {
-        // Software decoding can use extractplanes directly for luminance-only processing
-        ("scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+        decoder_context.decoder().video()
+            .context("Failed to create video decoder")?
     };
 
-    ffmpeg_args.push(filter_chain);
+    // Set up scaler for consistent 10-bit format analysis
+    let mut scaler = software::scaling::Context::get(
+        decoder.format(),
+        decoder.width(),
+        decoder.height(),
+        format::Pixel::YUV420P10LE, // Target 10-bit format for accurate PQ analysis
+        decoder.width(),
+        decoder.height(),
+        software::scaling::Flags::BILINEAR,
+    ).context("Failed to create scaling context")?;
 
-    // Output raw frames to stdout (format depends on hardware acceleration compatibility)
-    ffmpeg_args.push("-f".to_string());
-    ffmpeg_args.push("rawvideo".to_string());
-    ffmpeg_args.push("-pix_fmt".to_string());
-    ffmpeg_args.push(pixel_format);
-    ffmpeg_args.push("-".to_string()); // stdout
-
-    // Spawn the consolidated ffmpeg process
-    let mut child = Command::new("ffmpeg")
-        .args(&ffmpeg_args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("Failed to execute ffmpeg for consolidated analysis")?;
-
-    let stdout = child.stdout.take().context("Failed to capture stdout")?;
-    let stderr = child.stderr.take().context("Failed to capture stderr")?;
-
-    // Create channels for inter-thread communication
-    let (frame_tx, frame_rx) = mpsc::channel::<MadVRFrame>();
-    let (scene_tx, scene_rx) = mpsc::channel::<u32>();
-
-    // Frame processing thread (stdout)
-    let frame_thread = {
-        let frame_tx = frame_tx.clone();
-        let bytes_per_pixel_copy = bytes_per_pixel;
-        let lut_copy = lut; // Copy the LUT for the thread
-        thread::spawn(move || -> Result<()> {
-            let mut stdout_reader = BufReader::new(stdout);
-            let frame_size = width as usize * height as usize * bytes_per_pixel_copy; // Bytes per pixel depends on format
-            let mut frame_buffer = vec![0u8; frame_size];
-            let mut frame_count = 0u32;
-
-            // Progress tracking
-            let start_time = Instant::now();
-            let mut last_progress_update = Instant::now();
-            let progress_update_interval = Duration::from_millis(500);
-
-            println!(
-                "Processing frames ({}x{}, {} bytes per frame)...",
-                width, height, frame_size
-            );
-            print!("Initializing frame analysis...");
-            std::io::stdout().flush().unwrap_or(());
-
-            loop {
-                match stdout_reader.read_exact(&mut frame_buffer) {
-                    Ok(()) => {
-                        // Process this frame
-                        let frame = analyze_single_frame(&frame_buffer, width, height, bytes_per_pixel_copy, &lut_copy)?;
-                        frame_tx.send(frame).map_err(|_| anyhow::anyhow!("Failed to send frame data"))?;
-                        frame_count += 1;
-
-                        // Update progress display periodically
-                        let now = Instant::now();
-                        if now.duration_since(last_progress_update) >= progress_update_interval
-                            || frame_count == 1
-                        {
-                            last_progress_update = now;
-
-                            // Calculate processing rate (frames per second)
-                            let elapsed = now.duration_since(start_time);
-                            let fps = if elapsed.as_secs_f64() > 0.0 {
-                                frame_count as f64 / elapsed.as_secs_f64()
-                            } else {
-                                0.0
-                            };
-
-                            // Progress display with frame count and processing rate
-                            if let Some(total) = total_frames {
-                                let progress = (frame_count as f64 / total as f64) * 100.0;
-                                print!(
-                                    "\rProcessing: {}/{} frames ({:.1}%) at {:.1} fps",
-                                    frame_count, total, progress, fps
-                                );
-                            } else {
-                                print!(
-                                    "\rProcessing: {} frames at {:.1} fps",
-                                    frame_count, fps
-                                );
-                            }
-                            std::io::stdout().flush().unwrap_or(());
-                        }
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                        // End of stream - normal termination
-                        break;
-                    }
-                    Err(e) => {
-                        return Err(anyhow::Error::from(e).context("Failed to read frame data"));
-                    }
-                }
-            }
-
-            // Final completion message
-            let total_elapsed = start_time.elapsed();
-            let final_fps = if total_elapsed.as_secs_f64() > 0.0 {
-                frame_count as f64 / total_elapsed.as_secs_f64()
-            } else {
-                0.0
-            };
-
-            println!(
-                "\nCompleted processing {} frames in {} ({:.1} fps average)",
-                frame_count,
-                format_duration(total_elapsed),
-                final_fps
-            );
-
-            Ok(())
-        })
-    };
-
-    // Scene detection thread (stderr) - also capture stderr for error reporting
-    let (stderr_content_tx, stderr_content_rx) = mpsc::channel::<String>();
-    let scene_thread = {
-        let scene_tx = scene_tx.clone();
-        let stderr_content_tx = stderr_content_tx.clone();
-        thread::spawn(move || -> Result<()> {
-            let mut stderr_reader = BufReader::new(stderr);
-            let mut stderr_content = String::new();
-            stderr_reader
-                .read_to_string(&mut stderr_content)
-                .context("Failed to read ffmpeg stderr")?;
-
-            // Send stderr content for potential error reporting
-            stderr_content_tx.send(stderr_content.clone()).unwrap_or(());
-
-            // Parse scene cuts from stderr
-            let mut current_frame = 0u32;
-
-            for line in stderr_content.lines() {
-                // Look for frame number lines first
-                if line.contains("lavfi.scdet.n:") {
-                    if let Some(n_start) = line.find("lavfi.scdet.n:") {
-                        let n_part = &line[n_start + "lavfi.scdet.n:".len()..];
-                        if let Some(frame_num_str) = n_part.split_whitespace().next() {
-                            if let Ok(frame_num) = frame_num_str.parse::<u32>() {
-                                current_frame = frame_num;
-                            }
-                        }
-                    }
-                }
-                // Then look for scene detection on the same or nearby lines
-                if line.contains("lavfi.scdet.pts_time:") && current_frame > 0 {
-                    scene_tx.send(current_frame).map_err(|_| anyhow::anyhow!("Failed to send scene cut data"))?;
-                }
-            }
-
-            Ok(())
-        })
-    };
-
-    // Drop the senders to signal completion
-    drop(frame_tx);
-    drop(scene_tx);
-
-    // Collect results from both threads
+    // Initialize analysis data structures
     let mut frames = Vec::new();
     let mut scene_cuts = Vec::new();
+    let mut previous_histogram: Option<Vec<f64>> = None;
+    let mut frame_count = 0u32;
 
-    // Collect frames
-    while let Ok(frame) = frame_rx.recv() {
-        frames.push(frame);
+    // Progress tracking
+    let start_time = Instant::now();
+    let mut last_progress_update = Instant::now();
+    let progress_update_interval = Duration::from_millis(500);
+
+    println!("Processing frames with native pipeline...");
+    print!("Initializing frame analysis...");
+    std::io::stdout().flush().unwrap_or(());
+
+    // Main processing loop
+    for (stream, packet) in input_context.packets() {
+        if stream.index() == video_stream_index {
+            decoder.send_packet(&packet).context("Failed to send packet to decoder")?;
+
+            // Receive and process decoded frames
+            let mut decoded_frame = frame::Video::empty();
+            while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                // Scale frame to target format for analysis
+                let mut scaled_frame = frame::Video::empty();
+                scaler.run(&decoded_frame, &mut scaled_frame)
+                    .context("Failed to scale frame")?;
+
+                // Analyze the native frame
+                let analyzed_frame = analyze_native_frame(&scaled_frame, width, height)?;
+
+                // Scene detection using histogram comparison
+                if let Some(ref prev_hist) = previous_histogram {
+                    let scene_change_score = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+                    if scene_change_score > 15.0 { // Use threshold of 15 as per memory
+                        scene_cuts.push(frame_count);
+                    }
+                }
+                previous_histogram = Some(analyzed_frame.lum_histogram.clone());
+
+                frames.push(analyzed_frame);
+                frame_count += 1;
+
+                // Update progress display periodically
+                let now = Instant::now();
+                if now.duration_since(last_progress_update) >= progress_update_interval || frame_count == 1 {
+                    last_progress_update = now;
+
+                    let elapsed = now.duration_since(start_time);
+                    let fps = if elapsed.as_secs_f64() > 0.0 {
+                        frame_count as f64 / elapsed.as_secs_f64()
+                    } else {
+                        0.0
+                    };
+
+                    if let Some(total) = total_frames {
+                        let progress = (frame_count as f64 / total as f64) * 100.0;
+                        print!("\rProcessing: {}/{} frames ({:.1}%) at {:.1} fps", frame_count, total, progress, fps);
+                    } else {
+                        print!("\rProcessing: {} frames at {:.1} fps", frame_count, fps);
+                    }
+                    std::io::stdout().flush().unwrap_or(());
+                }
+            }
+        }
     }
 
-    // Collect scene cuts
-    while let Ok(scene_cut) = scene_rx.recv() {
-        scene_cuts.push(scene_cut);
+    // Send EOF to decoder and process remaining frames
+    decoder.send_eof().context("Failed to send EOF to decoder")?;
+    let mut decoded_frame = frame::Video::empty();
+    while decoder.receive_frame(&mut decoded_frame).is_ok() {
+        let mut scaled_frame = frame::Video::empty();
+        scaler.run(&decoded_frame, &mut scaled_frame)
+            .context("Failed to scale final frame")?;
+
+        let analyzed_frame = analyze_native_frame(&scaled_frame, width, height)?;
+
+        if let Some(ref prev_hist) = previous_histogram {
+            let scene_change_score = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+            if scene_change_score > 15.0 {
+                scene_cuts.push(frame_count);
+            }
+        }
+
+        frames.push(analyzed_frame);
+        frame_count += 1;
     }
 
-    // Wait for both threads to complete
-    frame_thread.join().map_err(|_| anyhow::anyhow!("Frame processing thread panicked"))??;
-    scene_thread.join().map_err(|_| anyhow::anyhow!("Scene detection thread panicked"))??;
+    // Final completion message
+    let total_elapsed = start_time.elapsed();
+    let final_fps = if total_elapsed.as_secs_f64() > 0.0 {
+        frame_count as f64 / total_elapsed.as_secs_f64()
+    } else {
+        0.0
+    };
 
-    // Wait for ffmpeg to finish
-    let status = child.wait().context("Failed to wait for ffmpeg")?;
-    if !status.success() {
-        // Try to get stderr content for debugging
-        let stderr_output = if let Ok(stderr_content) = stderr_content_rx.try_recv() {
-            stderr_content
-        } else {
-            "No stderr information available".to_string()
-        };
-        
-        anyhow::bail!("ffmpeg consolidated analysis failed. Exit status: {}. FFmpeg stderr: {}", status, stderr_output);
-    }
+    println!("\nCompleted native processing {} frames in {} ({:.1} fps average)",
+        frame_count, format_duration(total_elapsed), final_fps);
 
     // Convert scene cuts to scenes
+    let scenes = convert_scene_cuts_to_scenes(scene_cuts, frame_count);
+    println!("Scene detection completed: {} scenes detected", scenes.len());
+
+    Ok((scenes, frames))
+}
+
+/// Set up hardware-accelerated decoder based on the specified acceleration type.
+///
+/// # Arguments
+/// * `decoder_context` - The decoder context to configure
+/// * `hwaccel` - Hardware acceleration type ("cuda", "vaapi", "videotoolbox")
+///
+/// # Returns
+/// `Result<codec::decoder::Video>` - Configured hardware decoder
+fn setup_hardware_decoder(
+    decoder_context: codec::context::Context,
+    hwaccel: &str,
+) -> Result<codec::decoder::Video> {
+    match hwaccel {
+        "cuda" => {
+            // Try to find CUDA-specific decoder
+            if let Some(cuda_decoder) = codec::decoder::find_by_name("hevc_cuvid") {
+                let mut context = codec::context::Context::new_with_codec(cuda_decoder);
+                // Copy parameters from the original context
+                unsafe {
+                    (*context.as_mut_ptr()).width = (*decoder_context.as_ptr()).width;
+                    (*context.as_mut_ptr()).height = (*decoder_context.as_ptr()).height;
+                    (*context.as_mut_ptr()).pix_fmt = (*decoder_context.as_ptr()).pix_fmt;
+                }
+                context.decoder().video()
+                    .context("Failed to create CUDA hardware decoder")
+            } else {
+                println!("CUDA decoder not available, falling back to software decoder");
+                decoder_context.decoder().video()
+                    .context("Failed to create fallback software decoder")
+            }
+        }
+        "vaapi" | "videotoolbox" => {
+            // For VAAPI and VideoToolbox, we'll use software decoding for now
+            // as hardware acceleration setup is more complex and requires device contexts
+            println!("Hardware acceleration {} requested, using software decoder for now", hwaccel);
+            decoder_context.decoder().video()
+                .context("Failed to create software decoder")
+        }
+        _ => {
+            println!("Unknown hardware acceleration type '{}', using software decoder", hwaccel);
+            decoder_context.decoder().video()
+                .context("Failed to create software decoder")
+        }
+    }
+}
+
+/// Analyze a native FFmpeg frame to extract HDR metadata with correct 10-bit PQ mapping.
+///
+/// This function processes native FFmpeg frames with direct access to high-bit-depth data,
+/// enabling accurate luminance mapping and PQ conversion. The 10-bit luma values (0-1023)
+/// directly correspond to the PQ curve for precise measurement.
+///
+/// # Arguments
+/// * `frame` - Native FFmpeg video frame in YUV420P10LE format
+/// * `width` - Frame width in pixels
+/// * `height` - Frame height in pixels
+///
+/// # Returns
+/// `Result<MadVRFrame>` - Analyzed frame data with accurate PQ values and histogram
+fn analyze_native_frame(
+    frame: &frame::Video,
+    width: u32,
+    height: u32,
+) -> Result<MadVRFrame> {
+    let pixel_count = (width * height) as usize;
+    let mut histogram = vec![0f64; 256];
+    let mut max_luma_10bit = 0u16;
+
+    // Get Y-plane data (luminance) from the 10-bit frame
+    let y_plane_data = frame.data(0); // Y plane
+    let y_stride = frame.stride(0);
+
+    // Process 10-bit luminance data
+    // In YUV420P10LE, each luma sample is 2 bytes (little-endian 10-bit value)
+    for y in 0..height {
+        let row_start = (y as usize) * y_stride;
+        for x in 0..(width as usize) {
+            let pixel_offset = row_start + (x * 2); // 2 bytes per 10-bit pixel
+
+            if pixel_offset + 1 < y_plane_data.len() {
+                // Read 10-bit value (little-endian)
+                let luma_10bit = u16::from_le_bytes([
+                    y_plane_data[pixel_offset],
+                    y_plane_data[pixel_offset + 1]
+                ]) & 0x3FF; // Mask to 10 bits (0-1023)
+
+                max_luma_10bit = max_luma_10bit.max(luma_10bit);
+
+                // **CORRECT LUMINANCE MAPPING**: 10-bit luma directly corresponds to PQ curve
+                // Normalize 10-bit value to PQ range (0.0-1.0)
+                let pq_value = luma_10bit as f64 / 1023.0;
+
+                // Map PQ value to histogram bin (0-255)
+                let bin_index = (pq_value * 255.0).round() as usize;
+                let bin_index = bin_index.min(255);
+
+                histogram[bin_index] += 1.0;
+            }
+        }
+    }
+
+    // Normalize histogram so sum equals 100.0
+    let total_pixels = pixel_count as f64;
+    for bin in &mut histogram {
+        *bin = (*bin / total_pixels) * 100.0;
+    }
+
+    // Calculate peak PQ from the brightest 10-bit luma value
+    let peak_pq = max_luma_10bit as f64 / 1023.0;
+
+    // Calculate average PQ from the histogram
+    let avg_pq = calculate_avg_pq_from_histogram(&histogram);
+
+    Ok(MadVRFrame {
+        peak_pq_2020: peak_pq,
+        avg_pq,
+        lum_histogram: histogram,
+        hue_histogram: Some(vec![0f64; 31]), // Add empty hue histogram for v6 compatibility
+        target_nits: None, // Will be set by optimizer if enabled
+        ..Default::default()
+    })
+}
+
+/// Calculate histogram difference using Sum of Absolute Differences for scene detection.
+///
+/// # Arguments
+/// * `hist1` - First histogram
+/// * `hist2` - Second histogram
+///
+/// # Returns
+/// Difference score (higher values indicate more significant changes)
+fn calculate_histogram_difference(hist1: &[f64], hist2: &[f64]) -> f64 {
+    hist1.iter()
+        .zip(hist2.iter())
+        .map(|(a, b)| (a - b).abs())
+        .sum()
+}
+
+/// Convert scene cuts to MadVRScene structures.
+///
+/// # Arguments
+/// * `scene_cuts` - Vector of frame indices where scene cuts occur
+/// * `total_frames` - Total number of frames processed
+///
+/// # Returns
+/// Vector of MadVRScene structures
+fn convert_scene_cuts_to_scenes(mut scene_cuts: Vec<u32>, total_frames: u32) -> Vec<MadVRScene> {
     let mut scenes = Vec::new();
     let mut start_frame = 0u32;
 
@@ -606,139 +577,41 @@ fn run_analysis_pipeline(
             end: cut_frame,
             peak_nits: 0,      // Will be calculated later
             avg_pq: 0.0,       // Will be calculated later
-            ..Default::default() // Let the library handle other fields
+            ..Default::default()
         });
         start_frame = cut_frame + 1;
     }
 
-    // Add final scene if there are any cuts
+    // Add final scene
     if !scene_cuts.is_empty() {
         scenes.push(MadVRScene {
             start: start_frame,
-            end: u32::MAX, // Will be updated with actual frame count
+            end: total_frames.saturating_sub(1), // Use actual last frame index
             peak_nits: 0,
-            avg_pq: 0.0, // Will be calculated later
-            ..Default::default() // Let the library handle other fields
+            avg_pq: 0.0,
+            ..Default::default()
         });
     } else {
         // No scene cuts detected, create single scene
         scenes.push(MadVRScene {
             start: 0,
-            end: u32::MAX, // Will be updated with actual frame count
+            end: total_frames.saturating_sub(1),
             peak_nits: 0,
-            avg_pq: 0.0, // Will be calculated later
-            ..Default::default() // Let the library handle other fields
+            avg_pq: 0.0,
+            ..Default::default()
         });
     }
 
-    println!("Scene detection completed: {} scenes detected", scenes.len());
-
-    Ok((scenes, frames))
+    scenes
 }
 
+// OLD EXTERNAL FFMPEG PIPELINE REMOVED - Now using native ffmpeg-next pipeline
 
 
 
 
-/// Analyze a single frame's data to extract HDR metadata.
-///
-/// This function processes raw frame data to compute:
-/// - Peak PQ value (brightest pixel converted to PQ space)
-/// - 256-bin PQ-based luminance histogram
-/// - Average PQ value derived from the histogram
-///
-/// Supports both luminance-only (gray) and RGB24 formats for hardware acceleration compatibility.
-/// Uses parallel processing with Rayon and pre-computed look-up tables for optimal performance.
-///
-/// # Arguments
-/// * `frame_data` - Raw pixel data (1 byte per pixel for gray, 3 bytes for RGB24)
-/// * `width` - Frame width in pixels
-/// * `height` - Frame height in pixels
-/// * `bytes_per_pixel` - Number of bytes per pixel (1 for gray, 3 for RGB24)
-/// * `lut` - Pre-computed look-up table for luminance to bin index conversion
-///
-/// # Returns
-/// `Result<MadVRFrame>` - Analyzed frame data with PQ values and histogram
-fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32, bytes_per_pixel: usize, lut: &[usize; 256]) -> Result<MadVRFrame> {
-    let pixel_count = (width * height) as usize;
-    let mut histogram = vec![0f64; 256];
-    let mut max_luminance = 0u8;
 
-    // Process pixels based on format (1 byte for luminance, 3 bytes for RGB)
-    if bytes_per_pixel == 1 {
-        // Luminance-only processing (gray format) - Parallel version with LUT
-        let histogram_data: Vec<(u8, usize)> = frame_data
-            .par_iter()
-            .map(|&luminance| {
-                // Get bin_index from pre-computed LUT (no expensive calculations!)
-                let bin_index = lut[luminance as usize];
-                (luminance, bin_index)
-            })
-            .collect();
-
-        // Reduce results sequentially (histogram updates need to be sequential)
-        for (luminance, bin_index) in histogram_data {
-            max_luminance = max_luminance.max(luminance);
-            histogram[bin_index] += 1.0;
-        }
-    } else if bytes_per_pixel == 3 {
-        // RGB24 processing (fallback for VideoToolbox compatibility) - Parallel version with LUT
-        let histogram_data: Vec<(u8, usize)> = frame_data
-            .par_chunks(3)
-            .map(|pixel_chunk| {
-                let r = pixel_chunk[0];
-                let g = pixel_chunk[1];
-                let b = pixel_chunk[2];
-
-                // Find peak brightness (max of any color channel)
-                let pixel_max = r.max(g).max(b);
-
-                // Calculate luminance using Rec. 709/2020 coefficients for perceptual accuracy
-                let r_f64 = r as f64;
-                let g_f64 = g as f64;
-                let b_f64 = b as f64;
-
-                let luminance = (0.2126 * r_f64 + 0.7152 * g_f64 + 0.0722 * b_f64).round() as u8;
-
-                // Get bin_index from pre-computed LUT (no expensive calculations!)
-                let bin_index = lut[luminance as usize];
-
-                (pixel_max, bin_index)
-            })
-            .collect();
-
-        // Reduce results sequentially (histogram updates need to be sequential)
-        for (pixel_max, bin_index) in histogram_data {
-            max_luminance = max_luminance.max(pixel_max);
-            histogram[bin_index] += 1.0;
-        }
-    } else {
-        anyhow::bail!("Unsupported pixel format: {} bytes per pixel", bytes_per_pixel);
-    }
-
-    // Normalize histogram so sum equals 100.0
-    let total_pixels = pixel_count as f64;
-    for bin in &mut histogram {
-        *bin = (*bin / total_pixels) * 100.0;
-    }
-
-    // Calculate peak PQ from the brightest luminance value
-    let linear = max_luminance as f64 / 255.0;
-    let nits = linear * 10000.0;
-    let peak_pq = nits_to_pq(nits as u32);
-
-    // Calculate average PQ from the histogram
-    let avg_pq = calculate_avg_pq_from_histogram(&histogram);
-
-    Ok(MadVRFrame {
-        peak_pq_2020: peak_pq, // Use the correct field name from madvr_parse
-        avg_pq,
-        lum_histogram: histogram,
-        hue_histogram: Some(vec![0f64; 31]), // Add empty hue histogram for v6 compatibility (31 bins)
-        target_nits: None, // Will be set by optimizer if enabled
-        ..Default::default() // Let the library handle other fields
-    })
-}
+// OLD analyze_single_frame FUNCTION REMOVED - Now using analyze_native_frame with direct 10-bit processing
 
 /// Fix scene end frames after we know the actual frame count.
 ///
