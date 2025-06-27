@@ -347,24 +347,24 @@ fn run_analysis_pipeline(
         match accel.as_str() {
             "videotoolbox" => {
                 // VideoToolbox requires explicit format conversion before extractplanes
-                ("scdet=threshold=15,metadata=print,format=yuv420p10le,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+                ("scdet=threshold=2,metadata=print,format=yuv420p10le,extractplanes=y".to_string(), "gray".to_string(), 1usize)
             }
             "vaapi" => {
                 // VAAPI hardware acceleration with luminance extraction
-                ("hwdownload,format=yuv420p10le,scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+                ("hwdownload,format=yuv420p10le,scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
             }
             "cuda" => {
                 // CUDA hardware acceleration with luminance extraction
-                ("hwdownload,format=yuv420p10le,scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+                ("hwdownload,format=yuv420p10le,scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
             }
             _ => {
                 // Unknown acceleration type, use basic hardware acceleration pipeline
-                ("hwdownload,format=yuv420p10le,scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+                ("hwdownload,format=yuv420p10le,scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
             }
         }
     } else {
         // Software decoding can use extractplanes directly for luminance-only processing
-        ("scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+        ("scdet=threshold=2,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
     };
 
     ffmpeg_args.push(filter_chain);
