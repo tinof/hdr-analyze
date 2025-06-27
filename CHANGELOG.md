@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Corrected the ffmpeg filter chain in scene detection to remove a faulty `scale` operation, which was preventing accurate detection on high-resolution videos
+
 ### Changed
 - Improved scene detection sensitivity for more accurate scene segmentation
 - Replaced simple RGB average with a weighted luminance calculation (Rec. 709/2020 coefficients) for more perceptually accurate brightness analysis

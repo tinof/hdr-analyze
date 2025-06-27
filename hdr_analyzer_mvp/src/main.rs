@@ -321,9 +321,8 @@ fn get_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>)> {
 /// Detect scene cuts using ffmpeg (optimized for speed).
 ///
 /// This function uses ffmpeg's scene detection filter to identify scene boundaries.
-/// It processes the video at reduced resolution (640x360) for faster analysis while
-/// maintaining detection accuracy. Scene boundaries are essential for contextual
-/// HDR optimization.
+/// It processes the full-resolution video stream to ensure maximum detection accuracy.
+/// Scene boundaries are essential for contextual HDR optimization.
 ///
 /// # Arguments
 /// * `input_path` - Path to the input video file
@@ -333,14 +332,13 @@ fn get_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>)> {
 fn detect_scenes(input_path: &str) -> Result<Vec<MadVRScene>> {
     println!("Scene detection in progress (this may take a moment for large files)...");
 
-    // Use lower resolution for scene detection to speed up processing
-    // Scene cuts don't require full resolution analysis
+    // Process full-resolution video for maximum scene detection accuracy
     let mut child = Command::new("ffmpeg")
         .args([
             "-i",
             input_path,
             "-vf",
-            "scale=640:360,scdet=threshold=15,metadata=print",
+            "scdet=threshold=15,metadata=print",
             "-f",
             "null",
             "-",
