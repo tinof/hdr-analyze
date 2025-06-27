@@ -326,7 +326,8 @@ fn run_analysis_pipeline(
                 // VAAPI decoders are typically auto-selected
             }
             "videotoolbox" => {
-                // VideoToolbox decoders are typically auto-selected
+                // VideoToolbox decoders are auto-selected when hwaccel is specified
+                // No explicit decoder needed
             }
             _ => {
                 println!("Warning: Unknown hardware acceleration type '{}', proceeding with basic hwaccel flag", accel);
@@ -340,13 +341,39 @@ fn run_analysis_pipeline(
 
     // Scene detection filter with luminance extraction
     ffmpeg_args.push("-vf".to_string());
-    ffmpeg_args.push("scdet=threshold=15,metadata=print,extractplanes=y".to_string());
 
-    // Output raw grayscale frames to stdout (luminance only)
+    // Build filter chain and determine pixel format based on hardware acceleration compatibility
+    let (filter_chain, pixel_format, bytes_per_pixel) = if let Some(accel) = &cli.hwaccel {
+        match accel.as_str() {
+            "videotoolbox" => {
+                // VideoToolbox requires explicit format conversion before extractplanes
+                ("scdet=threshold=15,metadata=print,format=yuv420p10le,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+            }
+            "vaapi" => {
+                // VAAPI hardware acceleration with luminance extraction
+                ("hwdownload,format=yuv420p10le,scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+            }
+            "cuda" => {
+                // CUDA hardware acceleration with luminance extraction
+                ("hwdownload,format=yuv420p10le,scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+            }
+            _ => {
+                // Unknown acceleration type, use basic hardware acceleration pipeline
+                ("hwdownload,format=yuv420p10le,scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+            }
+        }
+    } else {
+        // Software decoding can use extractplanes directly for luminance-only processing
+        ("scdet=threshold=15,metadata=print,extractplanes=y".to_string(), "gray".to_string(), 1usize)
+    };
+
+    ffmpeg_args.push(filter_chain);
+
+    // Output raw frames to stdout (format depends on hardware acceleration compatibility)
     ffmpeg_args.push("-f".to_string());
     ffmpeg_args.push("rawvideo".to_string());
     ffmpeg_args.push("-pix_fmt".to_string());
-    ffmpeg_args.push("gray".to_string());
+    ffmpeg_args.push(pixel_format);
     ffmpeg_args.push("-".to_string()); // stdout
 
     // Spawn the consolidated ffmpeg process
@@ -367,9 +394,10 @@ fn run_analysis_pipeline(
     // Frame processing thread (stdout)
     let frame_thread = {
         let frame_tx = frame_tx.clone();
+        let bytes_per_pixel_copy = bytes_per_pixel;
         thread::spawn(move || -> Result<()> {
             let mut stdout_reader = BufReader::new(stdout);
-            let frame_size = (width * height * 1) as usize; // Gray = 1 byte per pixel (luminance only)
+            let frame_size = width as usize * height as usize * bytes_per_pixel_copy; // Bytes per pixel depends on format
             let mut frame_buffer = vec![0u8; frame_size];
             let mut frame_count = 0u32;
 
@@ -389,7 +417,7 @@ fn run_analysis_pipeline(
                 match stdout_reader.read_exact(&mut frame_buffer) {
                     Ok(()) => {
                         // Process this frame
-                        let frame = analyze_single_frame(&frame_buffer, width, height)?;
+                        let frame = analyze_single_frame(&frame_buffer, width, height, bytes_per_pixel_copy)?;
                         frame_tx.send(frame).map_err(|_| anyhow::anyhow!("Failed to send frame data"))?;
                         frame_count += 1;
 
@@ -453,15 +481,20 @@ fn run_analysis_pipeline(
         })
     };
 
-    // Scene detection thread (stderr)
+    // Scene detection thread (stderr) - also capture stderr for error reporting
+    let (stderr_content_tx, stderr_content_rx) = mpsc::channel::<String>();
     let scene_thread = {
         let scene_tx = scene_tx.clone();
+        let stderr_content_tx = stderr_content_tx.clone();
         thread::spawn(move || -> Result<()> {
             let mut stderr_reader = BufReader::new(stderr);
             let mut stderr_content = String::new();
             stderr_reader
                 .read_to_string(&mut stderr_content)
                 .context("Failed to read ffmpeg stderr")?;
+
+            // Send stderr content for potential error reporting
+            stderr_content_tx.send(stderr_content.clone()).unwrap_or(());
 
             // Parse scene cuts from stderr
             let mut current_frame = 0u32;
@@ -513,7 +546,14 @@ fn run_analysis_pipeline(
     // Wait for ffmpeg to finish
     let status = child.wait().context("Failed to wait for ffmpeg")?;
     if !status.success() {
-        anyhow::bail!("ffmpeg consolidated analysis failed");
+        // Try to get stderr content for debugging
+        let stderr_output = if let Ok(stderr_content) = stderr_content_rx.try_recv() {
+            stderr_content
+        } else {
+            "No stderr information available".to_string()
+        };
+        
+        anyhow::bail!("ffmpeg consolidated analysis failed. Exit status: {}. FFmpeg stderr: {}", status, stderr_output);
     }
 
     // Convert scene cuts to scenes
@@ -563,45 +603,81 @@ fn run_analysis_pipeline(
 
 
 
-/// Analyze a single frame's luminance data to extract HDR metadata.
+/// Analyze a single frame's data to extract HDR metadata.
 ///
-/// This function processes raw grayscale frame data (luminance only) to compute:
+/// This function processes raw frame data to compute:
 /// - Peak PQ value (brightest pixel converted to PQ space)
 /// - 256-bin PQ-based luminance histogram
 /// - Average PQ value derived from the histogram
 ///
-/// The luminance data is already extracted by ffmpeg using the extractplanes=y filter,
-/// which provides the Y (luma) plane directly from the video source.
+/// Supports both luminance-only (gray) and RGB24 formats for hardware acceleration compatibility.
 ///
 /// # Arguments
-/// * `frame_data` - Raw grayscale pixel data (1 byte per pixel - luminance only)
+/// * `frame_data` - Raw pixel data (1 byte per pixel for gray, 3 bytes for RGB24)
 /// * `width` - Frame width in pixels
 /// * `height` - Frame height in pixels
+/// * `bytes_per_pixel` - Number of bytes per pixel (1 for gray, 3 for RGB24)
 ///
 /// # Returns
 /// `Result<MadVRFrame>` - Analyzed frame data with PQ values and histogram
-fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<MadVRFrame> {
+fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32, bytes_per_pixel: usize) -> Result<MadVRFrame> {
     let pixel_count = (width * height) as usize;
     let mut histogram = vec![0f64; 256];
     let mut max_luminance = 0u8;
 
-    // Process each pixel (1 byte: Luminance)
-    for &luminance in frame_data {
-        // Find peak luminance
-        max_luminance = max_luminance.max(luminance);
+    // Process pixels based on format (1 byte for luminance, 3 bytes for RGB)
+    if bytes_per_pixel == 1 {
+        // Luminance-only processing (gray format)
+        for &luminance in frame_data {
+            // Find peak luminance
+            max_luminance = max_luminance.max(luminance);
 
-        // Convert 8-bit luminance to a linear float (0.0-1.0)
-        let linear_lum = luminance as f64 / 255.0;
-        // Scale to a nit value (0-10000)
-        let pixel_nits = linear_lum * 10000.0;
-        // Convert nits to a PQ value (0.0-1.0)
-        let pixel_pq = nits_to_pq(pixel_nits as u32);
+            // Convert 8-bit luminance to a linear float (0.0-1.0)
+            let linear_lum = luminance as f64 / 255.0;
+            // Scale to a nit value (0-10000)
+            let pixel_nits = linear_lum * 10000.0;
+            // Convert nits to a PQ value (0.0-1.0)
+            let pixel_pq = nits_to_pq(pixel_nits as u32);
 
-        // A pixel's PQ value (0.0 to 1.0) maps directly to the 256 bins
-        let bin_index = (pixel_pq * 255.0).round() as usize;
-        let bin_index = bin_index.min(255); // Clamp to be safe
+            // A pixel's PQ value (0.0 to 1.0) maps directly to the 256 bins
+            let bin_index = (pixel_pq * 255.0).round() as usize;
+            let bin_index = bin_index.min(255); // Clamp to be safe
 
-        histogram[bin_index] += 1.0;
+            histogram[bin_index] += 1.0;
+        }
+    } else if bytes_per_pixel == 3 {
+        // RGB24 processing (fallback for VideoToolbox compatibility)
+        for pixel_idx in 0..pixel_count {
+            let base_idx = pixel_idx * 3;
+            let r = frame_data[base_idx];
+            let g = frame_data[base_idx + 1];
+            let b = frame_data[base_idx + 2];
+
+            // Find peak brightness (max of any color channel)
+            max_luminance = max_luminance.max(r).max(g).max(b);
+
+            // Calculate luminance using Rec. 709/2020 coefficients for perceptual accuracy
+            let r_f64 = r as f64;
+            let g_f64 = g as f64;
+            let b_f64 = b as f64;
+
+            let luminance = (0.2126 * r_f64 + 0.7152 * g_f64 + 0.0722 * b_f64).round() as u8;
+
+            // Convert 8-bit luminance to a linear float (0.0-1.0)
+            let linear_lum = luminance as f64 / 255.0;
+            // Scale to a nit value (0-10000)
+            let pixel_nits = linear_lum * 10000.0;
+            // Convert nits to a PQ value (0.0-1.0)
+            let pixel_pq = nits_to_pq(pixel_nits as u32);
+
+            // A pixel's PQ value (0.0 to 1.0) maps directly to the 256 bins
+            let bin_index = (pixel_pq * 255.0).round() as usize;
+            let bin_index = bin_index.min(255); // Clamp to be safe
+
+            histogram[bin_index] += 1.0;
+        }
+    } else {
+        anyhow::bail!("Unsupported pixel format: {} bytes per pixel", bytes_per_pixel);
     }
 
     // Normalize histogram so sum equals 100.0
