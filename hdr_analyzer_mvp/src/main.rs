@@ -4,6 +4,8 @@ use madvr_parse::{MadVRHeader, MadVRMeasurements, MadVRScene, MadVRFrame};
 use std::collections::VecDeque;
 use std::io::{BufReader, Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 // --- Command Line Interface ---
@@ -155,44 +157,7 @@ fn format_duration(duration: Duration) -> String {
     format!("{:02}:{:02}", minutes, seconds)
 }
 
-/// Create a progress bar string for terminal display.
-///
-/// # Arguments
-/// * `current` - Current progress value
-/// * `total` - Optional total value (if None, shows spinning indicator)
-/// * `width` - Width of the progress bar in characters
-///
-/// # Returns
-/// Formatted progress bar string with percentage
-fn create_progress_bar(current: u32, total: Option<u32>, width: usize) -> String {
-    let (percentage, filled_width) = if let Some(total) = total {
-        if total > 0 {
-            let pct = (current as f64 / total as f64 * 100.0).min(100.0);
-            let filled = ((current as f64 / total as f64) * width as f64) as usize;
-            (pct, filled.min(width))
-        } else {
-            (0.0, 0)
-        }
-    } else {
-        // Unknown total - show a spinning indicator
-        let spin_pos = ((current / 10) as usize) % width;
-        return format!(
-            "[{}=>{}] Processing...",
-            " ".repeat(spin_pos),
-            " ".repeat(width.saturating_sub(spin_pos + 2))
-        );
-    };
 
-    let filled = "=".repeat(filled_width);
-    let arrow = if filled_width < width { ">" } else { "" };
-    let empty = " ".repeat(
-        width
-            .saturating_sub(filled_width)
-            .saturating_sub(if arrow.is_empty() { 0 } else { 1 }),
-    );
-
-    format!("[{}{}{}] {:3.0}%", filled, arrow, empty, percentage)
-}
 
 /// Main entry point for the HDR analyzer.
 ///
@@ -217,15 +182,10 @@ fn main() -> Result<()> {
         println!("Total frames: {}", frames);
     }
 
-    // Step 2: Scene detection via ffmpeg
-    println!("Performing scene detection...");
-    let mut scenes = detect_scenes(&cli.input)?;
-    println!("Detected {} scenes", scenes.len());
-
-    // Step 3: Per-frame analysis via ffmpeg pipe
-    println!("Starting per-frame analysis...");
-    let mut frames = analyze_frames(&cli.input, width, height, total_frames, &cli.hwaccel)?;
-    println!("Analyzed {} frames", frames.len());
+    // Step 2: Consolidated scene detection and frame analysis
+    println!("Starting consolidated analysis pipeline...");
+    let (mut scenes, mut frames) = run_analysis_pipeline(&cli, width, height, total_frames)?;
+    println!("Detected {} scenes and analyzed {} frames", scenes.len(), frames.len());
 
     // Step 4: Fix scene end frames and compute scene statistics
     fix_scene_end_frames(&mut scenes, frames.len());
@@ -323,73 +283,245 @@ fn get_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>)> {
     Ok((width, height, frame_count))
 }
 
-/// Detect scene cuts using ffmpeg (optimized for speed).
+/// Consolidated analysis pipeline that performs both scene detection and frame analysis
+/// using a single ffmpeg process with multiple output streams.
 ///
-/// This function uses ffmpeg's scene detection filter to identify scene boundaries.
-/// It processes the full-resolution video stream to ensure maximum detection accuracy.
-/// Scene boundaries are essential for contextual HDR optimization.
+/// This function eliminates the performance bottleneck of running separate ffmpeg processes
+/// by using one process that outputs both scene detection metadata (via stderr) and
+/// raw frame data (via stdout) simultaneously. Two dedicated threads process these streams
+/// concurrently to prevent pipe buffer overflow.
 ///
 /// # Arguments
-/// * `input_path` - Path to the input video file
+/// * `cli` - Command line interface containing input path and hardware acceleration settings
+/// * `width` - Video width in pixels
+/// * `height` - Video height in pixels
+/// * `total_frames` - Optional total frame count for progress tracking
 ///
 /// # Returns
-/// `Result<Vec<MadVRScene>>` - Vector of detected scenes with start/end frame numbers
-fn detect_scenes(input_path: &str) -> Result<Vec<MadVRScene>> {
-    println!("Scene detection in progress (this may take a moment for large files)...");
+/// `Result<(Vec<MadVRScene>, Vec<MadVRFrame>)>` - Tuple of detected scenes and analyzed frames
+fn run_analysis_pipeline(
+    cli: &Cli,
+    width: u32,
+    height: u32,
+    total_frames: Option<u32>,
+) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>)> {
+    println!("Consolidated pipeline in progress (this may take a moment for large files)...");
 
-    // Process full-resolution video for maximum scene detection accuracy
-    let mut child = Command::new("ffmpeg")
-        .args([
-            "-i",
-            input_path,
-            "-vf",
-            "scdet=threshold=15,metadata=print",
-            "-f",
-            "null",
-            "-",
-        ])
-        .stderr(Stdio::piped())
-        .stdout(Stdio::null())
-        .spawn()
-        .context("Failed to execute ffmpeg for scene detection")?;
+    // Build ffmpeg command with both scene detection and frame output
+    let mut ffmpeg_args = Vec::new();
 
-    let stderr = child.stderr.take().context("Failed to capture stderr")?;
-    let mut stderr_reader = BufReader::new(stderr);
-    let mut stderr_content = String::new();
-    stderr_reader
-        .read_to_string(&mut stderr_content)
-        .context("Failed to read ffmpeg stderr")?;
+    // Input arguments with optional hardware acceleration
+    if let Some(accel) = &cli.hwaccel {
+        println!("Attempting to use hardware acceleration: {}", accel);
+        ffmpeg_args.push("-hwaccel".to_string());
+        ffmpeg_args.push(accel.clone());
 
-    let status = child.wait().context("Failed to wait for ffmpeg")?;
-    if !status.success() {
-        anyhow::bail!("ffmpeg scene detection failed");
+        // Add decoder-specific flags based on acceleration type
+        match accel.as_str() {
+            "cuda" => {
+                ffmpeg_args.push("-c:v".to_string());
+                ffmpeg_args.push("hevc_cuvid".to_string());
+            }
+            "vaapi" => {
+                // VAAPI decoders are typically auto-selected
+            }
+            "videotoolbox" => {
+                // VideoToolbox decoders are typically auto-selected
+            }
+            _ => {
+                println!("Warning: Unknown hardware acceleration type '{}', proceeding with basic hwaccel flag", accel);
+            }
+        }
     }
 
-    // Parse scene cuts from stderr - simplified approach for MVP
-    let mut scene_cuts = Vec::new();
-    let mut current_frame = 0u32;
+    // Standard input
+    ffmpeg_args.push("-i".to_string());
+    ffmpeg_args.push(cli.input.clone());
 
-    for line in stderr_content.lines() {
-        // Look for frame number lines first
-        if line.contains("lavfi.scdet.n:") {
-            if let Some(n_start) = line.find("lavfi.scdet.n:") {
-                let n_part = &line[n_start + "lavfi.scdet.n:".len()..];
-                if let Some(frame_num_str) = n_part.split_whitespace().next() {
-                    if let Ok(frame_num) = frame_num_str.parse::<u32>() {
-                        current_frame = frame_num;
+    // Scene detection filter with frame output
+    ffmpeg_args.push("-vf".to_string());
+    ffmpeg_args.push("scdet=threshold=15,metadata=print".to_string());
+
+    // Output raw RGB24 frames to stdout
+    ffmpeg_args.push("-f".to_string());
+    ffmpeg_args.push("rawvideo".to_string());
+    ffmpeg_args.push("-pix_fmt".to_string());
+    ffmpeg_args.push("rgb24".to_string());
+    ffmpeg_args.push("-".to_string()); // stdout
+
+    // Spawn the consolidated ffmpeg process
+    let mut child = Command::new("ffmpeg")
+        .args(&ffmpeg_args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Failed to execute ffmpeg for consolidated analysis")?;
+
+    let stdout = child.stdout.take().context("Failed to capture stdout")?;
+    let stderr = child.stderr.take().context("Failed to capture stderr")?;
+
+    // Create channels for inter-thread communication
+    let (frame_tx, frame_rx) = mpsc::channel::<MadVRFrame>();
+    let (scene_tx, scene_rx) = mpsc::channel::<u32>();
+
+    // Frame processing thread (stdout)
+    let frame_thread = {
+        let frame_tx = frame_tx.clone();
+        thread::spawn(move || -> Result<()> {
+            let mut stdout_reader = BufReader::new(stdout);
+            let frame_size = (width * height * 3) as usize; // RGB24 = 3 bytes per pixel
+            let mut frame_buffer = vec![0u8; frame_size];
+            let mut frame_count = 0u32;
+
+            // Progress tracking
+            let start_time = Instant::now();
+            let mut last_progress_update = Instant::now();
+            let progress_update_interval = Duration::from_millis(500);
+
+            println!(
+                "Processing frames ({}x{}, {} bytes per frame)...",
+                width, height, frame_size
+            );
+            print!("Initializing frame analysis...");
+            std::io::stdout().flush().unwrap_or(());
+
+            loop {
+                match stdout_reader.read_exact(&mut frame_buffer) {
+                    Ok(()) => {
+                        // Process this frame
+                        let frame = analyze_single_frame(&frame_buffer, width, height)?;
+                        frame_tx.send(frame).map_err(|_| anyhow::anyhow!("Failed to send frame data"))?;
+                        frame_count += 1;
+
+                        // Update progress display periodically
+                        let now = Instant::now();
+                        if now.duration_since(last_progress_update) >= progress_update_interval
+                            || frame_count == 1
+                        {
+                            last_progress_update = now;
+
+                            // Calculate processing rate (frames per second)
+                            let elapsed = now.duration_since(start_time);
+                            let fps = if elapsed.as_secs_f64() > 0.0 {
+                                frame_count as f64 / elapsed.as_secs_f64()
+                            } else {
+                                0.0
+                            };
+
+                            // Progress display with frame count and processing rate
+                            if let Some(total) = total_frames {
+                                let progress = (frame_count as f64 / total as f64) * 100.0;
+                                print!(
+                                    "\rProcessing: {}/{} frames ({:.1}%) at {:.1} fps",
+                                    frame_count, total, progress, fps
+                                );
+                            } else {
+                                print!(
+                                    "\rProcessing: {} frames at {:.1} fps",
+                                    frame_count, fps
+                                );
+                            }
+                            std::io::stdout().flush().unwrap_or(());
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        // End of stream - normal termination
+                        break;
+                    }
+                    Err(e) => {
+                        return Err(anyhow::Error::from(e).context("Failed to read frame data"));
                     }
                 }
             }
-        }
-        // Then look for scene detection on the same or nearby lines
-        if line.contains("lavfi.scdet.pts_time:") && current_frame > 0 {
-            scene_cuts.push(current_frame);
-        }
+
+            // Final completion message
+            let total_elapsed = start_time.elapsed();
+            let final_fps = if total_elapsed.as_secs_f64() > 0.0 {
+                frame_count as f64 / total_elapsed.as_secs_f64()
+            } else {
+                0.0
+            };
+
+            println!(
+                "\nCompleted processing {} frames in {} ({:.1} fps average)",
+                frame_count,
+                format_duration(total_elapsed),
+                final_fps
+            );
+
+            Ok(())
+        })
+    };
+
+    // Scene detection thread (stderr)
+    let scene_thread = {
+        let scene_tx = scene_tx.clone();
+        thread::spawn(move || -> Result<()> {
+            let mut stderr_reader = BufReader::new(stderr);
+            let mut stderr_content = String::new();
+            stderr_reader
+                .read_to_string(&mut stderr_content)
+                .context("Failed to read ffmpeg stderr")?;
+
+            // Parse scene cuts from stderr
+            let mut current_frame = 0u32;
+
+            for line in stderr_content.lines() {
+                // Look for frame number lines first
+                if line.contains("lavfi.scdet.n:") {
+                    if let Some(n_start) = line.find("lavfi.scdet.n:") {
+                        let n_part = &line[n_start + "lavfi.scdet.n:".len()..];
+                        if let Some(frame_num_str) = n_part.split_whitespace().next() {
+                            if let Ok(frame_num) = frame_num_str.parse::<u32>() {
+                                current_frame = frame_num;
+                            }
+                        }
+                    }
+                }
+                // Then look for scene detection on the same or nearby lines
+                if line.contains("lavfi.scdet.pts_time:") && current_frame > 0 {
+                    scene_tx.send(current_frame).map_err(|_| anyhow::anyhow!("Failed to send scene cut data"))?;
+                }
+            }
+
+            Ok(())
+        })
+    };
+
+    // Drop the senders to signal completion
+    drop(frame_tx);
+    drop(scene_tx);
+
+    // Collect results from both threads
+    let mut frames = Vec::new();
+    let mut scene_cuts = Vec::new();
+
+    // Collect frames
+    while let Ok(frame) = frame_rx.recv() {
+        frames.push(frame);
+    }
+
+    // Collect scene cuts
+    while let Ok(scene_cut) = scene_rx.recv() {
+        scene_cuts.push(scene_cut);
+    }
+
+    // Wait for both threads to complete
+    frame_thread.join().map_err(|_| anyhow::anyhow!("Frame processing thread panicked"))??;
+    scene_thread.join().map_err(|_| anyhow::anyhow!("Scene detection thread panicked"))??;
+
+    // Wait for ffmpeg to finish
+    let status = child.wait().context("Failed to wait for ffmpeg")?;
+    if !status.success() {
+        anyhow::bail!("ffmpeg consolidated analysis failed");
     }
 
     // Convert scene cuts to scenes
     let mut scenes = Vec::new();
     let mut start_frame = 0u32;
+
+    // Sort scene cuts to ensure proper ordering
+    scene_cuts.sort_unstable();
 
     for &cut_frame in &scene_cuts {
         scenes.push(MadVRScene {
@@ -422,211 +554,14 @@ fn detect_scenes(input_path: &str) -> Result<Vec<MadVRScene>> {
         });
     }
 
-    Ok(scenes)
+    println!("Scene detection completed: {} scenes detected", scenes.len());
+
+    Ok((scenes, frames))
 }
 
-/// Builds the argument list for the main ffmpeg analysis process.
-///
-/// This function constructs the ffmpeg command arguments dynamically based on
-/// whether hardware acceleration is requested. It handles different acceleration
-/// types and their corresponding decoder configurations.
-///
-/// # Arguments
-/// * `input_path` - Path to the input video file
-/// * `hwaccel` - Optional hardware acceleration type (e.g., "cuda", "vaapi", "videotoolbox")
-///
-/// # Returns
-/// `Vec<String>` - Complete argument list for ffmpeg command
-fn build_ffmpeg_args(input_path: &str, hwaccel: &Option<String>) -> Vec<String> {
-    let mut args = Vec::new();
 
-    // Input arguments with optional hardware acceleration
-    if let Some(accel) = hwaccel {
-        println!("Attempting to use hardware acceleration: {}", accel);
-        args.push("-hwaccel".to_string());
-        args.push(accel.clone());
 
-        // Add decoder-specific flags based on acceleration type
-        // Note: This is a simplified implementation. In production, you might want to
-        // probe the video codec first and select the appropriate decoder accordingly.
-        match accel.as_str() {
-            "cuda" => {
-                // For NVIDIA CUDA acceleration, use hardware decoders when available
-                // This assumes H.265/HEVC content, which is common for HDR videos
-                args.push("-c:v".to_string());
-                args.push("hevc_cuvid".to_string());
-            }
-            "vaapi" => {
-                // For VAAPI (Intel/AMD on Linux), the decoder is typically auto-selected
-                // but we can specify it explicitly if needed
-                // args.push("-c:v".to_string());
-                // args.push("hevc_vaapi".to_string());
-            }
-            "videotoolbox" => {
-                // For macOS VideoToolbox, decoders are typically auto-selected
-                // but can be specified explicitly if needed
-                // args.push("-c:v".to_string());
-                // args.push("hevc_videotoolbox".to_string());
-            }
-            _ => {
-                println!("Warning: Unknown hardware acceleration type '{}', proceeding with basic hwaccel flag", accel);
-            }
-        }
-    }
 
-    // Standard input and output arguments
-    args.push("-i".to_string());
-    args.push(input_path.to_string());
-
-    // Output arguments (piping raw RGB24 to stdout)
-    args.push("-f".to_string());
-    args.push("rawvideo".to_string());
-    args.push("-pix_fmt".to_string());
-    args.push("rgb24".to_string());
-    args.push("-".to_string()); // Represents stdout
-
-    args
-}
-
-/// Analyze frames using ffmpeg pipe.
-///
-/// This function processes every frame of the video to extract HDR metadata.
-/// It uses ffmpeg to decode frames to RGB24 format and pipes the raw data
-/// for analysis. Each frame is processed to generate:
-/// - Peak PQ value (brightest pixel)
-/// - Average PQ value (computed from histogram)
-/// - 256-bin PQ-based luminance histogram
-///
-/// # Arguments
-/// * `input_path` - Path to the input video file
-/// * `width` - Video width in pixels
-/// * `height` - Video height in pixels
-/// * `total_frames` - Optional total frame count for progress tracking
-/// * `hwaccel` - Optional hardware acceleration type
-///
-/// # Returns
-/// `Result<Vec<MadVRFrame>>` - Vector of analyzed frame data
-fn analyze_frames(
-    input_path: &str,
-    width: u32,
-    height: u32,
-    total_frames: Option<u32>,
-    hwaccel: &Option<String>,
-) -> Result<Vec<MadVRFrame>> {
-    let ffmpeg_args = build_ffmpeg_args(input_path, hwaccel);
-    let mut child = Command::new("ffmpeg")
-        .args(&ffmpeg_args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("Failed to execute ffmpeg for frame analysis")?;
-
-    let stdout = child.stdout.take().context("Failed to capture stdout")?;
-    let mut stdout_reader = std::io::BufReader::new(stdout);
-
-    let frame_size = (width * height * 3) as usize; // RGB24 = 3 bytes per pixel
-    let mut frame_buffer = vec![0u8; frame_size];
-    let mut frames = Vec::new();
-    let mut frame_count = 0u32;
-
-    // Progress tracking variables
-    let start_time = Instant::now();
-    let mut last_progress_update = Instant::now();
-    let progress_update_interval = Duration::from_millis(500); // Update every 500ms
-
-    println!(
-        "Processing frames ({}x{}, {} bytes per frame)...",
-        width, height, frame_size
-    );
-    print!("Initializing frame analysis...");
-    std::io::stdout().flush().unwrap_or(());
-
-    loop {
-        match stdout_reader.read_exact(&mut frame_buffer) {
-            Ok(()) => {
-                // Process this frame
-                let frame = analyze_single_frame(&frame_buffer, width, height)?;
-                frames.push(frame);
-                frame_count += 1;
-
-                // Update progress display periodically
-                let now = Instant::now();
-                if now.duration_since(last_progress_update) >= progress_update_interval
-                    || frame_count == 1
-                {
-                    last_progress_update = now;
-
-                    // Calculate processing rate (frames per second)
-                    let elapsed = now.duration_since(start_time);
-                    let fps = if elapsed.as_secs_f64() > 0.0 {
-                        frame_count as f64 / elapsed.as_secs_f64()
-                    } else {
-                        0.0
-                    };
-
-                    // Create progress display
-                    let progress_bar = create_progress_bar(frame_count, total_frames, 20);
-
-                    let display = if let Some(total) = total_frames {
-                        // Calculate ETA
-                        let eta_str = if fps > 0.0 && frame_count < total {
-                            let remaining_frames = total.saturating_sub(frame_count);
-                            let eta_seconds = remaining_frames as f64 / fps;
-                            format!(
-                                "ETA: {}",
-                                format_duration(Duration::from_secs_f64(eta_seconds))
-                            )
-                        } else {
-                            "ETA: --:--".to_string()
-                        };
-
-                        format!(
-                            "\rProcessing frames: {} ({}/{}) | {:.1} fps | {}",
-                            progress_bar, frame_count, total, fps, eta_str
-                        )
-                    } else {
-                        format!(
-                            "\rProcessing frames: {} ({}) | {:.1} fps | Analyzing...",
-                            progress_bar, frame_count, fps
-                        )
-                    };
-
-                    print!("{}", display);
-                    std::io::stdout().flush().unwrap_or(());
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                // End of stream - normal termination
-                break;
-            }
-            Err(e) => {
-                return Err(anyhow::Error::from(e).context("Failed to read frame data"));
-            }
-        }
-    }
-
-    // Wait for ffmpeg to finish
-    let status = child.wait().context("Failed to wait for ffmpeg")?;
-    if !status.success() {
-        anyhow::bail!("ffmpeg frame analysis failed");
-    }
-
-    // Final completion message on a new line
-    let total_elapsed = start_time.elapsed();
-    let final_fps = if total_elapsed.as_secs_f64() > 0.0 {
-        frame_count as f64 / total_elapsed.as_secs_f64()
-    } else {
-        0.0
-    };
-
-    println!(
-        "\nCompleted processing {} frames in {} ({:.1} fps average)",
-        frame_count,
-        format_duration(total_elapsed),
-        final_fps
-    );
-    Ok(frames)
-}
 
 /// Analyze a single frame's RGB data to extract HDR metadata.
 ///
