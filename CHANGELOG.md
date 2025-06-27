@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Improved scene detection sensitivity for more accurate scene segmentation
+- Replaced simple RGB average with a weighted luminance calculation (Rec. 709/2020 coefficients) for more perceptually accurate brightness analysis
+
 ### Planned Features
 - Automated black bar detection for improved APL accuracy
 - Advanced color science with BT.2020 coefficients

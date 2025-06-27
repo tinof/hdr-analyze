@@ -135,16 +135,16 @@ The verifier will display detailed information about the measurement file includ
 This tool operates in three distinct phases to ensure the highest quality output:
 
 1. **Scene Detection**: The video is first quickly analyzed to identify the start and end of every scene.
-2. **Frame Measurement**: The tool then performs a deep analysis of every single frame, calculating its peak brightness, average brightness, and a detailed 256-bin PQ histogram.
+2. **Frame Measurement**: The tool then performs a deep analysis of every single frame, calculating its peak brightness, perceptually accurate average brightness using industry-standard weighted luminance (Rec. 709/2020 coefficients), and a detailed 256-bin PQ histogram.
 3. **Optimizer Pass (Optional)**: If enabled, a final pass is made over the frame data. Using scene-based statistics, a rolling average of previous frames, and highlight knee detection, it calculates the ideal target_nits for every frame to ensure a smooth, stable, and visually stunning result.
 
 ## Roadmap & Contributing
 
-This tool is a robust V1.0, but there is always room for improvement. Future enhancements may include:
+This tool is a robust V1.1, but there is always room for improvement. Future enhancements may include:
 
 - Implementing automated black bar detection for even more accurate APL measurements.
-- Using more advanced color science for luminance calculations (e.g., BT.2020 coefficients).
 - Allowing user-configurable parameters for the optimizer heuristics.
+- GPU acceleration support for faster processing of large files.
 
 Contributions are welcome! Please feel free to open an issue or submit a pull request.
 

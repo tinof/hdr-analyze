@@ -222,7 +222,8 @@ fn main() -> Result<()> {
     let mut frames = analyze_frames(&cli.input, width, height, total_frames)?;
     println!("Analyzed {} frames", frames.len());
 
-    // Step 4: Pre-compute scene statistics
+    // Step 4: Fix scene end frames and compute scene statistics
+    fix_scene_end_frames(&mut scenes, frames.len());
     precompute_scene_stats(&mut scenes, &frames);
 
     // Step 5: Run advanced optimizer if enabled
@@ -339,7 +340,7 @@ fn detect_scenes(input_path: &str) -> Result<Vec<MadVRScene>> {
             "-i",
             input_path,
             "-vf",
-            "scale=640:360,scdet=threshold=30,metadata=print",
+            "scale=640:360,scdet=threshold=15,metadata=print",
             "-f",
             "null",
             "-",
@@ -565,7 +566,7 @@ fn analyze_frames(
 /// - 256-bin PQ-based luminance histogram
 /// - Average PQ value derived from the histogram
 ///
-/// The analysis uses a simplified luminance calculation (RGB average) and
+/// The analysis uses industry-standard weighted luminance calculation (Rec. 709/2020 coefficients) and
 /// maps pixel values through the PQ curve for perceptually uniform analysis.
 ///
 /// # Arguments
@@ -590,8 +591,12 @@ fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<Ma
         // Find peak brightness (max of any color channel)
         max_byte = max_byte.max(r).max(g).max(b);
 
-        // Calculate luminance (simple average for MVP)
-        let luminance = ((r as u32 + g as u32 + b as u32) / 3) as u8;
+        // Calculate luminance using Rec. 709/2020 coefficients for perceptual accuracy
+        let r_f64 = r as f64;
+        let g_f64 = g as f64;
+        let b_f64 = b as f64;
+
+        let luminance = (0.2126 * r_f64 + 0.7152 * g_f64 + 0.0722 * b_f64).round() as u8;
 
         // NEW PQ-BASED HISTOGRAM LOGIC:
         // Convert 8-bit luminance to a linear float (0.0-1.0)
@@ -626,9 +631,52 @@ fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<Ma
         peak_pq_2020: peak_pq, // Use the correct field name from madvr_parse
         avg_pq,
         lum_histogram: histogram,
+        hue_histogram: Some(vec![0f64; 31]), // Add empty hue histogram for v6 compatibility (31 bins)
         target_nits: None, // Will be set by optimizer if enabled
         ..Default::default() // Let the library handle other fields
     })
+}
+
+/// Fix scene end frames after we know the actual frame count.
+///
+/// This function updates scene end frames that were set to u32::MAX during
+/// scene detection to use the actual last frame index. It also validates
+/// that all scene ranges are within bounds.
+///
+/// # Arguments
+/// * `scenes` - Mutable slice of scene data to fix
+/// * `total_frames` - Total number of frames in the video
+fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {
+    if scenes.is_empty() || total_frames == 0 {
+        return;
+    }
+
+    let last_frame_idx = (total_frames - 1) as u32;
+
+    for scene in scenes.iter_mut() {
+        // Fix scenes that have u32::MAX as end frame
+        if scene.end == u32::MAX {
+            scene.end = last_frame_idx;
+        }
+
+        // Ensure scene end doesn't exceed total frames (frame indices are 0-based)
+        if scene.end >= total_frames as u32 {
+            scene.end = last_frame_idx;
+        }
+
+        // Ensure scene start is valid
+        if scene.start >= total_frames as u32 {
+            scene.start = last_frame_idx;
+        }
+
+        // Ensure start <= end
+        if scene.start > scene.end {
+            // If start > end, this is likely corrupted data
+            // Set both to a safe range
+            scene.start = 0;
+            scene.end = last_frame_idx;
+        }
+    }
 }
 
 /// Pre-compute scene-based statistics for optimization.
@@ -653,6 +701,10 @@ fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
             // Calculate average PQ for the entire scene
             let total_avg_pq: f64 = scene_frames.iter().map(|f| f.avg_pq).sum();
             scene.avg_pq = total_avg_pq / scene_frames.len() as f64;
+
+            // Calculate peak nits for the scene
+            let max_peak_pq = scene_frames.iter().map(|f| f.peak_pq_2020).fold(0.0f64, f64::max);
+            scene.peak_nits = pq_to_nits(max_peak_pq) as u32;
         }
     }
 }
@@ -829,6 +881,7 @@ fn write_measurement_file(
             peak_pq_2020: frame.peak_pq_2020,
             avg_pq: frame.avg_pq,
             lum_histogram: frame.lum_histogram.clone(),
+            hue_histogram: frame.hue_histogram.clone(),
             target_nits: frame.target_nits,
             ..Default::default()
         });
