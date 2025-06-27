@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use madvr_parse::{MadVRHeader, MadVRMeasurements, MadVRScene, MadVRFrame};
+use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::io::{BufReader, Read, Write};
 use std::process::{Command, Stdio};
@@ -141,6 +142,38 @@ fn find_highlight_knee_nits(histogram: &[f64]) -> f64 {
 
     // Fallback if no significant highlights found
     1000.0
+}
+
+/// Create a pre-computed look-up table for luminance to bin index conversion.
+///
+/// This function pre-calculates the expensive `nits_to_pq` conversion and bin index
+/// calculation for all possible 8-bit luminance values (0-255). This eliminates
+/// the need to perform floating-point power calculations for each pixel during
+/// frame analysis, providing a significant performance improvement.
+///
+/// # Returns
+/// Array of 256 bin indices corresponding to luminance values 0-255
+fn create_luminance_to_bin_lut() -> [usize; 256] {
+    let mut lut = [0; 256];
+
+    for i in 0..=255 {
+        let luminance = i as u8;
+
+        // Convert 8-bit luminance to a linear float (0.0-1.0)
+        let linear_lum = luminance as f64 / 255.0;
+        // Scale to a nit value (0-10000)
+        let pixel_nits = linear_lum * 10000.0;
+        // Convert nits to a PQ value (0.0-1.0)
+        let pixel_pq = nits_to_pq(pixel_nits as u32);
+
+        // A pixel's PQ value (0.0 to 1.0) maps directly to the 256 bins
+        let bin_index = (pixel_pq * 255.0).round() as usize;
+        let bin_index = bin_index.min(255); // Clamp to be safe
+
+        lut[i] = bin_index;
+    }
+
+    lut
 }
 
 /// Format duration as MM:SS for user-friendly display.
@@ -305,6 +338,9 @@ fn run_analysis_pipeline(
     height: u32,
     total_frames: Option<u32>,
 ) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>)> {
+    // Create pre-computed look-up table for optimal performance
+    println!("Creating luminance-to-bin look-up table...");
+    let lut = create_luminance_to_bin_lut();
     println!("Consolidated pipeline in progress (this may take a moment for large files)...");
 
     // Build ffmpeg command with both scene detection and frame output
@@ -395,6 +431,7 @@ fn run_analysis_pipeline(
     let frame_thread = {
         let frame_tx = frame_tx.clone();
         let bytes_per_pixel_copy = bytes_per_pixel;
+        let lut_copy = lut; // Copy the LUT for the thread
         thread::spawn(move || -> Result<()> {
             let mut stdout_reader = BufReader::new(stdout);
             let frame_size = width as usize * height as usize * bytes_per_pixel_copy; // Bytes per pixel depends on format
@@ -417,7 +454,7 @@ fn run_analysis_pipeline(
                 match stdout_reader.read_exact(&mut frame_buffer) {
                     Ok(()) => {
                         // Process this frame
-                        let frame = analyze_single_frame(&frame_buffer, width, height, bytes_per_pixel_copy)?;
+                        let frame = analyze_single_frame(&frame_buffer, width, height, bytes_per_pixel_copy, &lut_copy)?;
                         frame_tx.send(frame).map_err(|_| anyhow::anyhow!("Failed to send frame data"))?;
                         frame_count += 1;
 
@@ -611,69 +648,68 @@ fn run_analysis_pipeline(
 /// - Average PQ value derived from the histogram
 ///
 /// Supports both luminance-only (gray) and RGB24 formats for hardware acceleration compatibility.
+/// Uses parallel processing with Rayon and pre-computed look-up tables for optimal performance.
 ///
 /// # Arguments
 /// * `frame_data` - Raw pixel data (1 byte per pixel for gray, 3 bytes for RGB24)
 /// * `width` - Frame width in pixels
 /// * `height` - Frame height in pixels
 /// * `bytes_per_pixel` - Number of bytes per pixel (1 for gray, 3 for RGB24)
+/// * `lut` - Pre-computed look-up table for luminance to bin index conversion
 ///
 /// # Returns
 /// `Result<MadVRFrame>` - Analyzed frame data with PQ values and histogram
-fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32, bytes_per_pixel: usize) -> Result<MadVRFrame> {
+fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32, bytes_per_pixel: usize, lut: &[usize; 256]) -> Result<MadVRFrame> {
     let pixel_count = (width * height) as usize;
     let mut histogram = vec![0f64; 256];
     let mut max_luminance = 0u8;
 
     // Process pixels based on format (1 byte for luminance, 3 bytes for RGB)
     if bytes_per_pixel == 1 {
-        // Luminance-only processing (gray format)
-        for &luminance in frame_data {
-            // Find peak luminance
+        // Luminance-only processing (gray format) - Parallel version with LUT
+        let histogram_data: Vec<(u8, usize)> = frame_data
+            .par_iter()
+            .map(|&luminance| {
+                // Get bin_index from pre-computed LUT (no expensive calculations!)
+                let bin_index = lut[luminance as usize];
+                (luminance, bin_index)
+            })
+            .collect();
+
+        // Reduce results sequentially (histogram updates need to be sequential)
+        for (luminance, bin_index) in histogram_data {
             max_luminance = max_luminance.max(luminance);
-
-            // Convert 8-bit luminance to a linear float (0.0-1.0)
-            let linear_lum = luminance as f64 / 255.0;
-            // Scale to a nit value (0-10000)
-            let pixel_nits = linear_lum * 10000.0;
-            // Convert nits to a PQ value (0.0-1.0)
-            let pixel_pq = nits_to_pq(pixel_nits as u32);
-
-            // A pixel's PQ value (0.0 to 1.0) maps directly to the 256 bins
-            let bin_index = (pixel_pq * 255.0).round() as usize;
-            let bin_index = bin_index.min(255); // Clamp to be safe
-
             histogram[bin_index] += 1.0;
         }
     } else if bytes_per_pixel == 3 {
-        // RGB24 processing (fallback for VideoToolbox compatibility)
-        for pixel_idx in 0..pixel_count {
-            let base_idx = pixel_idx * 3;
-            let r = frame_data[base_idx];
-            let g = frame_data[base_idx + 1];
-            let b = frame_data[base_idx + 2];
+        // RGB24 processing (fallback for VideoToolbox compatibility) - Parallel version with LUT
+        let histogram_data: Vec<(u8, usize)> = frame_data
+            .par_chunks(3)
+            .map(|pixel_chunk| {
+                let r = pixel_chunk[0];
+                let g = pixel_chunk[1];
+                let b = pixel_chunk[2];
 
-            // Find peak brightness (max of any color channel)
-            max_luminance = max_luminance.max(r).max(g).max(b);
+                // Find peak brightness (max of any color channel)
+                let pixel_max = r.max(g).max(b);
 
-            // Calculate luminance using Rec. 709/2020 coefficients for perceptual accuracy
-            let r_f64 = r as f64;
-            let g_f64 = g as f64;
-            let b_f64 = b as f64;
+                // Calculate luminance using Rec. 709/2020 coefficients for perceptual accuracy
+                let r_f64 = r as f64;
+                let g_f64 = g as f64;
+                let b_f64 = b as f64;
 
-            let luminance = (0.2126 * r_f64 + 0.7152 * g_f64 + 0.0722 * b_f64).round() as u8;
+                let luminance = (0.2126 * r_f64 + 0.7152 * g_f64 + 0.0722 * b_f64).round() as u8;
 
-            // Convert 8-bit luminance to a linear float (0.0-1.0)
-            let linear_lum = luminance as f64 / 255.0;
-            // Scale to a nit value (0-10000)
-            let pixel_nits = linear_lum * 10000.0;
-            // Convert nits to a PQ value (0.0-1.0)
-            let pixel_pq = nits_to_pq(pixel_nits as u32);
+                // Get bin_index from pre-computed LUT (no expensive calculations!)
+                let bin_index = lut[luminance as usize];
 
-            // A pixel's PQ value (0.0 to 1.0) maps directly to the 256 bins
-            let bin_index = (pixel_pq * 255.0).round() as usize;
-            let bin_index = bin_index.min(255); // Clamp to be safe
+                (pixel_max, bin_index)
+            })
+            .collect();
 
+        // Reduce results sequentially (histogram updates need to be sequential)
+        for (pixel_max, bin_index) in histogram_data {
+            max_luminance = max_luminance.max(pixel_max);
             histogram[bin_index] += 1.0;
         }
     } else {

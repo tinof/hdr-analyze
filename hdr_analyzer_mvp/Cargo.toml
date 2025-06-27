@@ -27,3 +27,4 @@ path = "src/main.rs"
 clap = { version = "4.4", features = ["derive"] }
 anyhow = "1.0"
 madvr_parse = "1.0.2"
+rayon = "1.8"
