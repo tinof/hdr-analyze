@@ -22,6 +22,11 @@ struct Cli {
     /// (Phase 3) Enable intelligent optimizer to generate dynamic target nits
     #[arg(long)]
     enable_optimizer: bool,
+
+    /// (Optional) Enable GPU hardware acceleration.
+    /// Examples: "cuda" (for NVIDIA), "vaapi" (for Linux/AMD/Intel), "videotoolbox" (for macOS).
+    #[arg(long)]
+    hwaccel: Option<String>,
 }
 
 // --- Data Structures ---
@@ -219,7 +224,7 @@ fn main() -> Result<()> {
 
     // Step 3: Per-frame analysis via ffmpeg pipe
     println!("Starting per-frame analysis...");
-    let mut frames = analyze_frames(&cli.input, width, height, total_frames)?;
+    let mut frames = analyze_frames(&cli.input, width, height, total_frames, &cli.hwaccel)?;
     println!("Analyzed {} frames", frames.len());
 
     // Step 4: Fix scene end frames and compute scene statistics
@@ -420,6 +425,69 @@ fn detect_scenes(input_path: &str) -> Result<Vec<MadVRScene>> {
     Ok(scenes)
 }
 
+/// Builds the argument list for the main ffmpeg analysis process.
+///
+/// This function constructs the ffmpeg command arguments dynamically based on
+/// whether hardware acceleration is requested. It handles different acceleration
+/// types and their corresponding decoder configurations.
+///
+/// # Arguments
+/// * `input_path` - Path to the input video file
+/// * `hwaccel` - Optional hardware acceleration type (e.g., "cuda", "vaapi", "videotoolbox")
+///
+/// # Returns
+/// `Vec<String>` - Complete argument list for ffmpeg command
+fn build_ffmpeg_args(input_path: &str, hwaccel: &Option<String>) -> Vec<String> {
+    let mut args = Vec::new();
+
+    // Input arguments with optional hardware acceleration
+    if let Some(accel) = hwaccel {
+        println!("Attempting to use hardware acceleration: {}", accel);
+        args.push("-hwaccel".to_string());
+        args.push(accel.clone());
+
+        // Add decoder-specific flags based on acceleration type
+        // Note: This is a simplified implementation. In production, you might want to
+        // probe the video codec first and select the appropriate decoder accordingly.
+        match accel.as_str() {
+            "cuda" => {
+                // For NVIDIA CUDA acceleration, use hardware decoders when available
+                // This assumes H.265/HEVC content, which is common for HDR videos
+                args.push("-c:v".to_string());
+                args.push("hevc_cuvid".to_string());
+            }
+            "vaapi" => {
+                // For VAAPI (Intel/AMD on Linux), the decoder is typically auto-selected
+                // but we can specify it explicitly if needed
+                // args.push("-c:v".to_string());
+                // args.push("hevc_vaapi".to_string());
+            }
+            "videotoolbox" => {
+                // For macOS VideoToolbox, decoders are typically auto-selected
+                // but can be specified explicitly if needed
+                // args.push("-c:v".to_string());
+                // args.push("hevc_videotoolbox".to_string());
+            }
+            _ => {
+                println!("Warning: Unknown hardware acceleration type '{}', proceeding with basic hwaccel flag", accel);
+            }
+        }
+    }
+
+    // Standard input and output arguments
+    args.push("-i".to_string());
+    args.push(input_path.to_string());
+
+    // Output arguments (piping raw RGB24 to stdout)
+    args.push("-f".to_string());
+    args.push("rawvideo".to_string());
+    args.push("-pix_fmt".to_string());
+    args.push("rgb24".to_string());
+    args.push("-".to_string()); // Represents stdout
+
+    args
+}
+
 /// Analyze frames using ffmpeg pipe.
 ///
 /// This function processes every frame of the video to extract HDR metadata.
@@ -434,6 +502,7 @@ fn detect_scenes(input_path: &str) -> Result<Vec<MadVRScene>> {
 /// * `width` - Video width in pixels
 /// * `height` - Video height in pixels
 /// * `total_frames` - Optional total frame count for progress tracking
+/// * `hwaccel` - Optional hardware acceleration type
 ///
 /// # Returns
 /// `Result<Vec<MadVRFrame>>` - Vector of analyzed frame data
@@ -442,9 +511,11 @@ fn analyze_frames(
     width: u32,
     height: u32,
     total_frames: Option<u32>,
+    hwaccel: &Option<String>,
 ) -> Result<Vec<MadVRFrame>> {
+    let ffmpeg_args = build_ffmpeg_args(input_path, hwaccel);
     let mut child = Command::new("ffmpeg")
-        .args(["-i", input_path, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .args(&ffmpeg_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()

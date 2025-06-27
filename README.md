@@ -103,6 +103,38 @@ cargo run -p hdr_analyzer_mvp -- -i "path/to/your/video.mkv" -o "measurements.bi
 cargo run -p hdr_analyzer_mvp -- -i "path/to/your/video.mkv" -o "measurements_optimized.bin" --enable-optimizer
 ```
 
+## Hardware Acceleration (Advanced)
+
+For users with compatible hardware, `hdr-analyze` supports GPU-accelerated video decoding to significantly improve performance. This offloads the most intensive part of the process from the CPU to your graphics card.
+
+To use it, provide the `--hwaccel` flag with the appropriate value for your system.
+
+**Usage:**
+```bash
+# For NVIDIA GPUs on Windows or Linux
+./target/release/hdr_analyzer_mvp --hwaccel cuda -i "video.mkv" -o "out.bin"
+
+# For Intel/AMD GPUs on Linux
+./target/release/hdr_analyzer_mvp --hwaccel vaapi -i "video.mkv" -o "out.bin"
+
+# For macOS (Intel or Apple Silicon)
+./target/release/hdr_analyzer_mvp --hwaccel videotoolbox -i "video.mkv" -o "out.bin"
+```
+
+**Using cargo run:**
+```bash
+# NVIDIA CUDA acceleration
+cargo run -p hdr_analyzer_mvp --release -- --hwaccel cuda -i "video.mkv" -o "measurements_gpu.bin"
+
+# Linux VAAPI acceleration
+cargo run -p hdr_analyzer_mvp --release -- --hwaccel vaapi -i "video.mkv" -o "measurements_gpu.bin"
+
+# macOS VideoToolbox acceleration
+cargo run -p hdr_analyzer_mvp --release -- --hwaccel videotoolbox -i "video.mkv" -o "measurements_gpu.bin"
+```
+
+**Note:** Hardware acceleration requires that `ffmpeg` was compiled with support for the chosen method. The tool will automatically select appropriate hardware decoders when available. For CUDA acceleration, it defaults to `hevc_cuvid` decoder for H.265/HEVC content, which is common in HDR videos.
+
 ### Verifier Tool
 
 The verifier tool can inspect and validate measurement files:
