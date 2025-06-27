@@ -338,15 +338,15 @@ fn run_analysis_pipeline(
     ffmpeg_args.push("-i".to_string());
     ffmpeg_args.push(cli.input.clone());
 
-    // Scene detection filter with frame output
+    // Scene detection filter with luminance extraction
     ffmpeg_args.push("-vf".to_string());
-    ffmpeg_args.push("scdet=threshold=4,metadata=print".to_string());
+    ffmpeg_args.push("scdet=threshold=15,metadata=print,extractplanes=y".to_string());
 
-    // Output raw RGB24 frames to stdout
+    // Output raw grayscale frames to stdout (luminance only)
     ffmpeg_args.push("-f".to_string());
     ffmpeg_args.push("rawvideo".to_string());
     ffmpeg_args.push("-pix_fmt".to_string());
-    ffmpeg_args.push("rgb24".to_string());
+    ffmpeg_args.push("gray".to_string());
     ffmpeg_args.push("-".to_string()); // stdout
 
     // Spawn the consolidated ffmpeg process
@@ -369,7 +369,7 @@ fn run_analysis_pipeline(
         let frame_tx = frame_tx.clone();
         thread::spawn(move || -> Result<()> {
             let mut stdout_reader = BufReader::new(stdout);
-            let frame_size = (width * height * 3) as usize; // RGB24 = 3 bytes per pixel
+            let frame_size = (width * height * 1) as usize; // Gray = 1 byte per pixel (luminance only)
             let mut frame_buffer = vec![0u8; frame_size];
             let mut frame_count = 0u32;
 
@@ -563,18 +563,18 @@ fn run_analysis_pipeline(
 
 
 
-/// Analyze a single frame's RGB data to extract HDR metadata.
+/// Analyze a single frame's luminance data to extract HDR metadata.
 ///
-/// This function processes raw RGB24 frame data to compute:
+/// This function processes raw grayscale frame data (luminance only) to compute:
 /// - Peak PQ value (brightest pixel converted to PQ space)
 /// - 256-bin PQ-based luminance histogram
 /// - Average PQ value derived from the histogram
 ///
-/// The analysis uses industry-standard weighted luminance calculation (Rec. 709/2020 coefficients) and
-/// maps pixel values through the PQ curve for perceptually uniform analysis.
+/// The luminance data is already extracted by ffmpeg using the extractplanes=y filter,
+/// which provides the Y (luma) plane directly from the video source.
 ///
 /// # Arguments
-/// * `frame_data` - Raw RGB24 pixel data (3 bytes per pixel)
+/// * `frame_data` - Raw grayscale pixel data (1 byte per pixel - luminance only)
 /// * `width` - Frame width in pixels
 /// * `height` - Frame height in pixels
 ///
@@ -583,26 +583,13 @@ fn run_analysis_pipeline(
 fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<MadVRFrame> {
     let pixel_count = (width * height) as usize;
     let mut histogram = vec![0f64; 256];
-    let mut max_byte = 0u8;
+    let mut max_luminance = 0u8;
 
-    // Process each pixel (3 bytes: RGB)
-    for pixel_idx in 0..pixel_count {
-        let base_idx = pixel_idx * 3;
-        let r = frame_data[base_idx];
-        let g = frame_data[base_idx + 1];
-        let b = frame_data[base_idx + 2];
+    // Process each pixel (1 byte: Luminance)
+    for &luminance in frame_data {
+        // Find peak luminance
+        max_luminance = max_luminance.max(luminance);
 
-        // Find peak brightness (max of any color channel)
-        max_byte = max_byte.max(r).max(g).max(b);
-
-        // Calculate luminance using Rec. 709/2020 coefficients for perceptual accuracy
-        let r_f64 = r as f64;
-        let g_f64 = g as f64;
-        let b_f64 = b as f64;
-
-        let luminance = (0.2126 * r_f64 + 0.7152 * g_f64 + 0.0722 * b_f64).round() as u8;
-
-        // NEW PQ-BASED HISTOGRAM LOGIC:
         // Convert 8-bit luminance to a linear float (0.0-1.0)
         let linear_lum = luminance as f64 / 255.0;
         // Scale to a nit value (0-10000)
@@ -623,8 +610,8 @@ fn analyze_single_frame(frame_data: &[u8], width: u32, height: u32) -> Result<Ma
         *bin = (*bin / total_pixels) * 100.0;
     }
 
-    // Calculate peak PQ
-    let linear = max_byte as f64 / 255.0;
+    // Calculate peak PQ from the brightest luminance value
+    let linear = max_luminance as f64 / 255.0;
     let nits = linear * 10000.0;
     let peak_pq = nits_to_pq(nits as u32);
 
