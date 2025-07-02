@@ -1,11 +1,3 @@
-Of course. This is an excellent time to take stock of the project. You've built an incredibly capable tool, and now it's about refining it from a V1.0 to a truly professional-grade utility.
-
-Here is a clear recap of the planned features and improvements we've discussed but have **not yet implemented** in the current codebase.
-
-I'll categorize them from highest to lowest priority based on our discussions.
-
----
-
 ### Priority 1: Core Measurement Accuracy
 
 These are fundamental improvements that will directly increase the quality and correctness of the measurements, bringing them closer to the ground truth.
