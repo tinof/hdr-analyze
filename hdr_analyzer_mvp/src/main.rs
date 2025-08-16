@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use madvr_parse::{MadVRHeader, MadVRMeasurements, MadVRScene, MadVRFrame};
+use madvr_parse::{MadVRFrame, MadVRHeader, MadVRMeasurements, MadVRScene};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
 // Native FFmpeg imports
 use ffmpeg_next as ffmpeg;
-use ffmpeg_next::{format, media, codec, frame, software};
+use ffmpeg_next::{codec, format, frame, media, software};
 
 mod crop;
 use crop::CropRect;
@@ -65,6 +65,7 @@ fn nits_to_pq(nits: f64) -> f64 {
 ///
 /// # Returns
 /// Weighted average PQ value in range [0.0, 1.0]
+#[allow(dead_code)]
 fn calculate_avg_pq_from_histogram(histogram: &[f64]) -> f64 {
     let mut weighted_sum = 0.0;
     let mut total_weight = 0.0;
@@ -154,8 +155,6 @@ fn format_duration(duration: Duration) -> String {
     format!("{:02}:{:02}", minutes, seconds)
 }
 
-
-
 /// Main entry point for the HDR analyzer with native FFmpeg pipeline.
 ///
 /// This function orchestrates the complete HDR analysis pipeline using native FFmpeg:
@@ -170,7 +169,10 @@ fn format_duration(duration: Duration) -> String {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    println!("HDR Analyzer MVP (Native Pipeline) - Starting analysis of: {}", cli.input);
+    println!(
+        "HDR Analyzer MVP (Native Pipeline) - Starting analysis of: {}",
+        cli.input
+    );
 
     // Step 1: Get video info using native FFmpeg
     let (width, height, total_frames, input_context) = get_native_video_info(&cli.input)?;
@@ -181,8 +183,13 @@ fn main() -> Result<()> {
 
     // Step 2: Native scene detection and frame analysis
     println!("Starting native analysis pipeline...");
-    let (mut scenes, mut frames) = run_native_analysis_pipeline(&cli, width, height, total_frames, input_context)?;
-    println!("Detected {} scenes and analyzed {} frames", scenes.len(), frames.len());
+    let (mut scenes, mut frames) =
+        run_native_analysis_pipeline(&cli, width, height, total_frames, input_context)?;
+    println!(
+        "Detected {} scenes and analyzed {} frames",
+        scenes.len(),
+        frames.len()
+    );
 
     // Step 3: Fix scene end frames and compute scene statistics
     fix_scene_end_frames(&mut scenes, frames.len());
@@ -212,13 +219,14 @@ fn main() -> Result<()> {
 ///
 /// # Returns
 /// `Result<(u32, u32, Option<u32>, format::context::Input)>` - (width, height, optional_frame_count, input_context)
-fn get_native_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>, format::context::Input)> {
+fn get_native_video_info(
+    input_path: &str,
+) -> Result<(u32, u32, Option<u32>, format::context::Input)> {
     // Initialize FFmpeg
     ffmpeg::init().context("Failed to initialize FFmpeg")?;
 
     // Open input file
-    let input_context = format::input(input_path)
-        .context("Failed to open input video file")?;
+    let input_context = format::input(input_path).context("Failed to open input video file")?;
 
     // Find the best video stream
     let video_stream = input_context
@@ -234,7 +242,9 @@ fn get_native_video_info(input_path: &str) -> Result<(u32, u32, Option<u32>, for
             // Get decoder context to access width/height
             let decoder_context = codec::context::Context::from_parameters(video_params)
                 .context("Failed to create decoder context")?;
-            let decoder = decoder_context.decoder().video()
+            let decoder = decoder_context
+                .decoder()
+                .video()
                 .context("Failed to create video decoder")?;
             (decoder.width(), decoder.height())
         }
@@ -305,7 +315,9 @@ fn run_native_analysis_pipeline(
         println!("Attempting to use hardware acceleration: {}", hwaccel);
         setup_hardware_decoder(decoder_context, hwaccel)?
     } else {
-        decoder_context.decoder().video()
+        decoder_context
+            .decoder()
+            .video()
             .context("Failed to create video decoder")?
     };
 
@@ -318,7 +330,8 @@ fn run_native_analysis_pipeline(
         decoder.width(),
         decoder.height(),
         software::scaling::Flags::BILINEAR,
-    ).context("Failed to create scaling context")?;
+    )
+    .context("Failed to create scaling context")?;
 
     // Initialize analysis data structures
     let mut frames = Vec::new();
@@ -339,29 +352,38 @@ fn run_native_analysis_pipeline(
     // Main processing loop
     for (stream, packet) in input_context.packets() {
         if stream.index() == video_stream_index {
-            decoder.send_packet(&packet).context("Failed to send packet to decoder")?;
+            decoder
+                .send_packet(&packet)
+                .context("Failed to send packet to decoder")?;
 
             // Receive and process decoded frames
             let mut decoded_frame = frame::Video::empty();
             while decoder.receive_frame(&mut decoded_frame).is_ok() {
                 // Scale frame to target format for analysis
                 let mut scaled_frame = frame::Video::empty();
-                scaler.run(&decoded_frame, &mut scaled_frame)
+                scaler
+                    .run(&decoded_frame, &mut scaled_frame)
                     .context("Failed to scale frame")?;
 
                 // Analyze the native frame within active area (detect crop once)
                 if crop_rect_opt.is_none() {
                     let rect = crop::detect_crop(&scaled_frame);
-                    println!("\nDetected active video area: {}x{} at offset ({}, {})", rect.width, rect.height, rect.x, rect.y);
+                    println!(
+                        "\nDetected active video area: {}x{} at offset ({}, {})",
+                        rect.width, rect.height, rect.x, rect.y
+                    );
                     crop_rect_opt = Some(rect);
                 }
                 let rect = crop_rect_opt.as_ref().unwrap();
-                let analyzed_frame = analyze_native_frame_cropped(&scaled_frame, width, height, rect)?;
+                let analyzed_frame =
+                    analyze_native_frame_cropped(&scaled_frame, width, height, rect)?;
 
                 // Scene detection using histogram comparison
                 if let Some(ref prev_hist) = previous_histogram {
-                    let scene_change_score = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
-                    if scene_change_score > 0.3 { // chi-squared threshold (~0.2-0.5 typical)
+                    let scene_change_score =
+                        calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+                    if scene_change_score > 0.3 {
+                        // chi-squared threshold (~0.2-0.5 typical)
                         scene_cuts.push(frame_count);
                     }
                 }
@@ -372,7 +394,9 @@ fn run_native_analysis_pipeline(
 
                 // Update progress display periodically
                 let now = Instant::now();
-                if now.duration_since(last_progress_update) >= progress_update_interval || frame_count == 1 {
+                if now.duration_since(last_progress_update) >= progress_update_interval
+                    || frame_count == 1
+                {
                     last_progress_update = now;
 
                     let elapsed = now.duration_since(start_time);
@@ -384,7 +408,10 @@ fn run_native_analysis_pipeline(
 
                     if let Some(total) = total_frames {
                         let progress = (frame_count as f64 / total as f64) * 100.0;
-                        print!("\rProcessing: {}/{} frames ({:.1}%) at {:.1} fps", frame_count, total, progress, fps);
+                        print!(
+                            "\rProcessing: {}/{} frames ({:.1}%) at {:.1} fps",
+                            frame_count, total, progress, fps
+                        );
                     } else {
                         print!("\rProcessing: {} frames at {:.1} fps", frame_count, fps);
                     }
@@ -395,24 +422,31 @@ fn run_native_analysis_pipeline(
     }
 
     // Send EOF to decoder and process remaining frames
-    decoder.send_eof().context("Failed to send EOF to decoder")?;
+    decoder
+        .send_eof()
+        .context("Failed to send EOF to decoder")?;
     let mut decoded_frame = frame::Video::empty();
     while decoder.receive_frame(&mut decoded_frame).is_ok() {
         let mut scaled_frame = frame::Video::empty();
-        scaler.run(&decoded_frame, &mut scaled_frame)
+        scaler
+            .run(&decoded_frame, &mut scaled_frame)
             .context("Failed to scale final frame")?;
 
         // Analyze the native frame within active area (reuse crop)
         if crop_rect_opt.is_none() {
             let rect = crop::detect_crop(&scaled_frame);
-            println!("\nDetected active video area: {}x{} at offset ({}, {})", rect.width, rect.height, rect.x, rect.y);
+            println!(
+                "\nDetected active video area: {}x{} at offset ({}, {})",
+                rect.width, rect.height, rect.x, rect.y
+            );
             crop_rect_opt = Some(rect);
         }
         let rect = crop_rect_opt.as_ref().unwrap();
         let analyzed_frame = analyze_native_frame_cropped(&scaled_frame, width, height, rect)?;
 
         if let Some(ref prev_hist) = previous_histogram {
-            let scene_change_score = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+            let scene_change_score =
+                calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
             if scene_change_score > 0.3 {
                 scene_cuts.push(frame_count);
             }
@@ -430,12 +464,19 @@ fn run_native_analysis_pipeline(
         0.0
     };
 
-    println!("\nCompleted native processing {} frames in {} ({:.1} fps average)",
-        frame_count, format_duration(total_elapsed), final_fps);
+    println!(
+        "\nCompleted native processing {} frames in {} ({:.1} fps average)",
+        frame_count,
+        format_duration(total_elapsed),
+        final_fps
+    );
 
     // Convert scene cuts to scenes
     let scenes = convert_scene_cuts_to_scenes(scene_cuts, frame_count);
-    println!("Scene detection completed: {} scenes detected", scenes.len());
+    println!(
+        "Scene detection completed: {} scenes detected",
+        scenes.len()
+    );
 
     Ok((scenes, frames))
 }
@@ -463,24 +504,38 @@ fn setup_hardware_decoder(
                     (*context.as_mut_ptr()).height = (*decoder_context.as_ptr()).height;
                     (*context.as_mut_ptr()).pix_fmt = (*decoder_context.as_ptr()).pix_fmt;
                 }
-                context.decoder().video()
+                context
+                    .decoder()
+                    .video()
                     .context("Failed to create CUDA hardware decoder")
             } else {
                 println!("CUDA decoder not available, falling back to software decoder");
-                decoder_context.decoder().video()
+                decoder_context
+                    .decoder()
+                    .video()
                     .context("Failed to create fallback software decoder")
             }
         }
         "vaapi" | "videotoolbox" => {
             // For VAAPI and VideoToolbox, we'll use software decoding for now
             // as hardware acceleration setup is more complex and requires device contexts
-            println!("Hardware acceleration {} requested, using software decoder for now", hwaccel);
-            decoder_context.decoder().video()
+            println!(
+                "Hardware acceleration {} requested, using software decoder for now",
+                hwaccel
+            );
+            decoder_context
+                .decoder()
+                .video()
                 .context("Failed to create software decoder")
         }
         _ => {
-            println!("Unknown hardware acceleration type '{}', using software decoder", hwaccel);
-            decoder_context.decoder().video()
+            println!(
+                "Unknown hardware acceleration type '{}', using software decoder",
+                hwaccel
+            );
+            decoder_context
+                .decoder()
+                .video()
                 .context("Failed to create software decoder")
         }
     }
@@ -488,8 +543,8 @@ fn setup_hardware_decoder(
 
 fn analyze_native_frame_cropped(
     frame: &frame::Video,
-    width: u32,
-    height: u32,
+    _width: u32,
+    _height: u32,
     crop_rect: &CropRect,
 ) -> Result<MadVRFrame> {
     let mut histogram = vec![0f64; 256];
@@ -497,7 +552,7 @@ fn analyze_native_frame_cropped(
 
     // Y plane data
     let y_plane_data = frame.data(0);
-    let y_stride = frame.stride(0) as usize;
+    let y_stride = frame.stride(0);
 
     // madVR v5 binning setup
     let sdr_peak_pq = nits_to_pq(100.0);
@@ -518,14 +573,18 @@ fn analyze_native_frame_cropped(
             }
 
             // Read 10-bit limited-range code (0..1023 in 16-bit container)
-            let code10 = u16::from_le_bytes([y_plane_data[pixel_offset], y_plane_data[pixel_offset + 1]]) & 0x03FF;
+            let code10 =
+                u16::from_le_bytes([y_plane_data[pixel_offset], y_plane_data[pixel_offset + 1]])
+                    & 0x03FF;
 
             // Normalize to limited-range [64,940] -> [0,1]
             let code_i = code10 as i32;
             let norm = ((code_i - 64) as f64 / 876.0).clamp(0.0, 1.0);
 
             let pq = norm; // Approximate PQ code from Y' (HDR10 pipeline)
-            if pq > max_pq { max_pq = pq; }
+            if pq > max_pq {
+                max_pq = pq;
+            }
 
             // Map to madVR v5 bins
             let bin = if pq < sdr_peak_pq {
@@ -593,11 +652,8 @@ fn analyze_native_frame_cropped(
 ///
 /// # Returns
 /// `Result<MadVRFrame>` - Analyzed frame data with accurate PQ values and histogram
-fn analyze_native_frame(
-    frame: &frame::Video,
-    width: u32,
-    height: u32,
-) -> Result<MadVRFrame> {
+#[allow(dead_code)]
+fn analyze_native_frame(frame: &frame::Video, width: u32, height: u32) -> Result<MadVRFrame> {
     let pixel_count = (width * height) as usize;
     let mut histogram = vec![0f64; 256];
     let mut max_luma_10bit = 0u16;
@@ -617,7 +673,7 @@ fn analyze_native_frame(
                 // Read 10-bit value (little-endian)
                 let luma_10bit = u16::from_le_bytes([
                     y_plane_data[pixel_offset],
-                    y_plane_data[pixel_offset + 1]
+                    y_plane_data[pixel_offset + 1],
                 ]) & 0x3FF; // Mask to 10 bits (0-1023)
 
                 max_luma_10bit = max_luma_10bit.max(luma_10bit);
@@ -652,7 +708,7 @@ fn analyze_native_frame(
         avg_pq,
         lum_histogram: histogram,
         hue_histogram: Some(vec![0f64; 31]), // Add empty hue histogram for v6 compatibility
-        target_nits: None, // Will be set by optimizer if enabled
+        target_nits: None,                   // Will be set by optimizer if enabled
         ..Default::default()
     })
 }
@@ -698,8 +754,8 @@ fn convert_scene_cuts_to_scenes(mut scene_cuts: Vec<u32>, total_frames: u32) -> 
         scenes.push(MadVRScene {
             start: start_frame,
             end: cut_frame.saturating_sub(1),
-            peak_nits: 0,      // Will be calculated later
-            avg_pq: 0.0,       // Will be calculated later
+            peak_nits: 0, // Will be calculated later
+            avg_pq: 0.0,  // Will be calculated later
             ..Default::default()
         });
         start_frame = cut_frame;
@@ -729,10 +785,6 @@ fn convert_scene_cuts_to_scenes(mut scene_cuts: Vec<u32>, total_frames: u32) -> 
 }
 
 // OLD EXTERNAL FFMPEG PIPELINE REMOVED - Now using native ffmpeg-next pipeline
-
-
-
-
 
 // OLD analyze_single_frame FUNCTION REMOVED - Now using analyze_native_frame with direct 10-bit processing
 
@@ -802,7 +854,10 @@ fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
             scene.avg_pq = total_avg_pq / scene_frames.len() as f64;
 
             // Calculate peak nits for the scene
-            let max_peak_pq = scene_frames.iter().map(|f| f.peak_pq_2020).fold(0.0f64, f64::max);
+            let max_peak_pq = scene_frames
+                .iter()
+                .map(|f| f.peak_pq_2020)
+                .fold(0.0f64, f64::max);
             scene.peak_nits = pq_to_nits(max_peak_pq) as u32;
         }
     }
@@ -946,15 +1001,24 @@ fn write_measurement_file(
     enable_optimizer: bool,
 ) -> Result<()> {
     // 1. Create the Header
-    let maxcll = frames.iter()
+    let maxcll = frames
+        .iter()
         .map(|f| pq_to_nits(f.peak_pq_2020) as u32)
         .max()
         .unwrap_or(0);
 
     // Compute FALL metrics from per-frame avg PQ
     let falls_nits: Vec<f64> = frames.iter().map(|f| pq_to_nits(f.avg_pq)).collect();
-    let maxfall: u32 = if falls_nits.is_empty() { 0 } else { falls_nits.iter().cloned().fold(0.0, f64::max).round() as u32 };
-    let avgfall: u32 = if falls_nits.is_empty() { 0 } else { (falls_nits.iter().sum::<f64>() / falls_nits.len() as f64).round() as u32 };
+    let maxfall: u32 = if falls_nits.is_empty() {
+        0
+    } else {
+        falls_nits.iter().cloned().fold(0.0, f64::max).round() as u32
+    };
+    let avgfall: u32 = if falls_nits.is_empty() {
+        0
+    } else {
+        (falls_nits.iter().sum::<f64>() / falls_nits.len() as f64).round() as u32
+    };
 
     let header = MadVRHeader {
         version: 5,
@@ -1001,7 +1065,8 @@ fn write_measurement_file(
 
     // 3. Let the library do all the hard work!
     println!("Serializing measurement data using madvr_parse library...");
-    let binary_data = measurements.write_measurements()
+    let binary_data = measurements
+        .write_measurements()
         .context("Failed to serialize measurements using madvr_parse library")?;
 
     // 4. Write the resulting bytes to a file

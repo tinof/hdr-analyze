@@ -11,7 +11,12 @@ pub struct CropRect {
 
 impl CropRect {
     pub fn full(width: u32, height: u32) -> Self {
-        CropRect { x: 0, y: 0, width, height }
+        CropRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }
     }
 }
 
@@ -54,14 +59,14 @@ fn read_luma10(y_data: &[u8], stride: usize, x: usize, y: usize) -> u16 {
 /// - Requires at least 10% non-black pixels to consider a row/column as active
 /// - Rounds the result to even coordinates/dimensions (safer for chroma-subsampled formats)
 pub fn detect_crop(frame: &frame::Video) -> CropRect {
-    let width = frame.width() as u32;
-    let height = frame.height() as u32;
+    let width = frame.width();
+    let height = frame.height();
     if width == 0 || height == 0 {
         return CropRect::full(width, height);
     }
 
     let y_data = frame.data(0);
-    let stride = frame.stride(0) as usize;
+    let stride = frame.stride(0);
 
     let sample_step = 10usize;
     let min_row_samples = ((width as usize + sample_step - 1) / sample_step).max(1);
@@ -168,11 +173,26 @@ pub fn detect_crop(frame: &frame::Video) -> CropRect {
 
     // Ensure within bounds
     if x0 + w > width {
-        if width >= w { x0 = width - w; } else { x0 = 0; w = width & !1; }
+        if width >= w {
+            x0 = width - w;
+        } else {
+            x0 = 0;
+            w = width & !1;
+        }
     }
     if y0 + h > height {
-        if height >= h { y0 = height - h; } else { y0 = 0; h = height & !1; }
+        if height >= h {
+            y0 = height - h;
+        } else {
+            y0 = 0;
+            h = height & !1;
+        }
     }
 
-    CropRect { x: x0, y: y0, width: w, height: h }
+    CropRect {
+        x: x0,
+        y: y0,
+        width: w,
+        height: h,
+    }
 }

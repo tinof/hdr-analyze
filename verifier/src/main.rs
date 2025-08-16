@@ -4,7 +4,7 @@
 //! their contents and verifying the format integrity.
 
 use anyhow::{Context, Result};
-use madvr_parse::{MadVRScene, MadVRFrame, MadVRMeasurements};
+use madvr_parse::{MadVRFrame, MadVRMeasurements, MadVRScene};
 use std::env;
 use std::fs;
 
@@ -28,8 +28,6 @@ fn pq_to_nits(pq: f64) -> f64 {
     y * ST2084_Y_MAX
 }
 
-
-
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
@@ -45,7 +43,10 @@ fn main() -> Result<()> {
     println!("\n=== FILE SUMMARY ===");
     println!("Scenes: {}", scenes.len());
     println!("Frames: {}", frames.len());
-    println!("Optimizer data: {}", if has_optimizer { "Yes" } else { "No" });
+    println!(
+        "Optimizer data: {}",
+        if has_optimizer { "Yes" } else { "No" }
+    );
 
     if !scenes.is_empty() {
         println!("\n=== SCENE ANALYSIS ===");
@@ -68,21 +69,42 @@ fn main() -> Result<()> {
         let max_avg_pq = frames.iter().map(|f| f.avg_pq).fold(0.0f64, f64::max);
         let avg_avg_pq = frames.iter().map(|f| f.avg_pq).sum::<f64>() / frames.len() as f64;
 
-        println!("Max Peak PQ: {:.4} ({:.0} nits)", max_peak_pq, pq_to_nits(max_peak_pq));
-        println!("Avg Peak PQ: {:.4} ({:.0} nits)", avg_peak_pq, pq_to_nits(avg_peak_pq));
-        println!("Max Avg PQ: {:.4} ({:.0} nits)", max_avg_pq, pq_to_nits(max_avg_pq));
-        println!("Avg Avg PQ: {:.4} ({:.0} nits)", avg_avg_pq, pq_to_nits(avg_avg_pq));
+        println!(
+            "Max Peak PQ: {:.4} ({:.0} nits)",
+            max_peak_pq,
+            pq_to_nits(max_peak_pq)
+        );
+        println!(
+            "Avg Peak PQ: {:.4} ({:.0} nits)",
+            avg_peak_pq,
+            pq_to_nits(avg_peak_pq)
+        );
+        println!(
+            "Max Avg PQ: {:.4} ({:.0} nits)",
+            max_avg_pq,
+            pq_to_nits(max_avg_pq)
+        );
+        println!(
+            "Avg Avg PQ: {:.4} ({:.0} nits)",
+            avg_avg_pq,
+            pq_to_nits(avg_avg_pq)
+        );
 
         if has_optimizer {
             let target_nits_count = frames.iter().filter(|f| f.target_nits.is_some()).count();
-            println!("Frames with target nits: {}/{}", target_nits_count, frames.len());
-            
+            println!(
+                "Frames with target nits: {}/{}",
+                target_nits_count,
+                frames.len()
+            );
+
             if target_nits_count > 0 {
                 let avg_target_nits = frames
                     .iter()
                     .filter_map(|f| f.target_nits)
                     .map(|t| t as f64)
-                    .sum::<f64>() / target_nits_count as f64;
+                    .sum::<f64>()
+                    / target_nits_count as f64;
                 println!("Average target nits: {:.0}", avg_target_nits);
             }
         }
@@ -130,7 +152,9 @@ fn validate_measurement_data(scenes: &[MadVRScene], frames: &[MadVRFrame]) -> Re
             if scene.end < scene.start {
                 invalid_scenes.push(format!(
                     "Scene {}: invalid range {}-{} (end < start)",
-                    i + 1, scene.start, scene.end
+                    i + 1,
+                    scene.start,
+                    scene.end
                 ));
                 continue;
             }
@@ -139,7 +163,10 @@ fn validate_measurement_data(scenes: &[MadVRScene], frames: &[MadVRFrame]) -> Re
             if scene.start >= frames.len() as u32 || scene.end >= frames.len() as u32 {
                 invalid_scenes.push(format!(
                     "Scene {}: range {}-{} extends beyond total frames ({})",
-                    i + 1, scene.start, scene.end, frames.len()
+                    i + 1,
+                    scene.start,
+                    scene.end,
+                    frames.len()
                 ));
                 continue;
             }
@@ -158,20 +185,31 @@ fn validate_measurement_data(scenes: &[MadVRScene], frames: &[MadVRFrame]) -> Re
         // Only validate frame count for valid scenes
         let valid_scene_count = scenes.len() - invalid_scenes.len();
         if valid_scene_count > 0 && total_scene_frames != frames.len() as u32 {
-            println!("⚠️  Scene frame count mismatch: valid scenes cover {} frames, but {} frames exist",
-                total_scene_frames, frames.len());
+            println!(
+                "⚠️  Scene frame count mismatch: valid scenes cover {} frames, but {} frames exist",
+                total_scene_frames,
+                frames.len()
+            );
         }
     }
 
     // Check histogram integrity
     for (i, frame) in frames.iter().enumerate() {
         if frame.lum_histogram.len() != 256 {
-            anyhow::bail!("Frame {} has invalid histogram length: {}", i, frame.lum_histogram.len());
+            anyhow::bail!(
+                "Frame {} has invalid histogram length: {}",
+                i,
+                frame.lum_histogram.len()
+            );
         }
 
         let histogram_sum: f64 = frame.lum_histogram.iter().sum();
         if (histogram_sum - 100.0).abs() > 1.0 {
-            anyhow::bail!("Frame {} has invalid histogram sum: {:.2} (should be ~100.0)", i, histogram_sum);
+            anyhow::bail!(
+                "Frame {} has invalid histogram sum: {:.2} (should be ~100.0)",
+                i,
+                histogram_sum
+            );
         }
     }
 

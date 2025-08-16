@@ -28,7 +28,7 @@ Implemented
   - Project builds successfully; `verifier` reads and validates produced .bin files.
 
 Not yet implemented
-- CLI controls for scene detector (threshold, min scene length, toggles), and crop disable.
+- CLI controls for scene detector (threshold, min scene length, toggles), and crop disable.cargo
 - Temporal smoothing/rolling window for scene detector; minimum scene duration guard.
 - Hue histogram (31 bins) content.
 - Scene-aware optimizer (use `scene_avg_pq` in decisions).
