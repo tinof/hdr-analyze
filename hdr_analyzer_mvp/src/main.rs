@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::{format, media, codec, frame, software};
 
+mod crop;
+use crop::CropRect;
+
 // --- Command Line Interface ---
 #[derive(Parser)]
 #[command(name = "hdr_analyzer_mvp")]
@@ -43,8 +46,13 @@ const ST2084_C1: f64 = 3424.0 / 4096.0;
 const ST2084_C2: f64 = (2413.0 / 4096.0) * 32.0;
 const ST2084_C3: f64 = (2392.0 / 4096.0) * 32.0;
 
-// --- Formulas ---
-// nits_to_pq function removed - no longer needed in native pipeline
+/* --- Formulas --- */
+#[inline]
+fn nits_to_pq(nits: f64) -> f64 {
+    let y = (nits / ST2084_Y_MAX).max(0.0);
+    ((ST2084_C1 + ST2084_C2 * y.powf(ST2084_M1)) / (1.0 + ST2084_C3 * y.powf(ST2084_M1)))
+        .powf(ST2084_M2)
+}
 
 /// Calculate average PQ from histogram data.
 ///
@@ -317,6 +325,7 @@ fn run_native_analysis_pipeline(
     let mut scene_cuts = Vec::new();
     let mut previous_histogram: Option<Vec<f64>> = None;
     let mut frame_count = 0u32;
+    let mut crop_rect_opt: Option<CropRect> = None;
 
     // Progress tracking
     let start_time = Instant::now();
@@ -340,13 +349,19 @@ fn run_native_analysis_pipeline(
                 scaler.run(&decoded_frame, &mut scaled_frame)
                     .context("Failed to scale frame")?;
 
-                // Analyze the native frame
-                let analyzed_frame = analyze_native_frame(&scaled_frame, width, height)?;
+                // Analyze the native frame within active area (detect crop once)
+                if crop_rect_opt.is_none() {
+                    let rect = crop::detect_crop(&scaled_frame);
+                    println!("\nDetected active video area: {}x{} at offset ({}, {})", rect.width, rect.height, rect.x, rect.y);
+                    crop_rect_opt = Some(rect);
+                }
+                let rect = crop_rect_opt.as_ref().unwrap();
+                let analyzed_frame = analyze_native_frame_cropped(&scaled_frame, width, height, rect)?;
 
                 // Scene detection using histogram comparison
                 if let Some(ref prev_hist) = previous_histogram {
                     let scene_change_score = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
-                    if scene_change_score > 15.0 { // Use threshold of 15 as per memory
+                    if scene_change_score > 0.3 { // chi-squared threshold (~0.2-0.5 typical)
                         scene_cuts.push(frame_count);
                     }
                 }
@@ -387,11 +402,18 @@ fn run_native_analysis_pipeline(
         scaler.run(&decoded_frame, &mut scaled_frame)
             .context("Failed to scale final frame")?;
 
-        let analyzed_frame = analyze_native_frame(&scaled_frame, width, height)?;
+        // Analyze the native frame within active area (reuse crop)
+        if crop_rect_opt.is_none() {
+            let rect = crop::detect_crop(&scaled_frame);
+            println!("\nDetected active video area: {}x{} at offset ({}, {})", rect.width, rect.height, rect.x, rect.y);
+            crop_rect_opt = Some(rect);
+        }
+        let rect = crop_rect_opt.as_ref().unwrap();
+        let analyzed_frame = analyze_native_frame_cropped(&scaled_frame, width, height, rect)?;
 
         if let Some(ref prev_hist) = previous_histogram {
             let scene_change_score = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
-            if scene_change_score > 15.0 {
+            if scene_change_score > 0.3 {
                 scene_cuts.push(frame_count);
             }
         }
@@ -462,6 +484,100 @@ fn setup_hardware_decoder(
                 .context("Failed to create software decoder")
         }
     }
+}
+
+fn analyze_native_frame_cropped(
+    frame: &frame::Video,
+    width: u32,
+    height: u32,
+    crop_rect: &CropRect,
+) -> Result<MadVRFrame> {
+    let mut histogram = vec![0f64; 256];
+    let mut max_pq = 0.0f64;
+
+    // Y plane data
+    let y_plane_data = frame.data(0);
+    let y_stride = frame.stride(0) as usize;
+
+    // madVR v5 binning setup
+    let sdr_peak_pq = nits_to_pq(100.0);
+    let sdr_step = sdr_peak_pq / 64.0;
+    let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
+
+    let x_start = crop_rect.x as usize;
+    let y_start = crop_rect.y as usize;
+    let x_end = x_start + crop_rect.width as usize;
+    let y_end = y_start + crop_rect.height as usize;
+
+    for y in y_start..y_end {
+        let row_start = y.saturating_mul(y_stride);
+        for x in x_start..x_end {
+            let pixel_offset = row_start + x.saturating_mul(2);
+            if pixel_offset + 1 >= y_plane_data.len() {
+                continue;
+            }
+
+            // Read 10-bit limited-range code (0..1023 in 16-bit container)
+            let code10 = u16::from_le_bytes([y_plane_data[pixel_offset], y_plane_data[pixel_offset + 1]]) & 0x03FF;
+
+            // Normalize to limited-range [64,940] -> [0,1]
+            let code_i = code10 as i32;
+            let norm = ((code_i - 64) as f64 / 876.0).clamp(0.0, 1.0);
+
+            let pq = norm; // Approximate PQ code from Y' (HDR10 pipeline)
+            if pq > max_pq { max_pq = pq; }
+
+            // Map to madVR v5 bins
+            let bin = if pq < sdr_peak_pq {
+                (pq / sdr_step).floor() as usize
+            } else {
+                64 + ((pq - sdr_peak_pq) / hdr_step).floor() as usize
+            };
+            let bin = bin.min(255);
+            histogram[bin] += 1.0;
+        }
+    }
+
+    // Normalize histogram to percentages (sum ~ 100.0)
+    let total_pixels = (crop_rect.width as f64) * (crop_rect.height as f64);
+    if total_pixels > 0.0 {
+        for v in &mut histogram {
+            *v = (*v / total_pixels) * 100.0;
+        }
+    }
+
+    // Compute avg_pq using mid-bin method similar to madvr_parse
+    let sdr_mid = sdr_step + (sdr_step / 2.0);
+    let hdr_mid = hdr_step + (hdr_step / 2.0);
+
+    let mut avg_pq = 0.0f64;
+    for (i, percent) in histogram.iter().enumerate() {
+        // Filter potential black bars at bin 0 per madvr_parse heuristic
+        if i == 0 && *percent > 2.0 && *percent < 30.0 {
+            continue;
+        }
+        let pq_value = if i <= 64 {
+            (i as f64) * sdr_mid
+        } else {
+            sdr_peak_pq + (((i - 63) as f64) * hdr_mid)
+        };
+        avg_pq += pq_value * (*percent / 100.0);
+    }
+    // Adjust based on sum of histogram bars
+    let percent_sum: f64 = histogram.iter().sum();
+    if percent_sum > 0.0 {
+        avg_pq = (avg_pq * (100.0 / percent_sum)).min(1.0);
+    }
+    avg_pq = avg_pq.min(1.0);
+
+    Ok(MadVRFrame {
+        peak_pq_2020: max_pq,
+        avg_pq,
+        lum_histogram: histogram,
+        hue_histogram: Some(vec![0.0; 31]),
+        target_nits: None,
+        ..Default::default()
+    })
 }
 
 /// Analyze a native FFmpeg frame to extract HDR metadata with correct 10-bit PQ mapping.
@@ -550,10 +666,17 @@ fn analyze_native_frame(
 /// # Returns
 /// Difference score (higher values indicate more significant changes)
 fn calculate_histogram_difference(hist1: &[f64], hist2: &[f64]) -> f64 {
-    hist1.iter()
-        .zip(hist2.iter())
-        .map(|(a, b)| (a - b).abs())
-        .sum()
+    // Chi-squared distance (symmetric form) with small epsilon to avoid div-by-zero
+    let mut dist = 0.0f64;
+    let len = hist1.len().min(hist2.len());
+    for i in 0..len {
+        let a = hist1[i];
+        let b = hist2[i];
+        let denom = a + b + 1e-6;
+        let diff = a - b;
+        dist += (diff * diff) / denom;
+    }
+    dist
 }
 
 /// Convert scene cuts to MadVRScene structures.
@@ -574,12 +697,12 @@ fn convert_scene_cuts_to_scenes(mut scene_cuts: Vec<u32>, total_frames: u32) -> 
     for &cut_frame in &scene_cuts {
         scenes.push(MadVRScene {
             start: start_frame,
-            end: cut_frame,
+            end: cut_frame.saturating_sub(1),
             peak_nits: 0,      // Will be calculated later
             avg_pq: 0.0,       // Will be calculated later
             ..Default::default()
         });
-        start_frame = cut_frame + 1;
+        start_frame = cut_frame;
     }
 
     // Add final scene
@@ -828,6 +951,11 @@ fn write_measurement_file(
         .max()
         .unwrap_or(0);
 
+    // Compute FALL metrics from per-frame avg PQ
+    let falls_nits: Vec<f64> = frames.iter().map(|f| pq_to_nits(f.avg_pq)).collect();
+    let maxfall: u32 = if falls_nits.is_empty() { 0 } else { falls_nits.iter().cloned().fold(0.0, f64::max).round() as u32 };
+    let avgfall: u32 = if falls_nits.is_empty() { 0 } else { (falls_nits.iter().sum::<f64>() / falls_nits.len() as f64).round() as u32 };
+
     let header = MadVRHeader {
         version: 5,
         header_size: 32,
@@ -835,6 +963,8 @@ fn write_measurement_file(
         frame_count: frames.len() as u32,
         flags: if enable_optimizer { 3 } else { 2 },
         maxcll,
+        maxfall,
+        avgfall,
         ..Default::default() // Let the library handle other default values
     };
 

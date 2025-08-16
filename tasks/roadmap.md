@@ -1,94 +1,239 @@
+# HDR-Analyze Roadmap (Consolidated)
 
+This document consolidates and supersedes:
+- tasks/scene-detection-v2-plan.md
+- tasks/to-do.md
+- the previous contents of tasks/roadmap.md
 
-### Analysis of the Research Findings
-
-Let's break down the key takeaways from each directive:
-
-1.  **Black Bar Detection:** The recommendation to adapt FFmpeg's `cropdetect` algorithm is perfect. It's a proven, efficient, and well-understood method. The provided pseudocode and default numerical values (`limit=24`, `round=16`) give us a concrete starting point for implementation. **This is a solved problem.**
-
-2.  **Histogram Scene Detection:** The recommendation of **Chi-Squared Distance** is a solid engineering choice, balancing accuracy and performance. The suggested threshold range of `0.2` to `0.5` is an excellent starting point for tuning. This provides a clear path to implementing a native scene detector superior to the current `ffmpeg scdet` method. **This is a solvable problem.**
-
-3.  **madVR v6 Format:** The research confirms that the key additions are optional fields for DCI-P3 and Rec.709 gamut peaks. It correctly identifies the need for color space conversion matrices and even provides a link to the authoritative ITU-R report. **This gives us a clear path to full format compatibility.**
-
-4.  **Tone Mapping Curves:** This is the most exciting finding. The agent has provided the formulas for **Hable's Filmic** and **Reinhard** tone mapping operators. This is the key to moving beyond simple "target nits" clamping and into the realm of true, professional-quality tone mapping that mimics `cm_analyze`. The list of common profile parameters (`Highlight Compression`, `Shadow Boost`, etc.) is a feature blueprint for a highly flexible and powerful optimizer. **This provides a long-term vision for the project's optimizer.**
+It reflects the current state after the latest code upgrades and lays out the next milestones with clear definitions of done and acceptance criteria.
 
 ---
 
-### The New Quality Improvement Roadmap
+## 0) Current Status (after latest upgrades)
 
-Based on these findings, we can now create a detailed, prioritized development plan.
+Implemented
+- Active area (black bar) detection and cropping
+  - New `hdr_analyzer_mvp/src/crop.rs` with crop-detect-like algorithm on Y (10-bit), sampling every 10 px, ~10% non-black threshold, rounded to even coordinates/dimensions.
+  - Detected once and applied to all frames; analysis constrained to `CropRect`.
+- Correct madVR v5 histogram binning and avg computation
+  - 256-bin mapping matching madVR semantics: 64 bins up to pq(100 nits), 192 bins from pq(100) to 1.0; mid-bin weighting; avg-pq computed likewise; black-bar bin0 heuristic applied for avg.
+- Limited-range normalization
+  - 10-bit Y’ treated as limited range (nominal 64–940); normalized to 0..1 as PQ proxy before binning.
+- Native scene detection (basic)
+  - Chi-squared distance between consecutive frame histograms; default threshold = 0.3.
+  - Fixed scene boundary off-by-one (cut marks first frame of new scene; previous ends at cut-1).
+- Header fields
+  - `maxCLL` from per-frame peak; `maxFALL` and `avgFALL` from per-frame avg-pq converted to nits.
+- Build/verify
+  - Project builds successfully; `verifier` reads and validates produced .bin files.
 
-#### **V1.2: Core Accuracy Release**
-
-*   **1. Implement Black Bar Detection:**
-    *   Create a new module `crop.rs`.
-    *   Implement the `detect_crop` function based on the provided pseudocode.
-    *   Integrate this into the `analyze_single_frame` function. The pixel processing loop (using Rayon) should now only iterate over the pixels within the detected active video area. This will make `avg_pq` much more accurate.
-
-*   **2. Implement Native Scene Detection:**
-    *   Add a `--scene-detector <ffmpeg|native>` CLI flag, with `ffmpeg` as the default for backward compatibility.
-    *   When `native` is selected, the `run_analysis_pipeline` will not run `scdet` in the `ffmpeg` command.
-    *   Instead, after the initial frame analysis, a new function `detect_scenes_native` will be called. This function will iterate through the frames, compare the histogram of `frame[n]` with `frame[n-1]` using the **Chi-Squared Distance** formula, and create a scene cut if the distance exceeds a threshold (defaulting to `0.3`).
-
-#### **V1.3: Advanced Optimization & Format Release**
-
-*   **1. Implement Scene-Aware Optimizer:**
-    *   Refactor `apply_advanced_heuristics`. It should now accept the `scene_avg_pq` as a parameter.
-    *   The function will use the `scene_avg_pq` to choose a baseline strategy (e.g., "dark scene," "bright scene") and then use the `rolling_avg_pq` and frame-specific data to refine the `target_nits` for that frame.
-
-*   **2. Add Support for Version 6 Format:**
-    *   Add the optional fields (`peak_pq_dcip3`, `peak_pq_709`, etc.) to the `MadVRFrame` struct in `hdr_analyzer_mvp`.
-    *   Add a `--format-version 6` flag.
-    *   When this flag is active, perform the necessary color space conversions in `analyze_single_frame` to calculate these values.
-    *   In `write_measurement_file`, set the `header.version` to `6` and ensure the new fields are written correctly.
-
-#### **V2.0: Perceptual Engine Release**
-
-*   **1. Implement Configurable Tone Mapping Engine:**
-    *   Create a `tonemap` module with different operators (e.g., `hable.rs`, `reinhard.rs`).
-    *   Add a `--tone-mapper <hable|reinhard|clamp>` CLI flag.
-    *   The `run_optimizer_pass` will no longer just calculate a `target_nits` value. It will generate a set of parameters (peak brightness, contrast, etc.) based on its analysis.
-    *   A final step will apply the chosen tone mapping operator to the frame's data using these parameters to produce the final metadata. This is a significant architectural change that completes the vision of the project.
+Not yet implemented
+- CLI controls for scene detector (threshold, min scene length, toggles), and crop disable.
+- Temporal smoothing/rolling window for scene detector; minimum scene duration guard.
+- Hue histogram (31 bins) content.
+- Scene-aware optimizer (use `scene_avg_pq` in decisions).
+- madVR v6 format: per-gamut frame peaks (`peak_pq_dcip3`, `peak_pq_709`) and optional `target_peak_nits` in header.
+- Proper VAAPI/VideoToolbox device context setup for hardware decoding.
+- Optional RGB→PQ luminance analysis path (exactness vs Y’-proxy).
+- Cleanup of unused functions/warnings; tests/docs.
 
 ---
 
-### Prompt for AI Coder Agent: V1.2 - Black Bar Detection
+## 1) V1.2 — Core Accuracy Release
 
-Let's start with the highest priority task: implementing black bar detection.
+Objective: Produce madVR v5-compatible measurements with accurate active-area cropping, correct histogram semantics, and reliable native scene detection suitable for dovi_tool ingestion.
 
-**Objective:** Implement a robust, automatic black bar detection algorithm based on the FFmpeg `cropdetect` methodology. This will be integrated into the frame analysis pipeline to ensure all subsequent calculations (especially `avg_pq`) are performed only on the active video area, dramatically improving measurement accuracy.
+Already Done
+- Black bar detection (crop once; constrain analysis)
+- v5 histogram semantics and avg-pq computation
+- Limited-range normalization
+- Native chi-squared scene detection; boundary fix
+- FALL metrics in header
 
-**Role:** You are a senior software engineer implementing a core image processing feature.
+Remaining To Complete V1.2
+- Scene detector controls
+  - `--scene-threshold <float>` (default: 0.3)
+  - `--min-scene-length <frames>` (default: 24)
+  - Optional `--scene-smoothing <frames>` to average diffs (default: 0 = off)
+- Crop toggle
+  - `--no-crop` to disable crop detection
+- Verifier enhancements
+  - Recompute/print derived FALL from histogram avg-pq to sanity-check header values; verify flags vs data consistency
+- Cleanup
+  - Remove legacy `analyze_native_frame` or prefix unused args with `_`
+  - Silence dead-code warnings
+- Documentation
+  - Update README usage, flags, and verification steps
+
+Definition of Done (V1.2)
+- CLI supports threshold/min-duration/no-crop; defaults yield stable cuts on typical content.
+- Verifier passes on produced .bin; FALL header and derived FALL match within reasonable tolerance.
+- dovi_tool measurement-based generation accepts .bin and produces stable DV RPU on test clips.
+- No unused warnings in release build.
+
+Acceptance Criteria
+- On 3 diverse HDR10 samples (letterboxed scope, 16:9 TV show, bright demo reel):
+  - Scene boundaries visually align (±1 frame) with ground truth/madVR on majority of cuts.
+  - APL and peaks look reasonable; no evident black-bar contamination.
+  - dovi_tool run completes without parse/format errors.
 
 ---
 
-### **Detailed Implementation Plan:**
+## 2) V1.3 — Advanced Optimization & Format
 
-**1. Create a New `crop` Module:**
-*   In `hdr_analyzer_mvp/src/`, create a new file named `crop.rs`.
-*   Define a public struct `CropRect` to hold the results: `pub struct CropRect { pub x: u32, pub y: u32, pub width: u32, pub height: u32 }`.
+Objective: Improve per-frame target selection with scene-aware logic and expand format support.
 
-**2. Implement the Detection Algorithm in `crop.rs`:**
-*   Create a public function `detect_crop(frame_data: &[u8], width: u32, height: u32, bytes_per_pixel: usize) -> CropRect`.
-*   Inside this function, implement the logic from the research document's pseudocode.
-    *   Use a `limit` of `24` and a `round` of `2` (rounding to 2 is sufficient and safer than 16).
-    *   Since you are processing luminance data (`bytes_per_pixel == 1`), the `pixel.luminance` check is simply a check of the byte value.
-    *   To improve performance, do not check every single pixel in a row/column. Check every 10th pixel, as suggested in the pseudocode.
+Planned
+- Scene-aware optimizer
+  - Pass `scene_avg_pq` into `apply_advanced_heuristics`
+  - Strategy selection by scene: dark/medium/bright baseline; refine with rolling avg and per-frame highlights
+  - Optional CLI: `--optimizer-profile <conservative|balanced|aggressive>`
+- Hue histogram (31 bins)
+  - Populate meaningful 31-bin hue histogram (e.g., angle quantization from chroma; low-cost approach acceptable)
+- madVR v6 format (optional but recommended)
+  - CLI: `--format-version 6`
+  - Compute per-frame `peak_pq_dcip3` and `peak_pq_709` via gamut conversion
+  - Write v6 header with `target_peak_nits` when applicable
+- Hardware acceleration
+  - Implement VAAPI/VideoToolbox device contexts; document CUDA availability/constraints
 
-**3. Integrate into the Main Pipeline (`main.rs`):**
-*   **A. Detect Crop Area for the Whole Video:** Black bars are generally consistent. We don't need to detect them on every frame. We will detect them once on a sample frame.
-    *   In `run_analysis_pipeline`, after spawning the `ffmpeg` child process but before starting the main frame reading loop, read **one single frame** from the `stdout` pipe into a buffer.
-    *   Call your new `crop::detect_crop` function on this single frame to get the `CropRect`.
-    *   Print the detected crop area to the console for user feedback (e.g., `Detected active video area: 3840x1600 at offset (0, 280)`).
+Definition of Done (V1.3)
+- Optimizer uses `scene_avg_pq` and rolling averages; produces smoother, scene-consistent `target_nits`.
+- Hue histogram block filled (non-zero; plausible distribution).
+- Optionally, v6 output selected by CLI; per-gamut peaks present and parseable; verifier extended to validate v6 fields.
+- HW accel working paths (at least one of VAAPI or VideoToolbox) validated on a supported platform.
 
-*   **B. Use the Crop Area in `analyze_single_frame`:**
-    *   The `analyze_single_frame` function must now accept the `crop_rect: &CropRect` as a parameter.
-    *   **CRITICAL:** All pixel processing loops (both the `rayon` parallel iterator and the sequential reduction) must now operate **only on the pixels inside the `crop_rect`**.
-    *   The `pixel_count` variable must be updated to `crop_rect.width * crop_rect.height`.
-    *   The loops will need to be adjusted to account for the `x` and `y` offsets of the crop rectangle when accessing the `frame_data` buffer.
+Acceptance Criteria
+- On test clips, optimizer reduces temporal flicker of `target_nits`; scene transitions feel smooth.
+- v6 files parse via `madvr_parse` and any external tools expecting v6.
+- Performance improved where HW accel is enabled compared to software decode.
 
 ---
 
-### **Final Deliverable:**
+## 3) V2.0 — Perceptual Engine
 
-Provide the complete, new `hdr_analyzer_mvp/src/crop.rs` file and the modified `hdr_analyzer_mvp/src/main.rs`. The updated `main.rs` must correctly detect the crop area once and then use that area to constrain all calculations within `analyze_single_frame`.
+Objective: Configurable tone-mapping operators and a more expressive metadata generation pipeline.
+
+Planned
+- Tone mapping operators
+  - `tonemap/` module with `hable.rs`, `reinhard.rs`
+  - CLI: `--tone-mapper <hable|reinhard|clamp>` (+ parameters per operator)
+- Optimizer outputs operator parameters
+  - Not just `target_nits`; produce a parameter set (contrast, shoulder, knee) per scene/frame based on analysis
+- Optional fidelity path
+  - Add an RGB-based analysis path computing PQ luminance using BT.2020 coefficients prior to histogramming; keep Y’ path as fast default
+  - CLI toggle to choose analysis mode
+
+Definition of Done (V2.0)
+- Operators selectable; parameterized; metadata reflects operator choice.
+- Documentation explains tradeoffs and recommended profiles.
+
+Acceptance Criteria
+- Visual validation: chosen operators yield expected behavior on reference scenes (highlight roll-off, shadow detail).
+- Performance acceptable with Y’ path; RGB analysis path documented with expected overhead.
+
+---
+
+## 4) Technical Specifications (Reference)
+
+4.1 Histogram Binning (madVR v5 semantics)
+- Bins: 256 total
+  - 0..63: PQ range [0, pq(100 nits)] with equal step; mid-bin used for averaging
+  - 64..255: PQ range [pq(100 nits), 1.0] with equal step; mid-bin used
+- Avg-pq computation
+  - Weighted sum of mid-bin PQ values by percent; adjust by sum of histogram bars
+  - Black-bar heuristic: skip bin 0 when it is between ~2% and ~30% for avg computation
+
+4.2 Black Bar Detection (implemented)
+- Scan Y’ plane (10-bit), sample every 10 px
+- Non-black if normalized limited-range value > ~0.01
+- Row/column active if ≥10% samples non-black
+- Round coordinates and sizes to even; clamp within frame
+
+4.3 Dynamic Metadata Fields
+- Header v5: version=5, header_size=32, frame/scene counts, flags (2: no custom target; 3: with per-frame target), maxCLL, maxFALL, avgFALL
+- Per-frame: `peak_pq_2020`, 256-bin luminance histogram, 31-bin hue histogram (required by lib)
+- If flags==3: custom per-frame `target_nits` block
+- v6 (planned): `peak_pq_dcip3`, `peak_pq_709`; header `target_peak_nits`
+
+4.4 FALL Calculations
+- FALL per-frame = inversePQ(avg_pq) in nits
+- `maxFALL` = ceil(max per-frame FALL), `avgFALL` = ceil(mean per-frame FALL)
+
+---
+
+## 5) Work Plan & Milestones
+
+Milestone A — Finalize V1.2 (Core Accuracy)
+- [ ] Add CLI flags: `--scene-threshold`, `--min-scene-length`, `--scene-smoothing`, `--no-crop`
+- [ ] Implement min-scene-length guard (drop cuts inside N frames)
+- [ ] Optional: smoothing window for scene diff (rolling average)
+- [ ] Verifier: recompute FALL, validate flags vs data
+- [ ] Cleanup: remove dead code/warnings; doc updates
+
+Milestone B — V1.3 (Optimizer & Format)
+- [ ] Pass `scene_avg_pq` to optimizer; strategy selection by scene type
+- [ ] Fill hue histogram (31 bins) from chroma-based hue angle quantization
+- [ ] Add `--format-version 6`; compute P3/709 peaks; write v6 header (`target_peak_nits` when provided)
+- [ ] Implement VAAPI/VideoToolbox device contexts; doc CUDA/VAAPI/VT usage
+
+Milestone C — V2.0 (Perceptual Engine)
+- [ ] Implement `tonemap/` module with Hable/Reinhard operators
+- [ ] CLI: `--tone-mapper` with operator-specific parameters
+- [ ] Optimizer outputs operator parameters, not just `target_nits`
+- [ ] Optional: RGB→PQ luminance analysis mode
+
+---
+
+## 6) Validation & QA
+
+- Unit tests
+  - Crop detection on synthetic letterboxed frames
+  - Histogram bin selection correctness (bin edges, mid-bin mapping)
+  - Chi-squared detector thresholds; min-scene-length logic
+  - FALL computations vs known inputs
+- Integration tests
+  - Run analyzer on sample HDR10 assets; verify with `verifier`
+  - Compare scene boundaries and statistics to a madVR-produced measurement (when available)
+  - Run dovi_tool measurement-based workflow to ensure end-to-end compatibility
+- Performance
+  - Benchmark decode/analysis fps on software vs HW-accelerated paths
+
+---
+
+## 7) CLI Flags (Planned/Current)
+
+Current
+- `--input`, `--output`
+- `--enable_optimizer`
+- `--hwaccel <cuda|vaapi|videotoolbox>` (CUDA path attempts; VAAPI/VT currently fall back to SW)
+
+Planned (V1.2)
+- `--scene-threshold <float>` (default: 0.3)
+- `--min-scene-length <frames>` (default: 24)
+- `--scene-smoothing <frames>` (default: 0 = off)
+- `--no-crop`
+
+Planned (V1.3+)
+- `--format-version <5|6>` (default: 5)
+- `--optimizer-profile <conservative|balanced|aggressive>`
+- `--tone-mapper <hable|reinhard|clamp>` and operator parameters (V2.0)
+
+---
+
+## 8) Changelog of Recent Upgrades (for context)
+
+- Added `crop.rs` and integrated active-area cropping into analysis
+- Implemented madVR v5 histogram binning and avg-pq computation
+- Normalized Y’ limited range; used as PQ proxy
+- Replaced SAD with chi-squared scene metric; fixed off-by-one scene boundaries
+- Computed and wrote `maxFALL` and `avgFALL` in header (v5)
+- Ensured .bin outputs parse via `madvr_parse`; `verifier` can read and validate
+
+---
+
+## 9) Ownership & Review
+
+- Code owners: hdr-analyzer core maintainers
+- Review cadence: per milestone completion or bi-weekly
+- Sign-off: require verification on sample assets and dovi_tool ingestion for each milestone
