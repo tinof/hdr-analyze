@@ -11,211 +11,216 @@ It reflects the current state after the latest code upgrades and lays out the ne
 
 ## 0) Current Status (after latest upgrades)
 
-Implemented
+Implemented (latest changes)
+- CLI options
+  - `--madvr-version 5|6` (default: 5). For v6, `header_size=36`, `target_peak_nits` is written (default: MaxCLL or overridden via `--target-peak-nits`), and per-frame gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are temporarily duplicated from `peak_pq_2020` until real gamut logic lands.
+  - `--scene-threshold <float>` (default: 0.3) to tune histogram-distance scene cut sensitivity.
+  - `--target-peak-nits <nits>` for v6 header override.
 - Active area (black bar) detection and cropping
-  - New `hdr_analyzer_mvp/src/crop.rs` with crop-detect-like algorithm on Y (10-bit), sampling every 10 px, ~10% non-black threshold, rounded to even coordinates/dimensions.
+  - New `hdr_analyzer_mvp/src/crop.rs` with crop-detect-like algorithm on Y (10-bit), sampling every 10 px, ~10% non-black threshold, rounded to even coords/dims.
   - Detected once and applied to all frames; analysis constrained to `CropRect`.
-- Correct madVR v5 histogram binning and avg computation
-  - 256-bin mapping matching madVR semantics: 64 bins up to pq(100 nits), 192 bins from pq(100) to 1.0; mid-bin weighting; avg-pq computed likewise; black-bar bin0 heuristic applied for avg.
+- v5 histogram semantics and avg computation
+  - 256-bin mapping matching v5 semantics: 64 bins up to pq(100 nits), 192 bins pq(100)→1.0; mid-bin weighting; avg-pq computed likewise; bin0 black-bar heuristic for avg.
 - Limited-range normalization
-  - 10-bit Y’ treated as limited range (nominal 64–940); normalized to 0..1 as PQ proxy before binning.
-- Native scene detection (basic)
-  - Chi-squared distance between consecutive frame histograms; default threshold = 0.3.
-  - Fixed scene boundary off-by-one (cut marks first frame of new scene; previous ends at cut-1).
-- Header fields
-  - `maxCLL` from per-frame peak; `maxFALL` and `avgFALL` from per-frame avg-pq converted to nits.
-- Build/verify
-  - Project builds successfully; `verifier` reads and validates produced .bin files.
+  - HDR10 Y’ nominal 64–940 normalized to [0..1] as PQ proxy prior to binning (robust with limited-range material).
+- Native scene detection
+  - Histogram distance (chi-squared-like, symmetric) between consecutive frame histograms; default threshold = 0.3; post-processing fixes end-frame off-by-one.
+- Optimizer (optional)
+  - Rolling 240-frame average + highlight knee (99th percentile) + scene-aware heuristics (by APL category); writes per-frame `target_nits` when enabled (flags=3).
+- Header fields and writer
+  - `maxCLL` from per-frame peak (nits), `maxFALL` and `avgFALL` derived from per-frame avg-pq (nits). Serialization via `madvr_parse` (v5 or v6).
+- Verifier
+  - Parses measurement, prints summary, validates scene/frame ranges, histogram integrity (256 bins, sum ≈100), PQ range checks; reports optimizer presence.
+- Documentation
+  - Root README updated to reflect current behavior, new flags, and a minimal beta validation workflow.
+
+Partially implemented (work remains)
+- madVR v6 support: Writer and header present; per-gamut peaks currently duplicated from 2020 (need true P3/709 computation).
+- Hardware acceleration: CUDA attempted via `hevc_cuvid` if available; VAAPI/VideoToolbox paths currently fall back to software decode (device contexts not wired).
 
 Not yet implemented
-- CLI controls for scene detector (threshold, min scene length, toggles), and crop disable.cargo
-- Temporal smoothing/rolling window for scene detector; minimum scene duration guard.
-- Hue histogram (31 bins) content.
-- Scene-aware optimizer (use `scene_avg_pq` in decisions).
-- madVR v6 format: per-gamut frame peaks (`peak_pq_dcip3`, `peak_pq_709`) and optional `target_peak_nits` in header.
+- Scene detector: min scene length guard, optional temporal smoothing of diff signal.
+- Crop toggle (`--no-crop`) for diagnostics/comparison.
+- Hue histogram (31 bins) with meaningful content.
+- Scene-aware optimizer incorporating scene aggregates (e.g., `scene_avg_pq`) explicitly.
 - Proper VAAPI/VideoToolbox device context setup for hardware decoding.
-- Optional RGB→PQ luminance analysis path (exactness vs Y’-proxy).
-- Cleanup of unused functions/warnings; tests/docs.
+- Parallel analysis (rayon) for multi-core throughput.
+- Tests and CI.
 
 ---
 
-## 1) V1.2 — Core Accuracy Release
+## 1) V1.2 — Core Accuracy Release (Beta Stabilization)
 
-Objective: Produce madVR v5-compatible measurements with accurate active-area cropping, correct histogram semantics, and reliable native scene detection suitable for dovi_tool ingestion.
+Objective: Produce stable, v5/v6-compatible measurements with accurate active-area cropping, correct histogram semantics, and reliable scene detection suitable for dovi_tool ingestion.
 
 Already Done
-- Black bar detection (crop once; constrain analysis)
-- v5 histogram semantics and avg-pq computation
-- Limited-range normalization
-- Native chi-squared scene detection; boundary fix
-- FALL metrics in header
+- Black bar detection with crop; v5 histogram semantics; limited-range normalization.
+- Histogram-distance scene cut with threshold control; boundary fix.
+- FALL metrics; v5/v6 writing; updated README; basic verifier.
 
 Remaining To Complete V1.2
 - Scene detector controls
-  - `--scene-threshold <float>` (default: 0.3)
-  - `--min-scene-length <frames>` (default: 24)
-  - Optional `--scene-smoothing <frames>` to average diffs (default: 0 = off)
+  - [ ] `--min-scene-length <frames>` (default: 24) — drop cuts that occur within N frames of the previous cut.
+  - [ ] Optional `--scene-smoothing <frames>` (default: 0 = off) — rolling average of histogram distance to stabilize cuts.
 - Crop toggle
-  - `--no-crop` to disable crop detection
+  - [ ] `--no-crop` to disable crop detection (e.g., for validation against other tools).
 - Verifier enhancements
-  - Recompute/print derived FALL from histogram avg-pq to sanity-check header values; verify flags vs data consistency
-- Cleanup
-  - Remove legacy `analyze_native_frame` or prefix unused args with `_`
-  - Silence dead-code warnings
+  - [ ] Recompute/print derived FALL from histogram avg-pq and compare to header (tolerance ≤ 2% or 10 nits, whichever is larger).
+  - [ ] Validate flags vs data (e.g., flags=3 implies per-frame target_nits present).
 - Documentation
-  - Update README usage, flags, and verification steps
+  - [ ] Expand README with scene controls and examples; document v6 caveat (temporary gamut duplication).
 
 Definition of Done (V1.2)
-- CLI supports threshold/min-duration/no-crop; defaults yield stable cuts on typical content.
-- Verifier passes on produced .bin; FALL header and derived FALL match within reasonable tolerance.
-- dovi_tool measurement-based generation accepts .bin and produces stable DV RPU on test clips.
+- New flags available and defaults yield stable cuts on typical content.
+- Verifier passes on produced .bin; FALL header values match derived values within tolerance; flags/data consistent.
+- dovi_tool measurement-based generation accepts .bin on test clips without parse errors.
 - No unused warnings in release build.
 
 Acceptance Criteria
-- On 3 diverse HDR10 samples (letterboxed scope, 16:9 TV show, bright demo reel):
-  - Scene boundaries visually align (±1 frame) with ground truth/madVR on majority of cuts.
-  - APL and peaks look reasonable; no evident black-bar contamination.
-  - dovi_tool run completes without parse/format errors.
+- On 3 diverse HDR10 samples (letterboxed scope, 16:9 TV, bright demo):
+  - Scene boundaries visually align (±1 frame) with ground truth/madVR on the majority of cuts.
+  - APL/peaks reasonable; no black-bar contamination.
+  - dovi_tool run completes and generates RPU.
 
 ---
 
-## 2) V1.3 — Advanced Optimization & Format
+## 2) Milestone R — Refactor `main.rs` (Modularization)
 
-Objective: Improve per-frame target selection with scene-aware logic and expand format support.
+Problem: `hdr_analyzer_mvp/src/main.rs` has grown beyond 1100 lines, mixing CLI, decode/scaling, analysis, detection, optimization, and writing. This hinders testability and evolution.
+
+Target module structure
+- `hdr_analyzer_mvp/src/cli.rs` — CLI definition and parsing
+- `hdr_analyzer_mvp/src/ffmpeg_io.rs` — init, input open, best stream, decoder setup, scaler setup (incl. future VAAPI/VT device contexts)
+- `hdr_analyzer_mvp/src/analysis/mod.rs`
+  - `histogram.rs` — v5 binning constants, mapping, accumulation, avg computation, black-bar heuristic
+  - `frame.rs` — per-frame analysis entry points operating on Y plane; active-area application
+  - `scene.rs` — histogram-distance computation, smoothing, min-length guard, conversion to scenes
+  - `crop.rs` — existing crop detection (move/keep; it already exists)
+- `hdr_analyzer_mvp/src/optimizer.rs` — rolling avg, knee detection, heuristics; future profiles
+- `hdr_analyzer_mvp/src/writer.rs` — v5/v6 writer using `madvr_parse`
+- `hdr_analyzer_mvp/src/pipeline.rs` — orchestration (end-to-end run), progress reporting
+- `hdr_analyzer_mvp/src/types.rs` (optional) — thin wrappers/types if needed (but reuse `madvr_parse` structs primarily)
+
+Refactor plan (incremental, safe)
+- [ ] Step 1: Extract CLI to `cli.rs`; import into `main.rs`.
+- [ ] Step 2: Extract writer to `writer.rs` (pure function taking scenes/frames/opts).
+- [ ] Step 3: Extract scene metric and helpers to `analysis/scene.rs`.
+- [ ] Step 4: Extract histogram utilities to `analysis/histogram.rs`.
+- [ ] Step 5: Extract per-frame analysis to `analysis/frame.rs` (uses histogram utils).
+- [ ] Step 6: Extract FFmpeg init/open/decoder/scaler to `ffmpeg_io.rs`.
+- [ ] Step 7: Create `pipeline.rs` to orchestrate; `main.rs` becomes thin: parse CLI → pipeline::run() → exit.
+- [ ] Step 8: Wire unit tests for histogram binning/avg, scene diff metric, and FALL conversions.
+- [ ] Step 9: Add benches (optional) for per-frame analysis and histogram accumulation (baseline for perf regressions).
+
+Acceptance criteria
+- Behavior-preserving: On sample input, produced `.bin` files parse identically (version/flags/frame+scene counts equal; histogram sums within ±0.5%; APL/peaks within negligible tolerance) compared to pre-refactor baseline.
+- Dev ergonomics: `main.rs` ≤ 300 lines; functions ≤ ~150 lines per file; cyclomatic complexity reduced.
+- Build: no new warnings in release; CI (when added) passes tests.
+
+Risks and mitigations
+- Hidden coupling between steps — mitigate by adding unit tests per module and incremental commits.
+- Performance regressions — mitigate by benchmarking before/after; avoid extra allocations.
+
+---
+
+## 3) V1.3 — Advanced Optimization & Format
+
+Objective: Improve per-frame target selection and expand complete v6 format support.
 
 Planned
 - Scene-aware optimizer
-  - Pass `scene_avg_pq` into `apply_advanced_heuristics`
-  - Strategy selection by scene: dark/medium/bright baseline; refine with rolling avg and per-frame highlights
-  - Optional CLI: `--optimizer-profile <conservative|balanced|aggressive>`
+  - [ ] Pass `scene_avg_pq` and related aggregates into `apply_advanced_heuristics`.
+  - [ ] Add profiles: `--optimizer-profile <conservative|balanced|aggressive>` to adjust bounds/weights.
 - Hue histogram (31 bins)
-  - Populate meaningful 31-bin hue histogram (e.g., angle quantization from chroma; low-cost approach acceptable)
-- madVR v6 format (optional but recommended)
-  - CLI: `--format-version 6`
-  - Compute per-frame `peak_pq_dcip3` and `peak_pq_709` via gamut conversion
-  - Write v6 header with `target_peak_nits` when applicable
-- Hardware acceleration
-  - Implement VAAPI/VideoToolbox device contexts; document CUDA availability/constraints
+  - [ ] Populate from chroma-based hue angle quantization; low-cost approach acceptable.
+- madVR v6 completeness
+  - [ ] Compute per-frame `peak_pq_dcip3` and `peak_pq_709` via gamut conversion (or approximate mapping); remove duplication placeholder.
+  - [ ] Extend verifier to validate v6-specific fields where applicable.
+- Documentation
+  - [ ] Update README on profiles and v6 completeness.
 
 Definition of Done (V1.3)
-- Optimizer uses `scene_avg_pq` and rolling averages; produces smoother, scene-consistent `target_nits`.
-- Hue histogram block filled (non-zero; plausible distribution).
-- Optionally, v6 output selected by CLI; per-gamut peaks present and parseable; verifier extended to validate v6 fields.
-- HW accel working paths (at least one of VAAPI or VideoToolbox) validated on a supported platform.
+- Optimizer yields smoother, scene-consistent `target_nits` with less temporal flicker.
+- Hue histogram non-zero, plausible distribution.
+- v6 outputs with proper gamut peaks parse via `madvr_parse` and external tools.
 
 Acceptance Criteria
-- On test clips, optimizer reduces temporal flicker of `target_nits`; scene transitions feel smooth.
-- v6 files parse via `madvr_parse` and any external tools expecting v6.
-- Performance improved where HW accel is enabled compared to software decode.
+- On reference clips, `target_nits` transitions are visually smooth at scene boundaries and within scenes.
+- v6 outputs validate and ingest in downstream tools expecting v6.
 
 ---
 
-## 3) V2.0 — Perceptual Engine
+## 4) V1.4 — Performance & Parallelization
 
-Objective: Configurable tone-mapping operators and a more expressive metadata generation pipeline.
+Objective: Improve throughput on multi-core systems (e.g., Ampere ARM).
 
 Planned
-- Tone mapping operators
-  - `tonemap/` module with `hable.rs`, `reinhard.rs`
-  - CLI: `--tone-mapper <hable|reinhard|clamp>` (+ parameters per operator)
-- Optimizer outputs operator parameters
-  - Not just `target_nits`; produce a parameter set (contrast, shoulder, knee) per scene/frame based on analysis
-- Optional fidelity path
-  - Add an RGB-based analysis path computing PQ luminance using BT.2020 coefficients prior to histogramming; keep Y’ path as fast default
-  - CLI toggle to choose analysis mode
+- [ ] Parallelize histogram accumulation by rows/tiles using `rayon`.
+- [ ] Optional lock-free accumulators or per-thread buffers + reduce.
+- [ ] Consider SIMD for hot loops (optional).
+- [ ] Benchmarks on representative 4K HEVC HDR samples.
 
-Definition of Done (V2.0)
-- Operators selectable; parameterized; metadata reflects operator choice.
-- Documentation explains tradeoffs and recommended profiles.
-
-Acceptance Criteria
-- Visual validation: chosen operators yield expected behavior on reference scenes (highlight roll-off, shadow detail).
-- Performance acceptable with Y’ path; RGB analysis path documented with expected overhead.
+Definition of Done (V1.4)
+- ≥1.7× speedup on 8-core CPU vs current single-thread baseline (same content, same flags).
+- No changes in measurement outputs beyond floating-point noise tolerance.
 
 ---
 
-## 4) Technical Specifications (Reference)
+## 5) V1.5 — Hardware Decode Contexts
 
-4.1 Histogram Binning (madVR v5 semantics)
-- Bins: 256 total
-  - 0..63: PQ range [0, pq(100 nits)] with equal step; mid-bin used for averaging
-  - 64..255: PQ range [pq(100 nits), 1.0] with equal step; mid-bin used
-- Avg-pq computation
-  - Weighted sum of mid-bin PQ values by percent; adjust by sum of histogram bars
-  - Black-bar heuristic: skip bin 0 when it is between ~2% and ~30% for avg computation
+Objective: Implement VAAPI/VideoToolbox device contexts for hardware decoding on supported platforms.
 
-4.2 Black Bar Detection (implemented)
-- Scan Y’ plane (10-bit), sample every 10 px
-- Non-black if normalized limited-range value > ~0.01
-- Row/column active if ≥10% samples non-black
-- Round coordinates and sizes to even; clamp within frame
+Planned
+- [ ] Add AVHWDeviceContext creation for VAAPI/VT; map hw frames → sw frames for analysis path.
+- [ ] CLI/docs updates; capability detection with graceful fallback.
+- [ ] Validate on at least one VAAPI-capable Linux and one macOS system.
 
-4.3 Dynamic Metadata Fields
-- Header v5: version=5, header_size=32, frame/scene counts, flags (2: no custom target; 3: with per-frame target), maxCLL, maxFALL, avgFALL
-- Per-frame: `peak_pq_2020`, 256-bin luminance histogram, 31-bin hue histogram (required by lib)
-- If flags==3: custom per-frame `target_nits` block
-- v6 (planned): `peak_pq_dcip3`, `peak_pq_709`; header `target_peak_nits`
-
-4.4 FALL Calculations
-- FALL per-frame = inversePQ(avg_pq) in nits
-- `maxFALL` = ceil(max per-frame FALL), `avgFALL` = ceil(mean per-frame FALL)
-
----
-
-## 5) Work Plan & Milestones
-
-Milestone A — Finalize V1.2 (Core Accuracy)
-- [ ] Add CLI flags: `--scene-threshold`, `--min-scene-length`, `--scene-smoothing`, `--no-crop`
-- [ ] Implement min-scene-length guard (drop cuts inside N frames)
-- [ ] Optional: smoothing window for scene diff (rolling average)
-- [ ] Verifier: recompute FALL, validate flags vs data
-- [ ] Cleanup: remove dead code/warnings; doc updates
-
-Milestone B — V1.3 (Optimizer & Format)
-- [ ] Pass `scene_avg_pq` to optimizer; strategy selection by scene type
-- [ ] Fill hue histogram (31 bins) from chroma-based hue angle quantization
-- [ ] Add `--format-version 6`; compute P3/709 peaks; write v6 header (`target_peak_nits` when provided)
-- [ ] Implement VAAPI/VideoToolbox device contexts; doc CUDA/VAAPI/VT usage
-
-Milestone C — V2.0 (Perceptual Engine)
-- [ ] Implement `tonemap/` module with Hable/Reinhard operators
-- [ ] CLI: `--tone-mapper` with operator-specific parameters
-- [ ] Optimizer outputs operator parameters, not just `target_nits`
-- [ ] Optional: RGB→PQ luminance analysis mode
+Definition of Done (V1.5)
+- HW decode demonstrably improves decode stage performance with no change to analysis results.
+- Fallback remains reliable where HW is unavailable.
 
 ---
 
 ## 6) Validation & QA
 
-- Unit tests
-  - Crop detection on synthetic letterboxed frames
-  - Histogram bin selection correctness (bin edges, mid-bin mapping)
-  - Chi-squared detector thresholds; min-scene-length logic
-  - FALL computations vs known inputs
-- Integration tests
-  - Run analyzer on sample HDR10 assets; verify with `verifier`
-  - Compare scene boundaries and statistics to a madVR-produced measurement (when available)
-  - Run dovi_tool measurement-based workflow to ensure end-to-end compatibility
-- Performance
-  - Benchmark decode/analysis fps on software vs HW-accelerated paths
+Unit tests
+- [ ] Crop detection on synthetic letterboxed frames.
+- [ ] Histogram bin selection correctness (bin edges, mid-bin mapping).
+- [ ] Chi-squared detector thresholds; min-scene-length logic; smoothing.
+- [ ] FALL computations vs known inputs.
+
+Integration tests
+- [ ] Analyze sample HDR10 assets; verify with `verifier`.
+- [ ] Compare scene boundaries and stats against a madVR-produced measurement when available.
+- [ ] Run dovi_tool measurement-based workflow (smoke test).
+
+Performance
+- [ ] Benchmark decode/analysis fps (SW vs HW when available).
+- [ ] Prevent regressions with benches.
+
+CI (recommended)
+- [ ] Build on Linux/macOS (GitHub Actions).
+- [ ] Run unit tests; run integration on small sample clip (time-bounded).
+- [ ] Artifact: attach verifier logs.
 
 ---
 
-## 7) CLI Flags (Planned/Current)
+## 7) CLI Flags (Current/Planned)
 
 Current
 - `--input`, `--output`
-- `--enable_optimizer`
-- `--hwaccel <cuda|vaapi|videotoolbox>` (CUDA path attempts; VAAPI/VT currently fall back to SW)
+- `--enable-optimizer`
+- `--hwaccel <cuda|vaapi|videotoolbox>` (CUDA attempted; VAAPI/VT currently fall back to SW)
+- `--madvr-version <5|6>` (default: 5)
+- `--scene-threshold <float>` (default: 0.3)
+- `--target-peak-nits <nits>` (v6 header override; default: MaxCLL)
 
 Planned (V1.2)
-- `--scene-threshold <float>` (default: 0.3)
 - `--min-scene-length <frames>` (default: 24)
 - `--scene-smoothing <frames>` (default: 0 = off)
 - `--no-crop`
 
 Planned (V1.3+)
-- `--format-version <5|6>` (default: 5)
 - `--optimizer-profile <conservative|balanced|aggressive>`
 - `--tone-mapper <hable|reinhard|clamp>` and operator parameters (V2.0)
 
@@ -223,12 +228,13 @@ Planned (V1.3+)
 
 ## 8) Changelog of Recent Upgrades (for context)
 
-- Added `crop.rs` and integrated active-area cropping into analysis
-- Implemented madVR v5 histogram binning and avg-pq computation
-- Normalized Y’ limited range; used as PQ proxy
-- Replaced SAD with chi-squared scene metric; fixed off-by-one scene boundaries
-- Computed and wrote `maxFALL` and `avgFALL` in header (v5)
-- Ensured .bin outputs parse via `madvr_parse`; `verifier` can read and validate
+- Added `--madvr-version`, `--scene-threshold`, `--target-peak-nits` to analyzer.
+- Implemented v6 writer path with temporary duplication of gamut peaks; `target_peak_nits` in header.
+- Updated README with new flags and a minimal beta validation workflow.
+- Retained robust v5/v6 serialization via `madvr_parse`.
+- Maintained active-area cropping, v5 histogram semantics, limited-range normalization.
+- Native chi-squared-like scene metric with boundary fix.
+- Optional optimizer (rolling avg + knee + heuristics).
 
 ---
 
@@ -236,4 +242,5 @@ Planned (V1.3+)
 
 - Code owners: hdr-analyzer core maintainers
 - Review cadence: per milestone completion or bi-weekly
-- Sign-off: require verification on sample assets and dovi_tool ingestion for each milestone
+- Refactor sign-off: require parity validation on sample assets (pre/post refactor outputs comparable within tolerances) and successful verifier checks.
+- Beta gate: dovi_tool ingestion on sample set must succeed with no parse errors.
