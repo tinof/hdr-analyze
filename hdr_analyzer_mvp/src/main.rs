@@ -33,6 +33,18 @@ struct Cli {
     /// Examples: "cuda" (for NVIDIA), "vaapi" (for Linux/AMD/Intel), "videotoolbox" (for macOS).
     #[arg(long)]
     hwaccel: Option<String>,
+
+    /// madVR measurement file version to write (5 or 6). Default: 5
+    #[arg(long, default_value_t = 5)]
+    madvr_version: u8,
+
+    /// Scene detection threshold (distance metric). Default: 0.3
+    #[arg(long, default_value_t = 0.3)]
+    scene_threshold: f64,
+
+    /// Optional override for header.target_peak_nits (used for v6). If omitted, defaults to computed maxCLL.
+    #[arg(long)]
+    target_peak_nits: Option<u32>,
 }
 
 // --- Data Structures ---
@@ -203,7 +215,14 @@ fn main() -> Result<()> {
 
     // Step 5: Assemble and write the .bin file
     println!("Writing measurement file: {}", cli.output);
-    write_measurement_file(&cli.output, &scenes, &frames, cli.enable_optimizer)?;
+    write_measurement_file(
+        &cli.output,
+        &scenes,
+        &frames,
+        cli.enable_optimizer,
+        cli.madvr_version as u32,
+        cli.target_peak_nits,
+    )?;
 
     println!("Native analysis complete!");
     Ok(())
@@ -382,8 +401,8 @@ fn run_native_analysis_pipeline(
                 if let Some(ref prev_hist) = previous_histogram {
                     let scene_change_score =
                         calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
-                    if scene_change_score > 0.3 {
-                        // chi-squared threshold (~0.2-0.5 typical)
+                    if scene_change_score > cli.scene_threshold {
+                        // configurable threshold
                         scene_cuts.push(frame_count);
                     }
                 }
@@ -447,7 +466,7 @@ fn run_native_analysis_pipeline(
         if let Some(ref prev_hist) = previous_histogram {
             let scene_change_score =
                 calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
-            if scene_change_score > 0.3 {
+            if scene_change_score > cli.scene_threshold {
                 scene_cuts.push(frame_count);
             }
         }
@@ -991,6 +1010,8 @@ fn apply_advanced_heuristics(
 /// * `scenes` - Scene analysis data
 /// * `frames` - Frame analysis data
 /// * `enable_optimizer` - Whether optimizer data should be included
+/// * `madvr_version` - madVR measurement version to write (5 or 6)
+/// * `target_peak_nits` - Optional override for header.target_peak_nits (v6)
 ///
 /// # Returns
 /// `Result<()>` - Ok(()) on successful write, Err on failure
@@ -999,6 +1020,8 @@ fn write_measurement_file(
     scenes: &[MadVRScene],
     frames: &[MadVRFrame],
     enable_optimizer: bool,
+    madvr_version: u32,
+    target_peak_nits: Option<u32>,
 ) -> Result<()> {
     // 1. Create the Header
     let maxcll = frames
@@ -1020,9 +1043,11 @@ fn write_measurement_file(
         (falls_nits.iter().sum::<f64>() / falls_nits.len() as f64).round() as u32
     };
 
-    let header = MadVRHeader {
-        version: 5,
-        header_size: 32,
+    let header_size = if madvr_version >= 6 { 36 } else { 32 };
+
+    let mut header = MadVRHeader {
+        version: madvr_version,
+        header_size,
         scene_count: scenes.len() as u32,
         frame_count: frames.len() as u32,
         flags: if enable_optimizer { 3 } else { 2 },
@@ -1031,6 +1056,10 @@ fn write_measurement_file(
         avgfall,
         ..Default::default() // Let the library handle other default values
     };
+
+    if madvr_version >= 6 {
+        header.target_peak_nits = target_peak_nits.unwrap_or(maxcll);
+    }
 
     // 2. Create the top-level Measurements object
     // We need to create new vectors with the data since the structs don't implement Clone
@@ -1047,8 +1076,11 @@ fn write_measurement_file(
 
     let mut owned_frames = Vec::new();
     for frame in frames {
+        // For v6, madVR expects per-gamut peaks; duplicate 2020 peak until proper computation is added
         owned_frames.push(MadVRFrame {
             peak_pq_2020: frame.peak_pq_2020,
+            peak_pq_dcip3: if madvr_version >= 6 { Some(frame.peak_pq_2020) } else { frame.peak_pq_dcip3 },
+            peak_pq_709: if madvr_version >= 6 { Some(frame.peak_pq_2020) } else { frame.peak_pq_709 },
             avg_pq: frame.avg_pq,
             lum_histogram: frame.lum_histogram.clone(),
             hue_histogram: frame.hue_histogram.clone(),
