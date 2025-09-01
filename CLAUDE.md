@@ -1,0 +1,175 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+HDR-Analyze is a Rust workspace containing tools for analyzing HDR10 video files to generate dynamic metadata for Dolby Vision conversion. The project implements advanced algorithms to analyze video on a per-frame and per-scene basis, creating measurement files for use with tools like `dovi_tool`.
+
+## Workspace Structure
+
+This is a Rust workspace with two main components:
+- **`hdr_analyzer_mvp/`**: Main HDR analysis tool that processes video files and generates madVR-compatible measurement files
+- **`verifier/`**: Utility tool for reading, validating, and inspecting madVR measurement files
+
+## Development Commands
+
+### Building
+```bash
+# Build entire workspace in release mode
+cargo build --release --workspace
+
+# Build only the analyzer
+cargo build --release -p hdr_analyzer_mvp
+
+# Build only the verifier
+cargo build --release -p verifier
+
+# Debug builds
+cargo build
+```
+
+### Testing
+```bash
+# Run all tests
+cargo test --workspace --verbose
+
+# Run specific test
+cargo test test_name
+
+# Run with output
+cargo test -- --nocapture
+```
+
+### Running Tools
+```bash
+# Analyzer (basic usage)
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
+
+# Analyzer with optimizer
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --enable-optimizer
+
+# Different madVR versions
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --madvr-version 6 --target-peak-nits 1000
+
+# Hardware acceleration (CUDA)
+./target/release/hdr_analyzer_mvp --hwaccel cuda -i "video.mkv" -o "out.bin"
+
+# Verifier
+./target/release/verifier "measurements.bin"
+
+# Using cargo run
+cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin"
+cargo run -p verifier -- "measurements.bin"
+```
+
+### Code Quality
+```bash
+# Format code
+cargo fmt
+
+# Linting (must pass with no warnings)
+cargo clippy --release -- -D warnings
+
+# Combined pre-commit check
+cargo fmt && cargo clippy --release -- -D warnings && cargo test --workspace
+```
+
+## Architecture Overview
+
+### Main Analysis Pipeline
+The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video frame access:
+
+1. **Video Initialization**: Uses ffmpeg-next to open input and detect best video stream
+2. **Frame Decoding**: Software decoding (with optional CUDA acceleration via `hevc_cuvid`)
+3. **Format Conversion**: Scales to YUV420P10LE for consistent 10-bit luminance analysis
+4. **Active Area Detection**: Black bar crop detection on Y-plane (once per video)
+5. **Per-Frame Analysis**: 
+   - 10-bit Y-plane analysis within detected crop area
+   - v5-compatible 256-bin luminance histogram (64 SDR + 192 HDR bins)
+   - Peak brightness (MaxCLL) and Average Picture Level (APL) computation
+6. **Scene Detection**: Histogram-distance based scene cut detection
+7. **Optimization** (optional): Dynamic target nits generation with rolling averages
+8. **Output**: madVR-compatible `.bin` files via `madvr_parse` library
+
+### Key Components
+- **`hdr_analyzer_mvp/src/main.rs`**: Main analysis pipeline (currently ~1100 lines, planned for refactoring)
+- **`hdr_analyzer_mvp/src/crop.rs`**: Active-video area detection and cropping logic
+- **`verifier/src/main.rs`**: Measurement file validation and inspection
+
+### Critical Implementation Details
+- **Limited-range normalization**: HDR10 Y' codes (64-940) normalized to [0,1] before PQ domain binning
+- **v5 histogram semantics**: Mid-bin weighting for average PQ computation, black-bar heuristic for bin 0
+- **Scene detection**: Chi-squared-like histogram distance with configurable threshold (default 0.3)
+- **Hardware acceleration**: CUDA attempted on NVIDIA GPUs, graceful fallback to software decoding
+
+## Dependencies and Prerequisites
+
+### System Requirements
+- **Rust toolchain**: 1.70 or later (install from https://rustup.rs/)
+- **FFmpeg development libraries**: Required for `ffmpeg-next` compilation
+  - macOS: `brew install ffmpeg pkg-config`
+  - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev pkg-config`
+  - Windows: Install FFmpeg dev libraries or use vcpkg
+- **Build tools**: C compiler and clang (Xcode CLT on macOS, build-essential on Linux, MSVC on Windows)
+- **Additional for Ubuntu/ARM64**: `sudo apt install build-essential clang libclang-dev`
+
+### FFmpeg Version Compatibility
+- **Recommended**: FFmpeg 6.1.x (Ubuntu 24.04 default)
+- **Known Issues**: FFmpeg 8.0+ may cause build failures due to removed headers (`avfft.h`)
+- **ARM64 Build Fix**: If encountering header errors, set: `BINDGEN_EXTRA_CLANG_ARGS="-I/usr/include/$(gcc -dumpmachine)"`
+
+### Key Rust Dependencies
+- **`ffmpeg-next`**: Native video processing (Windows uses `build` feature)
+- **`madvr_parse`**: Reading/writing madVR measurement files
+- **`clap`**: Command-line interface with derive macros
+- **`anyhow`**: Error handling
+- **`rayon`**: Planned for parallel processing
+- **`colored`**: Verifier output formatting
+
+## Current CLI Flags
+
+### Analyzer (`hdr_analyzer_mvp`)
+- `-i, --input <PATH>`: Input HDR video file
+- `-o, --output <PATH>`: Output `.bin` measurement file
+- `--enable-optimizer`: Enable dynamic target nits generation
+- `--hwaccel <TYPE>`: Hardware acceleration (`cuda`, `vaapi`, `videotoolbox`)
+- `--madvr-version <5|6>`: Output file version (default: 5)
+- `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
+- `--target-peak-nits <nits>`: Override target_peak_nits for v6 files
+
+### Verifier
+- Single positional argument: path to `.bin` file to verify
+
+## Planned Refactoring (Milestone R)
+
+The current `main.rs` is planned for modularization into:
+- `cli.rs`: CLI definition and parsing
+- `ffmpeg_io.rs`: FFmpeg initialization and I/O
+- `analysis/`: Histogram, frame analysis, scene detection
+- `optimizer.rs`: Dynamic target nits generation
+- `writer.rs`: madVR file writing
+- `pipeline.rs`: End-to-end orchestration
+
+## Development Workflow
+
+1. **Format checking**: Always run `cargo fmt` before commits
+2. **Linting**: Code must pass `cargo clippy --release -- -D warnings`
+3. **Testing**: Run full test suite with `cargo test --workspace --verbose`
+4. **Beta validation workflow**: Build → Analyze sample → Verify → Test with dovi_tool
+5. **Performance considerations**: HDR analysis is memory and CPU intensive, test with 4K+ content
+
+## Oracle Cloud ARM Compatibility
+
+Fully compatible with ARM64 (Ampere) processors:
+- Uses software decoding (no CUDA on ARM)
+- Recommended packages for Ubuntu arm64: `build-essential pkg-config libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev`
+- Performance is CPU-bound; planned improvements include parallel histogram processing
+
+## Version Compatibility Notes
+
+- **v5 format**: Default, widely compatible
+- **v6 format**: Newer format with additional fields
+  - `target_peak_nits` written to header
+  - Per-gamut peaks currently duplicated from BT.2020 (temporary until proper gamut computation)
+- Both formats validated with `verifier` tool and compatible with downstream `dovi_tool`

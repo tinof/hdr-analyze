@@ -1079,8 +1079,16 @@ fn write_measurement_file(
         // For v6, madVR expects per-gamut peaks; duplicate 2020 peak until proper computation is added
         owned_frames.push(MadVRFrame {
             peak_pq_2020: frame.peak_pq_2020,
-            peak_pq_dcip3: if madvr_version >= 6 { Some(frame.peak_pq_2020) } else { frame.peak_pq_dcip3 },
-            peak_pq_709: if madvr_version >= 6 { Some(frame.peak_pq_2020) } else { frame.peak_pq_709 },
+            peak_pq_dcip3: if madvr_version >= 6 {
+                Some(frame.peak_pq_2020)
+            } else {
+                frame.peak_pq_dcip3
+            },
+            peak_pq_709: if madvr_version >= 6 {
+                Some(frame.peak_pq_2020)
+            } else {
+                frame.peak_pq_709
+            },
             avg_pq: frame.avg_pq,
             lum_histogram: frame.lum_histogram.clone(),
             hue_histogram: frame.hue_histogram.clone(),

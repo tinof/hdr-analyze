@@ -69,8 +69,8 @@ pub fn detect_crop(frame: &frame::Video) -> CropRect {
     let stride = frame.stride(0);
 
     let sample_step = 10usize;
-    let min_row_samples = ((width as usize + sample_step - 1) / sample_step).max(1);
-    let min_col_samples = ((height as usize + sample_step - 1) / sample_step).max(1);
+    let min_row_samples = (width as usize).div_ceil(sample_step).max(1);
+    let min_col_samples = (height as usize).div_ceil(sample_step).max(1);
     let required_non_black_row = ((min_row_samples as f64) * 0.10).ceil() as usize;
     let required_non_black_col = ((min_col_samples as f64) * 0.10).ceil() as usize;
 
