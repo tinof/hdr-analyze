@@ -11,31 +11,53 @@ env:
 
 jobs:
   build:
-
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Install FFmpeg (Ubuntu)
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+        sudo apt-get install -y \
+          build-essential pkg-config clang libclang-dev \
+          ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+        echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
 
-    - name: Install FFmpeg (macOS)
+    - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
-      run: brew install ffmpeg
+      run: |
+        brew update
+        brew install llvm ffmpeg pkg-config
+        echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig:$(brew --prefix ffmpeg)/lib/pkgconfig" >> $GITHUB_ENV
 
-    - name: Install FFmpeg (Windows)
+    - name: Install dependencies (Windows)
       if: matrix.os == 'windows-latest'
-      run: choco install ffmpeg
+      run: |
+        choco install -y llvm nasm ffmpeg
+        echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     - name: Build
       run: cargo build --release --workspace --verbose
 
-    - name: Run tests
+    - name: Test
       run: cargo test --workspace --verbose
+
+  # Optional ARM64 cross-compilation job (similar to Oracle Cloud ARM instance)
+  build-linux-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build (aarch64-unknown-linux-gnu)
+        run: cross build --release --workspace --target aarch64-unknown-linux-gnu
