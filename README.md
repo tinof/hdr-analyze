@@ -80,7 +80,7 @@ The analyzer uses a fully native Rust pipeline via `ffmpeg-next`, providing dire
 Clone the repository and build all workspace members:
 
 ```bash
-git clone https://github.com/your-username/hdr-analyze.git
+git clone https://github.com/tinof/hdr-analyze.git
 cd hdr-analyze
 cargo build --release --workspace
 ```
