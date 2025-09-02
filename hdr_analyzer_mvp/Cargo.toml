@@ -24,13 +24,13 @@ name = "hdr_analyzer_mvp"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 madvr_parse = "1.0.2"
-rayon = "1.8"
+rayon = "1.11"
 
 [target.'cfg(windows)'.dependencies]
-ffmpeg-next = { version = "7.0", features = ["build"] }
+ffmpeg-next = { version = "8.0", features = ["build"] }
 
 [target.'cfg(not(windows))'.dependencies]
-ffmpeg-next = "7.0"
+ffmpeg-next = "8.0"

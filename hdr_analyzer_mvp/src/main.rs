@@ -18,12 +18,11 @@ use crop::CropRect;
 #[command(about = "HDR10 to Dolby Vision converter - Phase 1 MVP")]
 struct Cli {
     /// Path to the input video file
-    #[arg(short, long)]
     input: String,
 
-    /// Path for the output .bin measurement file
+    /// Path for the output .bin measurement file (optional - auto-generates from input filename if not provided)
     #[arg(short, long)]
-    output: String,
+    output: Option<String>,
 
     /// (Phase 3) Enable intelligent optimizer to generate dynamic target nits
     #[arg(long)]
@@ -181,6 +180,19 @@ fn format_duration(duration: Duration) -> String {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Auto-generate output filename if not provided
+    let output_path = match &cli.output {
+        Some(path) => path.clone(),
+        None => {
+            let input_path = std::path::Path::new(&cli.input);
+            let stem = input_path.file_stem()
+                .context("Input file has no filename")?
+                .to_str()
+                .context("Invalid UTF-8 in filename")?;
+            format!("{}_measurements.bin", stem)
+        }
+    };
+
     println!(
         "HDR Analyzer MVP (Native Pipeline) - Starting analysis of: {}",
         cli.input
@@ -214,9 +226,9 @@ fn main() -> Result<()> {
     }
 
     // Step 5: Assemble and write the .bin file
-    println!("Writing measurement file: {}", cli.output);
+    println!("Writing measurement file: {}", output_path);
     write_measurement_file(
-        &cli.output,
+        &output_path,
         &scenes,
         &frames,
         cli.enable_optimizer,

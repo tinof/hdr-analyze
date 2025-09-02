@@ -43,23 +43,26 @@ cargo test -- --nocapture
 
 ### Running Tools
 ```bash
-# Analyzer (basic usage)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
+# Analyzer (basic usage with auto-generated output filename)
+./target/release/hdr_analyzer_mvp "video.mkv"
+
+# Analyzer with custom output
+./target/release/hdr_analyzer_mvp "video.mkv" -o "measurements.bin"
 
 # Analyzer with optimizer
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --enable-optimizer
+./target/release/hdr_analyzer_mvp "video.mkv" -o "out.bin" --enable-optimizer
 
 # Different madVR versions
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --madvr-version 6 --target-peak-nits 1000
+./target/release/hdr_analyzer_mvp "video.mkv" -o "out.bin" --madvr-version 6 --target-peak-nits 1000
 
 # Hardware acceleration (CUDA)
-./target/release/hdr_analyzer_mvp --hwaccel cuda -i "video.mkv" -o "out.bin"
+./target/release/hdr_analyzer_mvp "video.mkv" --hwaccel cuda -o "out.bin"
 
 # Verifier
 ./target/release/verifier "measurements.bin"
 
 # Using cargo run
-cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin"
+cargo run -p hdr_analyzer_mvp --release -- "video.mkv" -o "out.bin"
 cargo run -p verifier -- "measurements.bin"
 ```
 
@@ -115,23 +118,24 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 - **Additional for Ubuntu/ARM64**: `sudo apt install build-essential clang libclang-dev`
 
 ### FFmpeg Version Compatibility
-- **Recommended**: FFmpeg 6.1.x (Ubuntu 24.04 default)
-- **Known Issues**: FFmpeg 8.0+ may cause build failures due to removed headers (`avfft.h`)
+- **Current**: Latest ARM64 optimized FFmpeg build (N-120864-g9a34ddc345-20250901)
+- **Supported**: FFmpeg versions 3.4 through 8.0+ via ffmpeg-next 8.0.0
+- **Legacy Issues**: FFmpeg 8.0+ header issues resolved with ffmpeg-next 8.0.0
 - **ARM64 Build Fix**: If encountering header errors, set: `BINDGEN_EXTRA_CLANG_ARGS="-I/usr/include/$(gcc -dumpmachine)"`
 
 ### Key Rust Dependencies
-- **`ffmpeg-next`**: Native video processing (Windows uses `build` feature)
+- **`ffmpeg-next`**: 8.0.0 - Native video processing with automatic version detection (Windows uses `build` feature)
 - **`madvr_parse`**: Reading/writing madVR measurement files
-- **`clap`**: Command-line interface with derive macros
+- **`clap`**: 4.5+ - Command-line interface with derive macros
 - **`anyhow`**: Error handling
-- **`rayon`**: Planned for parallel processing
-- **`colored`**: Verifier output formatting
+- **`rayon`**: 1.11+ - Parallel processing capabilities
+- **`colored`**: 3.0+ - Enhanced verifier output formatting
 
 ## Current CLI Flags
 
 ### Analyzer (`hdr_analyzer_mvp`)
-- `-i, --input <PATH>`: Input HDR video file
-- `-o, --output <PATH>`: Output `.bin` measurement file
+- `<INPUT>`: Input HDR video file (positional argument)
+- `-o, --output <PATH>`: Output `.bin` measurement file (optional - auto-generates from input filename if not provided)
 - `--enable-optimizer`: Enable dynamic target nits generation
 - `--hwaccel <TYPE>`: Hardware acceleration (`cuda`, `vaapi`, `videotoolbox`)
 - `--madvr-version <5|6>`: Output file version (default: 5)
