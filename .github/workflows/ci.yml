@@ -28,7 +28,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           build-essential pkg-config clang libclang-dev \
-          ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+          ffmpeg libavformat-dev libavcodec-dev libavutil-dev \
+          libavfilter-dev libavdevice-dev libswscale-dev
         echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
 
     - name: Install dependencies (macOS)
@@ -37,13 +38,20 @@ jobs:
         brew update
         brew install llvm ffmpeg pkg-config
         echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig:$(brew --prefix ffmpeg)/lib/pkgconfig" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
+        echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(brew --prefix)/include" >> $GITHUB_ENV
 
     - name: Install dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        choco install -y llvm nasm ffmpeg
+        choco install -y llvm nasm
         echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Clippy linting
+      run: cargo clippy --workspace --all-targets --release -- -D warnings
 
     - name: Build
       run: cargo build --release --workspace --verbose
@@ -62,8 +70,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential pkg-config clang libclang-dev \
-            ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+            ffmpeg libavformat-dev libavcodec-dev libavutil-dev \
+            libavfilter-dev libavdevice-dev libswscale-dev
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy linting
+        run: cargo clippy --workspace --all-targets --release -- -D warnings
       - name: Build
         run: cargo build --release --workspace --verbose
       - name: Test
