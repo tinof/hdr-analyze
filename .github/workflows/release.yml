@@ -19,18 +19,16 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
     steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create or Update Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: HDR-Analyze ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: HDR-Analyze ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
           body: |
             ## HDR-Analyze Release ${{ github.ref }}
             
@@ -60,8 +58,6 @@ jobs:
             ### Support
             - Report issues: [GitHub Issues](https://github.com/${{ github.repository }}/issues)
             - Documentation: [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
-          draft: false
-          prerelease: false
 
   build:
     name: Build
@@ -133,9 +129,10 @@ jobs:
 
       - name: Install FFmpeg & Toolchain (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
           choco install -y llvm
-          vcpkg install ffmpeg:x64-windows
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install ffmpeg:x64-windows
           echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "PKG_CONFIG_PATH=$env:VCPKG_INSTALLATION_ROOT\\installed\\x64-windows\\lib\\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -191,14 +188,11 @@ jobs:
           echo "ASSET=${{ matrix.name }}" >> $GITHUB_ENV
 
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./${{ env.ASSET }}
-          asset_name: ${{ env.ASSET }}
-          asset_content_type: application/octet-stream
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: ${{ env.ASSET }}
 
   test:
     name: Test Suite
@@ -262,14 +256,13 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const release_id = ${{ needs.create-release.outputs.release_id }};
             const tag_name = context.ref.replace('refs/tags/', '');
 
-            // Get current release
-            const { data: release } = await github.rest.repos.getRelease({
+            // Get current release by tag
+            const { data: release } = await github.rest.repos.getReleaseByTag({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: release_id
+              tag: tag_name
             });
 
             // Update release body with success status
@@ -304,7 +297,7 @@ jobs:
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: release_id,
+              release_id: release.id,
               body: updatedBody
             });
 
@@ -318,7 +311,6 @@ jobs:
         run: |
           echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release ID**: ${{ needs.create-release.outputs.release_id }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Status**: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Test Status**: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Security Audit**: ${{ needs.security-audit.result }}" >> $GITHUB_STEP_SUMMARY
