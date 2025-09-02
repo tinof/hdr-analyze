@@ -185,7 +185,8 @@ fn main() -> Result<()> {
         Some(path) => path.clone(),
         None => {
             let input_path = std::path::Path::new(&cli.input);
-            let stem = input_path.file_stem()
+            let stem = input_path
+                .file_stem()
                 .context("Input file has no filename")?
                 .to_str()
                 .context("Invalid UTF-8 in filename")?;
