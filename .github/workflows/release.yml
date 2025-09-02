@@ -76,7 +76,7 @@ jobs:
             os: ubuntu-24.04-arm64
             name: hdr-analyze-aarch64-unknown-linux-gnu.tar.gz
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-13
             name: hdr-analyze-x86_64-apple-darwin.tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -94,6 +94,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.82.0
           targets: ${{ matrix.target }}
 
       - name: Setup Cache
@@ -106,28 +107,38 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential pkg-config clang lld \
+            build-essential pkg-config clang lld libclang-dev \
             libavformat-dev libavcodec-dev libavutil-dev \
             libavfilter-dev libavdevice-dev libswscale-dev
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
 
       - name: Install FFmpeg & Toolchain (Ubuntu ARM64)
         if: matrix.os == 'ubuntu-24.04-arm64'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential pkg-config clang lld \
+            build-essential pkg-config clang lld libclang-dev \
             libavformat-dev libavcodec-dev libavutil-dev \
             libavfilter-dev libavdevice-dev libswscale-dev
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
 
-      - name: Install FFmpeg (macOS)
+      - name: Install FFmpeg & Toolchain (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew install ffmpeg
+          brew update
+          brew install llvm ffmpeg pkg-config
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(brew --prefix)/include" >> $GITHUB_ENV
 
-      - name: Install FFmpeg (Windows)
+      - name: Install FFmpeg & Toolchain (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          choco install ffmpeg
+          choco install -y llvm
+          vcpkg install ffmpeg:x64-windows
+          echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "PKG_CONFIG_PATH=$env:VCPKG_INSTALLATION_ROOT\\installed\\x64-windows\\lib\\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build Binary
         run: cargo build --verbose --locked --release --target ${{ matrix.target }}
@@ -149,8 +160,8 @@ jobs:
           cp "target/${{ matrix.target }}/release/$binary_name" "$staging/"
           
           # Copy documentation
-          cp README.md "$staging/"
-          cp CHANGELOG.md "$staging/"
+          cp README.md "$staging/" 2>/dev/null || echo "README file not found, skipping"
+          cp CHANGELOG.md "$staging/" 2>/dev/null || echo "CHANGELOG file not found, skipping"
           cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE file not found, skipping"
           
           # Create archive
@@ -171,8 +182,8 @@ jobs:
           cp "target/${{ matrix.target }}/release/$binary_name" "$staging/"
           
           # Copy documentation
-          cp README.md "$staging/"
-          cp CHANGELOG.md "$staging/"
+          cp README.md "$staging/" 2>/dev/null || echo "README file not found, skipping"
+          cp CHANGELOG.md "$staging/" 2>/dev/null || echo "CHANGELOG file not found, skipping"
           cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE file not found, skipping"
           
           # Create archive
@@ -198,6 +209,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.82.0
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2

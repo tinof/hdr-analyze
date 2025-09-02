@@ -23,11 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.82.0
       - uses: Swatinem/rust-cache@v2
       - name: cargo fmt (check)
         run: cargo fmt --all -- --check
       - name: cargo clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
     name: Test (Ubuntu)
@@ -36,6 +38,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.82.0
       - uses: Swatinem/rust-cache@v2
       - name: Install FFmpeg dev libs
         run: |
@@ -59,6 +63,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.82.0
       - uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies (Ubuntu)
@@ -99,6 +105,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.82.0
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies (ARM64)
         run: |
@@ -117,8 +125,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.82.0
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install --locked cargo-audit
       - name: Run Security Audit
         run: cargo audit
-
