@@ -28,9 +28,4 @@ clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 madvr_parse = "1.0.2"
 rayon = "1.11"
-
-[target.'cfg(windows)'.dependencies]
-ffmpeg-next = { version = "8.0", features = ["build"] }
-
-[target.'cfg(not(windows))'.dependencies]
 ffmpeg-next = "8.0"
