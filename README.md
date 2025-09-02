@@ -218,6 +218,18 @@ Expected:
 - Build and run using the steps above. Performance is CPU-bound; for higher throughput, planned improvements include parallelizing histogram accumulation across rows/tiles.
 - Enabled optimizations: auto-threaded decode, skip-scaler when possible, fast scaling, host CPU tuning (`target-cpu=native`). Use `--downscale` for additional speedups. On Linux ARM64, the build uses the LLD linker when available.
 
+## Local Quality Gates (Recommended)
+
+- Pre-commit hooks (fmt, clippy):
+  ```bash
+  pipx install pre-commit  # or: pip install --user pre-commit
+  pre-commit install        # installs pre-commit hook (fmt, clippy)
+  pre-commit install --hook-type pre-push  # optional: quick tests on push
+  ```
+  Configuration lives in `.pre-commit-config.yaml`. Hooks run `cargo fmt --check` and `cargo clippy -D warnings` before commit.
+
+- Pinned toolchain: rustc, clippy, and rustfmt are pinned via `rust-toolchain.toml` for reproducible CI/dev builds.
+
 ## The Native Pipeline Algorithm (Overview)
 
 1. Initialize video with `ffmpeg-next`, open input, detect best video stream.

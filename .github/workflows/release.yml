@@ -5,6 +5,13 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -98,13 +105,19 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg clang lld
+          sudo apt-get install -y \
+            build-essential pkg-config clang lld \
+            libavformat-dev libavcodec-dev libavutil-dev \
+            libavfilter-dev libavdevice-dev libswscale-dev
 
       - name: Install FFmpeg & Toolchain (Ubuntu ARM64)
         if: matrix.os == 'ubuntu-24.04-arm64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg clang lld
+          sudo apt-get install -y \
+            build-essential pkg-config clang lld \
+            libavformat-dev libavcodec-dev libavutil-dev \
+            libavfilter-dev libavdevice-dev libswscale-dev
 
       - name: Install FFmpeg (macOS)
         if: matrix.os == 'macos-latest'
@@ -189,10 +202,13 @@ jobs:
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg dev libs
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y \
+            build-essential pkg-config clang lld \
+            libavformat-dev libavcodec-dev libavutil-dev \
+            libavfilter-dev libavdevice-dev libswscale-dev
 
       - name: Run Tests
         run: cargo test --verbose --locked
