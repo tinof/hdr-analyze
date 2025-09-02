@@ -27,10 +27,12 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential pkg-config clang libclang-dev \
+          build-essential pkg-config clang lld libclang-dev \
           ffmpeg libavformat-dev libavcodec-dev libavutil-dev \
           libavfilter-dev libavdevice-dev libswscale-dev
         echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
+    - name: Setup Cache
+      uses: Swatinem/rust-cache@v2
 
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
@@ -72,10 +74,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential pkg-config clang libclang-dev \
+            build-essential pkg-config clang lld libclang-dev \
             ffmpeg libavformat-dev libavcodec-dev libavutil-dev \
             libavfilter-dev libavdevice-dev libswscale-dev
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy linting

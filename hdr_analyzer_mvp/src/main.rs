@@ -44,6 +44,11 @@ struct Cli {
     /// Optional override for header.target_peak_nits (used for v6). If omitted, defaults to computed maxCLL.
     #[arg(long)]
     target_peak_nits: Option<u32>,
+
+    /// Downscale factor for analysis to improve throughput (1=full, 2=half, 4=quarter)
+    /// Only affects internal analysis resolution. Output statistics remain comparable.
+    #[arg(long, default_value_t = 1)]
+    downscale: u32,
 }
 
 // --- Data Structures ---
@@ -340,8 +345,16 @@ fn run_native_analysis_pipeline(
     let video_stream_index = video_stream.index();
 
     // Set up decoder with hardware acceleration if requested
-    let decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
+    let mut decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
         .context("Failed to create decoder context from stream parameters")?;
+
+    // Enable FFmpeg multi-threading (auto thread count). Set before opening the decoder.
+    unsafe {
+        let ctx = decoder_context.as_mut_ptr();
+        // 0 means auto (FFmpeg chooses based on cores and codec)
+        (*ctx).thread_count = 0;
+        // Leave thread_type to codec default (HEVC typically uses frame threading).
+    }
 
     let mut decoder = if let Some(hwaccel) = &cli.hwaccel {
         println!("Attempting to use hardware acceleration: {}", hwaccel);
@@ -353,17 +366,42 @@ fn run_native_analysis_pipeline(
             .context("Failed to create video decoder")?
     };
 
-    // Set up scaler for consistent 10-bit format analysis
-    let mut scaler = software::scaling::Context::get(
-        decoder.format(),
-        decoder.width(),
-        decoder.height(),
-        format::Pixel::YUV420P10LE, // Target 10-bit format for accurate PQ analysis
-        decoder.width(),
-        decoder.height(),
-        software::scaling::Flags::BILINEAR,
-    )
-    .context("Failed to create scaling context")?;
+    // Prepare optional scaler for consistent 10-bit format analysis and optional downscaling
+    let mut scaler: Option<software::scaling::Context> = None;
+    // Validate downscale factor
+    let mut downscale = match cli.downscale {
+        1 | 2 | 4 => cli.downscale,
+        other => {
+            eprintln!(
+                "Unsupported --downscale value {}. Falling back to 1 (no downscale). Allowed: 1,2,4.",
+                other
+            );
+            1
+        }
+    };
+    // Ensure target dims remain >=2 and even when downscaling
+    let mut target_w = decoder.width();
+    let mut target_h = decoder.height();
+    if downscale > 1 {
+        target_w = (target_w / downscale).max(2) & !1;
+        target_h = (target_h / downscale).max(2) & !1;
+    }
+    // Only build a scaler when needed: pixfmt mismatch or downscale requested
+    let need_scaler = decoder.format() != format::Pixel::YUV420P10LE || downscale > 1;
+    if need_scaler {
+        scaler = Some(
+            software::scaling::Context::get(
+                decoder.format(),
+                decoder.width(),
+                decoder.height(),
+                format::Pixel::YUV420P10LE,
+                target_w,
+                target_h,
+                software::scaling::Flags::FAST_BILINEAR,
+            )
+            .context("Failed to create scaling context")?,
+        );
+    }
 
     // Initialize analysis data structures
     let mut frames = Vec::new();
@@ -390,16 +428,20 @@ fn run_native_analysis_pipeline(
 
             // Receive and process decoded frames
             let mut decoded_frame = frame::Video::empty();
+            let mut scaled_frame = frame::Video::empty(); // reused buffer
             while decoder.receive_frame(&mut decoded_frame).is_ok() {
-                // Scale frame to target format for analysis
-                let mut scaled_frame = frame::Video::empty();
-                scaler
-                    .run(&decoded_frame, &mut scaled_frame)
-                    .context("Failed to scale frame")?;
+                // Convert only if needed, else analyze decoded_frame directly
+                let analysis_frame = if let Some(ref mut sc) = scaler {
+                    sc.run(&decoded_frame, &mut scaled_frame)
+                        .context("Failed to scale frame")?;
+                    &scaled_frame
+                } else {
+                    &decoded_frame
+                };
 
                 // Analyze the native frame within active area (detect crop once)
                 if crop_rect_opt.is_none() {
-                    let rect = crop::detect_crop(&scaled_frame);
+                    let rect = crop::detect_crop(analysis_frame);
                     println!(
                         "\nDetected active video area: {}x{} at offset ({}, {})",
                         rect.width, rect.height, rect.x, rect.y
@@ -408,7 +450,7 @@ fn run_native_analysis_pipeline(
                 }
                 let rect = crop_rect_opt.as_ref().unwrap();
                 let analyzed_frame =
-                    analyze_native_frame_cropped(&scaled_frame, width, height, rect)?;
+                    analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
 
                 // Scene detection using histogram comparison
                 if let Some(ref prev_hist) = previous_histogram {
@@ -458,15 +500,19 @@ fn run_native_analysis_pipeline(
         .send_eof()
         .context("Failed to send EOF to decoder")?;
     let mut decoded_frame = frame::Video::empty();
+    let mut scaled_frame = frame::Video::empty();
     while decoder.receive_frame(&mut decoded_frame).is_ok() {
-        let mut scaled_frame = frame::Video::empty();
-        scaler
-            .run(&decoded_frame, &mut scaled_frame)
-            .context("Failed to scale final frame")?;
+        let analysis_frame = if let Some(ref mut sc) = scaler {
+            sc.run(&decoded_frame, &mut scaled_frame)
+                .context("Failed to scale final frame")?;
+            &scaled_frame
+        } else {
+            &decoded_frame
+        };
 
         // Analyze the native frame within active area (reuse crop)
         if crop_rect_opt.is_none() {
-            let rect = crop::detect_crop(&scaled_frame);
+            let rect = crop::detect_crop(analysis_frame);
             println!(
                 "\nDetected active video area: {}x{} at offset ({}, {})",
                 rect.width, rect.height, rect.x, rect.y
@@ -474,7 +520,7 @@ fn run_native_analysis_pipeline(
             crop_rect_opt = Some(rect);
         }
         let rect = crop_rect_opt.as_ref().unwrap();
-        let analyzed_frame = analyze_native_frame_cropped(&scaled_frame, width, height, rect)?;
+        let analyzed_frame = analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
 
         if let Some(ref prev_hist) = previous_histogram {
             let scene_change_score =
@@ -596,18 +642,22 @@ fn analyze_native_frame_cropped(
     let x_end = x_start + crop_rect.width as usize;
     let y_end = y_start + crop_rect.height as usize;
 
+    // Process by rows to reduce bounds checks and improve cache locality
     for y in y_start..y_end {
         let row_start = y.saturating_mul(y_stride);
-        for x in x_start..x_end {
-            let pixel_offset = row_start + x.saturating_mul(2);
-            if pixel_offset + 1 >= y_plane_data.len() {
-                continue;
-            }
+        // Compute byte range for cropped row
+        let base = row_start + x_start.saturating_mul(2);
+        if base >= y_plane_data.len() {
+            continue;
+        }
+        let want_len = (x_end - x_start).saturating_mul(2);
+        let max_len = y_plane_data.len() - base;
+        let len = want_len.min(max_len);
+        let row = &y_plane_data[base..base + len];
 
+        for px in row.chunks_exact(2) {
             // Read 10-bit limited-range code (0..1023 in 16-bit container)
-            let code10 =
-                u16::from_le_bytes([y_plane_data[pixel_offset], y_plane_data[pixel_offset + 1]])
-                    & 0x03FF;
+            let code10 = u16::from_le_bytes([px[0], px[1]]) & 0x03FF;
 
             // Normalize to limited-range [64,940] -> [0,1]
             let code_i = code10 as i32;
@@ -624,8 +674,7 @@ fn analyze_native_frame_cropped(
             } else {
                 64 + ((pq - sdr_peak_pq) / hdr_step).floor() as usize
             };
-            let bin = bin.min(255);
-            histogram[bin] += 1.0;
+            histogram[bin.min(255)] += 1.0;
         }
     }
 

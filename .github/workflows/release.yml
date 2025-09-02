@@ -33,6 +33,7 @@ jobs:
             - **macOS (Intel)**: `hdr-analyze-${{ github.ref }}-x86_64-apple-darwin.tar.gz`
             - **macOS (Apple Silicon)**: `hdr-analyze-${{ github.ref }}-aarch64-apple-darwin.tar.gz`
             - **Linux**: `hdr-analyze-${{ github.ref }}-x86_64-unknown-linux-gnu.tar.gz`
+            - **Linux (ARM64/AArch64)**: `hdr-analyze-${{ github.ref }}-aarch64-unknown-linux-gnu.tar.gz`
             
             ### Prerequisites
             - FFmpeg must be installed and available in your system PATH
@@ -64,6 +65,9 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: hdr-analyze-x86_64-unknown-linux-gnu.tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm64
+            name: hdr-analyze-aarch64-unknown-linux-gnu.tar.gz
           - target: x86_64-apple-darwin
             os: macos-latest
             name: hdr-analyze-x86_64-apple-darwin.tar.gz
@@ -90,11 +94,17 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install FFmpeg (Ubuntu)
+      - name: Install FFmpeg & Toolchain (Ubuntu x86_64)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg clang lld
+
+      - name: Install FFmpeg & Toolchain (Ubuntu ARM64)
+        if: matrix.os == 'ubuntu-24.04-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg clang lld
 
       - name: Install FFmpeg (macOS)
         if: matrix.os == 'macos-latest'

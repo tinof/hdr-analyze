@@ -167,7 +167,8 @@ The current `main.rs` is planned for modularization into:
 
 Fully compatible with ARM64 (Ampere) processors:
 - Uses software decoding (no CUDA on ARM)
-- Recommended packages for Ubuntu arm64: `build-essential pkg-config libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev`
+- Recommended packages for Ubuntu arm64: `build-essential pkg-config clang lld libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev`
+  - `clang` + `lld` enable significantly faster linking with LTO
 - Performance is CPU-bound; planned improvements include parallel histogram processing
 
 ## Version Compatibility Notes

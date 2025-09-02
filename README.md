@@ -66,6 +66,14 @@ The analyzer uses a fully native Rust pipeline via `ffmpeg-next`, providing dire
 - CUDA: Attempts the `hevc_cuvid` decoder when `--hwaccel cuda` is specified (automatic fallback to software decoding if unavailable).
 - VAAPI / VideoToolbox: Currently log and use software decoding paths; proper device contexts are planned. The pipeline remains fully functional via software decoding.
 
+### Throughput controls and ARM optimizations
+
+- Downscale analysis: Use `--downscale 2` (half) or `--downscale 4` (quarter) to speed up analysis with minimal impact on histogram/scene detection quality.
+- Skips unnecessary scaling: If the decoder outputs `YUV420P10LE` and `--downscale 1`, the scaler is bypassed to avoid extra copies.
+- Faster scaling: When scaling is needed, uses `FAST_BILINEAR` for analysis (sufficient for statistics).
+- Decoder threading: Enables FFmpeg multi-threading (auto thread count) for better CPU utilization.
+- Rust build tuning: Workspace includes `.cargo/config.toml` with `-C target-cpu=native` to enable host-specific optimizations (NEON on ARM).
+
 ## Prerequisites
 
 - Rust toolchain: Install from https://rustup.rs/
@@ -137,7 +145,7 @@ Hardware acceleration (attempts CUDA; others fall back to software):
 
 Using cargo:
 ```bash
-cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --enable-optimizer --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3
+cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --enable-optimizer --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3 --downscale 2
 ```
 
 ### Verifier
@@ -164,6 +172,7 @@ Verifier reports:
 - `--madvr-version <5|6>`: Output file version (default: 5)
 - `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
 - `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
+- `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
 
 Notes for v6 output:
 - Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently duplicated from BT.2020 (`peak_pq_2020`) as a compatibility placeholder. Proper per-gamut computation is planned.
@@ -200,9 +209,14 @@ Expected:
 - Recommended packages (Ubuntu 22.04/24.04 arm64):
   ```bash
   sudo apt update
-  sudo apt install -y build-essential pkg-config libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev
+  sudo apt install -y \
+    build-essential pkg-config clang lld \
+    libavformat-dev libavcodec-dev libavutil-dev \
+    libavfilter-dev libavdevice-dev libswscale-dev
   ```
+  - `clang` + `lld` provide much faster linking, especially with LTO.
 - Build and run using the steps above. Performance is CPU-bound; for higher throughput, planned improvements include parallelizing histogram accumulation across rows/tiles.
+- Enabled optimizations: auto-threaded decode, skip-scaler when possible, fast scaling, host CPU tuning (`target-cpu=native`). Use `--downscale` for additional speedups. On Linux ARM64, the build uses the LLD linker when available.
 
 ## The Native Pipeline Algorithm (Overview)
 
