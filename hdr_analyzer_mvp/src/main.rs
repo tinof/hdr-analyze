@@ -369,7 +369,7 @@ fn run_native_analysis_pipeline(
     // Prepare optional scaler for consistent 10-bit format analysis and optional downscaling
     let mut scaler: Option<software::scaling::Context> = None;
     // Validate downscale factor
-    let mut downscale = match cli.downscale {
+    let downscale = match cli.downscale {
         1 | 2 | 4 => cli.downscale,
         other => {
             eprintln!(
