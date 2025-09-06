@@ -37,6 +37,8 @@ hdr_project/
 - v5-compatible luminance histogram: 256-bin luminance histogram with SDR/HDR split (64 + 192) and mid-bin averaging, consistent with madVR v5 layout.
 - Native scene detection: Real-time histogram-distance based scene cut detection with configurable threshold.
 - Dynamic metadata optimizer (optional): Per-frame target nits generation using a 240-frame rolling average, 99th percentile highlight knee detection, and scene-aware heuristics.
+  - Scene-aware APL blending and per-scene smoothing resets to avoid cross-scene lag.
+  - Per-frame delta limiting for temporal stability of `target_nits`.
 - Professional output: Writes madVR-compatible `.bin` measurement files through the `madvr_parse` library.
 - Cross-platform: CPU decoding on all platforms with optional CUDA attempt on NVIDIA (graceful fallback to software decoding everywhere else).
 
@@ -116,7 +118,7 @@ Standard analysis (no optimizer):
 ./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements.bin"
 ```
 
-With dynamic optimizer:
+With dynamic optimizer (scene-aware + delta-limited):
 ```bash
 ./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements_optimized.bin" --enable-optimizer
 ```
@@ -127,10 +129,16 @@ Version selection (v5 default; v6 for broader compatibility):
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements_v6.bin" --madvr-version 6 --target-peak-nits 1000
 ```
 
-Scene detection sensitivity:
+Scene detection sensitivity and controls:
 ```bash
 # Increase/decrease sensitivity (default 0.3)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --scene-threshold 0.25
+
+# Enforce minimum scene length (default 24 frames) and optional smoothing (rolling mean over the diff signal)
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --min-scene-length 24 --scene-smoothing 5
+
+# Disable crop detection to analyze full frame (diagnostics/validation)
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --no-crop
 ```
 
 Hardware acceleration (attempts CUDA; others fall back to software):
@@ -162,6 +170,7 @@ Verifier reports:
 - Peak brightness and avg PQ
 - Histogram integrity checks
 - Target nits stats (if optimizer enabled)
+- Additional checks: FALL header coherence and flags vs. `target_nits` presence
 
 ## Command line arguments
 
@@ -171,8 +180,11 @@ Verifier reports:
 - `--hwaccel <TYPE>`: Hardware acceleration hint (`cuda`, `vaapi`, `videotoolbox`)
 - `--madvr-version <5|6>`: Output file version (default: 5)
 - `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
+- `--min-scene-length <frames>`: Drop cuts closer than N frames (default: 24)
+- `--scene-smoothing <frames>`: Rolling window over scene-change metric (default: 0 = off)
 - `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
 - `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
+- `--no-crop`: Disable active-area crop detection (analyze full frame)
 
 Notes for v6 output:
 - Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently duplicated from BT.2020 (`peak_pq_2020`) as a compatibility placeholder. Proper per-gamut computation is planned.

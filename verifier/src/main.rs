@@ -38,7 +38,7 @@ fn main() -> Result<()> {
     let file_path = &args[1];
     println!("Verifying measurement file: {}", file_path);
 
-    let (scenes, frames, has_optimizer) = read_measurement_file(file_path)?;
+    let (scenes, frames, has_optimizer, header) = read_measurement_file(file_path)?;
 
     println!("\n=== FILE SUMMARY ===");
     println!("Scenes: {}", scenes.len());
@@ -112,6 +112,11 @@ fn main() -> Result<()> {
 
     println!("\n=== VALIDATION ===");
     validate_measurement_data(&scenes, &frames)?;
+
+    // Additional validations: FALL coherence and flags/data consistency
+    println!("\n=== ADDITIONAL CHECKS ===");
+    validate_fall_consistency(&frames, header.maxfall, header.avgfall);
+    validate_flags_vs_data(has_optimizer, &frames);
     println!("✓ File format is valid");
     println!("✓ All data integrity checks passed");
 
@@ -119,7 +124,9 @@ fn main() -> Result<()> {
 }
 
 /// Read and parse a MadVR measurement file using the madvr_parse library
-fn read_measurement_file(file_path: &str) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>, bool)> {
+fn read_measurement_file(
+    file_path: &str,
+) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>, bool, madvr_parse::MadVRHeader)> {
     // Read the file as bytes
     let file_data = fs::read(file_path).context("Failed to read measurement file")?;
 
@@ -137,7 +144,12 @@ fn read_measurement_file(file_path: &str) -> Result<(Vec<MadVRScene>, Vec<MadVRF
 
     let has_optimizer = measurements.header.flags == 3;
 
-    Ok((measurements.scenes, measurements.frames, has_optimizer))
+    Ok((
+        measurements.scenes,
+        measurements.frames,
+        has_optimizer,
+        measurements.header,
+    ))
 }
 
 /// Validate the measurement data for consistency
@@ -224,4 +236,64 @@ fn validate_measurement_data(scenes: &[MadVRScene], frames: &[MadVRFrame]) -> Re
     }
 
     Ok(())
+}
+
+/// Compute FALL from frames and compare against header values with tolerance.
+fn validate_fall_consistency(frames: &[MadVRFrame], header_maxfall: u32, header_avgfall: u32) {
+    if frames.is_empty() {
+        println!("No frames; skipping FALL checks");
+        return;
+    }
+    let falls: Vec<f64> = frames.iter().map(|f| pq_to_nits(f.avg_pq)).collect();
+    let derived_maxfall = falls.iter().cloned().fold(0.0, f64::max);
+    let derived_avgfall = falls.iter().sum::<f64>() / falls.len() as f64;
+    let maxfall_tol = 10.0_f64.max(derived_maxfall * 0.02);
+    let avgfall_tol = 10.0_f64.max(derived_avgfall * 0.02);
+
+    let max_ok = (derived_maxfall - header_maxfall as f64).abs() <= maxfall_tol;
+    let avg_ok = (derived_avgfall - header_avgfall as f64).abs() <= avgfall_tol;
+
+    if max_ok && avg_ok {
+        println!("✓ FALL header values match derived values within tolerance");
+    } else {
+        if !max_ok {
+            println!(
+                "⚠️  MaxFALL mismatch: header={} derived≈{:.0} (tol±{:.0})",
+                header_maxfall, derived_maxfall, maxfall_tol
+            );
+        }
+        if !avg_ok {
+            println!(
+                "⚠️  AvgFALL mismatch: header={} derived≈{:.0} (tol±{:.0})",
+                header_avgfall, derived_avgfall, avgfall_tol
+            );
+        }
+    }
+}
+
+/// Check that flags imply presence/absence of optimizer data consistently.
+fn validate_flags_vs_data(has_optimizer: bool, frames: &[MadVRFrame]) {
+    if has_optimizer {
+        let count = frames.iter().filter(|f| f.target_nits.is_some()).count();
+        if count == frames.len() {
+            println!("✓ Optimizer flag set and per-frame target_nits present");
+        } else {
+            println!(
+                "⚠️  Optimizer flag set but only {}/{} frames have target_nits",
+                count,
+                frames.len()
+            );
+        }
+    } else {
+        let count = frames.iter().filter(|f| f.target_nits.is_some()).count();
+        if count == 0 {
+            println!("✓ No optimizer flag and no target_nits present");
+        } else {
+            println!(
+                "⚠️  Optimizer flag not set but found target_nits in {}/{} frames",
+                count,
+                frames.len()
+            );
+        }
+    }
 }

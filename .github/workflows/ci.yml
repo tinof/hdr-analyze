@@ -26,6 +26,14 @@ jobs:
         with:
           toolchain: 1.82.0
       - uses: Swatinem/rust-cache@v2
+      - name: Install FFmpeg dev libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config clang lld libclang-dev \
+            libavformat-dev libavcodec-dev libavutil-dev \
+            libavfilter-dev libavdevice-dev libswscale-dev
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
       - name: cargo fmt (check)
         run: cargo fmt --all -- --check
       - name: cargo clippy (deny warnings)

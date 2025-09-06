@@ -16,6 +16,9 @@ Implemented (latest changes)
   - `--madvr-version 5|6` (default: 5). For v6, `header_size=36`, `target_peak_nits` is written (default: MaxCLL or overridden via `--target-peak-nits`), and per-frame gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are temporarily duplicated from `peak_pq_2020` until real gamut logic lands.
   - `--scene-threshold <float>` (default: 0.3) to tune histogram-distance scene cut sensitivity.
   - `--target-peak-nits <nits>` for v6 header override.
+  - `--min-scene-length <frames>` (default: 24) — drop cuts occurring within N frames of the previous cut.
+  - `--scene-smoothing <frames>` (default: 0) — rolling mean smoothing over the scene-change metric.
+  - `--no-crop` — disable active-area crop detection (analyze full frame; diagnostics/validation).
 - Active area (black bar) detection and cropping
   - New `hdr_analyzer_mvp/src/crop.rs` with crop-detect-like algorithm on Y (10-bit), sampling every 10 px, ~10% non-black threshold, rounded to even coords/dims.
   - Detected once and applied to all frames; analysis constrained to `CropRect`.
@@ -25,12 +28,15 @@ Implemented (latest changes)
   - HDR10 Y’ nominal 64–940 normalized to [0..1] as PQ proxy prior to binning (robust with limited-range material).
 - Native scene detection
   - Histogram distance (chi-squared-like, symmetric) between consecutive frame histograms; default threshold = 0.3; post-processing fixes end-frame off-by-one.
+  - New controls: min scene length guard and optional temporal smoothing of the difference signal.
 - Optimizer (optional)
   - Rolling 240-frame average + highlight knee (99th percentile) + scene-aware heuristics (by APL category); writes per-frame `target_nits` when enabled (flags=3).
+  - Scene-aware improvements: blends per-scene APL with rolling APL, resets smoothing at scene boundaries, and applies per-frame delta limiting for temporal stability.
 - Header fields and writer
   - `maxCLL` from per-frame peak (nits), `maxFALL` and `avgFALL` derived from per-frame avg-pq (nits). Serialization via `madvr_parse` (v5 or v6).
 - Verifier
   - Parses measurement, prints summary, validates scene/frame ranges, histogram integrity (256 bins, sum ≈100), PQ range checks; reports optimizer presence.
+  - Additional checks: recomputes MaxFALL/AvgFALL and compares to header within tolerance; validates flags vs. presence of per-frame `target_nits`.
 - Documentation
   - Root README updated to reflect current behavior, new flags, and a minimal beta validation workflow.
 
@@ -39,13 +45,11 @@ Partially implemented (work remains)
 - Hardware acceleration: CUDA attempted via `hevc_cuvid` if available; VAAPI/VideoToolbox paths currently fall back to software decode (device contexts not wired).
 
 Not yet implemented
-- Scene detector: min scene length guard, optional temporal smoothing of diff signal.
-- Crop toggle (`--no-crop`) for diagnostics/comparison.
 - Hue histogram (31 bins) with meaningful content.
-- Scene-aware optimizer incorporating scene aggregates (e.g., `scene_avg_pq`) explicitly.
+- Optimizer profiles (`--optimizer-profile`) and additional tunables.
 - Proper VAAPI/VideoToolbox device context setup for hardware decoding.
 - Parallel analysis (rayon) for multi-core throughput.
-- Tests and CI.
+- Broader unit/integration tests and CI coverage.
 
 ---
 
@@ -59,16 +63,8 @@ Already Done
 - FALL metrics; v5/v6 writing; updated README; basic verifier.
 
 Remaining To Complete V1.2
-- Scene detector controls
-  - [ ] `--min-scene-length <frames>` (default: 24) — drop cuts that occur within N frames of the previous cut.
-  - [ ] Optional `--scene-smoothing <frames>` (default: 0 = off) — rolling average of histogram distance to stabilize cuts.
-- Crop toggle
-  - [ ] `--no-crop` to disable crop detection (e.g., for validation against other tools).
-- Verifier enhancements
-  - [ ] Recompute/print derived FALL from histogram avg-pq and compare to header (tolerance ≤ 2% or 10 nits, whichever is larger).
-  - [ ] Validate flags vs data (e.g., flags=3 implies per-frame target_nits present).
 - Documentation
-  - [ ] Expand README with scene controls and examples; document v6 caveat (temporary gamut duplication).
+  - [ ] Expand README with additional scene control examples as needed; document v6 gamut caveat (temporary duplication) — partial.
 
 Definition of Done (V1.2)
 - New flags available and defaults yield stable cuts on typical content.
@@ -129,7 +125,7 @@ Objective: Improve per-frame target selection and expand complete v6 format supp
 
 Planned
 - Scene-aware optimizer
-  - [ ] Pass `scene_avg_pq` and related aggregates into `apply_advanced_heuristics`.
+  - [x] Pass `scene_avg_pq` and related aggregates into `apply_advanced_heuristics`.
   - [ ] Add profiles: `--optimizer-profile <conservative|balanced|aggressive>` to adjust bounds/weights.
 - Hue histogram (31 bins)
   - [ ] Populate from chroma-based hue angle quantization; low-cost approach acceptable.

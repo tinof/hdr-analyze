@@ -41,6 +41,14 @@ struct Cli {
     #[arg(long, default_value_t = 0.3)]
     scene_threshold: f64,
 
+    /// Minimum scene length in frames. Cuts closer than this are dropped. Default: 24
+    #[arg(long, default_value_t = 24)]
+    min_scene_length: u32,
+
+    /// Optional smoothing window (in frames) over the scene-change metric. 0 disables smoothing.
+    #[arg(long, default_value_t = 0)]
+    scene_smoothing: u32,
+
     /// Optional override for header.target_peak_nits (used for v6). If omitted, defaults to computed maxCLL.
     #[arg(long)]
     target_peak_nits: Option<u32>,
@@ -49,6 +57,10 @@ struct Cli {
     /// Only affects internal analysis resolution. Output statistics remain comparable.
     #[arg(long, default_value_t = 1)]
     downscale: u32,
+
+    /// Disable active-area crop detection (analyze full frame). Useful for diagnostics/validation.
+    #[arg(long)]
+    no_crop: bool,
 }
 
 // --- Data Structures ---
@@ -228,7 +240,7 @@ fn main() -> Result<()> {
     // Step 4: Run advanced optimizer if enabled
     if cli.enable_optimizer {
         println!("Running intelligent optimizer pass...");
-        run_optimizer_pass(&mut frames);
+        run_optimizer_pass(&scenes, &mut frames);
     }
 
     // Step 5: Assemble and write the .bin file
@@ -407,6 +419,11 @@ fn run_native_analysis_pipeline(
     let mut frames = Vec::new();
     let mut scene_cuts = Vec::new();
     let mut previous_histogram: Option<Vec<f64>> = None;
+    // Scene smoothing state
+    let smoothing_window = cli.scene_smoothing as usize;
+    let mut diff_window: VecDeque<f64> = VecDeque::with_capacity(smoothing_window.max(1));
+    // Min scene length guard state
+    let mut last_cut_frame: u32 = 0; // start of video acts as implicit cut
     let mut frame_count = 0u32;
     let mut crop_rect_opt: Option<CropRect> = None;
 
@@ -439,14 +456,23 @@ fn run_native_analysis_pipeline(
                     &decoded_frame
                 };
 
-                // Analyze the native frame within active area (detect crop once)
+                // Analyze the native frame within active area (detect crop once unless disabled)
                 if crop_rect_opt.is_none() {
-                    let rect = crop::detect_crop(analysis_frame);
-                    println!(
-                        "\nDetected active video area: {}x{} at offset ({}, {})",
-                        rect.width, rect.height, rect.x, rect.y
-                    );
-                    crop_rect_opt = Some(rect);
+                    if cli.no_crop {
+                        let rect = CropRect::full(analysis_frame.width(), analysis_frame.height());
+                        println!(
+                            "\nCrop disabled: using full frame {}x{}",
+                            rect.width, rect.height
+                        );
+                        crop_rect_opt = Some(rect);
+                    } else {
+                        let rect = crop::detect_crop(analysis_frame);
+                        println!(
+                            "\nDetected active video area: {}x{} at offset ({}, {})",
+                            rect.width, rect.height, rect.x, rect.y
+                        );
+                        crop_rect_opt = Some(rect);
+                    }
                 }
                 let rect = crop_rect_opt.as_ref().unwrap();
                 let analyzed_frame =
@@ -454,11 +480,25 @@ fn run_native_analysis_pipeline(
 
                 // Scene detection using histogram comparison
                 if let Some(ref prev_hist) = previous_histogram {
-                    let scene_change_score =
+                    let raw_diff =
                         calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
-                    if scene_change_score > cli.scene_threshold {
-                        // configurable threshold
+                    // Apply optional smoothing over the diff signal
+                    let diff_for_threshold = if smoothing_window > 0 {
+                        diff_window.push_back(raw_diff);
+                        if diff_window.len() > smoothing_window {
+                            diff_window.pop_front();
+                        }
+                        let sum: f64 = diff_window.iter().sum();
+                        sum / (diff_window.len() as f64)
+                    } else {
+                        raw_diff
+                    };
+
+                    if diff_for_threshold > cli.scene_threshold
+                        && cut_allowed(Some(last_cut_frame), frame_count, cli.min_scene_length)
+                    {
                         scene_cuts.push(frame_count);
+                        last_cut_frame = frame_count;
                     }
                 }
                 previous_histogram = Some(analyzed_frame.lum_histogram.clone());
@@ -512,21 +552,43 @@ fn run_native_analysis_pipeline(
 
         // Analyze the native frame within active area (reuse crop)
         if crop_rect_opt.is_none() {
-            let rect = crop::detect_crop(analysis_frame);
-            println!(
-                "\nDetected active video area: {}x{} at offset ({}, {})",
-                rect.width, rect.height, rect.x, rect.y
-            );
-            crop_rect_opt = Some(rect);
+            if cli.no_crop {
+                let rect = CropRect::full(analysis_frame.width(), analysis_frame.height());
+                println!(
+                    "\nCrop disabled: using full frame {}x{}",
+                    rect.width, rect.height
+                );
+                crop_rect_opt = Some(rect);
+            } else {
+                let rect = crop::detect_crop(analysis_frame);
+                println!(
+                    "\nDetected active video area: {}x{} at offset ({}, {})",
+                    rect.width, rect.height, rect.x, rect.y
+                );
+                crop_rect_opt = Some(rect);
+            }
         }
         let rect = crop_rect_opt.as_ref().unwrap();
         let analyzed_frame = analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
 
         if let Some(ref prev_hist) = previous_histogram {
-            let scene_change_score =
+            let raw_diff =
                 calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
-            if scene_change_score > cli.scene_threshold {
+            let diff_for_threshold = if smoothing_window > 0 {
+                diff_window.push_back(raw_diff);
+                if diff_window.len() > smoothing_window {
+                    diff_window.pop_front();
+                }
+                let sum: f64 = diff_window.iter().sum();
+                sum / (diff_window.len() as f64)
+            } else {
+                raw_diff
+            };
+            if diff_for_threshold > cli.scene_threshold
+                && cut_allowed(Some(last_cut_frame), frame_count, cli.min_scene_length)
+            {
                 scene_cuts.push(frame_count);
+                last_cut_frame = frame_count;
             }
         }
 
@@ -816,6 +878,14 @@ fn calculate_histogram_difference(hist1: &[f64], hist2: &[f64]) -> f64 {
     dist
 }
 
+/// Decide whether a candidate cut is allowed given the last accepted cut and minimum scene length.
+fn cut_allowed(last_cut: Option<u32>, candidate_frame: u32, min_scene_len: u32) -> bool {
+    match last_cut {
+        None => candidate_frame >= min_scene_len,
+        Some(prev) => candidate_frame.saturating_sub(prev) >= min_scene_len,
+    }
+}
+
 /// Convert scene cuts to MadVRScene structures.
 ///
 /// # Arguments
@@ -958,51 +1028,67 @@ fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
 ///
 /// # Arguments
 /// * `frames` - Mutable slice of frame data to optimize
-fn run_optimizer_pass(frames: &mut [MadVRFrame]) {
+fn run_optimizer_pass(scenes: &[MadVRScene], frames: &mut [MadVRFrame]) {
     const ROLLING_WINDOW_SIZE: usize = 240; // 240 frames as recommended by research
 
-    let mut rolling_avg_queue: VecDeque<f64> = VecDeque::with_capacity(ROLLING_WINDOW_SIZE);
     let total_frames = frames.len();
-
     println!(
-        "Applying advanced optimization heuristics with {}-frame rolling window...",
+        "Applying advanced optimization heuristics with {}-frame rolling window (scene-aware)...",
         ROLLING_WINDOW_SIZE
     );
 
-    for (frame_idx, frame) in frames.iter_mut().enumerate() {
-        // Add current frame's avg_pq to rolling window
-        rolling_avg_queue.push_back(frame.avg_pq);
+    let mut processed = 0usize;
+    let mut prev_target: Option<u16> = None;
+    const MAX_DELTA_PER_FRAME: u16 = 200; // limit how fast target_nits can change frame-to-frame
 
-        // Remove oldest frame if window is full
-        if rolling_avg_queue.len() > ROLLING_WINDOW_SIZE {
-            rolling_avg_queue.pop_front();
-        }
+    for scene in scenes {
+        let start = scene.start as usize;
+        let end = ((scene.end + 1) as usize).min(frames.len());
+        if start >= end { continue; }
 
-        // Calculate rolling average
-        let rolling_avg_pq: f64 =
-            rolling_avg_queue.iter().sum::<f64>() / rolling_avg_queue.len() as f64;
+        // Reset smoothing at scene boundary to avoid cross-scene lag
+        let mut rolling_avg_queue: VecDeque<f64> = VecDeque::with_capacity(ROLLING_WINDOW_SIZE);
 
-        // Convert peak PQ to nits for decision making
-        let peak_nits = pq_to_nits(frame.peak_pq_2020) as u32;
+        let scene_avg_apl_nits = pq_to_nits(scene.avg_pq);
 
-        // Find highlight knee (99th percentile)
-        let highlight_knee_nits = find_highlight_knee_nits(&frame.lum_histogram);
+        for idx in start..end {
+            let frame = &mut frames[idx];
 
-        // Convert rolling average PQ back to approximate APL in nits
-        let rolling_apl_nits = pq_to_nits(rolling_avg_pq);
+            // Add current frame's avg_pq to rolling window
+            rolling_avg_queue.push_back(frame.avg_pq);
+            if rolling_avg_queue.len() > ROLLING_WINDOW_SIZE {
+                rolling_avg_queue.pop_front();
+            }
 
-        // Apply advanced heuristics
-        frame.target_nits = Some(apply_advanced_heuristics(
-            peak_nits,
-            rolling_apl_nits,
-            highlight_knee_nits,
-        ));
+            // Rolling average PQ blended with scene average to be truly scene-aware
+            let rolling_avg_pq = rolling_avg_queue.iter().sum::<f64>() / rolling_avg_queue.len() as f64;
+            let rolling_apl_nits = pq_to_nits(rolling_avg_pq);
+            let blended_apl_nits = 0.6 * rolling_apl_nits + 0.4 * scene_avg_apl_nits;
 
-        // Progress indicator for long videos
-        if frame_idx % 1000 == 0 && frame_idx > 0 {
-            let progress = (frame_idx as f64 / total_frames as f64) * 100.0;
-            print!("\rOptimizer progress: {:.1}%", progress);
-            std::io::stdout().flush().unwrap_or(());
+            // Convert peak PQ to nits for decision making
+            let peak_nits = pq_to_nits(frame.peak_pq_2020) as u32;
+            // Find highlight knee (99th percentile)
+            let highlight_knee_nits = find_highlight_knee_nits(&frame.lum_histogram);
+
+            // Apply heuristics with scene-aware APL
+            let raw_target = apply_advanced_heuristics(
+                peak_nits,
+                blended_apl_nits,
+                highlight_knee_nits,
+                scene_avg_apl_nits,
+            );
+
+            // Apply delta limiting for temporal smoothness
+            let final_target = apply_delta_limit(prev_target, raw_target, MAX_DELTA_PER_FRAME);
+            frame.target_nits = Some(final_target);
+            prev_target = Some(final_target);
+
+            processed += 1;
+            if processed % 1000 == 0 {
+                let progress = (processed as f64 / total_frames as f64) * 100.0;
+                print!("\rOptimizer progress: {:.1}%", progress);
+                std::io::stdout().flush().unwrap_or(());
+            }
         }
     }
 
@@ -1032,6 +1118,7 @@ fn apply_advanced_heuristics(
     peak_nits: u32,
     rolling_apl_nits: f64,
     highlight_knee_nits: f64,
+    scene_avg_apl_nits: f64,
 ) -> u16 {
     // Heuristic 1: Hard cap for extreme peaks (prevents flicker and blown-out highlights)
     if peak_nits > 4000 {
@@ -1039,12 +1126,14 @@ fn apply_advanced_heuristics(
     }
 
     // Heuristic 2: Use rolling average to smooth transitions and prevent temporal artifacts
-    if rolling_apl_nits < 50.0 {
+    // Blend rolling with scene average to stabilize classification
+    let apl_ref = 0.7 * rolling_apl_nits + 0.3 * scene_avg_apl_nits;
+    if apl_ref < 50.0 {
         // Dark scene - be more aggressive, allow brighter targets to preserve shadow detail
         // But still respect the highlight knee to prevent blown highlights
         let target = peak_nits.clamp(800, 2000); // Minimum 800 nits for dark scenes
         (target as f64).min(highlight_knee_nits * 1.2) as u16 // Allow 20% above knee for dark scenes
-    } else if rolling_apl_nits < 150.0 {
+    } else if apl_ref < 150.0 {
         // Medium brightness scene - balanced approach
         let target = peak_nits.clamp(600, 1500);
         (target as f64).min(highlight_knee_nits * 1.1) as u16 // Allow 10% above knee
@@ -1052,6 +1141,21 @@ fn apply_advanced_heuristics(
         // Bright scene - be more conservative to prevent blown-out look
         let target = peak_nits.clamp(400, 1000);
         (target as f64).min(highlight_knee_nits) as u16 // Respect the highlight knee strictly
+    }
+}
+
+/// Limit frame-to-frame change of target_nits to reduce flicker.
+fn apply_delta_limit(prev: Option<u16>, target: u16, max_delta: u16) -> u16 {
+    if let Some(p) = prev {
+        if target > p {
+            p.saturating_add(max_delta).min(target)
+        } else if target < p {
+            p.saturating_sub(max_delta).max(target)
+        } else {
+            target
+        }
+    } else {
+        target
     }
 }
 
@@ -1093,17 +1197,7 @@ fn write_measurement_file(
         .unwrap_or(0);
 
     // Compute FALL metrics from per-frame avg PQ
-    let falls_nits: Vec<f64> = frames.iter().map(|f| pq_to_nits(f.avg_pq)).collect();
-    let maxfall: u32 = if falls_nits.is_empty() {
-        0
-    } else {
-        falls_nits.iter().cloned().fold(0.0, f64::max).round() as u32
-    };
-    let avgfall: u32 = if falls_nits.is_empty() {
-        0
-    } else {
-        (falls_nits.iter().sum::<f64>() / falls_nits.len() as f64).round() as u32
-    };
+    let (maxfall, avgfall) = compute_falls(frames);
 
     let header_size = if madvr_version >= 6 { 36 } else { 32 };
 
@@ -1179,4 +1273,68 @@ fn write_measurement_file(
     println!("MaxCLL: {} nits", maxcll);
 
     Ok(())
+}
+
+/// Compute MaxFALL and AvgFALL from frames' avg_pq values.
+fn compute_falls(frames: &[MadVRFrame]) -> (u32, u32) {
+    if frames.is_empty() {
+        return (0, 0);
+    }
+    let falls_nits: Vec<f64> = frames.iter().map(|f| pq_to_nits(f.avg_pq)).collect();
+    let maxfall = falls_nits.iter().cloned().fold(0.0, f64::max).round() as u32;
+    let avgfall = (falls_nits.iter().sum::<f64>() / falls_nits.len() as f64).round() as u32;
+    (maxfall, avgfall)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cut_allowed_min_len() {
+        // First cut at frame 10 not allowed if min len 24
+        assert_eq!(cut_allowed(Some(0), 10, 24), false);
+        // Cut at frame 24 allowed
+        assert_eq!(cut_allowed(Some(0), 24, 24), true);
+        // Subsequent cut needs another 24 frames
+        assert_eq!(cut_allowed(Some(24), 40, 24), false);
+        assert_eq!(cut_allowed(Some(24), 48, 24), true);
+    }
+
+    #[test]
+    fn test_compute_falls() {
+        // Build three frames with avg_pq corresponding to 100, 200, 300 nits
+        fn to_pq(nits: f64) -> f64 { nits_to_pq(nits) }
+        let frames = vec![
+            MadVRFrame { avg_pq: to_pq(100.0), ..Default::default() },
+            MadVRFrame { avg_pq: to_pq(200.0), ..Default::default() },
+            MadVRFrame { avg_pq: to_pq(300.0), ..Default::default() },
+        ];
+        let (maxfall, avgfall) = compute_falls(&frames);
+        assert!(maxfall >= 300 - 1 && maxfall <= 300 + 1, "maxfall ~300, got {}", maxfall);
+        assert!(avgfall >= 200 - 1 && avgfall <= 200 + 1, "avgfall ~200, got {}", avgfall);
+    }
+
+    #[test]
+    fn test_histogram_diff_smoothing_behaves() {
+        // A simple increasing sequence; smoothing should be lower than last value for window>1
+        let diffs = [0.1, 0.2, 0.5, 1.0];
+        let mut dq: VecDeque<f64> = VecDeque::with_capacity(3);
+        let mut smoothed = Vec::new();
+        for d in diffs { dq.push_back(d); if dq.len() > 3 { dq.pop_front(); } smoothed.push(dq.iter().sum::<f64>() / dq.len() as f64) }
+        assert!(smoothed[3] < 1.0, "smoothed value should be below last raw value");
+        assert!(smoothed[0] - 0.1_f64).abs() < 1e-9;
+    }
+
+    #[test]
+    fn test_apply_delta_limit() {
+        // No previous: pass-through
+        assert_eq!(apply_delta_limit(None, 800, 200), 800);
+        // Limit positive jump
+        assert_eq!(apply_delta_limit(Some(600), 1000, 200), 800);
+        // Limit negative jump
+        assert_eq!(apply_delta_limit(Some(900), 400, 200), 700);
+        // Within delta: unchanged
+        assert_eq!(apply_delta_limit(Some(700), 820, 200), 820);
+    }
 }
