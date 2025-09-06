@@ -17,7 +17,7 @@ Implemented (latest changes)
   - `--scene-threshold <float>` (default: 0.3) to tune histogram-distance scene cut sensitivity.
   - `--target-peak-nits <nits>` for v6 header override.
   - `--min-scene-length <frames>` (default: 24) — drop cuts occurring within N frames of the previous cut.
-  - `--scene-smoothing <frames>` (default: 0) — rolling mean smoothing over the scene-change metric.
+  - `--scene-smoothing <frames>` (default: 5) — rolling mean smoothing over the scene-change metric (set 0 to disable).
   - `--no-crop` — disable active-area crop detection (analyze full frame; diagnostics/validation).
 - Active area (black bar) detection and cropping
   - New `hdr_analyzer_mvp/src/crop.rs` with crop-detect-like algorithm on Y (10-bit), sampling every 10 px, ~10% non-black threshold, rounded to even coords/dims.
@@ -28,10 +28,11 @@ Implemented (latest changes)
   - HDR10 Y’ nominal 64–940 normalized to [0..1] as PQ proxy prior to binning (robust with limited-range material).
 - Native scene detection
   - Histogram distance (chi-squared-like, symmetric) between consecutive frame histograms; default threshold = 0.3; post-processing fixes end-frame off-by-one.
-  - New controls: min scene length guard and optional temporal smoothing of the difference signal.
+  - New controls: min scene length guard (default 24) and temporal smoothing of the difference signal (default 5 frames; set 0 to disable).
 - Optimizer (optional)
   - Rolling 240-frame average + highlight knee (99th percentile) + scene-aware heuristics (by APL category); writes per-frame `target_nits` when enabled (flags=3).
   - Scene-aware improvements: blends per-scene APL with rolling APL, resets smoothing at scene boundaries, and applies per-frame delta limiting for temporal stability.
+  - Enabled by default; can be disabled via `--disable-optimizer`.
 - Header fields and writer
   - `maxCLL` from per-frame peak (nits), `maxFALL` and `avgFALL` derived from per-frame avg-pq (nits). Serialization via `madvr_parse` (v5 or v6).
 - Verifier

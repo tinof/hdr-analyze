@@ -24,8 +24,8 @@ struct Cli {
     #[arg(short, long)]
     output: Option<String>,
 
-    /// (Phase 3) Enable intelligent optimizer to generate dynamic target nits
-    #[arg(long)]
+    /// DEPRECATED: Optimizer is enabled by default. Use --disable-optimizer to turn off.
+    #[arg(long, hide = true)]
     enable_optimizer: bool,
 
     /// (Optional) Enable GPU hardware acceleration.
@@ -46,7 +46,7 @@ struct Cli {
     min_scene_length: u32,
 
     /// Optional smoothing window (in frames) over the scene-change metric. 0 disables smoothing.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 5)]
     scene_smoothing: u32,
 
     /// Optional override for header.target_peak_nits (used for v6). If omitted, defaults to computed maxCLL.
@@ -61,6 +61,10 @@ struct Cli {
     /// Disable active-area crop detection (analyze full frame). Useful for diagnostics/validation.
     #[arg(long)]
     no_crop: bool,
+
+    /// Disable dynamic optimizer (enabled by default).
+    #[arg(long)]
+    disable_optimizer: bool,
 }
 
 // --- Data Structures ---
@@ -197,6 +201,15 @@ fn format_duration(duration: Duration) -> String {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Optimizer is enabled by default. Legacy --enable-optimizer is accepted but hidden.
+    let optimizer_enabled = if cli.disable_optimizer {
+        false
+    } else if cli.enable_optimizer {
+        true
+    } else {
+        true
+    };
+
     // Auto-generate output filename if not provided
     let output_path = match &cli.output {
         Some(path) => path.clone(),
@@ -238,7 +251,7 @@ fn main() -> Result<()> {
     precompute_scene_stats(&mut scenes, &frames);
 
     // Step 4: Run advanced optimizer if enabled
-    if cli.enable_optimizer {
+    if optimizer_enabled {
         println!("Running intelligent optimizer pass...");
         run_optimizer_pass(&scenes, &mut frames);
     }
@@ -249,7 +262,7 @@ fn main() -> Result<()> {
         &output_path,
         &scenes,
         &frames,
-        cli.enable_optimizer,
+        optimizer_enabled,
         cli.madvr_version as u32,
         cli.target_peak_nits,
     )?;

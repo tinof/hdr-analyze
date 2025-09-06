@@ -113,14 +113,14 @@ cargo build --release -p verifier
 
 ### Analyzer
 
-Standard analysis (no optimizer):
+Standard analysis (optimized by default):
 ```bash
 ./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements.bin"
 ```
 
-With dynamic optimizer (scene-aware + delta-limited):
+Disable optimizer:
 ```bash
-./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements_optimized.bin" --enable-optimizer
+./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements_noopt.bin" --disable-optimizer
 ```
 
 Version selection (v5 default; v6 for broader compatibility):
@@ -153,7 +153,7 @@ Hardware acceleration (attempts CUDA; others fall back to software):
 
 Using cargo:
 ```bash
-cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --enable-optimizer --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3 --downscale 2
+cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3 --downscale 2
 ```
 
 ### Verifier
@@ -176,12 +176,12 @@ Verifier reports:
 
 - `-i, --input <PATH>`: Input HDR video file
 - `-o, --output <PATH>`: Output `.bin` measurement file
-- `--enable-optimizer`: Enable dynamic target nits generation
+- `--disable-optimizer`: Disable dynamic target nits generation (enabled by default)
 - `--hwaccel <TYPE>`: Hardware acceleration hint (`cuda`, `vaapi`, `videotoolbox`)
 - `--madvr-version <5|6>`: Output file version (default: 5)
 - `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
 - `--min-scene-length <frames>`: Drop cuts closer than N frames (default: 24)
-- `--scene-smoothing <frames>`: Rolling window over scene-change metric (default: 0 = off)
+- `--scene-smoothing <frames>`: Rolling window over scene-change metric (default: 5)
 - `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
 - `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
 - `--no-crop`: Disable active-area crop detection (analyze full frame)
