@@ -126,7 +126,12 @@ fn main() -> Result<()> {
 /// Read and parse a MadVR measurement file using the madvr_parse library
 fn read_measurement_file(
     file_path: &str,
-) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>, bool, madvr_parse::MadVRHeader)> {
+) -> Result<(
+    Vec<MadVRScene>,
+    Vec<MadVRFrame>,
+    bool,
+    madvr_parse::MadVRHeader,
+)> {
     // Read the file as bytes
     let file_data = fs::read(file_path).context("Failed to read measurement file")?;
 

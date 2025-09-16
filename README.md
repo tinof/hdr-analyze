@@ -185,6 +185,8 @@ Verifier reports:
 - `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
 - `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
 - `--no-crop`: Disable active-area crop detection (analyze full frame)
+- `--analysis-threads <N>`: Override Rayon worker count for histogram analysis (default: logical cores)
+- `--profile-performance`: Print per-stage throughput metrics (decode vs. analysis) when finished
 
 Notes for v6 output:
 - Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently duplicated from BT.2020 (`peak_pq_2020`) as a compatibility placeholder. Proper per-gamut computation is planned.
@@ -218,6 +220,8 @@ Expected:
 ## Oracle Cloud ARM (Ampere) Readiness
 
 - Fully functional with software decoding (no CUDA on Ampere).
+- Rayon-backed histogram analysis saturates available cores; tune with `--analysis-threads` if you need to pin execution to available vCPUs.
+- Use `--profile-performance` to capture decode vs. analysis throughput when validating new instances.
 - Recommended packages (Ubuntu 22.04/24.04 arm64):
   ```bash
   sudo apt update

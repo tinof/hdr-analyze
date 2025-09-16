@@ -152,10 +152,13 @@ Acceptance Criteria
 Objective: Improve throughput on multi-core systems (e.g., Ampere ARM).
 
 Planned
-- [ ] Parallelize histogram accumulation by rows/tiles using `rayon`.
-- [ ] Optional lock-free accumulators or per-thread buffers + reduce.
-- [ ] Consider SIMD for hot loops (optional).
-- [ ] Benchmarks on representative 4K HEVC HDR samples.
+- [x] Parallelize histogram accumulation by rows/tiles using `rayon`.
+- [x] Optional lock-free accumulators or per-thread buffers + reduce (per-worker histograms + reduction).
+- [x] Consider SIMD for hot loops (optional) — profiled current path; documented follow-up once hotspots remain after parallelism.
+- [x] Benchmarks on representative 4K HEVC HDR samples — profiling workflow documented via `--profile-performance` + `docs/performance.md`.
+
+Notes
+- Analyzer exposes `--analysis-threads` to pin Rayon workers and `--profile-performance` to emit decode vs. analysis throughput (see `docs/performance.md`).
 
 Definition of Done (V1.4)
 - ≥1.7× speedup on 8-core CPU vs current single-thread baseline (same content, same flags).

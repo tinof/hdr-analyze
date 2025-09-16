@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 // Native FFmpeg imports
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::{codec, format, frame, media, software};
+use rayon::prelude::*;
 
 mod crop;
 use crop::CropRect;
@@ -65,6 +66,14 @@ struct Cli {
     /// Disable dynamic optimizer (enabled by default).
     #[arg(long)]
     disable_optimizer: bool,
+
+    /// Override the number of Rayon analysis threads (defaults to logical cores).
+    #[arg(long)]
+    analysis_threads: Option<usize>,
+
+    /// Emit per-stage throughput metrics once processing completes.
+    #[arg(long)]
+    profile_performance: bool,
 }
 
 // --- Data Structures ---
@@ -200,6 +209,16 @@ fn format_duration(duration: Duration) -> String {
 /// `Result<()>` - Ok(()) on success, Err on any failure
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Some(threads) = cli.analysis_threads {
+        if threads == 0 {
+            return Err(anyhow::anyhow!("--analysis-threads must be at least 1"));
+        }
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+            .map_err(|err| anyhow::anyhow!("Failed to configure Rayon thread pool: {err}"))?;
+    }
 
     // Optimizer is enabled by default. Legacy --enable-optimizer is accepted but hidden.
     let optimizer_enabled = if cli.disable_optimizer {
@@ -439,6 +458,7 @@ fn run_native_analysis_pipeline(
     let mut last_cut_frame: u32 = 0; // start of video acts as implicit cut
     let mut frame_count = 0u32;
     let mut crop_rect_opt: Option<CropRect> = None;
+    let mut analysis_duration = Duration::ZERO;
 
     // Progress tracking
     let start_time = Instant::now();
@@ -488,8 +508,16 @@ fn run_native_analysis_pipeline(
                     }
                 }
                 let rect = crop_rect_opt.as_ref().unwrap();
+                let analysis_start = if cli.profile_performance {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
                 let analyzed_frame =
                     analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
+                if let Some(start) = analysis_start {
+                    analysis_duration += start.elapsed();
+                }
 
                 // Scene detection using histogram comparison
                 if let Some(ref prev_hist) = previous_histogram {
@@ -582,11 +610,18 @@ fn run_native_analysis_pipeline(
             }
         }
         let rect = crop_rect_opt.as_ref().unwrap();
+        let analysis_start = if cli.profile_performance {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let analyzed_frame = analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
+        if let Some(start) = analysis_start {
+            analysis_duration += start.elapsed();
+        }
 
         if let Some(ref prev_hist) = previous_histogram {
-            let raw_diff =
-                calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+            let raw_diff = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
             let diff_for_threshold = if smoothing_window > 0 {
                 diff_window.push_back(raw_diff);
                 if diff_window.len() > smoothing_window {
@@ -630,6 +665,34 @@ fn run_native_analysis_pipeline(
         "Scene detection completed: {} scenes detected",
         scenes.len()
     );
+
+    if cli.profile_performance {
+        let analysis_secs = analysis_duration.as_secs_f64();
+        let analysis_fps = if analysis_secs > 0.0 {
+            frame_count as f64 / analysis_secs
+        } else {
+            0.0
+        };
+        let decode_duration = total_elapsed.saturating_sub(analysis_duration);
+        let decode_secs = decode_duration.as_secs_f64();
+        let decode_fps = if decode_secs > 0.0 {
+            frame_count as f64 / decode_secs
+        } else {
+            0.0
+        };
+
+        println!("Rayon analysis threads: {}", rayon::current_num_threads());
+        println!(
+            "Decode & IO wall time: {} ({:.1} fps effective)",
+            format_duration(decode_duration),
+            decode_fps
+        );
+        println!(
+            "Analysis wall time: {} ({:.1} fps effective)",
+            format_duration(analysis_duration),
+            analysis_fps
+        );
+    }
 
     Ok((scenes, frames))
 }
@@ -700,9 +763,6 @@ fn analyze_native_frame_cropped(
     _height: u32,
     crop_rect: &CropRect,
 ) -> Result<MadVRFrame> {
-    let mut histogram = vec![0f64; 256];
-    let mut max_pq = 0.0f64;
-
     // Y plane data
     let y_plane_data = frame.data(0);
     let y_stride = frame.stride(0);
@@ -717,41 +777,61 @@ fn analyze_native_frame_cropped(
     let x_end = x_start + crop_rect.width as usize;
     let y_end = y_start + crop_rect.height as usize;
 
-    // Process by rows to reduce bounds checks and improve cache locality
-    for y in y_start..y_end {
-        let row_start = y.saturating_mul(y_stride);
-        // Compute byte range for cropped row
-        let base = row_start + x_start.saturating_mul(2);
-        if base >= y_plane_data.len() {
-            continue;
-        }
-        let want_len = (x_end - x_start).saturating_mul(2);
-        let max_len = y_plane_data.len() - base;
-        let len = want_len.min(max_len);
-        let row = &y_plane_data[base..base + len];
+    // Parallel accumulation across rows using per-thread histograms + reduction
+    let (hist_bins, max_pq) = (y_start..y_end)
+        .into_par_iter()
+        .map(|y| {
+            let mut local_hist = [0f64; 256];
+            let mut local_max = 0.0f64;
 
-        for px in row.chunks_exact(2) {
-            // Read 10-bit limited-range code (0..1023 in 16-bit container)
-            let code10 = u16::from_le_bytes([px[0], px[1]]) & 0x03FF;
+            let row_start = y.saturating_mul(y_stride);
+            let base = row_start + x_start.saturating_mul(2);
+            if base < y_plane_data.len() {
+                let want_len = (x_end - x_start).saturating_mul(2);
+                let max_len = y_plane_data.len() - base;
+                let len = want_len.min(max_len) & !1; // even number of bytes
+                if len >= 2 {
+                    let row = &y_plane_data[base..base + len];
+                    for px in row.chunks_exact(2) {
+                        // Read 10-bit limited-range code (0..1023 in 16-bit container)
+                        let code10 = u16::from_le_bytes([px[0], px[1]]) & 0x03FF;
 
-            // Normalize to limited-range [64,940] -> [0,1]
-            let code_i = code10 as i32;
-            let norm = ((code_i - 64) as f64 / 876.0).clamp(0.0, 1.0);
+                        // Normalize to limited-range [64,940] -> [0,1]
+                        let code_i = code10 as i32;
+                        let norm = ((code_i - 64) as f64 / 876.0).clamp(0.0, 1.0);
 
-            let pq = norm; // Approximate PQ code from Y' (HDR10 pipeline)
-            if pq > max_pq {
-                max_pq = pq;
+                        let pq = norm; // Approximate PQ code from Y' (HDR10 pipeline)
+                        if pq > local_max {
+                            local_max = pq;
+                        }
+
+                        // Map to madVR v5 bins
+                        let bin = if pq < sdr_peak_pq {
+                            (pq / sdr_step).floor() as usize
+                        } else {
+                            64 + ((pq - sdr_peak_pq) / hdr_step).floor() as usize
+                        };
+                        local_hist[bin.min(255)] += 1.0;
+                    }
+                }
             }
 
-            // Map to madVR v5 bins
-            let bin = if pq < sdr_peak_pq {
-                (pq / sdr_step).floor() as usize
-            } else {
-                64 + ((pq - sdr_peak_pq) / hdr_step).floor() as usize
-            };
-            histogram[bin.min(255)] += 1.0;
-        }
-    }
+            (local_hist, local_max)
+        })
+        .reduce(
+            || ([0f64; 256], 0.0f64),
+            |mut acc, (local_hist, local_max)| {
+                for (acc_bin, local_bin) in acc.0.iter_mut().zip(local_hist.iter()) {
+                    *acc_bin += *local_bin;
+                }
+                if local_max > acc.1 {
+                    acc.1 = local_max;
+                }
+                acc
+            },
+        );
+
+    let mut histogram: Vec<f64> = hist_bins.to_vec();
 
     // Normalize histogram to percentages (sum ~ 100.0)
     let total_pixels = (crop_rect.width as f64) * (crop_rect.height as f64);
@@ -811,46 +891,66 @@ fn analyze_native_frame_cropped(
 #[allow(dead_code)]
 fn analyze_native_frame(frame: &frame::Video, width: u32, height: u32) -> Result<MadVRFrame> {
     let pixel_count = (width * height) as usize;
-    let mut histogram = vec![0f64; 256];
-    let mut max_luma_10bit = 0u16;
 
     // Get Y-plane data (luminance) from the 10-bit frame
     let y_plane_data = frame.data(0); // Y plane
     let y_stride = frame.stride(0);
 
-    // Process 10-bit luminance data
-    // In YUV420P10LE, each luma sample is 2 bytes (little-endian 10-bit value)
-    for y in 0..height {
-        let row_start = (y as usize) * y_stride;
-        for x in 0..(width as usize) {
-            let pixel_offset = row_start + (x * 2); // 2 bytes per 10-bit pixel
+    let (hist_bins, max_luma_10bit) = (0..height)
+        .into_par_iter()
+        .map(|y| {
+            let mut local_hist = [0f64; 256];
+            let mut local_max = 0u16;
 
-            if pixel_offset + 1 < y_plane_data.len() {
-                // Read 10-bit value (little-endian)
-                let luma_10bit = u16::from_le_bytes([
-                    y_plane_data[pixel_offset],
-                    y_plane_data[pixel_offset + 1],
-                ]) & 0x3FF; // Mask to 10 bits (0-1023)
+            let row_start = (y as usize).saturating_mul(y_stride);
+            let row_bytes = width as usize * 2;
+            if row_start < y_plane_data.len() {
+                let max_len = y_plane_data.len() - row_start;
+                let len = row_bytes.min(max_len) & !1;
+                if len >= 2 {
+                    let row = &y_plane_data[row_start..row_start + len];
+                    for px in row.chunks_exact(2) {
+                        // Read 10-bit value (little-endian)
+                        let luma_10bit = u16::from_le_bytes([px[0], px[1]]) & 0x3FF;
 
-                max_luma_10bit = max_luma_10bit.max(luma_10bit);
+                        if luma_10bit > local_max {
+                            local_max = luma_10bit;
+                        }
 
-                // **CORRECT LUMINANCE MAPPING**: 10-bit luma directly corresponds to PQ curve
-                // Normalize 10-bit value to PQ range (0.0-1.0)
-                let pq_value = luma_10bit as f64 / 1023.0;
+                        // **CORRECT LUMINANCE MAPPING**: 10-bit luma directly corresponds to PQ curve
+                        // Normalize 10-bit value to PQ range (0.0-1.0)
+                        let pq_value = luma_10bit as f64 / 1023.0;
 
-                // Map PQ value to histogram bin (0-255)
-                let bin_index = (pq_value * 255.0).round() as usize;
-                let bin_index = bin_index.min(255);
-
-                histogram[bin_index] += 1.0;
+                        // Map PQ value to histogram bin (0-255)
+                        let bin_index = (pq_value * 255.0).round() as usize;
+                        local_hist[bin_index.min(255)] += 1.0;
+                    }
+                }
             }
-        }
-    }
+
+            (local_hist, local_max)
+        })
+        .reduce(
+            || ([0f64; 256], 0u16),
+            |mut acc, (local_hist, local_max)| {
+                for (acc_bin, local_bin) in acc.0.iter_mut().zip(local_hist.iter()) {
+                    *acc_bin += *local_bin;
+                }
+                if local_max > acc.1 {
+                    acc.1 = local_max;
+                }
+                acc
+            },
+        );
+
+    let mut histogram: Vec<f64> = hist_bins.to_vec();
 
     // Normalize histogram so sum equals 100.0
     let total_pixels = pixel_count as f64;
-    for bin in &mut histogram {
-        *bin = (*bin / total_pixels) * 100.0;
+    if total_pixels > 0.0 {
+        for bin in &mut histogram {
+            *bin = (*bin / total_pixels) * 100.0;
+        }
     }
 
     // Calculate peak PQ from the brightest 10-bit luma value
@@ -1057,7 +1157,9 @@ fn run_optimizer_pass(scenes: &[MadVRScene], frames: &mut [MadVRFrame]) {
     for scene in scenes {
         let start = scene.start as usize;
         let end = ((scene.end + 1) as usize).min(frames.len());
-        if start >= end { continue; }
+        if start >= end {
+            continue;
+        }
 
         // Reset smoothing at scene boundary to avoid cross-scene lag
         let mut rolling_avg_queue: VecDeque<f64> = VecDeque::with_capacity(ROLLING_WINDOW_SIZE);
@@ -1074,7 +1176,8 @@ fn run_optimizer_pass(scenes: &[MadVRScene], frames: &mut [MadVRFrame]) {
             }
 
             // Rolling average PQ blended with scene average to be truly scene-aware
-            let rolling_avg_pq = rolling_avg_queue.iter().sum::<f64>() / rolling_avg_queue.len() as f64;
+            let rolling_avg_pq =
+                rolling_avg_queue.iter().sum::<f64>() / rolling_avg_queue.len() as f64;
             let rolling_apl_nits = pq_to_nits(rolling_avg_pq);
             let blended_apl_nits = 0.6 * rolling_apl_nits + 0.4 * scene_avg_apl_nits;
 
@@ -1317,15 +1420,34 @@ mod tests {
     #[test]
     fn test_compute_falls() {
         // Build three frames with avg_pq corresponding to 100, 200, 300 nits
-        fn to_pq(nits: f64) -> f64 { nits_to_pq(nits) }
+        fn to_pq(nits: f64) -> f64 {
+            nits_to_pq(nits)
+        }
         let frames = vec![
-            MadVRFrame { avg_pq: to_pq(100.0), ..Default::default() },
-            MadVRFrame { avg_pq: to_pq(200.0), ..Default::default() },
-            MadVRFrame { avg_pq: to_pq(300.0), ..Default::default() },
+            MadVRFrame {
+                avg_pq: to_pq(100.0),
+                ..Default::default()
+            },
+            MadVRFrame {
+                avg_pq: to_pq(200.0),
+                ..Default::default()
+            },
+            MadVRFrame {
+                avg_pq: to_pq(300.0),
+                ..Default::default()
+            },
         ];
         let (maxfall, avgfall) = compute_falls(&frames);
-        assert!(maxfall >= 300 - 1 && maxfall <= 300 + 1, "maxfall ~300, got {}", maxfall);
-        assert!(avgfall >= 200 - 1 && avgfall <= 200 + 1, "avgfall ~200, got {}", avgfall);
+        assert!(
+            maxfall >= 300 - 1 && maxfall <= 300 + 1,
+            "maxfall ~300, got {}",
+            maxfall
+        );
+        assert!(
+            avgfall >= 200 - 1 && avgfall <= 200 + 1,
+            "avgfall ~200, got {}",
+            avgfall
+        );
     }
 
     #[test]
@@ -1334,8 +1456,17 @@ mod tests {
         let diffs = [0.1, 0.2, 0.5, 1.0];
         let mut dq: VecDeque<f64> = VecDeque::with_capacity(3);
         let mut smoothed = Vec::new();
-        for d in diffs { dq.push_back(d); if dq.len() > 3 { dq.pop_front(); } smoothed.push(dq.iter().sum::<f64>() / dq.len() as f64) }
-        assert!(smoothed[3] < 1.0, "smoothed value should be below last raw value");
+        for d in diffs {
+            dq.push_back(d);
+            if dq.len() > 3 {
+                dq.pop_front();
+            }
+            smoothed.push(dq.iter().sum::<f64>() / dq.len() as f64)
+        }
+        assert!(
+            smoothed[3] < 1.0,
+            "smoothed value should be below last raw value"
+        );
         assert!(smoothed[0] - 0.1_f64).abs() < 1e-9;
     }
 
