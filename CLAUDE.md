@@ -43,14 +43,14 @@ cargo test -- --nocapture
 
 ### Running Tools
 ```bash
-# Analyzer (basic usage with auto-generated output filename)
+# Analyzer (basic usage with auto-generated output filename, positional input)
 ./target/release/hdr_analyzer_mvp "video.mkv"
 
-# Analyzer with custom output
-./target/release/hdr_analyzer_mvp "video.mkv" -o "measurements.bin"
+# Analyzer with flag-based input and custom output
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
 
-# Analyzer with optimizer
-./target/release/hdr_analyzer_mvp "video.mkv" -o "out.bin" --enable-optimizer
+# Analyzer with optimizer disabled (enabled by default)
+./target/release/hdr_analyzer_mvp "video.mkv" -o "out.bin" --disable-optimizer
 
 # Different madVR versions
 ./target/release/hdr_analyzer_mvp "video.mkv" -o "out.bin" --madvr-version 6 --target-peak-nits 1000
@@ -96,9 +96,18 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 8. **Output**: madVR-compatible `.bin` files via `madvr_parse` library
 
 ### Key Components
-- **`hdr_analyzer_mvp/src/main.rs`**: Main analysis pipeline (currently ~1100 lines, planned for refactoring)
-- **`hdr_analyzer_mvp/src/crop.rs`**: Active-video area detection and cropping logic
-- **`verifier/src/main.rs`**: Measurement file validation and inspection
+- **`hdr_analyzer_mvp/src/main.rs`**: Thin application entry point.
+- **`hdr_analyzer_mvp/src/pipeline.rs`**: Main orchestration logic for the analysis pipeline.
+- **`hdr_analyzer_mvp/src/analysis/`**: Module containing all core analysis logic:
+  - `frame.rs`: Per-frame analysis.
+  - `scene.rs`: Scene detection.
+  - `histogram.rs`: Histogram and PQ/nits conversion logic.
+- **`hdr_analyzer_mvp/src/optimizer.rs`**: Dynamic target nits generation.
+- **`hdr_analyzer_mvp/src/ffmpeg_io.rs`**: FFmpeg initialization and I/O.
+- **`hdr_analyzer_mvp/src/writer.rs`**: madVR measurement file writing.
+- **`hdr_analyzer_mvp/src/cli.rs`**: CLI definition and parsing.
+- **`hdr_analyzer_mvp/src/crop.rs`**: Active-video area detection.
+- **`verifier/src/main.rs`**: Measurement file validation and inspection.
 
 ### Critical Implementation Details
 - **Limited-range normalization**: HDR10 Y' codes (64-940) normalized to [0,1] before PQ domain binning
@@ -145,15 +154,9 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 ### Verifier
 - Single positional argument: path to `.bin` file to verify
 
-## Planned Refactoring (Milestone R)
+## Refactoring (Milestone R) - ✓ COMPLETE
 
-The current `main.rs` is planned for modularization into:
-- `cli.rs`: CLI definition and parsing
-- `ffmpeg_io.rs`: FFmpeg initialization and I/O
-- `analysis/`: Histogram, frame analysis, scene detection
-- `optimizer.rs`: Dynamic target nits generation
-- `writer.rs`: madVR file writing
-- `pipeline.rs`: End-to-end orchestration
+The `main.rs` file has been successfully refactored into a modular structure, improving maintainability and testability. The application logic is now separated into distinct modules, each with a single responsibility.
 
 ## Development Workflow
 

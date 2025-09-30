@@ -210,7 +210,7 @@ fn validate_measurement_data(scenes: &[MadVRScene], frames: &[MadVRFrame]) -> Re
         }
     }
 
-    // Check histogram integrity
+    // Check luminance histogram integrity
     for (i, frame) in frames.iter().enumerate() {
         if frame.lum_histogram.len() != 256 {
             anyhow::bail!(
@@ -228,6 +228,75 @@ fn validate_measurement_data(scenes: &[MadVRScene], frames: &[MadVRFrame]) -> Re
                 histogram_sum
             );
         }
+    }
+
+    // Check hue histogram integrity (31 bins)
+    let mut hue_histogram_warnings = Vec::new();
+    let mut frames_with_hue = 0;
+    let mut frames_with_nonzero_hue = 0;
+
+    for (i, frame) in frames.iter().enumerate() {
+        if let Some(ref hue_hist) = frame.hue_histogram {
+            frames_with_hue += 1;
+
+            // Check length
+            if hue_hist.len() != 31 {
+                hue_histogram_warnings.push(format!(
+                    "Frame {} has invalid hue histogram length: {} (expected 31)",
+                    i,
+                    hue_hist.len()
+                ));
+                continue;
+            }
+
+            // Check sum (should be ≤100, might be less if low saturation content)
+            let hue_sum: f64 = hue_hist.iter().sum();
+            if hue_sum > 100.5 {
+                hue_histogram_warnings.push(format!(
+                    "Frame {} has invalid hue histogram sum: {:.2} (should be ≤100.0)",
+                    i, hue_sum
+                ));
+            }
+
+            // Check for non-zero distribution
+            let nonzero_bins = hue_hist.iter().filter(|&&v| v > 0.01).count();
+            if nonzero_bins > 0 {
+                frames_with_nonzero_hue += 1;
+            }
+        }
+    }
+
+    // Report hue histogram validation results
+    if !hue_histogram_warnings.is_empty() {
+        println!(
+            "⚠️  Found {} hue histogram issue(s):",
+            hue_histogram_warnings.len()
+        );
+        for warning in &hue_histogram_warnings {
+            println!("   {}", warning);
+        }
+    }
+
+    if frames_with_hue > 0 {
+        let coverage_pct = (frames_with_nonzero_hue as f64 / frames_with_hue as f64) * 100.0;
+        println!(
+            "✓ Hue histogram: {}/{} frames have data, {}/{} have non-zero distribution ({:.1}%)",
+            frames_with_hue,
+            frames.len(),
+            frames_with_nonzero_hue,
+            frames_with_hue,
+            coverage_pct
+        );
+
+        // Warning if too many frames have all-zero hue (might indicate grayscale content or bug)
+        if coverage_pct < 50.0 && frames_with_hue == frames.len() {
+            println!(
+                "⚠️  Low hue coverage: {:.1}% of frames have non-zero hue distribution (might be grayscale content or implementation issue)",
+                coverage_pct
+            );
+        }
+    } else {
+        println!("⚠️  No hue histogram data found in any frame");
     }
 
     // Check PQ values are in valid range

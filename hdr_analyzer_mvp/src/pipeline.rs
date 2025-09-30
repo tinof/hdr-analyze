@@ -1,0 +1,413 @@
+use anyhow::{Context, Result};
+use madvr_parse::{MadVRFrame, MadVRScene};
+use std::collections::VecDeque;
+use std::io::Write;
+use std::time::{Duration, Instant};
+
+use ffmpeg_next::{codec, format, frame, software};
+
+use crate::analysis::frame::analyze_native_frame_cropped;
+use crate::analysis::scene::{calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed};
+use crate::cli::Cli;
+use crate::crop::CropRect;
+use crate::ffmpeg_io::setup_hardware_decoder;
+use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
+use crate::writer::write_measurement_file;
+
+pub fn format_duration(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let minutes = total_seconds / 60;
+    let seconds = total_seconds % 60;
+    format!("{:02}:{:02}", minutes, seconds)
+}
+
+/// This function orchestrates the complete HDR analysis pipeline using native FFmpeg
+pub fn run(cli: &Cli, width: u32, height: u32, total_frames: Option<u32>, mut input_context: format::context::Input) -> Result<()> {
+    let (mut scenes, mut frames) =
+        run_native_analysis_pipeline(cli, width, height, total_frames, &mut input_context)?;
+
+    fix_scene_end_frames(&mut scenes, frames.len());
+    precompute_scene_stats(&mut scenes, &frames);
+
+    let optimizer_enabled = !cli.disable_optimizer;
+    if optimizer_enabled {
+        println!("Running intelligent optimizer pass...");
+        let optimizer_profile = OptimizerProfile::from_name(&cli.optimizer_profile)?;
+        run_optimizer_pass(&scenes, &mut frames, &optimizer_profile);
+    }
+
+    let output_path = match &cli.output {
+        Some(path) => path.clone(),
+        None => {
+            let input_path_obj = std::path::Path::new(cli.input_positional.as_ref().unwrap_or(cli.input_flag.as_ref().unwrap()));
+            let stem = input_path_obj
+                .file_stem()
+                .context("Input file has no filename")?
+                .to_str()
+                .context("Invalid UTF-8 in filename")?;
+            format!("{}_measurements.bin", stem)
+        }
+    };
+
+    println!("Writing measurement file: {}", output_path);
+    write_measurement_file(
+        &output_path,
+        &scenes,
+        &frames,
+        optimizer_enabled,
+        cli.madvr_version as u32,
+        cli.target_peak_nits,
+    )?;
+
+    Ok(())
+}
+
+fn run_native_analysis_pipeline(
+    cli: &Cli,
+    width: u32,
+    height: u32,
+    total_frames: Option<u32>,
+    input_context: &mut format::context::Input,
+) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>)> {
+    println!("Starting native analysis pipeline...");
+
+    let video_stream = input_context
+        .streams()
+        .best(ffmpeg_next::media::Type::Video)
+        .context("No video stream found")?;
+    let video_stream_index = video_stream.index();
+
+    let mut decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
+        .context("Failed to create decoder context from stream parameters")?;
+
+    unsafe {
+        let ctx = decoder_context.as_mut_ptr();
+        (*ctx).thread_count = 0;
+    }
+
+    let mut decoder = if let Some(hwaccel) = &cli.hwaccel {
+        println!("Attempting to use hardware acceleration: {}", hwaccel);
+        setup_hardware_decoder(decoder_context, hwaccel)?
+    } else {
+        decoder_context
+            .decoder()
+            .video()
+            .context("Failed to create video decoder")?
+    };
+
+    let mut scaler: Option<software::scaling::Context> = None;
+    let downscale = match cli.downscale {
+        1 | 2 | 4 => cli.downscale,
+        other => {
+            eprintln!(
+                "Unsupported --downscale value {}. Falling back to 1 (no downscale). Allowed: 1,2,4.",
+                other
+            );
+            1
+        }
+    };
+    let mut target_w = decoder.width();
+    let mut target_h = decoder.height();
+    if downscale > 1 {
+        target_w = (target_w / downscale).max(2) & !1;
+        target_h = (target_h / downscale).max(2) & !1;
+    }
+    let need_scaler = decoder.format() != format::Pixel::YUV420P10LE || downscale > 1;
+    if need_scaler {
+        scaler = Some(
+            software::scaling::Context::get(
+                decoder.format(),
+                decoder.width(),
+                decoder.height(),
+                format::Pixel::YUV420P10LE,
+                target_w,
+                target_h,
+                software::scaling::Flags::FAST_BILINEAR,
+            )
+            .context("Failed to create scaling context")?,
+        );
+    }
+
+    let mut frames = Vec::new();
+    let mut scene_cuts = Vec::new();
+    let mut previous_histogram: Option<Vec<f64>> = None;
+    let smoothing_window = cli.scene_smoothing as usize;
+    let mut diff_window: VecDeque<f64> = VecDeque::with_capacity(smoothing_window.max(1));
+    let mut last_cut_frame: u32 = 0;
+    let mut frame_count = 0u32;
+    let mut crop_rect_opt: Option<CropRect> = None;
+    let mut analysis_duration = Duration::ZERO;
+
+    let start_time = Instant::now();
+    let mut last_progress_update = Instant::now();
+    let progress_update_interval = Duration::from_millis(500);
+
+    println!("Processing frames with native pipeline...");
+    print!("Initializing frame analysis...");
+    std::io::stdout().flush().unwrap_or(());
+
+    for (stream, packet) in input_context.packets() {
+        if stream.index() == video_stream_index {
+            decoder
+                .send_packet(&packet)
+                .context("Failed to send packet to decoder")?;
+
+            let mut decoded_frame = frame::Video::empty();
+            let mut scaled_frame = frame::Video::empty();
+            while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                let analysis_frame = if let Some(ref mut sc) = scaler {
+                    sc.run(&decoded_frame, &mut scaled_frame)
+                        .context("Failed to scale frame")?;
+                    &scaled_frame
+                } else {
+                    &decoded_frame
+                };
+
+                if crop_rect_opt.is_none() {
+                    if cli.no_crop {
+                        let rect = CropRect::full(analysis_frame.width(), analysis_frame.height());
+                        println!(
+                            "\nCrop disabled: using full frame {}x{}",
+                            rect.width, rect.height
+                        );
+                        crop_rect_opt = Some(rect);
+                    } else {
+                        let rect = crate::crop::detect_crop(analysis_frame);
+                        println!(
+                            "\nDetected active video area: {}x{} at offset ({}, {})",
+                            rect.width, rect.height, rect.x, rect.y
+                        );
+                        crop_rect_opt = Some(rect);
+                    }
+                }
+                let rect = crop_rect_opt.as_ref().unwrap();
+                let analysis_start = if cli.profile_performance {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
+                let analyzed_frame =
+                    analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
+                if let Some(start) = analysis_start {
+                    analysis_duration += start.elapsed();
+                }
+
+                if let Some(ref prev_hist) = previous_histogram {
+                    let raw_diff =
+                        calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+                    let diff_for_threshold = if smoothing_window > 0 {
+                        diff_window.push_back(raw_diff);
+                        if diff_window.len() > smoothing_window {
+                            diff_window.pop_front();
+                        }
+                        let sum: f64 = diff_window.iter().sum();
+                        sum / (diff_window.len() as f64)
+                    } else {
+                        raw_diff
+                    };
+
+                    if diff_for_threshold > cli.scene_threshold
+                        && cut_allowed(Some(last_cut_frame), frame_count, cli.min_scene_length)
+                    {
+                        scene_cuts.push(frame_count);
+                        last_cut_frame = frame_count;
+                    }
+                }
+                previous_histogram = Some(analyzed_frame.lum_histogram.clone());
+
+                frames.push(analyzed_frame);
+                frame_count += 1;
+
+                let now = Instant::now();
+                if now.duration_since(last_progress_update) >= progress_update_interval
+                    || frame_count == 1
+                {
+                    last_progress_update = now;
+
+                    let elapsed = now.duration_since(start_time);
+                    let fps = if elapsed.as_secs_f64() > 0.0 {
+                        frame_count as f64 / elapsed.as_secs_f64()
+                    } else {
+                        0.0
+                    };
+
+                    if let Some(total) = total_frames {
+                        let progress = (frame_count as f64 / total as f64) * 100.0;
+                        print!(
+                            "\rProcessing: {}/{} frames ({:.1}%) at {:.1} fps",
+                            frame_count, total, progress, fps
+                        );
+                    } else {
+                        print!("\rProcessing: {} frames at {:.1} fps", frame_count, fps);
+                    }
+                    std::io::stdout().flush().unwrap_or(());
+                }
+            }
+        }
+    }
+
+    decoder
+        .send_eof()
+        .context("Failed to send EOF to decoder")?;
+    let mut decoded_frame = frame::Video::empty();
+    let mut scaled_frame = frame::Video::empty();
+    while decoder.receive_frame(&mut decoded_frame).is_ok() {
+        let analysis_frame = if let Some(ref mut sc) = scaler {
+            sc.run(&decoded_frame, &mut scaled_frame)
+                .context("Failed to scale final frame")?;
+            &scaled_frame
+        } else {
+            &decoded_frame
+        };
+
+        if crop_rect_opt.is_none() {
+            if cli.no_crop {
+                let rect = CropRect::full(analysis_frame.width(), analysis_frame.height());
+                println!(
+                    "\nCrop disabled: using full frame {}x{}",
+                    rect.width, rect.height
+                );
+                crop_rect_opt = Some(rect);
+            } else {
+                let rect = crate::crop::detect_crop(analysis_frame);
+                println!(
+                    "\nDetected active video area: {}x{} at offset ({}, {})",
+                    rect.width, rect.height, rect.x, rect.y
+                );
+                crop_rect_opt = Some(rect);
+            }
+        }
+        let rect = crop_rect_opt.as_ref().unwrap();
+        let analysis_start = if cli.profile_performance {
+            Some(Instant::now())
+        } else {
+            None
+        };
+        let analyzed_frame = analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
+        if let Some(start) = analysis_start {
+            analysis_duration += start.elapsed();
+        }
+
+        if let Some(ref prev_hist) = previous_histogram {
+            let raw_diff = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+            let diff_for_threshold = if smoothing_window > 0 {
+                diff_window.push_back(raw_diff);
+                if diff_window.len() > smoothing_window {
+                    diff_window.pop_front();
+                }
+                let sum: f64 = diff_window.iter().sum();
+                sum / (diff_window.len() as f64)
+            } else {
+                raw_diff
+            };
+            if diff_for_threshold > cli.scene_threshold
+                && cut_allowed(Some(last_cut_frame), frame_count, cli.min_scene_length)
+            {
+                scene_cuts.push(frame_count);
+                last_cut_frame = frame_count;
+            }
+        }
+
+        frames.push(analyzed_frame);
+        frame_count += 1;
+    }
+
+    let total_elapsed = start_time.elapsed();
+    let final_fps = if total_elapsed.as_secs_f64() > 0.0 {
+        frame_count as f64 / total_elapsed.as_secs_f64()
+    } else {
+        0.0
+    };
+
+    println!(
+        "\nCompleted native processing {} frames in {} ({:.1} fps average)",
+        frame_count,
+        format_duration(total_elapsed),
+        final_fps
+    );
+
+    let scenes = convert_scene_cuts_to_scenes(scene_cuts, frame_count);
+    println!(
+        "Scene detection completed: {} scenes detected",
+        scenes.len()
+    );
+
+    if cli.profile_performance {
+        let analysis_secs = analysis_duration.as_secs_f64();
+        let analysis_fps = if analysis_secs > 0.0 {
+            frame_count as f64 / analysis_secs
+        } else {
+            0.0
+        };
+        let decode_duration = total_elapsed.saturating_sub(analysis_duration);
+        let decode_secs = decode_duration.as_secs_f64();
+        let decode_fps = if decode_secs > 0.0 {
+            frame_count as f64 / decode_secs
+        } else {
+            0.0
+        };
+
+        println!("Rayon analysis threads: {}", rayon::current_num_threads());
+        println!(
+            "Decode & IO wall time: {} ({:.1} fps effective)",
+            format_duration(decode_duration),
+            decode_fps
+        );
+        println!(
+            "Analysis wall time: {} ({:.1} fps effective)",
+            format_duration(analysis_duration),
+            analysis_fps
+        );
+    }
+
+    Ok((scenes, frames))
+}
+
+fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {
+    if scenes.is_empty() || total_frames == 0 {
+        return;
+    }
+
+    let last_frame_idx = (total_frames - 1) as u32;
+
+    for scene in scenes.iter_mut() {
+        if scene.end == u32::MAX {
+            scene.end = last_frame_idx;
+        }
+
+        if scene.end >= total_frames as u32 {
+            scene.end = last_frame_idx;
+        }
+
+        if scene.start >= total_frames as u32 {
+            scene.start = last_frame_idx;
+        }
+
+        if scene.start > scene.end {
+            scene.start = 0;
+            scene.end = last_frame_idx;
+        }
+    }
+}
+
+fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
+    println!("Computing scene-based statistics...");
+
+    for scene in scenes.iter_mut() {
+        let start_idx = scene.start as usize;
+        let end_idx = ((scene.end + 1) as usize).min(frames.len());
+
+        if start_idx < frames.len() && start_idx < end_idx {
+            let scene_frames = &frames[start_idx..end_idx];
+
+            let total_avg_pq: f64 = scene_frames.iter().map(|f| f.avg_pq).sum();
+            scene.avg_pq = total_avg_pq / scene_frames.len() as f64;
+
+            let max_peak_pq = scene_frames
+                .iter()
+                .map(|f| f.peak_pq_2020)
+                .fold(0.0f64, f64::max);
+            scene.peak_nits = crate::analysis::histogram::pq_to_nits(max_peak_pq) as u32;
+        }
+    }
+}

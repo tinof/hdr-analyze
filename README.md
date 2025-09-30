@@ -18,7 +18,18 @@ hdr_project/
 ├── hdr_analyzer_mvp/       # Main HDR analysis tool
 │   ├── Cargo.toml
 │   └── src/
-│       └── main.rs
+│       ├── main.rs         # Application entry point
+│       ├── pipeline.rs     # Main orchestration logic
+│       ├── analysis/       # Core analysis modules
+│       │   ├── mod.rs
+│       │   ├── frame.rs
+│       │   ├── scene.rs
+│       │   └── histogram.rs
+│       ├── optimizer.rs    # Dynamic target nits generation
+│       ├── ffmpeg_io.rs    # FFmpeg initialization and I/O
+│       ├── writer.rs       # .bin file writing
+│       ├── cli.rs          # CLI definition
+│       └── crop.rs         # Active area detection
 └── verifier/               # Measurement file verification tool
     ├── Cargo.toml
     └── src/
