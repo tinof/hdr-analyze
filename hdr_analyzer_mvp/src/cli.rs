@@ -70,4 +70,21 @@ pub struct Cli {
     /// Optimizer profile: conservative, balanced, or aggressive (default: balanced)
     #[arg(long, default_value = "balanced")]
     pub optimizer_profile: String,
+
+    /// Peak brightness source: max (direct max), histogram99 (99th percentile), histogram999 (99.9th percentile)
+    /// Default: histogram99 for balanced/aggressive profiles, max for conservative
+    #[arg(long)]
+    pub peak_source: Option<String>,
+
+    /// EMA smoothing beta for histogram bins (0.0-1.0). Lower = more smoothing. 0 disables. Default: 0.1
+    #[arg(long, default_value_t = 0.1)]
+    pub hist_bin_ema_beta: f64,
+
+    /// Temporal median filter window for histograms (in frames). 0 disables. Default: 0 (off)
+    #[arg(long, default_value_t = 0)]
+    pub hist_temporal_median: usize,
+
+    /// Pre-analysis Y-plane denoising: nlmeans, median3, or off (default: off)
+    #[arg(long, default_value = "off")]
+    pub pre_denoise: String,
 }

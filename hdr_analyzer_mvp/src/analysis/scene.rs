@@ -38,7 +38,10 @@ pub fn cut_allowed(last_cut: Option<u32>, candidate_frame: u32, min_scene_len: u
 ///
 /// # Returns
 /// Vector of MadVRScene structures
-pub fn convert_scene_cuts_to_scenes(mut scene_cuts: Vec<u32>, total_frames: u32) -> Vec<MadVRScene> {
+pub fn convert_scene_cuts_to_scenes(
+    mut scene_cuts: Vec<u32>,
+    total_frames: u32,
+) -> Vec<MadVRScene> {
     let mut scenes = Vec::new();
     let mut start_frame = 0u32;
 
@@ -81,8 +84,8 @@ pub fn convert_scene_cuts_to_scenes(mut scene_cuts: Vec<u32>, total_frames: u32)
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
     use super::*;
+    use std::collections::VecDeque;
 
     #[test]
     fn test_histogram_diff_smoothing_behaves() {

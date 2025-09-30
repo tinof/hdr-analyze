@@ -6,15 +6,80 @@ use rayon::prelude::*;
 use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq};
 use crate::crop::CropRect;
 
+/// Apply 3x3 median filter to Y-plane data (in-place on a cloned buffer).
+///
+/// This reduces noise in the luminance data before histogram computation,
+/// improving stability of APL and peak measurements in grainy content.
+///
+/// # Arguments
+/// * `y_data` - Y-plane data (10-bit, 2 bytes per pixel)
+/// * `stride` - Row stride in bytes
+/// * `crop_rect` - Active area to denoise
+///
+/// # Returns
+/// Denoised Y-plane data (cloned and filtered)
+fn apply_median3_denoise(y_data: &[u8], stride: usize, crop_rect: &CropRect) -> Vec<u8> {
+    let mut output = y_data.to_vec();
+    let x_start = crop_rect.x as usize;
+    let y_start = crop_rect.y as usize;
+    let x_end = x_start + crop_rect.width as usize;
+    let y_end = y_start + crop_rect.height as usize;
+
+    // Process interior pixels (skip borders to avoid edge handling complexity)
+    for y in (y_start + 1)..(y_end.saturating_sub(1)) {
+        for x in (x_start + 1)..(x_end.saturating_sub(1)) {
+            let mut neighbors = Vec::with_capacity(9);
+
+            // Collect 3x3 neighborhood
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let ny = (y as i32 + dy) as usize;
+                    let nx = (x as i32 + dx) as usize;
+                    let offset = ny * stride + nx * 2;
+                    if offset + 1 < y_data.len() {
+                        let code =
+                            u16::from_le_bytes([y_data[offset], y_data[offset + 1]]) & 0x03FF;
+                        neighbors.push(code);
+                    }
+                }
+            }
+
+            // Compute median
+            if !neighbors.is_empty() {
+                neighbors.sort_unstable();
+                let median = neighbors[neighbors.len() / 2];
+                let out_offset = y * stride + x * 2;
+                if out_offset + 1 < output.len() {
+                    let bytes = median.to_le_bytes();
+                    output[out_offset] = bytes[0];
+                    output[out_offset + 1] = bytes[1];
+                }
+            }
+        }
+    }
+
+    output
+}
+
 pub fn analyze_native_frame_cropped(
     frame: &frame::Video,
     _width: u32,
     _height: u32,
     crop_rect: &CropRect,
+    denoise_mode: &str,
 ) -> Result<MadVRFrame> {
     // Y plane data
-    let y_plane_data = frame.data(0);
+    let y_plane_data_raw = frame.data(0);
     let y_stride = frame.stride(0);
+
+    // Apply denoising if requested
+    let y_plane_data_denoised;
+    let y_plane_data = if denoise_mode == "median3" {
+        y_plane_data_denoised = apply_median3_denoise(y_plane_data_raw, y_stride, crop_rect);
+        &y_plane_data_denoised[..]
+    } else {
+        y_plane_data_raw
+    };
 
     // madVR v5 binning setup
     let sdr_peak_pq = nits_to_pq(100.0);

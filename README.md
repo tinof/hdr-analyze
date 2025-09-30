@@ -50,6 +50,10 @@ hdr_project/
 - Dynamic metadata optimizer (optional): Per-frame target nits generation using a 240-frame rolling average, 99th percentile highlight knee detection, and scene-aware heuristics.
   - Scene-aware APL blending and per-scene smoothing resets to avoid cross-scene lag.
   - Per-frame delta limiting for temporal stability of `target_nits`.
+- Noise robustness: Advanced histogram smoothing and robust peak detection for grainy content.
+  - Histogram-based peak selection (99th/99.9th percentile) instead of direct max to reduce noise impact.
+  - Per-bin EMA smoothing with scene-aware resets to stabilize APL measurements.
+  - Optional temporal median filtering and pre-analysis denoising for extremely noisy content.
 - Professional output: Writes madVR-compatible `.bin` measurement files through the `madvr_parse` library.
 - Cross-platform: CPU decoding on all platforms with optional CUDA attempt on NVIDIA (graceful fallback to software decoding everywhere else).
 
@@ -162,6 +166,23 @@ Hardware acceleration (attempts CUDA; others fall back to software):
 ./target/release/hdr_analyzer_mvp --hwaccel videotoolbox -i "video.mkv" -o "out.bin"
 ```
 
+Noise robustness for grainy content:
+```bash
+# Default behavior (histogram99 peak with EMA smoothing enabled)
+./target/release/hdr_analyzer_mvp -i "grainy_video.mkv" -o "out.bin"
+
+# Aggressive smoothing for very noisy content
+./target/release/hdr_analyzer_mvp -i "grainy_video.mkv" -o "out.bin" \
+  --hist-bin-ema-beta 0.05 --hist-temporal-median 3 --pre-denoise median3
+
+# Disable histogram smoothing for clean content
+./target/release/hdr_analyzer_mvp -i "clean_video.mkv" -o "out.bin" --hist-bin-ema-beta 0
+
+# Conservative profile with direct max (most responsive)
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" \
+  --optimizer-profile conservative --peak-source max
+```
+
 Using cargo:
 ```bash
 cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3 --downscale 2
@@ -185,17 +206,36 @@ Verifier reports:
 
 ## Command line arguments
 
+### Core Options
 - `-i, --input <PATH>`: Input HDR video file
 - `-o, --output <PATH>`: Output `.bin` measurement file
-- `--disable-optimizer`: Disable dynamic target nits generation (enabled by default)
-- `--hwaccel <TYPE>`: Hardware acceleration hint (`cuda`, `vaapi`, `videotoolbox`)
 - `--madvr-version <5|6>`: Output file version (default: 5)
+- `--hwaccel <TYPE>`: Hardware acceleration hint (`cuda`, `vaapi`, `videotoolbox`)
+- `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
+- `--no-crop`: Disable active-area crop detection (analyze full frame)
+
+### Scene Detection
 - `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
 - `--min-scene-length <frames>`: Drop cuts closer than N frames (default: 24)
 - `--scene-smoothing <frames>`: Rolling window over scene-change metric (default: 5)
+
+### Optimizer
+- `--disable-optimizer`: Disable dynamic target nits generation (enabled by default)
+- `--optimizer-profile <conservative|balanced|aggressive>`: Optimizer behavior preset (default: balanced)
 - `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
-- `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
-- `--no-crop`: Disable active-area crop detection (analyze full frame)
+
+### Noise Robustness (New in v1.4)
+- `--peak-source <max|histogram99|histogram999>`: Peak brightness source (default: histogram99 for balanced/aggressive, max for conservative)
+  - `max`: Direct max from Y-plane (most responsive to noise)
+  - `histogram99`: 99th percentile from histogram (recommended, reduces noise impact)
+  - `histogram999`: 99.9th percentile from histogram (most conservative)
+- `--hist-bin-ema-beta <float>`: EMA smoothing for histogram bins, 0.0-1.0 (default: 0.1, lower = more smoothing, 0 = disabled)
+- `--hist-temporal-median <N>`: Temporal median filter window in frames (default: 0/off, 3 = recommended for aggressive smoothing)
+- `--pre-denoise <nlmeans|median3|off>`: Pre-analysis Y-plane denoising (default: off)
+  - `median3`: 3x3 median filter (good for grainy content)
+  - `nlmeans`: Non-local means denoising (reserved for future)
+
+### Performance & Diagnostics
 - `--analysis-threads <N>`: Override Rayon worker count for histogram analysis (default: logical cores)
 - `--profile-performance`: Print per-stage throughput metrics (decode vs. analysis) when finished
 

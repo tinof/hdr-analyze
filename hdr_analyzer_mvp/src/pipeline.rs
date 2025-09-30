@@ -7,7 +7,12 @@ use std::time::{Duration, Instant};
 use ffmpeg_next::{codec, format, frame, software};
 
 use crate::analysis::frame::analyze_native_frame_cropped;
-use crate::analysis::scene::{calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed};
+use crate::analysis::histogram::{
+    apply_histogram_ema, apply_histogram_temporal_median, select_peak_pq,
+};
+use crate::analysis::scene::{
+    calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed,
+};
 use crate::cli::Cli;
 use crate::crop::CropRect;
 use crate::ffmpeg_io::setup_hardware_decoder;
@@ -22,11 +27,23 @@ pub fn format_duration(duration: Duration) -> String {
 }
 
 /// This function orchestrates the complete HDR analysis pipeline using native FFmpeg
-pub fn run(cli: &Cli, width: u32, height: u32, total_frames: Option<u32>, mut input_context: format::context::Input) -> Result<()> {
+pub fn run(
+    cli: &Cli,
+    width: u32,
+    height: u32,
+    total_frames: Option<u32>,
+    mut input_context: format::context::Input,
+) -> Result<()> {
     let (mut scenes, mut frames) =
         run_native_analysis_pipeline(cli, width, height, total_frames, &mut input_context)?;
 
     fix_scene_end_frames(&mut scenes, frames.len());
+
+    // Apply histogram smoothing with scene-aware EMA reset (if enabled)
+    if cli.hist_bin_ema_beta > 0.0 || cli.hist_temporal_median > 0 {
+        apply_histogram_smoothing_pass(&scenes, &mut frames, cli)?;
+    }
+
     precompute_scene_stats(&mut scenes, &frames);
 
     let optimizer_enabled = !cli.disable_optimizer;
@@ -39,7 +56,11 @@ pub fn run(cli: &Cli, width: u32, height: u32, total_frames: Option<u32>, mut in
     let output_path = match &cli.output {
         Some(path) => path.clone(),
         None => {
-            let input_path_obj = std::path::Path::new(cli.input_positional.as_ref().unwrap_or(cli.input_flag.as_ref().unwrap()));
+            let input_path_obj = std::path::Path::new(
+                cli.input_positional
+                    .as_ref()
+                    .unwrap_or(cli.input_flag.as_ref().unwrap()),
+            );
             let stem = input_path_obj
                 .file_stem()
                 .context("Input file has no filename")?
@@ -186,8 +207,13 @@ fn run_native_analysis_pipeline(
                 } else {
                     None
                 };
-                let analyzed_frame =
-                    analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
+                let analyzed_frame = analyze_native_frame_cropped(
+                    analysis_frame,
+                    width,
+                    height,
+                    rect,
+                    &cli.pre_denoise,
+                )?;
                 if let Some(start) = analysis_start {
                     analysis_duration += start.elapsed();
                 }
@@ -283,7 +309,8 @@ fn run_native_analysis_pipeline(
         } else {
             None
         };
-        let analyzed_frame = analyze_native_frame_cropped(analysis_frame, width, height, rect)?;
+        let analyzed_frame =
+            analyze_native_frame_cropped(analysis_frame, width, height, rect, &cli.pre_denoise)?;
         if let Some(start) = analysis_start {
             analysis_duration += start.elapsed();
         }
@@ -388,6 +415,104 @@ fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {
             scene.end = last_frame_idx;
         }
     }
+}
+
+fn apply_histogram_smoothing_pass(
+    scenes: &[MadVRScene],
+    frames: &mut [MadVRFrame],
+    cli: &Cli,
+) -> Result<()> {
+    println!(
+        "Applying histogram smoothing (EMA beta={}, temporal median window={})...",
+        cli.hist_bin_ema_beta, cli.hist_temporal_median
+    );
+
+    let ema_beta = cli.hist_bin_ema_beta;
+    let temporal_window = cli.hist_temporal_median;
+
+    // Determine peak source (default to histogram99 for balanced/aggressive, max for conservative)
+    let peak_source = cli.peak_source.as_deref().unwrap_or_else(|| {
+        match cli.optimizer_profile.to_lowercase().as_str() {
+            "conservative" => "max",
+            _ => "histogram99", // balanced and aggressive default to histogram99
+        }
+    });
+
+    // Process each scene independently to reset EMA at scene boundaries
+    for scene in scenes {
+        let start_idx = scene.start as usize;
+        let end_idx = ((scene.end + 1) as usize).min(frames.len());
+
+        if start_idx >= frames.len() || start_idx >= end_idx {
+            continue;
+        }
+
+        // Reset EMA state at scene boundary
+        let mut ema_state = vec![0.0; 256];
+        let mut temporal_history: VecDeque<Vec<f64>> = VecDeque::with_capacity(temporal_window);
+
+        for frame in frames.iter_mut().take(end_idx).skip(start_idx) {
+            // Store original peak for reference
+            let direct_max_pq = frame.peak_pq_2020;
+
+            // Apply EMA smoothing
+            if ema_beta > 0.0 {
+                apply_histogram_ema(&mut frame.lum_histogram, &mut ema_state, ema_beta);
+            }
+
+            // Apply temporal median if enabled
+            if temporal_window > 0 && !temporal_history.is_empty() {
+                apply_histogram_temporal_median(
+                    &mut frame.lum_histogram,
+                    &temporal_history.iter().cloned().collect::<Vec<_>>(),
+                );
+            }
+
+            // Update temporal history (keep last N-1 frames)
+            if temporal_window > 0 {
+                temporal_history.push_back(frame.lum_histogram.clone());
+                if temporal_history.len() >= temporal_window {
+                    temporal_history.pop_front();
+                }
+            }
+
+            // Recompute peak based on peak_source
+            frame.peak_pq_2020 = select_peak_pq(&frame.lum_histogram, direct_max_pq, peak_source);
+
+            // Recompute avg_pq from smoothed histogram using v5 semantics
+            let sdr_peak_pq = crate::analysis::histogram::nits_to_pq(100.0);
+            let sdr_step = sdr_peak_pq / 64.0;
+            let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
+            let sdr_mid = sdr_step + (sdr_step / 2.0);
+            let hdr_mid = hdr_step + (hdr_step / 2.0);
+
+            let mut avg_pq = 0.0f64;
+            for (i, percent) in frame.lum_histogram.iter().enumerate() {
+                // Filter potential black bars at bin 0 per madvr_parse heuristic
+                if i == 0 && *percent > 2.0 && *percent < 30.0 {
+                    continue;
+                }
+                let pq_value = if i <= 64 {
+                    (i as f64) * sdr_mid
+                } else {
+                    sdr_peak_pq + (((i - 63) as f64) * hdr_mid)
+                };
+                avg_pq += pq_value * (*percent / 100.0);
+            }
+            // Adjust based on sum of histogram bars
+            let percent_sum: f64 = frame.lum_histogram.iter().sum();
+            if percent_sum > 0.0 {
+                avg_pq = (avg_pq * (100.0 / percent_sum)).min(1.0);
+            }
+            frame.avg_pq = avg_pq.min(1.0);
+        }
+    }
+
+    println!(
+        "Histogram smoothing completed. Peak source: {}",
+        peak_source
+    );
+    Ok(())
 }
 
 fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {

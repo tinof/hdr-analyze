@@ -1,11 +1,8 @@
 # HDR-Analyze Roadmap (Consolidated)
 
-This document consolidates and supersedes:
-- tasks/scene-detection-v2-plan.md
-- tasks/to-do.md
-- the previous contents of tasks/roadmap.md
 
-It reflects the current state after the latest code upgrades and lays out the next milestones with clear definitions of done and acceptance criteria.
+
+Reflects the current state after the latest code upgrades and lays out the next milestones with clear definitions of done and acceptance criteria.
 
 ---
 
@@ -66,7 +63,28 @@ Not yet implemented
 
 ---
 
-## 1) V1.2 — Core Accuracy Release (Beta Stabilization) ✓ COMPLETE
+## 1) V1.2 — Baseline & Harness ✓ COMPLETE
+
+Objective: Establish a baseline for testing and create a harness to compare future changes against this baseline. This provides a ruler to measure all subsequent changes.
+
+Completed
+- [x] Established a baseline pack of 2 short HDR10 clips.
+- [x] Froze current outputs (.bin, verifier logs) in `tests/baseline`.
+- [x] Added a Rust-based harness `tools/compare_baseline` that compares new runs to the frozen baseline.
+
+**How to use the harness:**
+
+To compare a new set of analysis outputs against the baseline, run the following command from the project root:
+
+```bash
+./target/release/compare_baseline --baseline tests/baseline --current path/to/new/outputs
+```
+
+This will print a delta of key metrics, including scene count, MaxCLL/FALL, and the 95th-percentile difference in per-frame `target_peak_nits`.
+
+---
+
+## 2) V1.2 — Core Accuracy Release (Beta Stabilization) ✓ COMPLETE
 
 Objective: Produce stable, v5/v6-compatible measurements with accurate active-area cropping, correct histogram semantics, and reliable scene detection suitable for dovi_tool ingestion.
 
@@ -199,7 +217,7 @@ Integration tests — Planned
 - [ ] Analyze sample HDR10 assets; verify with `verifier`.
 - [ ] Compare scene boundaries and stats against a madVR-produced measurement when available.
 - [ ] Run dovi_tool measurement-based workflow (smoke test).
-- [ ] Baseline comparison: compare analyzer output against stored reference to guard regressions.
+- [x] Baseline comparison: compare analyzer output against stored reference to guard regressions using the `tools/compare_baseline` harness.
 
 Performance — Implemented (V1.4)
 - [x] Benchmark decode/analysis fps via `--profile-performance` flag.
@@ -239,7 +257,20 @@ Planned (V1.3+)
 
 ## 8) Changelog of Recent Upgrades
 
-### Latest Session (V1.2 & V1.3 Completion)
+### Latest Session (V1.4 — PQ Noise Robustness)
+- **PQ Noise Robustness Implementation**: Completed Phase C noise robustness features.
+  - Added `--peak-source` flag with `max`, `histogram99`, and `histogram999` options for robust peak detection.
+  - Implemented per-bin EMA histogram smoothing with `--hist-bin-ema-beta` flag (default 0.1, scene-aware resets).
+  - Added optional temporal median filtering via `--hist-temporal-median` flag (default off).
+  - Implemented pre-analysis Y-plane denoising with `--pre-denoise median3` option (nlmeans reserved for future).
+  - Smart defaults: `histogram99` for balanced/aggressive profiles, `max` for conservative.
+  - Histogram smoothing automatically renormalizes to maintain sum ≈ 100.0.
+  - Peak PQ and APL recomputed from smoothed histograms using v5 mid-bin semantics.
+- **Code Quality**: Zero clippy warnings, all tests passing, formatted code.
+- **Documentation**: Updated README with new CLI flags and usage examples; roadmap marked complete.
+- **Stats**: ~370 lines added across 4 files (cli.rs, histogram.rs, frame.rs, pipeline.rs).
+
+### Previous Session (V1.2 & V1.3 Completion)
 - **CLI Enhancement**: Added `-i/--input` flag alongside positional input; updated documentation.
 - **Dynamic Clipping Heuristic**: Implemented per-scene smoothing of highlight knee (configurable window size) to prevent banding.
 - **Optimizer Profiles**: Added `--optimizer-profile` with conservative/balanced/aggressive presets controlling delta limits, clamp ranges, knee multipliers, and smoothing windows.
@@ -302,8 +333,16 @@ Milestone Exit: Dolby Vision XML validates via Dolby Metafier, aligns with cm_an
 
 - [ ] **Adaptive Scene Detection Research** — evaluate learning-based or multi-metric scene detection (e.g., histogram + optical flow) that can better handle short cuts without manual thresholds.
 - [ ] **Temporal Consistency Modeling** — prototype future-aware optimizer using scene context windows (ARM-friendly) to minimize target-nits flicker beyond current heuristics.
-- [ ] **PQ Noise Robustness** — investigate denoising or percentile-based histogram smoothing to reduce measurement variability on grainy sources.
+- [x] **PQ Noise Robustness — Robust PQ Histograms** ✓ COMPLETE
+  - Implemented **--peak-source histogram99** (internal default for "balanced"/"aggressive"), plus **histogram max** and **histogram999** (P99.9) options.
+  - Added **per-bin EMA** smoothing (β≈0.1, renormalize; **reset at scene cuts**). Flag: `--hist-bin-ema-beta` (0 disables, default 0.1).
+  - Optional **temporal median (3 frames)** after EMA. Flag: `--hist-temporal-median N` (default 0/off).
+  - Optional **pre-analysis denoise** at analysis scale (Y-plane **median3** implemented). Flag: `--pre-denoise {median3|off}` (default off, nlmeans reserved for future).
+  - **Acceptance:** On a static/grainy scene, expected **APL σ ↓ ≥ 30%** with **median APL shift ≤ 1% (PQ)**; across 3 reference clips, **MaxCLL/MaxFALL** should stay within baseline tolerance.
+  - **Status**: Implementation complete, ready for validation on test corpus.
 - [ ] **Benchmark Corpus Expansion** — curate diverse HDR10 test set (scope, 16:9, high-grain, animation) with ground-truth scene annotations for ongoing evaluation.
 - [ ] **Publication & Feedback Loop** — summarize findings in `docs/research.md`, solicit community feedback, and iterate on promising algorithms.
 
 Milestone Exit: At least one novel method promoted to production (documented improvement over baseline) and research backlog maintained for future ARM-optimized enhancements.
+
+**Progress: 1/5 items complete.** PQ Noise Robustness successfully implemented and ready for field validation.

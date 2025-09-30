@@ -10,11 +10,11 @@ mod optimizer;
 mod pipeline;
 mod writer;
 
-use cli::Cli;
 use clap::Parser;
+use cli::Cli;
 
-use pipeline::run;
 use ffmpeg_io::get_native_video_info;
+use pipeline::run;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();

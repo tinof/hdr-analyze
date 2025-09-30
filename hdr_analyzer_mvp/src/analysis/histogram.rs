@@ -1,5 +1,5 @@
-use ffmpeg_next::frame;
 use crate::crop::CropRect;
+use ffmpeg_next::frame;
 
 // --- Constants for PQ Conversion ---
 const ST2084_Y_MAX: f64 = 10000.0;
@@ -100,6 +100,133 @@ pub fn find_highlight_knee_nits(histogram: &[f64]) -> f64 {
 
     // Fallback if no significant highlights found
     1000.0
+}
+
+/// Compute a percentile value from the histogram, returning PQ code.
+///
+/// This function finds the PQ value at which the specified percentile of pixels fall below.
+/// Used for robust peak detection that's less sensitive to noise than direct max.
+///
+/// # Arguments
+/// * `histogram` - Array of 256 values representing pixel percentages for each PQ bin
+/// * `percentile` - Target percentile (0.0-100.0), e.g., 99.0 for P99, 99.9 for P99.9
+///
+/// # Returns
+/// PQ value (0.0-1.0) at the requested percentile
+pub fn compute_histogram_percentile_pq(histogram: &[f64], percentile: f64) -> f64 {
+    let target_cumulative = 100.0 - percentile; // Convert to upper tail
+    let mut cumulative_percentage = 0.0;
+
+    // Start from the highest bin and work backwards
+    for (bin_index, &percentage) in histogram.iter().enumerate().rev() {
+        cumulative_percentage += percentage;
+
+        if cumulative_percentage >= target_cumulative {
+            // Convert bin index back to PQ value
+            return (bin_index as f64) / 255.0;
+        }
+    }
+
+    // Fallback: return max bin with data
+    for (bin_index, &percentage) in histogram.iter().enumerate().rev() {
+        if percentage > 0.0 {
+            return (bin_index as f64) / 255.0;
+        }
+    }
+
+    1.0 // Ultimate fallback
+}
+
+/// Select peak PQ based on the specified peak source method.
+///
+/// # Arguments
+/// * `histogram` - Luminance histogram
+/// * `direct_max_pq` - Peak PQ from direct frame analysis
+/// * `peak_source` - Method to use: "max", "histogram99", or "histogram999"
+///
+/// # Returns
+/// Peak PQ value selected by the specified method
+pub fn select_peak_pq(histogram: &[f64], direct_max_pq: f64, peak_source: &str) -> f64 {
+    match peak_source {
+        "histogram99" => compute_histogram_percentile_pq(histogram, 99.0),
+        "histogram999" => compute_histogram_percentile_pq(histogram, 99.9),
+        _ => direct_max_pq, // "max" or unknown defaults to direct max
+    }
+}
+
+/// Apply exponential moving average (EMA) smoothing to histogram bins.
+///
+/// This reduces frame-to-frame noise in the histogram while preserving temporal trends.
+/// Uses the formula: smoothed[i] = beta * current[i] + (1-beta) * ema_state[i]
+///
+/// # Arguments
+/// * `histogram` - Current frame's histogram (will be smoothed in-place)
+/// * `ema_state` - EMA state from previous frame (updated in-place)
+/// * `beta` - EMA coefficient (0.0-1.0). Lower = more smoothing. 0 disables.
+///
+/// # Notes
+/// The histogram is renormalized after smoothing to maintain sum ≈ 100.0
+pub fn apply_histogram_ema(histogram: &mut [f64], ema_state: &mut [f64], beta: f64) {
+    if beta <= 0.0 || beta > 1.0 {
+        return; // No smoothing
+    }
+
+    for i in 0..histogram.len().min(ema_state.len()) {
+        ema_state[i] = beta * histogram[i] + (1.0 - beta) * ema_state[i];
+        histogram[i] = ema_state[i];
+    }
+
+    // Renormalize to maintain sum ≈ 100.0
+    let sum: f64 = histogram.iter().sum();
+    if sum > 0.0 {
+        let scale = 100.0 / sum;
+        for bin in histogram.iter_mut() {
+            *bin *= scale;
+        }
+    }
+}
+
+/// Apply temporal median filter to histogram bins.
+///
+/// This further reduces noise by taking the median of the last N frames for each bin.
+/// More aggressive than EMA but can introduce slight lag.
+///
+/// # Arguments
+/// * `histogram` - Current frame's histogram (will be replaced with median)
+/// * `history` - Ring buffer of recent histograms (oldest to newest)
+/// * `window_size` - Number of frames to use for median (e.g., 3)
+///
+/// # Notes
+/// Modifies histogram in-place. History should contain at least 1 histogram.
+pub fn apply_histogram_temporal_median(histogram: &mut [f64], history: &[Vec<f64>]) {
+    if history.is_empty() {
+        return;
+    }
+
+    let hist_len = histogram.len();
+    for bin_idx in 0..hist_len {
+        // Collect values for this bin across all frames in history + current
+        let mut values: Vec<f64> = history.iter().map(|h| h[bin_idx]).collect();
+        values.push(histogram[bin_idx]);
+
+        // Compute median
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = values.len() / 2;
+        histogram[bin_idx] = if values.len() % 2 == 0 {
+            (values[mid - 1] + values[mid]) / 2.0
+        } else {
+            values[mid]
+        };
+    }
+
+    // Renormalize
+    let sum: f64 = histogram.iter().sum();
+    if sum > 0.0 {
+        let scale = 100.0 / sum;
+        for bin in histogram.iter_mut() {
+            *bin *= scale;
+        }
+    }
 }
 
 /// Compute hue histogram (31 bins) from chroma planes (U and V).
@@ -229,7 +356,6 @@ mod tests {
         let bin_255_pq = sdr_peak_pq + 192.0 * hdr_step;
         assert!((bin_255_pq - 1.0).abs() < 0.01);
     }
-
 
     #[test]
     fn test_find_highlight_knee() {
