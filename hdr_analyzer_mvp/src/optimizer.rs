@@ -186,6 +186,77 @@ pub fn run_optimizer_pass(
     println!("\rOptimizer completed: {} frames processed", total_frames);
 }
 
+/// Apply EMA smoothing to target_nits per scene.
+///
+/// When bidirectional is true, applies forward and backward EMA and averages the results.
+/// After smoothing, re-apply delta limiting with the provided max_delta to maintain temporal stability.
+pub fn apply_target_smoother(
+    scenes: &[MadVRScene],
+    frames: &mut [MadVRFrame],
+    alpha: f64,
+    bidirectional: bool,
+    max_delta: u16,
+) {
+    if alpha <= 0.0 || alpha > 1.0 {
+        return;
+    }
+
+    for scene in scenes {
+        let start = scene.start as usize;
+        let end = ((scene.end + 1) as usize).min(frames.len());
+        if start >= end {
+            continue;
+        }
+
+        // Collect target_nits for the scene; skip if optimizer wasn't used
+        let mut values: Vec<f64> = Vec::with_capacity(end - start);
+        let mut any_none = false;
+        for f in frames.iter().take(end).skip(start) {
+            if let Some(v) = f.target_nits {
+                values.push(v as f64);
+            } else {
+                any_none = true;
+                break;
+            }
+        }
+        if any_none || values.is_empty() {
+            continue;
+        }
+
+        // Forward EMA
+        let mut fwd: Vec<f64> = vec![0.0; values.len()];
+        fwd[0] = values[0];
+        for i in 1..values.len() {
+            fwd[i] = alpha * values[i] + (1.0 - alpha) * fwd[i - 1];
+        }
+
+        // Optional backward EMA
+        let smoothed: Vec<f64> = if bidirectional {
+            let mut bwd: Vec<f64> = vec![0.0; values.len()];
+            let last = values.len() - 1;
+            bwd[last] = values[last];
+            for i in (0..last).rev() {
+                bwd[i] = alpha * values[i] + (1.0 - alpha) * bwd[i + 1];
+            }
+            fwd.iter()
+                .zip(bwd.iter())
+                .map(|(a, b)| (a + b) / 2.0)
+                .collect()
+        } else {
+            fwd
+        };
+
+        // Re-apply delta limiting for temporal stability
+        let mut prev: Option<u16> = None;
+        for (idx, f) in frames.iter_mut().take(end).skip(start).enumerate() {
+            let desired = smoothed[idx].round().clamp(0.0, u16::MAX as f64) as u16;
+            let limited = apply_delta_limit(prev, desired, max_delta);
+            f.target_nits = Some(limited);
+            prev = Some(limited);
+        }
+    }
+}
+
 /// Apply advanced optimization heuristics to determine target nits.
 ///
 /// This function implements the core tone mapping logic using multiple
@@ -242,7 +313,7 @@ fn apply_advanced_heuristics(
 }
 
 /// Limit frame-to-frame change of target_nits to reduce flicker.
-fn apply_delta_limit(prev: Option<u16>, target: u16, max_delta: u16) -> u16 {
+pub fn apply_delta_limit(prev: Option<u16>, target: u16, max_delta: u16) -> u16 {
     if let Some(p) = prev {
         use std::cmp::Ordering;
         match target.cmp(&p) {
@@ -291,5 +362,77 @@ mod tests {
             conservative.knee_smoothing_window > aggressive.knee_smoothing_window,
             "Conservative should smooth more"
         );
+    }
+
+    #[test]
+    fn test_apply_target_smoother_reduces_variation() {
+        // Build a synthetic scene with oscillating targets
+        let mut frames: Vec<MadVRFrame> = (0..10)
+            .map(|i| MadVRFrame {
+                target_nits: Some(if i % 2 == 0 { 1000 } else { 500 }),
+                ..Default::default()
+            })
+            .collect();
+        let scenes = vec![MadVRScene {
+            start: 0,
+            end: 9,
+            ..Default::default()
+        }];
+
+        // Apply EMA smoothing bidirectionally
+        apply_target_smoother(&scenes, &mut frames, 0.2, true, 300);
+
+        // Check that adjacent deltas are reduced compared to the original 500 jumps
+        let mut max_delta = 0u16;
+        for w in frames.windows(2) {
+            let a = w[0].target_nits.unwrap();
+            let b = w[1].target_nits.unwrap();
+            let d = if a > b { a - b } else { b - a };
+            if d > max_delta {
+                max_delta = d;
+            }
+        }
+        assert!(
+            max_delta < 500,
+            "Smoother should reduce large adjacent deltas"
+        );
+    }
+
+    #[test]
+    fn test_apply_target_smoother_resets_per_scene() {
+        // Two scenes with distinct starting targets; smoothing must not bleed across scenes
+        let mut frames: Vec<MadVRFrame> = Vec::new();
+        // Scene 0: frames 0..4
+        for _ in 0..5 {
+            frames.push(MadVRFrame {
+                target_nits: Some(1000),
+                ..Default::default()
+            });
+        }
+        // Scene 1: frames 5..9
+        for _ in 0..5 {
+            frames.push(MadVRFrame {
+                target_nits: Some(500),
+                ..Default::default()
+            });
+        }
+        let scenes = vec![
+            MadVRScene {
+                start: 0,
+                end: 4,
+                ..Default::default()
+            },
+            MadVRScene {
+                start: 5,
+                end: 9,
+                ..Default::default()
+            },
+        ];
+
+        apply_target_smoother(&scenes, &mut frames, 0.3, true, 300);
+
+        // First frame of each scene should remain equal to its original value after per-scene reset
+        assert_eq!(frames[0].target_nits.unwrap(), 1000);
+        assert_eq!(frames[5].target_nits.unwrap(), 500);
     }
 }

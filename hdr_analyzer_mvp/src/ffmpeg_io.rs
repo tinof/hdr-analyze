@@ -1,6 +1,45 @@
 use anyhow::{Context, Result};
 use ffmpeg_next as ffmpeg;
-use ffmpeg_next::{codec, format, media};
+use ffmpeg_next::{codec, format, media, util::color};
+use std::fmt;
+
+/// Video transfer function reported by FFmpeg metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransferFunction {
+    Pq,
+    Hlg,
+    Unknown,
+}
+
+impl fmt::Display for TransferFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TransferFunction::Pq => write!(f, "PQ (SMPTE 2084)"),
+            TransferFunction::Hlg => write!(f, "HLG (ARIB STD-B67)"),
+            TransferFunction::Unknown => write!(f, "Unspecified"),
+        }
+    }
+}
+
+impl From<color::TransferCharacteristic> for TransferFunction {
+    fn from(value: color::TransferCharacteristic) -> Self {
+        use color::TransferCharacteristic::*;
+        match value {
+            SMPTE2084 | BT2020_10 | BT2020_12 => TransferFunction::Pq,
+            ARIB_STD_B67 => TransferFunction::Hlg,
+            _ => TransferFunction::Unknown,
+        }
+    }
+}
+
+/// Basic metadata about the input video stream needed by the analyzer pipeline.
+#[derive(Clone, Copy, Debug)]
+pub struct VideoInfo {
+    pub width: u32,
+    pub height: u32,
+    pub total_frames: Option<u32>,
+    pub transfer_function: TransferFunction,
+}
 
 /// Native video information extraction using ffmpeg-next.
 ///
@@ -11,10 +50,8 @@ use ffmpeg_next::{codec, format, media};
 /// * `input_path` - Path to the input video file
 ///
 /// # Returns
-/// `Result<(u32, u32, Option<u32>, format::context::Input)>` - (width, height, optional_frame_count, input_context)
-pub fn get_native_video_info(
-    input_path: &str,
-) -> Result<(u32, u32, Option<u32>, format::context::Input)> {
+/// `Result<(VideoInfo, format::context::Input)>` - (video metadata, input_context)
+pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::context::Input)> {
     // Initialize FFmpeg
     ffmpeg::init().context("Failed to initialize FFmpeg")?;
 
@@ -27,22 +64,16 @@ pub fn get_native_video_info(
         .best(media::Type::Video)
         .context("No video stream found in input file")?;
 
-    let video_params = video_stream.parameters();
-
-    // Extract width and height from video parameters
-    let (width, height) = match video_params.medium() {
-        media::Type::Video => {
-            // Get decoder context to access width/height
-            let decoder_context = codec::context::Context::from_parameters(video_params)
-                .context("Failed to create decoder context")?;
-            let decoder = decoder_context
-                .decoder()
-                .video()
-                .context("Failed to create video decoder")?;
-            (decoder.width(), decoder.height())
-        }
-        _ => return Err(anyhow::anyhow!("Stream is not a video stream")),
-    };
+    let decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
+        .context("Failed to create decoder context")?;
+    let transfer_characteristic =
+        unsafe { color::TransferCharacteristic::from((*decoder_context.as_ptr()).color_trc) };
+    let decoder = decoder_context
+        .decoder()
+        .video()
+        .context("Failed to create video decoder")?;
+    let width = decoder.width();
+    let height = decoder.height();
 
     // Try to estimate frame count from duration and frame rate
     let frame_count = if video_stream.duration() != ffmpeg::ffi::AV_NOPTS_VALUE {
@@ -61,12 +92,28 @@ pub fn get_native_video_info(
         None
     };
 
+    let transfer_function = TransferFunction::from(transfer_characteristic);
+    let transfer_label = transfer_characteristic
+        .name()
+        .unwrap_or("unspecified")
+        .to_string();
+
     println!("Native video info: {}x{}", width, height);
     if let Some(frames) = frame_count {
         println!("Estimated frames: {}", frames);
     }
+    println!(
+        "Transfer function: {} ({})",
+        transfer_label, transfer_function
+    );
+    let info = VideoInfo {
+        width,
+        height,
+        total_frames: frame_count,
+        transfer_function,
+    };
 
-    Ok((width, height, frame_count, input_context))
+    Ok((info, input_context))
 }
 
 /// Set up hardware-accelerated decoder based on the specified acceleration type.

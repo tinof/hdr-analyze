@@ -4,7 +4,9 @@ use madvr_parse::MadVRFrame;
 use rayon::prelude::*;
 
 use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq};
+use crate::analysis::hlg::hlg_signal_to_nits;
 use crate::crop::CropRect;
+use crate::ffmpeg_io::TransferFunction;
 
 /// Apply 3x3 median filter to Y-plane data (in-place on a cloned buffer).
 ///
@@ -67,6 +69,8 @@ pub fn analyze_native_frame_cropped(
     _height: u32,
     crop_rect: &CropRect,
     denoise_mode: &str,
+    transfer_function: TransferFunction,
+    hlg_peak_nits: f64,
 ) -> Result<MadVRFrame> {
     // Y plane data
     let y_plane_data_raw = frame.data(0);
@@ -114,7 +118,14 @@ pub fn analyze_native_frame_cropped(
                         let code_i = code10 as i32;
                         let norm = ((code_i - 64) as f64 / 876.0).clamp(0.0, 1.0);
 
-                        let pq = norm; // Approximate PQ code from Y' (HDR10 pipeline)
+                        let pq = match transfer_function {
+                            TransferFunction::Hlg => {
+                                let nits = hlg_signal_to_nits(norm, hlg_peak_nits);
+                                nits_to_pq(nits)
+                            }
+                            _ => norm, // PQ/Unknown fall back to normalized PQ proxy
+                        }
+                        .clamp(0.0, 1.0);
                         if pq > local_max {
                             local_max = pq;
                         }

@@ -87,4 +87,20 @@ pub struct Cli {
     /// Pre-analysis Y-plane denoising: nlmeans, median3, or off (default: off)
     #[arg(long, default_value = "off")]
     pub pre_denoise: String,
+
+    /// Target_nits smoother type: off or ema (default: ema)
+    #[arg(long, default_value = "ema")]
+    pub target_smoother: String,
+
+    /// Use bidirectional (forward+backward) EMA smoothing when target_smoother=ema
+    #[arg(long, default_value_t = true)]
+    pub smoother_bidirectional: bool,
+
+    /// EMA alpha for target_nits smoothing (0.0-1.0). Lower = more smoothing. Default: 0.2
+    #[arg(long, default_value_t = 0.2)]
+    pub smoother_alpha: f64,
+
+    /// Peak luminance (nits) used when analyzing HLG content (default: 1000.0)
+    #[arg(long, default_value_t = 1000.0)]
+    pub hlg_peak_nits: f64,
 }

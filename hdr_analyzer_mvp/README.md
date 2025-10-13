@@ -40,7 +40,9 @@ The native pipeline provides measurement parity through:
   - 240-frame rolling average for temporal smoothing
   - 99th percentile highlight knee detection
   - Scene-aware heuristics for artistic intent preservation
+  - Bidirectional EMA smoothing enabled by default for stable target_nits output
 - **Hardware Acceleration**: Native support for CUDA, VAAPI, and VideoToolbox with graceful fallback
+- **Native HLG Analysis**: Auto-detects ARIB STD-B67 transfers and converts to PQ histograms using configurable peak luminance (`--hlg-peak-nits`, default 1000 nits)
 - **Professional Output**: madVR-compatible `.bin` measurement files with measurement parity accuracy
 
 ## Prerequisites
@@ -70,11 +72,11 @@ cargo build --release -p hdr_analyzer_mvp
 ### Basic Analysis
 
 ```bash
-# Standard analysis
+# Standard analysis (optimizer + smoothing enabled by default)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
 
-# With advanced optimizer
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin" --enable-optimizer
+# Disable optimizer/smoothing if you need raw measurements
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin" --disable-optimizer --target-smoother off
 ```
 
 ### Hardware Acceleration (Recommended)
@@ -98,16 +100,19 @@ cargo build --release -p hdr_analyzer_mvp
 # From workspace root with hardware acceleration
 cargo run -p hdr_analyzer_mvp --release -- --hwaccel cuda -i "video.mkv" -o "measurements.bin"
 
-# With optimizer enabled
-cargo run -p hdr_analyzer_mvp --release -- --hwaccel cuda --enable-optimizer -i "video.mkv" -o "measurements.bin"
+# Tweak smoothing or HLG peak during development
+cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --smoother-alpha 0.15 --hlg-peak-nits 1200
 ```
 
 ## Command Line Arguments
 
 - `-i, --input <PATH>`: Input HDR video file path
 - `-o, --output <PATH>`: Output .bin measurement file path  
-- `--enable-optimizer`: Enable advanced dynamic metadata optimizer
+- `--disable-optimizer`: Disable dynamic metadata optimizer (enabled by default)
 - `--hwaccel <TYPE>`: Hardware acceleration (`cuda`, `vaapi`, `videotoolbox`)
+- `--target-smoother <off|ema>`: Control target_nits smoothing (default `ema`)
+- `--smoother-alpha <float>` / `--smoother-bidirectional`: Tune bidirectional EMA smoothing
+- `--hlg-peak-nits <float>`: Override peak luminance used for HLG → PQ conversion (default 1000 nits)
 
 ## Performance Characteristics
 

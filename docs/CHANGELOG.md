@@ -43,12 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Bidirectional EMA target_nits smoothing with configurable CLI flags (`--target-smoother`, `--smoother-alpha`, `--smoother-bidirectional`).
+- Native HLG (ARIB STD-B67) detection and in-memory conversion to PQ histograms with configurable peak luminance (`--hlg-peak-nits`).
+
 ### Fixed
 - Corrected the ffmpeg filter chain in scene detection to remove a faulty `scale` operation, which was preventing accurate detection on high-resolution videos
 
 ### Changed
 - Improved scene detection sensitivity for more accurate scene segmentation
 - Replaced simple RGB average with a weighted luminance calculation (Rec. 709/2020 coefficients) for more perceptually accurate brightness analysis
+- Enabled EMA target smoothing by default for the balanced optimizer profile and CLI (opt-out via `--target-smoother off`).
 
 ### Planned Features
 - Automated black bar detection for improved APL accuracy

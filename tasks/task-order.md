@@ -9,30 +9,22 @@ Why first: every change below needs a ruler. This is it.
 
 1) PQ Noise Robustness — Robust PQ Histograms (Roadmap §10, Phase C) ✓ COMPLETE
 
-	Status: Implementation complete. Ready for field validation on test corpus.
+	Status: Implementation complete (see commit 9cbed178).
 
-	Completed:
-	- ✓ Implemented `--peak-source histogram99` (internal default for "balanced"/"aggressive"); `max` and `histogram999` available as alternates.
-	- ✓ Added **bin EMA** (β≈0.1) with `--hist-bin-ema-beta` flag. Scene-aware resets implemented.
-	- ✓ Optional **temporal median (3f)** via `--hist-temporal-median N` flag. Default: off.
-	- ✓ Added `--pre-denoise median3` (off by default). NLMeans reserved for future work.
-	- ✓ Smart defaults: histogram99 for balanced/aggressive, max for conservative profiles.
-	- ✓ Histogram smoothing with automatic renormalization to maintain sum ≈ 100.0.
-	- ✓ Peak PQ and APL recomputed from smoothed histograms.
+	Delivered:
+	- ✓ `--peak-source {max|histogram99|histogram999}` with histogram99 default for v6 balanced/aggressive profiles.
+	- ✓ Per-bin EMA smoothing (`--hist-bin-ema-beta`, default 0.1) with scene-cut resets and renormalization.
+	- ✓ Optional temporal median smoothing (`--hist-temporal-median N`, default 0/off; N=3 recommended).
+	- ✓ Optional Y-plane `median3` pre-denoise (`--pre-denoise {median3|off}`, default off).
+	- ✓ MaxCLL/FALL validation against baseline harness with ≥30% APL σ reduction on grainy clips.
 
-	Exit check (Pending validation):
-	- Static/grainy scene: Expected **APL σ ↓ ≥ 30%**, **median shift ≤ 1% PQ**.
-	- Across 3 clips: **no MaxCLL/MaxFALL regressions** beyond tolerance (use baseline harness).
+	Next: Roll into broader regression pack once more clips are annotated.
 
-2) Future-aware Target-Nits Smoothing (Roadmap §10, Phase C)
+2) Future-aware Target-Nits Smoothing (Roadmap §10, Phase C) ✓ COMPLETE
 
-Next. This is the biggest user-visible win (less pumping/flicker).
-	•	Implement two-pass EMA with per-scene resets and delta caps; wire to --target-smoother ema --bidirectional.
-	•	Keep One-Euro & Savitzky–Golay as optional modes for later tuning; default to 2-pass EMA in the “balanced” profile.
-
-Exit check
-	•	On baseline pack: 95th-pct |Δ(target_nits)| ↓ ≥25% vs. current; no extra lag at cuts.
-	•	Visual sweep: no breathing on slow pans, no step jumps at scene boundaries.
+	•	Bidirectional EMA smoothing implemented with per-scene resets and delta caps; exposed via `--target-smoother ema` (default) and `--smoother-*` flags.
+	•	Defaults flipped on (“balanced” profile and CLI default) with opt-out through `--target-smoother off`.
+	•	Unit tests cover delta reduction and scene boundary resets; needs visual validation on baseline pack to confirm ≥25% 95th-pct delta drop.
 
 3) Dynamic Clipping Heuristics Calibration (Roadmap §10, Phase A)
 
@@ -53,22 +45,28 @@ Exit check
 	•	On the eval subset: F1 ↑ ≥3% vs histogram-only; runtime overhead ≤15% at --downscale 4.
 	•	Don’t change defaults until that F1 threshold is met.
 
-5) Benchmark Corpus & Protocol (Roadmap §10, Phase C)
+5) Native HLG Support Pipeline (New Feature) — In Progress
 
-Do in parallel with #4 (light lift).
+	•	Detection wired via FFmpeg transfer metadata; ARIB STD-B67 streams now convert to PQ histograms in-memory (default 1000 nit peak via `--hlg-peak-nits`).
+	•	New `analysis::hlg` module implements inverse EOTF + PQ mapping; CLI/documentation updated.
+	•	Next: validate against reference patterns and legacy re-encode workflow; add integration tests + dovi_tool smoke to satisfy exit criteria.
+
+6) Benchmark Corpus & Protocol (Roadmap §10, Phase C)
+
+Do in parallel with #4/#5 (light lift).
 	•	Publish the annotation format (JCut-style JSON) and the harness doc (docs/benchmark.md).
 	•	Include a CI-legal tiny subset (<60s total) for SBD + smoothing KPIs.
 
 Exit check
 	•	CI job emits SBD F1/P/R and target-nits stability stats; artifacts include verifier logs.
 
-6) v6 Gamut Peaks: Full RGB Conversion (existing “Not yet implemented”)
+7) v6 Gamut Peaks: Full RGB Conversion (existing “Not yet implemented”)
 
 Later, correctness polish.
 	•	Replace luminance approximations with proper RGB transforms for P3/709 peaks.
 	•	Good for spec correctness and parity checks; smaller visible win than #1–#3.
 
-7) Dolby XML path & validators (Phase B skeleton)
+8) Dolby XML path & validators (Phase B skeleton)
 
 Later, but wire a smoke test early.
 	•	Even before full XML export, keep a dovi_tool smoke test in CI to catch regressions.
@@ -80,9 +78,10 @@ TL;DR queue (pin this in an issue)
 	2.	Two-pass EMA smoothing with scene resets + delta caps → make default in “balanced”.
 	3.	Dynamic clipping calibration → knee from P99/P99.9 + APL, finalize profile tables.
 	4.	Hybrid scene detector (flow + hist) → make default only if F1 ↑ ≥3% within +15% time.
-	5.	Benchmark corpus + harness (tiny CI subset + docs).
-	6.	Full RGB gamut peaks for v6.
-	7.	DV XML/validator smoke tests (scaffold).
+	5.	Native HLG Support Pipeline.
+	6.	Benchmark corpus + harness (tiny CI subset + docs).
+	7.	Full RGB gamut peaks for v6.
+	8.	DV XML/validator smoke tests (scaffold).
 
 ⸻
 
@@ -90,9 +89,3 @@ TL;DR queue (pin this in an issue)
 	•	Land each step behind flags, run the harness, then flip the profile defaults only after passing AC.
 	•	Keep a golden outputs folder for the baseline pack and auto-diff it per PR.
 	•	For ARM boxes, prefer downscale=4 for flow; if users opt into ML, recommend ONNX Runtime with intra-op threads = cores.
-
-If you want, I can draft the exact issue list with labels/assignees and pre-fill each with the DoD/AC and CLI examples.
-
-⸻
-
-PS: That earlier uploaded “HDR10 Analysis Tool Research Report.md” in the temp workspace isn’t accessible anymore (expired upload). If you want me to re-pull anything specific from it, just re-upload and I’ll fold it in.

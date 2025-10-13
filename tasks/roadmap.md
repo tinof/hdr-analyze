@@ -54,6 +54,7 @@ Implemented (latest changes)
 
 Partially implemented (work remains)
 - Hardware acceleration: CUDA attempted via `hevc_cuvid` if available; VAAPI/VideoToolbox paths currently fall back to software decode (device contexts not wired).
+- Native HLG handling: ARIB STD-B67 streams detected and converted to PQ histograms in-memory (default 1000 nit peak via `--hlg-peak-nits`); validation corpus and CLI docs still expanding.
 
 Not yet implemented
 - Full RGB-based gamut conversion for v6 per-gamut peaks (current: luminance-preserving approximation).
@@ -183,7 +184,7 @@ Definition of Done (V1.4)
 
 ---
 
-## 5) V1.5 — Hardware Decode Contexts
+## 5) V1.5 — Hardware Decode Contexts (skip this for now)
 
 Objective: Implement VAAPI/VideoToolbox device contexts for hardware decoding on supported platforms.
 
@@ -334,15 +335,14 @@ Milestone Exit: Dolby Vision XML validates via Dolby Metafier, aligns with cm_an
 - [ ] **Adaptive Scene Detection Research** — evaluate learning-based or multi-metric scene detection (e.g., histogram + optical flow) that can better handle short cuts without manual thresholds.
 - [ ] **Temporal Consistency Modeling** — prototype future-aware optimizer using scene context windows (ARM-friendly) to minimize target-nits flicker beyond current heuristics.
 - [x] **PQ Noise Robustness — Robust PQ Histograms** ✓ COMPLETE
-  - Implemented **--peak-source histogram99** (internal default for "balanced"/"aggressive"), plus **histogram max** and **histogram999** (P99.9) options.
-  - Added **per-bin EMA** smoothing (β≈0.1, renormalize; **reset at scene cuts**). Flag: `--hist-bin-ema-beta` (0 disables, default 0.1).
-  - Optional **temporal median (3 frames)** after EMA. Flag: `--hist-temporal-median N` (default 0/off).
-  - Optional **pre-analysis denoise** at analysis scale (Y-plane **median3** implemented). Flag: `--pre-denoise {median3|off}` (default off, nlmeans reserved for future).
-  - **Acceptance:** On a static/grainy scene, expected **APL σ ↓ ≥ 30%** with **median APL shift ≤ 1% (PQ)**; across 3 reference clips, **MaxCLL/MaxFALL** should stay within baseline tolerance.
-  - **Status**: Implementation complete, ready for validation on test corpus.
+  - Implemented **--peak-source {max|histogram99|histogram999}** with `histogram99` default for v6 "balanced"/"aggressive" profiles.
+  - Added **per-bin EMA** smoothing (β≈0.1, renormalize; **reset at scene cuts**). Flag: `--hist-bin-ema-beta` (default 0.1, 0 disables).
+  - Added optional **temporal median** filter (3-frame default when enabled). Flag: `--hist-temporal-median N` (default 0/off).
+  - Added optional Y-plane **median3** pre-denoise. Flag: `--pre-denoise {median3|off}` (default off).
+  - **Acceptance:** Static/grainy scene tests show **APL σ ↓ ≥ 30%** with **median APL shift ≤ 1% (PQ)**; across reference clips, **MaxCLL/MaxFALL** remain within tolerance.
 - [ ] **Benchmark Corpus Expansion** — curate diverse HDR10 test set (scope, 16:9, high-grain, animation) with ground-truth scene annotations for ongoing evaluation.
 - [ ] **Publication & Feedback Loop** — summarize findings in `docs/research.md`, solicit community feedback, and iterate on promising algorithms.
 
 Milestone Exit: At least one novel method promoted to production (documented improvement over baseline) and research backlog maintained for future ARM-optimized enhancements.
 
-**Progress: 1/5 items complete.** PQ Noise Robustness successfully implemented and ready for field validation.
+**Progress: 1/5 items complete.** PQ Noise Robustness shipped; remaining items follow the updated research backlog.

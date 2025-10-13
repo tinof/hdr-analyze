@@ -50,10 +50,12 @@ hdr_project/
 - Dynamic metadata optimizer (optional): Per-frame target nits generation using a 240-frame rolling average, 99th percentile highlight knee detection, and scene-aware heuristics.
   - Scene-aware APL blending and per-scene smoothing resets to avoid cross-scene lag.
   - Per-frame delta limiting for temporal stability of `target_nits`.
+  - Bidirectional EMA smoothing enabled by default (configurable via `--target-smoother` / `--smoother-*`).
 - Noise robustness: Advanced histogram smoothing and robust peak detection for grainy content.
   - Histogram-based peak selection (99th/99.9th percentile) instead of direct max to reduce noise impact.
   - Per-bin EMA smoothing with scene-aware resets to stabilize APL measurements.
   - Optional temporal median filtering and pre-analysis denoising for extremely noisy content.
+- Native HLG workflow: Automatically detects ARIB STD-B67 transfers and converts to PQ histograms in-memory using the configurable `--hlg-peak-nits` (default 1000 nits).
 - Professional output: Writes madVR-compatible `.bin` measurement files through the `madvr_parse` library.
 - Cross-platform: CPU decoding on all platforms with optional CUDA attempt on NVIDIA (graceful fallback to software decoding everywhere else).
 
@@ -181,6 +183,13 @@ Noise robustness for grainy content:
 # Conservative profile with direct max (most responsive)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" \
   --optimizer-profile conservative --peak-source max
+
+# Tweak target_nits smoothing (enabled by default)
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --target-smoother off
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --smoother-alpha 0.1 --smoother-bidirectional false
+
+# Native HLG content handling (auto-detected, override peak if desired)
+./target/release/hdr_analyzer_mvp -i "hlg_video.mkv" -o "out.bin" --hlg-peak-nits 1200
 ```
 
 Using cargo:

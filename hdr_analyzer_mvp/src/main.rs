@@ -44,18 +44,25 @@ fn main() -> Result<()> {
             .map_err(|err| anyhow::anyhow!("Failed to configure Rayon thread pool: {err}"))?;
     }
 
+    if cli.hlg_peak_nits <= 0.0 {
+        return Err(anyhow::anyhow!("--hlg-peak-nits must be greater than 0"));
+    }
+
     println!(
         "HDR Analyzer MVP (Native Pipeline) - Starting analysis of: {}",
         input_path
     );
 
-    let (width, height, total_frames, input_context) = get_native_video_info(&input_path)?;
-    println!("Video resolution: {}x{}", width, height);
-    if let Some(frames) = total_frames {
+    let (video_info, input_context) = get_native_video_info(&input_path)?;
+    println!(
+        "Video resolution: {}x{}",
+        video_info.width, video_info.height
+    );
+    if let Some(frames) = video_info.total_frames {
         println!("Total frames: {}", frames);
     }
 
-    run(&cli, width, height, total_frames, input_context)?;
+    run(&cli, &video_info, input_context)?;
 
     println!("Native analysis complete!");
     Ok(())

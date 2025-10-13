@@ -15,7 +15,7 @@ use crate::analysis::scene::{
 };
 use crate::cli::Cli;
 use crate::crop::CropRect;
-use crate::ffmpeg_io::setup_hardware_decoder;
+use crate::ffmpeg_io::{setup_hardware_decoder, TransferFunction, VideoInfo};
 use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
 use crate::writer::write_measurement_file;
 
@@ -29,13 +29,26 @@ pub fn format_duration(duration: Duration) -> String {
 /// This function orchestrates the complete HDR analysis pipeline using native FFmpeg
 pub fn run(
     cli: &Cli,
-    width: u32,
-    height: u32,
-    total_frames: Option<u32>,
+    video_info: &VideoInfo,
     mut input_context: format::context::Input,
 ) -> Result<()> {
+    match video_info.transfer_function {
+        TransferFunction::Hlg => {
+            println!(
+                "Detected HLG transfer function. Using native HLG→PQ conversion (peak {:.0} nits).",
+                cli.hlg_peak_nits
+            );
+        }
+        TransferFunction::Unknown => {
+            println!(
+                "Transfer function unspecified; defaulting to PQ analysis path. Use --hlg-peak-nits if needed."
+            );
+        }
+        TransferFunction::Pq => {}
+    }
+
     let (mut scenes, mut frames) =
-        run_native_analysis_pipeline(cli, width, height, total_frames, &mut input_context)?;
+        run_native_analysis_pipeline(cli, video_info, &mut input_context)?;
 
     fix_scene_end_frames(&mut scenes, frames.len());
 
@@ -47,10 +60,33 @@ pub fn run(
     precompute_scene_stats(&mut scenes, &frames);
 
     let optimizer_enabled = !cli.disable_optimizer;
+    let mut selected_profile: Option<OptimizerProfile> = None;
     if optimizer_enabled {
         println!("Running intelligent optimizer pass...");
         let optimizer_profile = OptimizerProfile::from_name(&cli.optimizer_profile)?;
         run_optimizer_pass(&scenes, &mut frames, &optimizer_profile);
+        selected_profile = Some(optimizer_profile);
+    }
+
+    // Optional post-optimization target_nits smoothing
+    if optimizer_enabled && cli.target_smoother.to_lowercase() == "ema" {
+        let alpha = cli.smoother_alpha.clamp(0.0, 1.0);
+        let bidirectional = cli.smoother_bidirectional;
+        let max_delta = selected_profile
+            .map(|p| p.max_delta_per_frame)
+            .unwrap_or(200);
+        println!(
+            "Applying target_nits EMA smoother (alpha={:.3}, bidirectional={})...",
+            alpha, bidirectional
+        );
+        crate::optimizer::apply_target_smoother(
+            &scenes,
+            &mut frames,
+            alpha,
+            bidirectional,
+            max_delta,
+        );
+        println!("Target_nits smoothing complete.");
     }
 
     let output_path = match &cli.output {
@@ -85,12 +121,14 @@ pub fn run(
 
 fn run_native_analysis_pipeline(
     cli: &Cli,
-    width: u32,
-    height: u32,
-    total_frames: Option<u32>,
+    video_info: &VideoInfo,
     input_context: &mut format::context::Input,
 ) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>)> {
     println!("Starting native analysis pipeline...");
+    let width = video_info.width;
+    let height = video_info.height;
+    let total_frames = video_info.total_frames;
+    let transfer_function = video_info.transfer_function;
 
     let video_stream = input_context
         .streams()
@@ -213,6 +251,8 @@ fn run_native_analysis_pipeline(
                     height,
                     rect,
                     &cli.pre_denoise,
+                    transfer_function,
+                    cli.hlg_peak_nits,
                 )?;
                 if let Some(start) = analysis_start {
                     analysis_duration += start.elapsed();
@@ -309,8 +349,15 @@ fn run_native_analysis_pipeline(
         } else {
             None
         };
-        let analyzed_frame =
-            analyze_native_frame_cropped(analysis_frame, width, height, rect, &cli.pre_denoise)?;
+        let analyzed_frame = analyze_native_frame_cropped(
+            analysis_frame,
+            width,
+            height,
+            rect,
+            &cli.pre_denoise,
+            transfer_function,
+            cli.hlg_peak_nits,
+        )?;
         if let Some(start) = analysis_start {
             analysis_duration += start.elapsed();
         }

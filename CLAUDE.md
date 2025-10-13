@@ -114,6 +114,7 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 - **v5 histogram semantics**: Mid-bin weighting for average PQ computation, black-bar heuristic for bin 0
 - **Scene detection**: Chi-squared-like histogram distance with configurable threshold (default 0.3)
 - **Hardware acceleration**: CUDA attempted on NVIDIA GPUs, graceful fallback to software decoding
+- **HLG conversion**: ARIB STD-B67 streams converted in-memory to PQ histograms using configurable peak nits (default 1000)
 
 ## Dependencies and Prerequisites
 
@@ -145,11 +146,15 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 ### Analyzer (`hdr_analyzer_mvp`)
 - `<INPUT>`: Input HDR video file (positional argument)
 - `-o, --output <PATH>`: Output `.bin` measurement file (optional - auto-generates from input filename if not provided)
-- `--enable-optimizer`: Enable dynamic target nits generation
+- `--disable-optimizer`: Disable dynamic target nits generation (enabled by default)
 - `--hwaccel <TYPE>`: Hardware acceleration (`cuda`, `vaapi`, `videotoolbox`)
 - `--madvr-version <5|6>`: Output file version (default: 5)
 - `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
 - `--target-peak-nits <nits>`: Override target_peak_nits for v6 files
+- `--target-smoother <off|ema>`: Target nits smoother (default `ema`)
+- `--smoother-bidirectional`: Use forward+backward EMA (default on)
+- `--smoother-alpha <float>`: EMA alpha coefficient (default 0.2)
+- `--hlg-peak-nits <float>`: Peak luminance used for HLG analysis (default 1000.0 nits)
 
 ### Verifier
 - Single positional argument: path to `.bin` file to verify

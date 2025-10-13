@@ -2,4 +2,5 @@
 
 pub mod frame;
 pub mod histogram;
+pub mod hlg;
 pub mod scene;
