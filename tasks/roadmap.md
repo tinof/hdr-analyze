@@ -46,15 +46,17 @@ Implemented (latest changes)
   - Parses measurement, prints summary, validates scene/frame ranges, histogram integrity (256 bins, sum ≈100), PQ range checks; reports optimizer presence.
   - Additional checks: recomputes MaxFALL/AvgFALL and compares to header within tolerance; validates flags vs. presence of per-frame `target_nits`.
   - Hue histogram validation: checks 31-bin length, sum ≤100%, reports non-zero distribution coverage, warns on low coverage.
+  - Post-mux DV verification: available via `mkvdolby --verify` (automates verifier, `dovi_tool info` on extracted RPU, and `mediainfo` frame count checks for P8.1 correctness).
 - Unit tests
-  - 12 passing tests covering: PQ↔nits conversion, v5 histogram boundaries, scene detection guards, histogram distance metrics, highlight knee detection, optimizer profiles, delta limiting, gamut approximation, FALL computation.
+  - 17 passing tests across modules covering: PQ↔nits conversion, v5 histogram boundaries, scene detection guards, histogram distance metrics, highlight knee detection, optimizer profiles, delta limiting, gamut approximation, FALL computation, HLG conversion.
 - Documentation
   - Root README and CLAUDE.md updated to reflect current CLI (positional + flag input), optimizer defaults, and new flags.
   - Roadmap synchronized with implementation status.
+  - mkvdolby README documents `--verify` usage and options.
 
-Partially implemented (work remains)
-- Hardware acceleration: CUDA attempted via `hevc_cuvid` if available; VAAPI/VideoToolbox paths currently fall back to software decode (device contexts not wired).
-- Native HLG handling: ARIB STD-B67 streams detected and converted to PQ histograms in-memory (default 1000 nit peak via `--hlg-peak-nits`); validation corpus and CLI docs still expanding.
+ Partially implemented (work remains)
+ - Hardware acceleration: CUDA attempted via `hevc_cuvid` if available; VAAPI/VideoToolbox paths currently fall back to software decode (device contexts not wired).
+ - Native HLG handling: ARIB STD-B67 streams detected and converted to PQ histograms in-memory (default 1000 nit peak via `--hlg-peak-nits`). Validation corpus still expanding. mkvdolby updated to run analyzer natively on HLG for measurements; retains a single HLG→PQ encode for DV base layer compliance (Profile 8.1).
 
 Not yet implemented
 - Full RGB-based gamut conversion for v6 per-gamut peaks (current: luminance-preserving approximation).
@@ -169,16 +171,16 @@ Acceptance Criteria — Ready for Validation
 
 Objective: Improve throughput on multi-core systems (e.g., Ampere ARM).
 
-Planned
+Implementation status
 - [x] Parallelize histogram accumulation by rows/tiles using `rayon`.
-- [x] Optional lock-free accumulators or per-thread buffers + reduce (per-worker histograms + reduction).
-- [x] Consider SIMD for hot loops (optional) — profiled current path; documented follow-up once hotspots remain after parallelism.
-- [x] Benchmarks on representative 4K HEVC HDR samples — profiling workflow documented via `--profile-performance` + `docs/performance.md`.
+- [x] Optional per-thread buffers + reduce (per-worker histograms + reduction).
+- [x] Considered SIMD for hot loops — profiled current path; follow-ups documented post-parallelism.
+- [x] Profiling workflow via `--profile-performance` documented in `docs/performance.md`.
 
 Notes
 - Analyzer exposes `--analysis-threads` to pin Rayon workers and `--profile-performance` to emit decode vs. analysis throughput (see `docs/performance.md`).
 
-Definition of Done (V1.4)
+Definition of Done (V1.4) — Pending validation
 - ≥1.7× speedup on 8-core CPU vs current single-thread baseline (same content, same flags).
 - No changes in measurement outputs beyond floating-point noise tolerance.
 
@@ -201,7 +203,7 @@ Definition of Done (V1.5)
 
 ## 6) Validation & QA
 
-Unit tests — ✓ Partially Complete
+Unit tests — ✓ Expanded
 - [x] Histogram bin selection correctness (bin edges, mid-bin mapping, v5 boundaries).
 - [x] Chi-squared/histogram distance metrics (identical vs. opposite histograms).
 - [x] Min-scene-length logic and smoothing behavior.
@@ -212,7 +214,7 @@ Unit tests — ✓ Partially Complete
 - [x] Delta limiting behavior.
 - [x] Gamut peak approximation logic.
 - [ ] Crop detection on synthetic letterboxed frames (remaining).
-- Status: 12 passing tests in `hdr_analyzer_mvp/src/main.rs`.
+- Status: 17 passing tests across `hdr_analyzer_mvp` modules (optimizer, writer, histogram, scene, HLG).
 
 Integration tests — Planned
 - [ ] Analyze sample HDR10 assets; verify with `verifier`.

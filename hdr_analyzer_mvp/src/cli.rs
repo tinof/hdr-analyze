@@ -34,6 +34,10 @@ pub struct Cli {
     #[arg(long, default_value_t = 0.3)]
     pub scene_threshold: f64,
 
+    /// Scene detection metric: 'hist' (histogram distance) or 'hybrid' (prototype; histogram fused with flow)
+    #[arg(long, default_value = "hist")]
+    pub scene_metric: String,
+
     /// Minimum scene length in frames. Cuts closer than this are dropped. Default: 24
     #[arg(long, default_value_t = 24)]
     pub min_scene_length: u32,
@@ -103,4 +107,9 @@ pub struct Cli {
     /// Peak luminance (nits) used when analyzing HLG content (default: 1000.0)
     #[arg(long, default_value_t = 1000.0)]
     pub hlg_peak_nits: f64,
+
+    /// Header MaxCLL source: max (direct max), histogram99 (99th percentile), histogram999 (99.9th percentile)
+    /// Only affects header.maxcll; per-frame peaks use --peak-source.
+    #[arg(long)]
+    pub header_peak_source: Option<String>,
 }

@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+dist/
+build/
+*.egg-info/
+
+# mkvdolby temporary files
+mkvdolby_temp_*/

@@ -47,6 +47,10 @@ pub fn run(
         TransferFunction::Pq => {}
     }
 
+    if cli.scene_metric.to_lowercase() == "hybrid" {
+        println!("Scene metric: hybrid (prototype, using histogram-only for now)");
+    }
+
     let (mut scenes, mut frames) =
         run_native_analysis_pipeline(cli, video_info, &mut input_context)?;
 
@@ -114,9 +118,18 @@ pub fn run(
         optimizer_enabled,
         cli.madvr_version as u32,
         cli.target_peak_nits,
+        cli.header_peak_source.as_deref(),
     )?;
 
     Ok(())
+}
+
+fn compute_scene_diff(cli: &Cli, curr_hist: &[f64], prev_hist: &[f64]) -> f64 {
+    match cli.scene_metric.to_lowercase().as_str() {
+        // Placeholder for future hybrid (histogram + flow). For now, use histogram difference.
+        "hybrid" => calculate_histogram_difference(curr_hist, prev_hist),
+        _ => calculate_histogram_difference(curr_hist, prev_hist),
+    }
 }
 
 fn run_native_analysis_pipeline(
@@ -259,8 +272,7 @@ fn run_native_analysis_pipeline(
                 }
 
                 if let Some(ref prev_hist) = previous_histogram {
-                    let raw_diff =
-                        calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+                    let raw_diff = compute_scene_diff(cli, &analyzed_frame.lum_histogram, prev_hist);
                     let diff_for_threshold = if smoothing_window > 0 {
                         diff_window.push_back(raw_diff);
                         if diff_window.len() > smoothing_window {
@@ -363,7 +375,7 @@ fn run_native_analysis_pipeline(
         }
 
         if let Some(ref prev_hist) = previous_histogram {
-            let raw_diff = calculate_histogram_difference(&analyzed_frame.lum_histogram, prev_hist);
+            let raw_diff = compute_scene_diff(cli, &analyzed_frame.lum_histogram, prev_hist);
             let diff_for_threshold = if smoothing_window > 0 {
                 diff_window.push_back(raw_diff);
                 if diff_window.len() > smoothing_window {

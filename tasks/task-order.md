@@ -3,7 +3,7 @@ Here’s the order I’d tackle things to maximize visible output quality (and k
 0) Baseline & Harness (do this first, ~half-day)
 	•	Lock a tiny baseline pack (3× short HDR10 clips: scope letterbox, TV doc, bright demo).
 	•	Freeze current outputs (.bin, verifier logs) and compute simple deltas (scene count, MaxCLL/FALL, per-frame target_nits 95th-pct delta).
-	•	Add a micro harness: tools/compare_baseline.py (or Rust) that compares new runs to the frozen baseline and prints the metrics you already list in Acceptance Criteria.
+	•	Use the existing Rust harness at `tools/compare_baseline` to compare new runs to the frozen baseline and print the key metrics (scene count deltas, MaxCLL/FALL deltas, target_nits P95 delta).
 
 Why first: every change below needs a ruler. This is it.
 
@@ -31,6 +31,7 @@ Why first: every change below needs a ruler. This is it.
 Then. Now that peaks and smoothing are stable, set the curve.
 	•	Define knee from P99/P99.9 + APL category; scene-aware reset; delta caps (you already have scaffolding).
 	•	Finalize --optimizer-profile {conservative,balanced,aggressive} numeric tables in docs; make “balanced=P99” with modest knee slope.
+	•	Add `--header-peak-source {max|histogram99|histogram999}` to select header MaxCLL from robust percentiles and reduce outlier-driven spikes.
 
 Exit check
 	•	dovi_tool generate --madvr-file … accepts our bins; plot shows monotone, smooth intra-scene trajectories; no banding in troublesome highlights.
@@ -49,7 +50,8 @@ Exit check
 
 	•	Detection wired via FFmpeg transfer metadata; ARIB STD-B67 streams now convert to PQ histograms in-memory (default 1000 nit peak via `--hlg-peak-nits`).
 	•	New `analysis::hlg` module implements inverse EOTF + PQ mapping; CLI/documentation updated.
-	•	Next: validate against reference patterns and legacy re-encode workflow; add integration tests + dovi_tool smoke to satisfy exit criteria.
+	•	Completed: `mkvdolby` now calls `hdr_analyzer_mvp` directly on HLG content for measurements (native HLG path) and retains a single HLG→PQ encode for the DV base layer.
+	•	Next: validate native HLG outputs against legacy zscale re-encode workflow; add integration tests + dovi_tool smoke to satisfy exit criteria.
 
 6) Benchmark Corpus & Protocol (Roadmap §10, Phase C)
 
@@ -82,6 +84,7 @@ TL;DR queue (pin this in an issue)
 	6.	Benchmark corpus + harness (tiny CI subset + docs).
 	7.	Full RGB gamut peaks for v6.
 	8.	DV XML/validator smoke tests (scaffold).
+	9.	Post-mux verification in mkvdolby (`--verify`): IMPLEMENTED — runs `verifier` on .bin, extracts RPU + `dovi_tool info --summary`, cross-checks frame counts via mediainfo, returns non-zero on mismatches.
 
 ⸻
 

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mkvdolby"
+version = "1.0.0"
+description = "Convert HDR10/HDR10+ videos to Dolby Vision format."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "you@example.com" }
+]
+dependencies = [
+    "ffmpeg-progress-yield"
+]
+
+[project.scripts]
+mkvdolby = "mkvdolby.cli:main"

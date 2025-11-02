@@ -32,13 +32,19 @@ pub fn write_measurement_file(
     enable_optimizer: bool,
     madvr_version: u32,
     target_peak_nits: Option<u32>,
+    header_peak_source: Option<&str>,
 ) -> Result<()> {
     // 1. Create the Header
-    let maxcll = frames
+    let peaks_nits: Vec<u32> = frames
         .iter()
-        .map(|f| pq_to_nits(f.peak_pq_2020) as u32)
-        .max()
-        .unwrap_or(0);
+        .map(|f| pq_to_nits(f.peak_pq_2020).round() as u32)
+        .collect();
+
+    let maxcll = match header_peak_source.unwrap_or("max").to_lowercase().as_str() {
+        "histogram99" => percentile_u32(&peaks_nits, 0.99),
+        "histogram999" => percentile_u32(&peaks_nits, 0.999),
+        _ => peaks_nits.into_iter().max().unwrap_or(0),
+    };
 
     // Compute FALL metrics from per-frame avg PQ
     let (maxfall, avgfall) = compute_falls(frames);
@@ -198,4 +204,24 @@ mod tests {
             avgfall
         );
     }
+
+    #[test]
+    fn test_percentile_u32() {
+        let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        assert_eq!(percentile_u32(&v, 0.0), 1);
+        assert_eq!(percentile_u32(&v, 0.5), 5);
+        assert!(percentile_u32(&v, 0.99) >= 10 - 1);
+        assert_eq!(percentile_u32(&[], 0.5), 0);
+    }
+}
+
+fn percentile_u32(values: &[u32], p: f64) -> u32 {
+    if values.is_empty() {
+        return 0;
+    }
+    let mut v = values.to_vec();
+    v.sort_unstable();
+    let p = p.clamp(0.0, 1.0);
+    let idx = ((p * (v.len() as f64)) - 1.0).ceil().max(0.0) as usize;
+    v[idx.min(v.len() - 1)]
 }

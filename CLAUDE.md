@@ -150,7 +150,9 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 - `--hwaccel <TYPE>`: Hardware acceleration (`cuda`, `vaapi`, `videotoolbox`)
 - `--madvr-version <5|6>`: Output file version (default: 5)
 - `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
+- `--scene-metric <hist|hybrid>`: Scene detection metric (default: hist). Hybrid is a prototype flag.
 - `--target-peak-nits <nits>`: Override target_peak_nits for v6 files
+- `--header-peak-source <max|histogram99|histogram999>`: How to select header MaxCLL (default: max)
 - `--target-smoother <off|ema>`: Target nits smoother (default `ema`)
 - `--smoother-bidirectional`: Use forward+backward EMA (default on)
 - `--smoother-alpha <float>`: EMA alpha coefficient (default 0.2)
@@ -158,6 +160,9 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 
 ### Verifier
 - Single positional argument: path to `.bin` file to verify
+
+### mkvdolby
+- `--verify`: Run our verifier + dovi_tool info/mediainfo post-mux and fail on inconsistencies
 
 ## Refactoring (Milestone R) - ✓ COMPLETE
 
