@@ -1,92 +1,52 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [1.0.0] - 2025-01-26
-
-### Added
-- **Core HDR Analysis Engine**: Complete per-frame analysis of HDR10 video content
-- **PQ-Based Histogram Generation**: 256-bin luminance histogram based on ST.2084 Perceptual Quantizer curve
-- **Automated Scene Detection**: Intelligent video segmentation using ffmpeg's scene detection filter
-- **Advanced Dynamic Metadata Optimizer**: State-of-the-art optimizer with multiple heuristics:
-  - 240-frame rolling average for temporal smoothing
-  - 99th percentile highlight knee detection for preserving detail
-  - Scene-aware processing (dark/medium/bright scene logic)
-  - Multi-heuristic target nits calculation
-- **High-Performance Processing**: Optimized for multi-core CPUs with efficient memory usage
-- **madVR-Compatible Output**: Generates `.bin` measurement files ready for Dolby Vision workflows
-- **Enhanced Progress Reporting**: Visual progress bars with ETA calculations and processing rates
-- **Professional CLI Interface**: Clean command-line interface with comprehensive help
-- **Cross-Platform Support**: Works on Windows, macOS, and Linux
-
-### Technical Features
-- **Accurate Peak Brightness Measurement**: MaxCLL calculation with PQ curve precision
-- **Average Picture Level Analysis**: Frame-by-frame APL computation for contextual optimization
-- **Binary Format Compatibility**: Full madVR measurement file format support
-- **Temporal Artifact Prevention**: Rolling averages prevent abrupt brightness changes
-- **Highlight Detail Preservation**: Intelligent knee detection maintains artistic intent
-- **Memory Efficient**: Streaming analysis minimizes RAM usage for large 4K/8K files
-
-### Dependencies
-- Rust toolchain (1.70+)
-- FFmpeg (required in system PATH)
-- Cross-platform binary releases available
-
-### Performance
-- Processes 4K HDR content at 15-30 fps on modern hardware
-- Optimized scene detection reduces analysis time by 60%
-- Memory usage scales linearly with video resolution
-- Multi-threaded histogram processing for maximum efficiency
-
-## [Unreleased]
-
-### Added
-- Bidirectional EMA target_nits smoothing with configurable CLI flags (`--target-smoother`, `--smoother-alpha`, `--smoother-bidirectional`).
-- Native HLG (ARIB STD-B67) detection and in-memory conversion to PQ histograms with configurable peak luminance (`--hlg-peak-nits`).
-
-### Fixed
-- Corrected the ffmpeg filter chain in scene detection to remove a faulty `scale` operation, which was preventing accurate detection on high-resolution videos
-
-### Changed
-- Improved scene detection sensitivity for more accurate scene segmentation
-- Replaced simple RGB average with a weighted luminance calculation (Rec. 709/2020 coefficients) for more perceptually accurate brightness analysis
-- Enabled EMA target smoothing by default for the balanced optimizer profile and CLI (opt-out via `--target-smoother off`).
-
-### Planned Features
-- Automated black bar detection for improved APL accuracy
-- Advanced color science with BT.2020 coefficients
-- User-configurable optimizer parameters
-- GPU acceleration support
-- Batch processing capabilities
-- Integration with popular encoding workflows
+This document provides a historical record of completed milestones, feature implementations, and significant refactoring efforts for the `hdr-analyze` project.
 
 ---
 
-## Release Notes
+## V1.4: Performance & Quality Enhancements
 
-### v1.0.0 - Initial Public Release
+- **PQ Noise Robustness**: Implemented a suite of features to improve measurement stability on noisy or grainy content.
+  - Added `--peak-source` flag with `max`, `histogram99`, and `histogram999` options for robust peak detection. `histogram99` is now the default for balanced/aggressive profiles.
+  - Implemented per-bin EMA histogram smoothing (`--hist-bin-ema-beta`) with scene-aware resets to prevent cross-scene contamination.
+  - Added optional temporal median filtering (`--hist-temporal-median`) for histograms.
+  - Added an optional Y-plane `median3` pre-analysis denoiser (`--pre-denoise`).
+- **Future-aware Target-Nits Smoothing**: Implemented bidirectional EMA smoothing with per-scene resets and delta caps to reduce flicker and pumping in `target_nits`. This is now the default smoothing strategy.
+- **Performance & Parallelization**:
+  - Parallelized histogram accumulation using `rayon` to improve throughput on multi-core systems.
+  - Added `--analysis-threads` flag to control worker count.
+  - Added `--profile-performance` flag to emit per-stage throughput metrics for performance analysis.
 
-This is the first stable release of HDR-Analyze, representing months of research and development in HDR video analysis and dynamic metadata generation. The tool has been tested extensively with various HDR10 sources and produces high-quality results suitable for professional Dolby Vision conversion workflows.
+## V1.3: Advanced Optimization & Format Support
 
-**Key Highlights:**
-- Production-ready stability and performance
-- Research-backed optimization algorithms
-- Professional-grade output quality
-- Comprehensive documentation and examples
-- Active community support and development
+- **Scene-Aware Optimizer**: Enhanced the optimizer with configurable profiles (`conservative`, `balanced`, `aggressive`) and a dynamic clipping heuristic that uses per-scene knee smoothing to prevent banding.
+- **Hue Histogram**: Implemented a real 31-bin chroma-derived hue histogram from the U/V planes, replacing the previous zeroed-out placeholder. The verifier was also extended to validate its distribution.
+- **madVR v6 Gamut Peaks**: Replaced the simple duplication of BT.2020 peaks with a gamut-aware approximation for DCI-P3 (99%) and BT.709 (95%) peaks.
 
-**Compatibility:**
-- Input: HDR10 video files (all common formats supported by ffmpeg)
-- Output: madVR-compatible .bin measurement files
-- Platforms: Windows 10/11, macOS 10.15+, Linux (Ubuntu 18.04+)
+## Milestone R: Codebase Modularization
 
-**Getting Started:**
-See the README.md for installation instructions and usage examples.
+- **Refactored `main.rs`**: Successfully refactored the monolithic `main.rs` file (originally ~1860 lines) into a modular structure with a thin (63-line) entry point.
+- **Created Modules**: Logic was separated into distinct modules with single responsibilities:
+  - `cli.rs`: Command-line interface definition.
+  - `ffmpeg_io.rs`: FFmpeg initialization and I/O.
+  - `pipeline.rs`: Main orchestration logic.
+  - `writer.rs`: madVR measurement file writing.
+  - `analysis/`: Modules for frame, scene, histogram, and HLG analysis.
+- **Preserved Behavior**: All unit tests were migrated and passed, ensuring behavior was preserved post-refactor.
 
-**Support:**
-- GitHub Issues for bug reports and feature requests
-- Community discussions and contributions welcome
-- Professional support available for enterprise users
+## V1.2: Core Accuracy and Stabilization
+
+- **Baseline & Harness**: Established a baseline test pack and created the `tools/compare_baseline` harness for regression testing.
+- **Core Analysis Features**:
+  - Implemented robust active-area (black bar) detection and cropping.
+  - Ensured correct v5 histogram semantics and limited-range normalization.
+  - Implemented a native histogram-distance scene detection algorithm with threshold and smoothing controls.
+- **CLI & Usability**:
+  - Added support for both positional and flag-based (`-i/--input`) input.
+  - Enhanced the `verifier` tool with additional checks for FALL metrics and data consistency.
+
+## Initial Implementation
+
+- **Native FFmpeg Pipeline**: Initial version of the tool using `ffmpeg-next` for a native Rust video processing pipeline.
+- **madVR v5/v6 Output**: Core support for writing madVR-compatible `.bin` measurement files.
+- **Basic Optimizer**: First implementation of the dynamic target nits optimizer.
