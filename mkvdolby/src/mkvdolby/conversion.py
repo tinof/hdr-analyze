@@ -26,6 +26,17 @@ from .metadata import (
 from .verify import verify_post_mux
 
 
+def _build_analyzer_boost_args(args: argparse.Namespace) -> List[str]:
+    """Return extra hdr_analyzer_mvp arguments for experimental boost mode."""
+    boost_args: List[str] = ["--optimizer-profile", "aggressive"]
+    print_color(
+        "green",
+        "Experimental boost: hdr_analyzer_mvp will use the 'aggressive' optimizer "
+        "profile for shot-by-shot target_nits.",
+    )
+    return boost_args
+
+
 def run_hdr_analyzer(source_file: str, temp_dir: str, extra_args: Optional[List[str]] = None) -> Optional[str]:
     """Run hdr_analyzer_mvp on a source file and return the measurements path.
 
@@ -195,19 +206,33 @@ def convert_file(input_file: str, temp_dir: str, args: argparse.Namespace) -> bo
     
     if hdr_type in (HdrFormat.HDR10_WITH_MEASUREMENTS, HdrFormat.HDR10_UNSUPPORTED):
         measurements_file = find_measurements_file(input_file)
-        if not measurements_file and hdr_type == HdrFormat.HDR10_WITH_MEASUREMENTS:
+        if measurements_file:
+            if getattr(args, "boost_experimental", False):
+                print_color(
+                    "yellow",
+                    "Experimental boost requested, but an existing measurements file was found "
+                    "and will be used as-is. Delete or move it if you want to regenerate using "
+                    "the boosted analyzer profile.",
+                )
+        elif hdr_type == HdrFormat.HDR10_WITH_MEASUREMENTS:
             print_color("red", "Expected madVR measurements file not found.")
             return False
-        elif not measurements_file:
-            measurements_file = run_hdr_analyzer(input_file, temp_dir)
-            if not measurements_file: return False
+        else:
+            extra_args: Optional[List[str]] = None
+            if getattr(args, "boost_experimental", False):
+                extra_args = _build_analyzer_boost_args(args)
+            measurements_file = run_hdr_analyzer(input_file, temp_dir, extra_args)
+            if not measurements_file:
+                return False
 
     elif hdr_type == HdrFormat.HLG:
         # Use native HLG analysis path (no analysis re-encode):
         # Generate measurements directly from the original HLG source,
         # passing the configured HLG peak nits to the analyzer.
         analyzer_extra = ["--hlg-peak-nits", str(getattr(args, "hlg_peak_nits", 1000))]
-        print_color("green", f"HLG detected. Running analyzer natively with --hlg-peak-nits={analyzer_extra[-1]}...")
+        if getattr(args, "boost_experimental", False):
+            analyzer_extra.extend(_build_analyzer_boost_args(args))
+        print_color("green", f"HLG detected. Running analyzer natively with --hlg-peak-nits={analyzer_extra[1]}...")
         measurements_file = run_hdr_analyzer(input_file, temp_dir, analyzer_extra)
         if not measurements_file:
             return False

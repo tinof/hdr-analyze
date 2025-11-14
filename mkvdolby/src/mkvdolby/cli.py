@@ -97,8 +97,42 @@ def main():
             "(dovi_tool extract/info + mediainfo). Fails on inconsistencies."
         ),
     )
+    parser.add_argument(
+        "-b",
+        "--boost",
+        action="store_true",
+        help=(
+            "Enable a brighter Dolby Vision mapping preset.\n"
+            "For HDR10+ sources this switches --peak-source to 'histogram99' when using "
+            "the default peak source, which tends to lift overall brightness by ignoring "
+            "extreme highlight outliers."
+        ),
+    )
+    parser.add_argument(
+        "--boost-experimental",
+        action="store_true",
+        help=(
+            "Experimental boost mode that asks hdr_analyzer_mvp to use a more aggressive "
+            "optimizer profile when generating madVR measurements (shot-by-shot target_nits). "
+            "Only applies when mkvdolby needs to generate measurements itself; existing "
+            "measurements.bin files are left untouched."
+        ),
+    )
 
     args = parser.parse_args()
+
+    if getattr(args, "boost", False):
+        if args.peak_source == "max-scl-luminance":
+            print_color(
+                "green",
+                "Boost mode enabled: using --peak-source=histogram99 for HDR10+ peak detection.",
+            )
+            args.peak_source = "histogram99"
+        else:
+            print_color(
+                "yellow",
+                "Boost mode enabled but custom --peak-source was provided; leaving it unchanged.",
+            )
 
     try:
         args.trim_targets = [int(t.strip()) for t in args.trim_targets.split(",")]
