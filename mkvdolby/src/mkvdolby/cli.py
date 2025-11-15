@@ -25,11 +25,11 @@ def main():
     parser.add_argument(
         "--peak-source",
         choices=["max-scl-luminance", "histogram", "histogram99"],
-        default="max-scl-luminance",
+        default="histogram99",
         help="Controls the --hdr10plus-peak-source flag in dovi_tool generate.\n"
-        "  max-scl-luminance: (Default) Use max-scl from metadata.\n"
-        "  histogram: Use the max value from histogram.\n"
-        "  histogram99: Use the 99th percentile from histogram.",
+        "  histogram99: (Default) Use the 99th percentile from histogram (good balance of detail vs brightness).\n"
+        "  histogram: Use the max value from histogram (more conservative).\n"
+        "  max-scl-luminance: Use max-scl from metadata (most conservative; can look dim).",
     )
     parser.add_argument(
         "--trim-targets",
@@ -102,10 +102,10 @@ def main():
         "--boost",
         action="store_true",
         help=(
-            "Enable a brighter Dolby Vision mapping preset.\n"
-            "For HDR10+ sources this switches --peak-source to 'histogram99' when using "
-            "the default peak source, which tends to lift overall brightness by ignoring "
-            "extreme highlight outliers."
+            "Enable a brighter Dolby Vision mapping preset for HDR10+ sources.\n"
+            "If --peak-source is set to 'max-scl-luminance' or 'histogram', this switches "
+            "it to 'histogram99', which tends to lift overall brightness by ignoring "
+            "extreme highlight outliers. With the default 'histogram99', this has no effect."
         ),
     )
     parser.add_argument(
@@ -122,7 +122,7 @@ def main():
     args = parser.parse_args()
 
     if getattr(args, "boost", False):
-        if args.peak_source == "max-scl-luminance":
+        if args.peak_source in ("max-scl-luminance", "histogram"):
             print_color(
                 "green",
                 "Boost mode enabled: using --peak-source=histogram99 for HDR10+ peak detection.",

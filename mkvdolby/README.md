@@ -55,8 +55,8 @@ mkvdolby --help
 
 - `--hlg-peak-nits <nits>`: For HLG sources, passes the nominal peak luminance to the analyzer (native HLG path) and uses it for the HLG→PQ encode used as the DV base layer.
 
-- `--peak-source <max-scl-luminance|histogram|histogram99>`: Controls `dovi_tool generate` peak source for HDR10+.
+- `--peak-source <max-scl-luminance|histogram|histogram99>`: Controls `dovi_tool generate` peak source for HDR10+.\n  Default is `histogram99`, which typically produces a brighter, less \"gray\" result by ignoring extreme highlight outliers.
 
-- `--boost` / `-b`: Convenience preset for darker HDR10+ titles. When enabled and `--peak-source` is left at the default, mkvdolby internally uses `--peak-source histogram99`, which typically yields a brighter Dolby Vision mapping by ignoring extreme highlight outliers during peak detection.
+- `--boost` / `-b`: Convenience preset for darker HDR10+ titles when you explicitly set a more conservative `--peak-source`. If `--peak-source` is `max-scl-luminance` or `histogram`, `--boost` switches it to `histogram99`. With the default `histogram99`, this flag has no additional effect.
 
 - `--boost-experimental`: Experimental shot-by-shot boost mode for HDR10/HLG sources. When mkvdolby needs to generate measurements itself, this flag tells `hdr_analyzer_mvp` to use its `aggressive` optimizer profile so that per-scene `target_nits` are pushed harder (similar in spirit to Dolby’s `cm_analyzer`). Existing `*_measurements.bin` files are not modified; remove them if you want to regenerate with this mode.
