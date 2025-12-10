@@ -401,6 +401,26 @@ def convert_file(input_file: str, temp_dir: str, args: argparse.Namespace) -> bo
                 return False
 
         print_color("green", f"✓ Success! Created: {os.path.basename(output_file)}")
+
+        if not getattr(args, "keep_source", False):
+            print_color("green", "Cleaning up source and intermediate files...")
+            try:
+                if os.path.exists(input_file):
+                    os.remove(input_file)
+                    print(f"  Deleted source: {os.path.basename(input_file)}")
+
+                meas_to_del = measurements_file or find_measurements_file(input_file)
+                if meas_to_del and os.path.exists(meas_to_del):
+                    os.remove(meas_to_del)
+                    print(f"  Deleted measurements: {os.path.basename(meas_to_del)}")
+
+                details_to_del = find_details_file(input_file)
+                if details_to_del and os.path.exists(details_to_del):
+                    os.remove(details_to_del)
+                    print(f"  Deleted details: {os.path.basename(details_to_del)}")
+            except OSError as e:
+                print_color("yellow", f"Warning: Failed to cleanup some files: {e}")
+
         return True
     else:
         print_color("red", "Muxing failed, output file not created.")
