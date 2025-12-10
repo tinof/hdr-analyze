@@ -45,33 +45,52 @@ def run_command(command: List[str], log_file_path: str) -> bool:
 
 def run_command_live(command: List[str], log_file_path: str) -> bool:
     """
-    Executes a command and streams its output to stdout and a log file simultaneously.
+    Executes a command and streams its output to the terminal and a log file simultaneously.
+    Handles both stdout and stderr for progress output.
     Useful for long-running processes that provide their own progress bars.
     """
+    import select
+
     try:
         with open(log_file_path, "w") as log_file:
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,  # Line buffered
             )
 
-            while True:
-                # Read character by character to ensure \r progress bars are updated immediately
-                char = process.stdout.read(1)
-                if not char and process.poll() is not None:
-                    break
-                if char:
-                    sys.stdout.write(char)
-                    sys.stdout.flush()
-                    log_file.write(char)
+            # Use select for multiplexing stdout/stderr
+            while process.poll() is None:
+                readable, _, _ = select.select(
+                    [process.stdout, process.stderr], [], [], 0.1
+                )
 
-            # Ensure log file is flushed
+                for pipe in readable:
+                    # Read one character at a time for responsive progress updates
+                    char = pipe.read(1)
+                    if char:
+                        # Write to appropriate output stream
+                        if pipe == process.stderr:
+                            sys.stderr.write(char)
+                            sys.stderr.flush()
+                        else:
+                            sys.stdout.write(char)
+                            sys.stdout.flush()
+                        log_file.write(char)
+
+            # Drain any remaining output after process exits
+            for pipe, out in [(process.stdout, sys.stdout), (process.stderr, sys.stderr)]:
+                remaining = pipe.read()
+                if remaining:
+                    out.write(remaining)
+                    out.flush()
+                    log_file.write(remaining)
+
             log_file.flush()
-
             return process.returncode == 0
+
     except Exception as e:
         print_color("red", f"\nError executing command: {' '.join(command)}")
         print_color("red", f"Details: {e}")

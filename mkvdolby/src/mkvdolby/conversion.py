@@ -39,12 +39,16 @@ def _build_analyzer_boost_args(args: argparse.Namespace) -> List[str]:
 
 
 def run_hdr_analyzer(
-    source_file: str, temp_dir: str, extra_args: Optional[List[str]] = None
+    source_file: str,
+    temp_dir: str,
+    extra_args: Optional[List[str]] = None,
+    fast_mode: bool = True,
 ) -> Optional[str]:
     """Run hdr_analyzer_mvp on a source file and return the measurements path.
 
     extra_args: optional list of additional flags to pass to the analyzer
     (e.g., ["--hlg-peak-nits", "1000"]).
+    fast_mode: if True, use optimized settings (--downscale 2 --sample-rate 3) for faster processing.
     """
     exe = find_analyzer_executable()
     if not exe:
@@ -59,6 +63,11 @@ def run_hdr_analyzer(
     out_path = os.path.join(directory, f"{base_no_ext}_measurements.bin")
     log_path = os.path.join(temp_dir, "hdr_analyzer.log")
     cmd = [exe, source_file, "-o", out_path]
+
+    # Add fast mode defaults for quicker processing
+    if fast_mode:
+        cmd.extend(["--downscale", "2", "--sample-rate", "3"])
+
     if extra_args:
         cmd.extend(extra_args)
 

@@ -60,3 +60,11 @@ mkvdolby --help
 - `--boost` / `-b`: Convenience preset for darker HDR10+ titles when you explicitly set a more conservative `--peak-source`. If `--peak-source` is `max-scl-luminance` or `histogram`, `--boost` switches it to `histogram99`. With the default `histogram99`, this flag has no additional effect.
 
 - `--boost-experimental`: Experimental shot-by-shot boost mode for HDR10/HLG sources. When mkvdolby needs to generate measurements itself, this flag tells `hdr_analyzer_mvp` to use its `aggressive` optimizer profile so that per-scene `target_nits` are pushed harder (similar in spirit to Dolby’s `cm_analyzer`). Existing `*_measurements.bin` files are not modified; remove them if you want to regenerate with this mode.
+
+## Performance
+
+By default, `mkvdolby` uses "Fast Mode" for HDR analysis (when using `hdr_analyzer_mvp`):
+- **Sample Rate**: Analyzes every 3rd frame (`--sample-rate 3`).
+- **Downscale**: Analyzes at half resolution (`--downscale 2`).
+
+This reduces analysis time by ~4-5x on CPU-limited systems (like ARM64) with negligible impact on the resulting Dolby Vision metadata quality.

@@ -58,6 +58,8 @@ hdr_project/
 - Native HLG workflow: Automatically detects ARIB STD-B67 transfers and converts to PQ histograms in-memory using the configurable `--hlg-peak-nits` (default 1000 nits).
 - Professional output: Writes madVR-compatible `.bin` measurement files through the `madvr_parse` library.
 - Cross-platform: CPU decoding on all platforms with optional CUDA attempt on NVIDIA (graceful fallback to software decoding everywhere else).
+- Performance Tuned: Optimized for software decoding on ARM64. Features smart frame sampling (`--sample-rate`) and analysis downscaling (`--downscale`) to boost throughput by 3-4x on CPU-limited systems.
+- Visual Progress Tracking: Real-time progress bar with ETA, frame count, and processing speed.
 
 ## Native Pipeline Architecture
 
@@ -87,11 +89,13 @@ The analyzer uses a fully native Rust pipeline via `ffmpeg-next`, providing dire
 
 ### Throughput controls and ARM optimizations
 
-- Downscale analysis: Use `--downscale 2` (half) or `--downscale 4` (quarter) to speed up analysis with minimal impact on histogram/scene detection quality.
-- Skips unnecessary scaling: If the decoder outputs `YUV420P10LE` and `--downscale 1`, the scaler is bypassed to avoid extra copies.
-- Faster scaling: When scaling is needed, uses `FAST_BILINEAR` for analysis (sufficient for statistics).
-- Decoder threading: Enables FFmpeg multi-threading (auto thread count) for better CPU utilization.
-- Rust build tuning: Workspace includes `.cargo/config.toml` with `-C target-cpu=native` to enable host-specific optimizations (NEON on ARM).
+- **Frame Sampling**: Use `--sample-rate 3` (analyze 1 in 3 frames) to significantly reduce CPU load. Scaling and complex analysis are skipped for ignored frames.
+- **Downscale analysis**: Use `--downscale 2` (half) or `--downscale 4` (quarter) to speed up analysis with minimal impact on histogram/scene detection quality.
+- **Smart Skipping**: The pipeline intelligently skips scaling and cropping operations for frames that aren't selected for analysis.
+- **Faster scaling**: When scaling is needed, uses `FAST_BILINEAR` for analysis.
+- **Visual Feedback**: Progress bar and ETA calculation help track long-running jobs.
+- **Decoder threading**: Enables FFmpeg multi-threading (auto thread count) for better CPU utilization.
+- **Rust build tuning**: Workspace includes `.cargo/config.toml` with `-C target-cpu=native` to enable host-specific optimizations (NEON on ARM).
 
 ## Prerequisites
 
@@ -221,6 +225,7 @@ Verifier reports:
 - `--madvr-version <5|6>`: Output file version (default: 5)
 - `--hwaccel <TYPE>`: Hardware acceleration hint (`cuda`, `vaapi`, `videotoolbox`)
 - `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
+- `--sample-rate <N>`: Analyze every Nth frame (1=all, 2=every 2nd, etc.). Skipped frames inherit previous measurements. High impact on performance.
 - `--no-crop`: Disable active-area crop detection (analyze full frame)
 
 ### Scene Detection

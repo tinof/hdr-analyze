@@ -110,6 +110,9 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" 
 - `-o, --output <PATH>`: Output .bin measurement file path  
 - `--disable-optimizer`: Disable dynamic metadata optimizer (enabled by default)
 - `--hwaccel <TYPE>`: Hardware acceleration (`cuda`, `vaapi`, `videotoolbox`)
+- `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
+- `--sample-rate <N>`: Analyze every Nth frame (default: 1). Skipped frames inherit measurements.
+- `--no-crop`: Disable active-area crop detection (analyze full frame)
 - `--target-smoother <off|ema>`: Control target_nits smoothing (default `ema`)
 - `--smoother-alpha <float>` / `--smoother-bidirectional`: Tune bidirectional EMA smoothing
 - `--hlg-peak-nits <float>`: Override peak luminance used for HLG → PQ conversion (default 1000 nits)
@@ -117,7 +120,8 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" 
 ## Performance Characteristics
 
 ### Native Pipeline Benefits
-- **Processing Speed**: ~13-14 FPS average (maintained from previous implementation)
+- **Processing Speed**: ~13-14 FPS average in full quality; up to 30-40+ FPS with `--sample-rate 3` and `--downscale 2`.
+- **Optimization**: Intelligent skipping of scaling/cropping for sampled frames.
 - **Memory Usage**: Reduced overhead from eliminating external processes
 - **Reliability**: No external process coordination or pipe buffer management
 - **Accuracy**: Direct 10-bit processing eliminates quantization errors

@@ -112,4 +112,10 @@ pub struct Cli {
     /// Only affects header.maxcll; per-frame peaks use --peak-source.
     #[arg(long)]
     pub header_peak_source: Option<String>,
+
+    /// Frame sample rate: analyze every Nth frame (1=all frames, 2=every other, 3=every third, etc.)
+    /// Higher values significantly speed up analysis with minimal quality impact.
+    /// Skipped frames inherit measurements from the previous analyzed frame.
+    #[arg(long, default_value_t = 1)]
+    pub sample_rate: u32,
 }

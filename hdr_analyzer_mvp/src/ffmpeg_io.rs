@@ -75,21 +75,46 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
     let width = decoder.width();
     let height = decoder.height();
 
-    // Try to estimate frame count from duration and frame rate
-    let frame_count = if video_stream.duration() != ffmpeg::ffi::AV_NOPTS_VALUE {
-        let duration = video_stream.duration();
-        let time_base = video_stream.time_base();
-        let avg_frame_rate = video_stream.avg_frame_rate();
-
-        if avg_frame_rate.numerator() > 0 && avg_frame_rate.denominator() > 0 {
-            let duration_seconds = (duration as f64) * f64::from(time_base);
-            let fps = avg_frame_rate.numerator() as f64 / avg_frame_rate.denominator() as f64;
-            Some((duration_seconds * fps) as u32)
+    // Try multiple methods to estimate frame count
+    let frame_count = {
+        // Method 1: Try to get nb_frames directly from the stream
+        let nb_frames = video_stream.frames();
+        if nb_frames > 0 {
+            Some(nb_frames as u32)
         } else {
-            None
+            // Method 2: Calculate from stream duration and frame rate
+            let stream_duration = video_stream.duration();
+            if stream_duration != ffmpeg::ffi::AV_NOPTS_VALUE && stream_duration > 0 {
+                let time_base = video_stream.time_base();
+                let avg_frame_rate = video_stream.avg_frame_rate();
+
+                if avg_frame_rate.numerator() > 0 && avg_frame_rate.denominator() > 0 {
+                    let duration_seconds = (stream_duration as f64) * f64::from(time_base);
+                    let fps =
+                        avg_frame_rate.numerator() as f64 / avg_frame_rate.denominator() as f64;
+                    Some((duration_seconds * fps) as u32)
+                } else {
+                    None
+                }
+            } else {
+                // Method 3: Calculate from container duration and frame rate
+                let container_duration = input_context.duration();
+                if container_duration > 0 {
+                    let avg_frame_rate = video_stream.avg_frame_rate();
+                    if avg_frame_rate.numerator() > 0 && avg_frame_rate.denominator() > 0 {
+                        // Duration is in AV_TIME_BASE units (microseconds)
+                        let duration_seconds = container_duration as f64 / 1_000_000.0;
+                        let fps =
+                            avg_frame_rate.numerator() as f64 / avg_frame_rate.denominator() as f64;
+                        Some((duration_seconds * fps) as u32)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
         }
-    } else {
-        None
     };
 
     let transfer_function = TransferFunction::from(transfer_characteristic);

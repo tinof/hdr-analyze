@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mkvdolby"
-version = "1.0.0"
+version = "1.1.0"
 description = "Convert HDR10/HDR10+ videos to Dolby Vision format."
 readme = "README.md"
 requires-python = ">=3.8"
