@@ -119,6 +119,12 @@ def main():
         ),
     )
     parser.add_argument(
+        "--optimizer-profile",
+        choices=["conservative", "balanced", "aggressive"],
+        default="conservative",
+        help="Optimizer profile for hdr_analyzer_mvp: conservative, balanced, or aggressive (default: conservative).",
+    )
+    parser.add_argument(
         "--keep-source",
         action="store_true",
         help="Do not delete the source file and intermediate files (measurements, Details.txt) after successful conversion.",

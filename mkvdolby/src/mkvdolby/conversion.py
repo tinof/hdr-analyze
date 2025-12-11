@@ -282,9 +282,16 @@ def convert_file(input_file: str, temp_dir: str, args: argparse.Namespace) -> bo
             print_color("red", "Expected madVR measurements file not found.")
             return False
         else:
-            extra_args: Optional[List[str]] = None
+            extra_args: List[str] = []
             if getattr(args, "boost_experimental", False):
-                extra_args = _build_analyzer_boost_args(args)
+                extra_args.extend(_build_analyzer_boost_args(args))
+            else:
+                extra_args.extend(
+                    [
+                        "--optimizer-profile",
+                        getattr(args, "optimizer_profile", "conservative"),
+                    ]
+                )
             measurements_file = run_hdr_analyzer(input_file, temp_dir, extra_args)
             if not measurements_file:
                 return False
@@ -296,6 +303,13 @@ def convert_file(input_file: str, temp_dir: str, args: argparse.Namespace) -> bo
         analyzer_extra = ["--hlg-peak-nits", str(getattr(args, "hlg_peak_nits", 1000))]
         if getattr(args, "boost_experimental", False):
             analyzer_extra.extend(_build_analyzer_boost_args(args))
+        else:
+            analyzer_extra.extend(
+                [
+                    "--optimizer-profile",
+                    getattr(args, "optimizer_profile", "conservative"),
+                ]
+            )
         print_color(
             "green",
             f"HLG detected. Running analyzer natively with --hlg-peak-nits={analyzer_extra[1]}...",

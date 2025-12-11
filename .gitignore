@@ -56,3 +56,5 @@ DOCUMENTATION_UPDATE_SUMMARY.md
 tests
 docs/VIDEOTOOLBOX_OPTIMIZATION_SUMMARY.md
 AGENTS.md
+tools/compare_baseline/dovi_tool
+tools/compare_baseline/hdr10plus_tool

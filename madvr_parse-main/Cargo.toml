@@ -1,0 +1,16 @@
+[package]
+name = "madvr_parse"
+version = "1.0.2"
+authors = ["quietvoid"]
+edition = "2024"
+rust-version = "1.85.0"
+license = "MIT"
+description = "madVR measurement file library"
+repository = "https://github.com/quietvoid/madvr_parse"
+
+[dependencies]
+anyhow = "1.0.96"
+byteorder = "1.5.0"
+
+[lib]
+doctest = false

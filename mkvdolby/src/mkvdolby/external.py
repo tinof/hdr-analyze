@@ -81,7 +81,10 @@ def run_command_live(command: List[str], log_file_path: str) -> bool:
                         log_file.write(char)
 
             # Drain any remaining output after process exits
-            for pipe, out in [(process.stdout, sys.stdout), (process.stderr, sys.stderr)]:
+            for pipe, out in [
+                (process.stdout, sys.stdout),
+                (process.stderr, sys.stderr),
+            ]:
                 remaining = pipe.read()
                 if remaining:
                     out.write(remaining)
@@ -181,6 +184,28 @@ def get_mediainfo_json_cached(input_file: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_ffprobe_data(input_file: str) -> Optional[Dict[str, Any]]:
+    """Return ffprobe data for a file."""
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            "-show_frames",
+            "-read_intervals",
+            "%+#1",
+            input_file,
+        ]
+        output = subprocess.check_output(cmd, text=True)
+        return json.loads(output)
+    except Exception:
+        return None
+
+
 def find_local_tool(tool_name: str) -> Optional[str]:
     """Find a tool in the current working directory first, then in PATH."""
     local_path = os.path.join(".", tool_name)
@@ -191,12 +216,19 @@ def find_local_tool(tool_name: str) -> Optional[str]:
 
 def check_dependencies():
     """Check base dependencies that are always required."""
-    required_cmds = ["ffmpeg", "mediainfo", "mkvmerge"]
+    required_cmds = ["ffmpeg", "mkvmerge"]
     all_found = True
     for cmd in required_cmds:
         if not shutil.which(cmd):
             print_color("red", f"Error: Required command '{cmd}' not found in PATH.")
             all_found = False
+
+    if not shutil.which("mediainfo") and not shutil.which("ffprobe"):
+        print_color(
+            "red",
+            "Error: Neither 'mediainfo' nor 'ffprobe' found in PATH. One is required.",
+        )
+        all_found = False
 
     if not find_local_tool("dovi_tool"):
         print_color(

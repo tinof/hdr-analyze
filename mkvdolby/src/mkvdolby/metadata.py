@@ -8,11 +8,12 @@ from enum import Enum, auto
 from typing import List, Dict, Any, Optional
 
 from .utils import print_color
-from .external import get_mediainfo_json_cached, find_local_tool
+from .external import get_mediainfo_json_cached, find_local_tool, get_ffprobe_data
 
 
 class HdrFormat(Enum):
     """Enum for different HDR formats."""
+
     HDR10_PLUS = auto()
     HDR10_WITH_MEASUREMENTS = auto()
     HDR10_UNSUPPORTED = auto()
@@ -40,7 +41,8 @@ def find_measurements_file(input_file: str) -> Optional[str]:
 
     try:
         pattern_matches = [
-            p for p in glob.glob(os.path.join(directory, "*.measurements"))
+            p
+            for p in glob.glob(os.path.join(directory, "*.measurements"))
             if os.path.basename(p).startswith(base_no_ext)
         ]
         if len(pattern_matches) == 1 and os.path.isfile(pattern_matches[0]):
@@ -50,7 +52,8 @@ def find_measurements_file(input_file: str) -> Optional[str]:
 
     try:
         pattern_matches = [
-            p for p in glob.glob(os.path.join(directory, "*_measurements.bin"))
+            p
+            for p in glob.glob(os.path.join(directory, "*_measurements.bin"))
             if os.path.basename(p).startswith(base_no_ext)
         ]
         if len(pattern_matches) == 1 and os.path.isfile(pattern_matches[0]):
@@ -119,33 +122,49 @@ def parse_madvr_details_static_values(details_path: str) -> Dict[str, Any]:
             if re.search(r"^Calculated values after clipping", line, re.IGNORECASE):
                 in_after_clipping = True
                 continue
-            m_lum = re.search(r"Mastering\s+display\s+luminance:\s*([0-9.,]+)\s*/\s*([0-9.,]+)", line, re.IGNORECASE)
+            m_lum = re.search(
+                r"Mastering\s+display\s+luminance:\s*([0-9.,]+)\s*/\s*([0-9.,]+)",
+                line,
+                re.IGNORECASE,
+            )
             if m_lum:
                 min_val = _extract_number(m_lum.group(1))
                 max_val = _extract_number(m_lum.group(2))
-                if min_val is not None: min_dml = float(min_val)
-                if max_val is not None: max_dml = float(max_val)
+                if min_val is not None:
+                    min_dml = float(min_val)
+                if max_val is not None:
+                    max_dml = float(max_val)
                 continue
-            m_cll_100 = re.search(r"MaxCLL\s*100%\s*:\s*([0-9.,]+)", line, re.IGNORECASE)
+            m_cll_100 = re.search(
+                r"MaxCLL\s*100%\s*:\s*([0-9.,]+)", line, re.IGNORECASE
+            )
             if m_cll_100 and max_cll_100 is None:
                 num = _extract_number(m_cll_100.group(1))
-                if num is not None: max_cll_100 = int(num)
+                if num is not None:
+                    max_cll_100 = int(num)
                 continue
             if in_after_clipping:
-                m_cll_after = re.search(r"^MaxCLL\s*:\s*([0-9.,]+)$", line, re.IGNORECASE)
+                m_cll_after = re.search(
+                    r"^MaxCLL\s*:\s*([0-9.,]+)$", line, re.IGNORECASE
+                )
                 if m_cll_after:
                     num = _extract_number(m_cll_after.group(1))
-                    if num is not None: max_cll_after = int(num)
+                    if num is not None:
+                        max_cll_after = int(num)
                     continue
             m_fall = re.search(r"^MaxFALL\s*:\s*([0-9.,]+)", line, re.IGNORECASE)
             if m_fall and max_fall is None:
                 num = _extract_number(m_fall.group(1))
-                if num is not None: max_fall = int(num)
+                if num is not None:
+                    max_fall = int(num)
                 continue
 
-        if min_dml is not None: result["min_dml"] = min_dml
-        if max_dml is not None: result["max_dml"] = int(max_dml)
-        if max_fall is not None: result["max_fall"] = int(max_fall)
+        if min_dml is not None:
+            result["min_dml"] = min_dml
+        if max_dml is not None:
+            result["max_dml"] = int(max_dml)
+        if max_fall is not None:
+            result["max_fall"] = int(max_fall)
         if max_cll_after is not None:
             result["max_cll"] = int(max_cll_after)
         elif max_cll_100 is not None:
@@ -164,19 +183,25 @@ def parse_madvr_details_for_trims(details_path: str) -> Optional[List[int]]:
         real_display_peak = None
         max_target_nits = None
 
-        m_peak = re.search(r"Real\s+display\s+peak\s+nits:\s*([0-9.,]+)", text, re.IGNORECASE)
+        m_peak = re.search(
+            r"Real\s+display\s+peak\s+nits:\s*([0-9.,]+)", text, re.IGNORECASE
+        )
         if m_peak:
             v = _extract_number(m_peak.group(1))
-            if v is not None and v > 0: real_display_peak = int(round(v))
+            if v is not None and v > 0:
+                real_display_peak = int(round(v))
 
         m_max = re.search(r"Maximum\s+Target\s+Nits:\s*([0-9.,]+)", text, re.IGNORECASE)
         if m_max:
             v = _extract_number(m_max.group(1))
-            if v is not None and v > 0: max_target_nits = int(round(v))
+            if v is not None and v > 0:
+                max_target_nits = int(round(v))
 
         targets: List[int] = [100]
-        if real_display_peak: targets.append(real_display_peak)
-        if max_target_nits: targets.append(max_target_nits)
+        if real_display_peak:
+            targets.append(real_display_peak)
+        if max_target_nits:
+            targets.append(max_target_nits)
 
         targets = sorted({t for t in targets if 80 <= t <= 10000})
         if len(targets) >= 2:
@@ -193,31 +218,89 @@ def get_static_metadata(input_file: str) -> Dict[str, Any]:
 
     try:
         mi_json = get_mediainfo_json_cached(input_file) or {}
-        video_track = next((t for t in mi_json.get("media", {}).get("track", []) if t.get("@type") == "Video"), None)
+        video_track = next(
+            (
+                t
+                for t in mi_json.get("media", {}).get("track", [])
+                if t.get("@type") == "Video"
+            ),
+            None,
+        )
 
         if video_track:
             mdl = video_track.get("MasteringDisplay_Luminance")
             if mdl:
                 max_dml_match = re.search(r"max: ([0-9.]+)", mdl)
                 min_dml_match = re.search(r"min: ([0-9.]+)", mdl)
-                if max_dml_match: metadata["max_dml"] = int(float(max_dml_match.group(1)))
-                if min_dml_match: metadata["min_dml"] = float(min_dml_match.group(1))
+                if max_dml_match:
+                    metadata["max_dml"] = int(float(max_dml_match.group(1)))
+                if min_dml_match:
+                    metadata["min_dml"] = float(min_dml_match.group(1))
 
             max_cll_str = video_track.get("MaxCLL", "0")
             max_fall_str = video_track.get("MaxFALL", "0")
             max_cll_match = re.search(r"([0-9.]+)", str(max_cll_str))
             max_fall_match = re.search(r"([0-9.]+)", str(max_fall_str))
-            metadata["max_cll"] = int(float(max_cll_match.group(1))) if max_cll_match else 0
-            metadata["max_fall"] = int(float(max_fall_match.group(1))) if max_fall_match else 0
+            metadata["max_cll"] = (
+                int(float(max_cll_match.group(1))) if max_cll_match else 0
+            )
+            metadata["max_fall"] = (
+                int(float(max_fall_match.group(1))) if max_fall_match else 0
+            )
     except (subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError) as e:
         print_color("yellow", f"Warning: Could not get metadata from mediainfo: {e}")
+
+    # Fallback/Update with ffprobe if keys are missing
+    if "max_dml" not in metadata or "max_cll" not in metadata:
+        fp_data = get_ffprobe_data(input_file)
+        if fp_data:
+            # Check frames for mastering metadata
+            frames = fp_data.get("frames", [])
+            side_data_list = []
+            if frames:
+                side_data_list = frames[0].get("side_data_list", [])
+
+            # Find Mastering Display Metadata
+            mdm = next(
+                (
+                    item
+                    for item in side_data_list
+                    if item.get("side_data_type") == "Mastering display metadata"
+                ),
+                None,
+            )
+            if mdm:
+                if "max_dml" not in metadata and "max_luminance" in mdm:
+                    # ffprobe uses X/10000 format
+                    val = mdm["max_luminance"].split("/")[0]
+                    metadata["max_dml"] = int(float(val) / 10000)
+                if "min_dml" not in metadata and "min_luminance" in mdm:
+                    val = mdm["min_luminance"].split("/")[0]
+                    metadata["min_dml"] = float(val) / 10000
+
+            # Find Content Light Level Metadata
+            cll = next(
+                (
+                    item
+                    for item in side_data_list
+                    if item.get("side_data_type") == "Content light level metadata"
+                ),
+                None,
+            )
+            if cll:
+                if "max_cll" not in metadata and "max_content_light_level" in cll:
+                    metadata["max_cll"] = int(cll["max_content_light_level"])
+                if "max_fall" not in metadata and "max_pic_average_light_level" in cll:
+                    metadata["max_fall"] = int(cll["max_pic_average_light_level"])
 
     details_path = find_details_file(input_file)
     if details_path:
         details_values = parse_madvr_details_static_values(details_path)
         if details_values:
             metadata.update({k: v for k, v in details_values.items() if v is not None})
-            print(f"Supplemented static metadata from Details.txt: { {k: metadata[k] for k in ['max_dml','min_dml','max_cll','max_fall'] if k in metadata} }")
+            print(
+                f"Supplemented static metadata from Details.txt: { {k: metadata[k] for k in ['max_dml', 'min_dml', 'max_cll', 'max_fall'] if k in metadata} }"
+            )
 
     final_metadata = defaults.copy()
     missing_keys = []
@@ -228,13 +311,21 @@ def get_static_metadata(input_file: str) -> Dict[str, Any]:
             missing_keys.append(key.upper())
 
     if missing_keys:
-        print_color("yellow", f"Warning: Missing metadata for: {', '.join(missing_keys)}. Using defaults.")
-        print_color("yellow", f"Default values used: MaxDML={defaults['max_dml']}, MinDML={defaults['min_dml']}, MaxCLL={defaults['max_cll']}, MaxFALL={defaults['max_fall']}")
+        print_color(
+            "yellow",
+            f"Warning: Missing metadata for: {', '.join(missing_keys)}. Using defaults.",
+        )
+        print_color(
+            "yellow",
+            f"Default values used: MaxDML={defaults['max_dml']}, MinDML={defaults['min_dml']}, MaxCLL={defaults['max_cll']}, MaxFALL={defaults['max_fall']}",
+        )
 
     return final_metadata
 
 
-def validate_static_metadata(metadata: Dict[str, Any], source_desc: str = "input") -> bool:
+def validate_static_metadata(
+    metadata: Dict[str, Any], source_desc: str = "input"
+) -> bool:
     """Validate static HDR metadata for sanity and conformance."""
     issues = []
     warnings = []
@@ -243,27 +334,44 @@ def validate_static_metadata(metadata: Dict[str, Any], source_desc: str = "input
     max_cll = metadata.get("max_cll", 0)
     max_fall = metadata.get("max_fall", 0)
 
-    if max_dml < 100: warnings.append(f"MaxDML={max_dml} is unusually low (<100 nits)")
-    elif max_dml > 10000: issues.append(f"MaxDML={max_dml} exceeds ST.2084 range (10000 nits)")
-    if min_dml > 0.05: warnings.append(f"MinDML={min_dml} is unusually high (>0.05 nits, typical OLED ~0.005)")
-    elif min_dml <= 0: issues.append(f"MinDML={min_dml} must be positive")
-    if max_cll <= 0: issues.append(f"MaxCLL={max_cll} must be positive")
-    elif max_cll > 10000: warnings.append(f"MaxCLL={max_cll} exceeds ST.2084 range (10000 nits)")
-    if max_fall <= 0: issues.append(f"MaxFALL={max_fall} must be positive")
-    elif max_fall > 10000: warnings.append(f"MaxFALL={max_fall} exceeds ST.2084 range (10000 nits)")
-    if max_cll > 0 and max_fall > 0 and max_cll < max_fall: warnings.append(f"MaxCLL={max_cll} < MaxFALL={max_fall} (unusual: peak should >= average)")
+    if max_dml < 100:
+        warnings.append(f"MaxDML={max_dml} is unusually low (<100 nits)")
+    elif max_dml > 10000:
+        issues.append(f"MaxDML={max_dml} exceeds ST.2084 range (10000 nits)")
+    if min_dml > 0.05:
+        warnings.append(
+            f"MinDML={min_dml} is unusually high (>0.05 nits, typical OLED ~0.005)"
+        )
+    elif min_dml <= 0:
+        issues.append(f"MinDML={min_dml} must be positive")
+    if max_cll <= 0:
+        issues.append(f"MaxCLL={max_cll} must be positive")
+    elif max_cll > 10000:
+        warnings.append(f"MaxCLL={max_cll} exceeds ST.2084 range (10000 nits)")
+    if max_fall <= 0:
+        issues.append(f"MaxFALL={max_fall} must be positive")
+    elif max_fall > 10000:
+        warnings.append(f"MaxFALL={max_fall} exceeds ST.2084 range (10000 nits)")
+    if max_cll > 0 and max_fall > 0 and max_cll < max_fall:
+        warnings.append(
+            f"MaxCLL={max_cll} < MaxFALL={max_fall} (unusual: peak should >= average)"
+        )
 
     if issues:
         print_color("red", f"Metadata validation errors for {source_desc}:")
-        for issue in issues: print_color("red", f"  • {issue}")
+        for issue in issues:
+            print_color("red", f"  • {issue}")
         return False
     if warnings:
         print_color("yellow", f"Metadata validation warnings for {source_desc}:")
-        for warning in warnings: print_color("yellow", f"  • {warning}")
+        for warning in warnings:
+            print_color("yellow", f"  • {warning}")
     return True
 
 
-def generate_extra_json(output_file: str, metadata: Dict[str, Any], trim_targets: List[int]):
+def generate_extra_json(
+    output_file: str, metadata: Dict[str, Any], trim_targets: List[int]
+):
     """Generates the extra.json file for dovi_tool."""
     try:
         min_display_luminance = int(float(metadata["min_dml"]) * 10000)
@@ -339,17 +447,20 @@ def check_hdr_format(input_file: str) -> HdrFormat:
             return None
 
     try:
-        result = subprocess.check_output(
-            [
-                "mediainfo",
-                "--Inform=Video;%HDR_Format%/%HDR_Format_Compatibility%",
-                input_file,
-            ],
-            text=True,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-        format_info = result.strip()
+        try:
+            result = subprocess.check_output(
+                [
+                    "mediainfo",
+                    "--Inform=Video;%HDR_Format%/%HDR_Format_Compatibility%",
+                    input_file,
+                ],
+                text=True,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            format_info = result.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            format_info = ""
 
         measurements_file = find_measurements_file(input_file)
 
@@ -400,44 +511,97 @@ def check_hdr_format(input_file: str) -> HdrFormat:
                 print("Detected (ffprobe): HDR10 (no measurements)")
                 return HdrFormat.HDR10_UNSUPPORTED
 
+        if not format_info and not mi_json:
+            # If mediainfo failed completely, rely on ffprobe results (already checked above)
+            pass
+
         # If still unknown, report unsupported with raw info string
         fmt_display = format_info if format_info else "/"
         print(f"Detected: Unsupported format ({fmt_display})")
         return HdrFormat.UNSUPPORTED
-    except subprocess.CalledProcessError as e:
-        print_color("red", f"Error checking HDR format with mediainfo: {e.stderr}")
+    except Exception as e:
+        print_color("red", f"Error checking HDR format: {e}")
         return HdrFormat.UNSUPPORTED
 
 
 def get_frame_count_from_mediainfo(input_file: str) -> Optional[int]:
     """Try to obtain frame count from mediainfo JSON, with fallbacks."""
     mi_json = get_mediainfo_json_cached(input_file)
-    if not mi_json: return None
-    video_track = next((t for t in mi_json.get("media", {}).get("track", []) if t.get("@type") == "Video"), None)
-    if not video_track: return None
-    frame_count_str = video_track.get("FrameCount")
-    if frame_count_str and str(frame_count_str).isdigit():
-        return int(frame_count_str)
-    try:
-        duration_ms = float(video_track.get("Duration", 0))
-        frame_rate = float(video_track.get("FrameRate", 0))
-        if duration_ms > 0 and frame_rate > 0:
-            return int(round((duration_ms / 1000.0) * frame_rate))
-    except Exception:
-        pass
+    if mi_json:
+        video_track = next(
+            (
+                t
+                for t in mi_json.get("media", {}).get("track", [])
+                if t.get("@type") == "Video"
+            ),
+            None,
+        )
+        if video_track:
+            frame_count_str = video_track.get("FrameCount")
+            if frame_count_str and str(frame_count_str).isdigit():
+                return int(frame_count_str)
+
+    # Fallback to ffprobe
+    fp_data = get_ffprobe_data(input_file)
+    if fp_data:
+        try:
+            streams = fp_data.get("streams", [])
+            video = next((s for s in streams if s.get("codec_type") == "video"), None)
+            if video:
+                if "nb_frames" in video:
+                    return int(video["nb_frames"])
+                if "duration" in video and "avg_frame_rate" in video:
+                    dur = float(video["duration"])
+                    num, den = map(int, video["avg_frame_rate"].split("/"))
+                    if den > 0:
+                        return int(dur * num / den)
+        except Exception:
+            pass
+
+    if mi_json:
+        # Re-assign video_track to ensure availability in this scope if needed,
+        # though previous assignment persists if mi_json is truthy.
+        # Actually safest to re-fetch or rely on previous fetch if scope allows.
+        # Given python scope, video_track from line 452 is available here.
+        if video_track:
+            try:
+                duration_ms = float(video_track.get("Duration", 0))
+                frame_rate = float(video_track.get("FrameRate", 0))
+                if duration_ms > 0 and frame_rate > 0:
+                    return int(round((duration_ms / 1000.0) * frame_rate))
+            except Exception:
+                pass
     return None
 
 
 def get_duration_from_mediainfo(input_file: str) -> Optional[float]:
     """Get video duration in seconds from mediainfo."""
     mi_json = get_mediainfo_json_cached(input_file)
-    if not mi_json: return None
-    video_track = next((t for t in mi_json.get("media", {}).get("track", []) if t.get("@type") == "Video"), None)
-    if not video_track: return None
-    try:
-        duration_ms = float(video_track.get("Duration", 0))
-        if duration_ms > 0:
-            return duration_ms / 1000.0
-    except (ValueError, TypeError):
-        pass
+    if mi_json:
+        video_track = next(
+            (
+                t
+                for t in mi_json.get("media", {}).get("track", [])
+                if t.get("@type") == "Video"
+            ),
+            None,
+        )
+        if video_track:
+            try:
+                duration_ms = float(video_track.get("Duration", 0))
+                if duration_ms > 0:
+                    return duration_ms / 1000.0
+            except (ValueError, TypeError):
+                pass
+
+    # Fallback to ffprobe
+    fp_data = get_ffprobe_data(input_file)
+    if fp_data:
+        try:
+            fmt = fp_data.get("format", {})
+            if "duration" in fmt:
+                return float(fmt["duration"])
+        except Exception:
+            pass
+
     return None
