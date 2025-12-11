@@ -47,6 +47,7 @@ def run_command_live(command: List[str], log_file_path: str) -> bool:
     """
     Executes a command and streams its output to the terminal and a log file simultaneously.
     Handles both stdout and stderr for progress output.
+    Properly handles carriage return (\r) for in-place progress bar updates.
     Useful for long-running processes that provide their own progress bars.
     """
     import select
@@ -61,6 +62,29 @@ def run_command_live(command: List[str], log_file_path: str) -> bool:
                 bufsize=1,  # Line buffered
             )
 
+            # Track line buffers to handle \r properly
+            stdout_line = ""
+            stderr_line = ""
+
+            def write_with_cr_handling(
+                char: str, output_stream, line_buffer: str
+            ) -> str:
+                """Handle carriage return by clearing and rewriting the line."""
+                if char == "\r":
+                    # Clear current line and move cursor to start
+                    # Use ANSI escape: \033[2K clears line, \r moves to start
+                    output_stream.write("\r\033[K")
+                    output_stream.flush()
+                    return ""
+                elif char == "\n":
+                    output_stream.write(char)
+                    output_stream.flush()
+                    return ""
+                else:
+                    output_stream.write(char)
+                    output_stream.flush()
+                    return line_buffer + char
+
             # Use select for multiplexing stdout/stderr
             while process.poll() is None:
                 readable, _, _ = select.select(
@@ -71,25 +95,39 @@ def run_command_live(command: List[str], log_file_path: str) -> bool:
                     # Read one character at a time for responsive progress updates
                     char = pipe.read(1)
                     if char:
-                        # Write to appropriate output stream
+                        # Write to appropriate output stream with CR handling
                         if pipe == process.stderr:
-                            sys.stderr.write(char)
-                            sys.stderr.flush()
+                            stderr_line = write_with_cr_handling(
+                                char, sys.stderr, stderr_line
+                            )
                         else:
-                            sys.stdout.write(char)
-                            sys.stdout.flush()
-                        log_file.write(char)
+                            stdout_line = write_with_cr_handling(
+                                char, sys.stdout, stdout_line
+                            )
+                        # Log file gets raw output (newlines for each update for readability)
+                        if char == "\r":
+                            log_file.write("\n")
+                        else:
+                            log_file.write(char)
 
             # Drain any remaining output after process exits
-            for pipe, out in [
-                (process.stdout, sys.stdout),
-                (process.stderr, sys.stderr),
+            for pipe, out, line_buf in [
+                (process.stdout, sys.stdout, stdout_line),
+                (process.stderr, sys.stderr, stderr_line),
             ]:
                 remaining = pipe.read()
                 if remaining:
-                    out.write(remaining)
+                    for char in remaining:
+                        if char == "\r":
+                            out.write("\r\033[K")
+                            log_file.write("\n")
+                        elif char == "\n":
+                            out.write(char)
+                            log_file.write(char)
+                        else:
+                            out.write(char)
+                            log_file.write(char)
                     out.flush()
-                    log_file.write(remaining)
 
             log_file.flush()
             return process.returncode == 0
