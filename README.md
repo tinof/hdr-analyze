@@ -199,6 +199,28 @@ Using cargo:
 cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3 --downscale 2
 ```
 
+### mkvdolby (Python Wrapper)
+
+The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG to Dolby Vision Profile 8.1.
+
+```bash
+# Basic usage (converts all MKV files in current directory)
+mkvdolby
+
+# Convert specific file
+mkvdolby "input.mkv"
+
+# Automatic Cleanup (Default Behavior)
+# By default, mkvdolby deletes the source file and intermediate artifacts (.measurements, Details.txt)
+# after a successful conversion to save space.
+
+# To keep the source file and all intermediate files:
+mkvdolby "input.mkv" --keep-source
+
+# Additional flags
+mkvdolby --help
+```
+
 ### Verifier
 
 ```bash
