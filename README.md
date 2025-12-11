@@ -61,9 +61,7 @@ hdr_project/
 - Performance Tuned: Optimized for software decoding on ARM64. Features smart frame sampling (`--sample-rate`) and analysis downscaling (`--downscale`) to boost throughput by 3-4x on CPU-limited systems.
 - Visual Progress Tracking: Real-time progress bar with ETA, frame count, and processing speed.
 
-## Native Pipeline Architecture
-
-The analyzer uses a fully native Rust pipeline via `ffmpeg-next`, providing direct access to decoded video frames in memory (no external process invocation).
+Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-Analyze inspects raw 10-bit pixel data directly in application memory. This zero-copy approach eliminates inter-process overhead and enables precise, per-pixel luminance operations that would be impossible with text-based analysis.
 
 ### 10-bit luminance and PQ domain
 
@@ -311,19 +309,7 @@ Expected:
 
 - Pinned toolchain: rustc, clippy, and rustfmt are pinned via `rust-toolchain.toml` for reproducible CI/dev builds.
 
-## The Native Pipeline Algorithm (Overview)
 
-1. Initialize video with `ffmpeg-next`, open input, detect best video stream.
-2. Decode frames (software by default; CUDA attempted if requested) and scale to YUV420P10LE.
-3. Active-video crop detection on Y-plane to ignore black bars.
-4. For each frame:
-   - Read 10-bit Y-plane samples
-   - Normalize (HDR10 limited-range) to [0,1]
-   - Bin into v5 histogram layout (SDR+HDR), compute avg PQ via mid-bin weighting
-   - Track peak PQ
-   - Optionally compute optimizer target nits using rolling averages and highlight knee
-5. Scene detection using histogram distance with configurable threshold.
-6. Serialize measurements via `madvr_parse` as v5 or v6.
 
 ## Roadmap
 
