@@ -3,14 +3,10 @@ import sys
 import json
 import shutil
 import subprocess
-import time
-import re
 from typing import List, Dict, Any, Optional
 
-try:
-    from ffmpeg_progress_yield import FfmpegProgress
-except ImportError:
-    FfmpegProgress = None
+# FfmpegProgress removed
+
 
 from .utils import print_color
 
@@ -147,63 +143,9 @@ def run_ffmpeg_with_progress(
     """
     Run an ffmpeg command with a concise progress display.
     """
-    if not command or os.path.basename(command[0]) != "ffmpeg":
-        return run_command(command, log_file_path)
-
-    if FfmpegProgress is None:
-        print_color(
-            "yellow",
-            "ffmpeg-progress-yield not installed; running ffmpeg without progress.",
-        )
-        return run_command(command, log_file_path)
-
-    try:
-        with FfmpegProgress(command, exclude_progress=True) as ff:
-            last_print = -1.0
-            finalizing_hint_shown = False
-            for pct in ff.run_command_with_progress(
-                duration_override=duration_override
-            ):
-                if pct is None:
-                    continue
-                if pct == 0 or pct == 100 or pct - last_print >= 1.0:
-                    if pct == 100 and not finalizing_hint_shown:
-                        print(
-                            f"\r{description}: {pct:6.2f}% (finalizing...)",
-                            end="",
-                            flush=True,
-                        )
-                        finalizing_hint_shown = True
-                    else:
-                        print(f"\r{description}: {pct:6.2f}%", end="", flush=True)
-                    last_print = pct
-        print()
-
-        returncode = getattr(ff, "returncode", None)
-        if returncode is not None and returncode != 0:
-            print_color("red", f"\nFFmpeg command failed with return code {returncode}")
-            try:
-                with open(log_file_path, "w") as log_file:
-                    log_file.write(f"Command: {' '.join(command)}\n\n")
-                    if hasattr(ff, "stderr") and ff.stderr:
-                        log_file.write(ff.stderr)
-            except Exception:
-                pass
-            return False
-
-        try:
-            with open(log_file_path, "w") as log_file:
-                log_file.write(f"Command: {' '.join(command)}\n\n")
-                if hasattr(ff, "stderr") and ff.stderr:
-                    log_file.write(ff.stderr)
-        except Exception:
-            pass
-        return True
-    except RuntimeError as e:
-        print()
-        print_color("red", f"\nError executing command: {' '.join(command)}")
-        print_color("red", f"See log for details: {log_file_path}")
-        return False
+    # Simply use run_command_live which already handles live output streaming
+    # and \r carriage returns for progress bars.
+    return run_command_live(command, log_file_path)
 
 
 def get_mediainfo_json_cached(input_file: str) -> Optional[Dict[str, Any]]:

@@ -12,9 +12,7 @@ license = { text = "MIT" }
 authors = [
     { name = "Your Name", email = "you@example.com" }
 ]
-dependencies = [
-    "ffmpeg-progress-yield"
-]
+dependencies = []
 
 [project.scripts]
 mkvdolby = "mkvdolby.cli:main"
