@@ -49,83 +49,60 @@ def run_command_live(command: List[str], log_file_path: str) -> bool:
     import select
 
     try:
-        with open(log_file_path, "w") as log_file:
+        with open(log_file_path, "w", encoding="utf-8") as log_file:
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # Line buffered
+                text=False,  # Binary mode to avoid buffering issues/decoding lags
+                bufsize=0,  # Unbuffered
             )
 
-            # Track line buffers to handle \r properly
-            stdout_line = ""
-            stderr_line = ""
+            while True:
+                # Check for process exit if pipes are closed/empty
+                if process.poll() is not None:
+                    # Drain one last time
+                    remainder_out = process.stdout.read() if process.stdout else b""
+                    remainder_err = process.stderr.read() if process.stderr else b""
+                    if remainder_out:
+                        sys.stdout.buffer.write(remainder_out)
+                        sys.stdout.buffer.flush()
+                        log_file.write(remainder_out.decode("utf-8", errors="replace"))
+                    if remainder_err:
+                        sys.stderr.buffer.write(remainder_err)
+                        sys.stderr.buffer.flush()
+                        log_file.write(
+                            remainder_err.decode("utf-8", errors="replace").replace(
+                                "\r", "\n"
+                            )
+                        )
+                    break
 
-            def write_with_cr_handling(
-                char: str, output_stream, line_buffer: str
-            ) -> str:
-                """Handle carriage return by clearing and rewriting the line."""
-                if char == "\r":
-                    # Clear current line and move cursor to start
-                    # Use ANSI escape: \033[2K clears line, \r moves to start
-                    output_stream.write("\r\033[K")
-                    output_stream.flush()
-                    return ""
-                elif char == "\n":
-                    output_stream.write(char)
-                    output_stream.flush()
-                    return ""
-                else:
-                    output_stream.write(char)
-                    output_stream.flush()
-                    return line_buffer + char
-
-            # Use select for multiplexing stdout/stderr
-            while process.poll() is None:
                 readable, _, _ = select.select(
                     [process.stdout, process.stderr], [], [], 0.1
                 )
 
                 for pipe in readable:
-                    # Read one character at a time for responsive progress updates
-                    char = pipe.read(1)
-                    if char:
-                        # Write to appropriate output stream with CR handling
-                        if pipe == process.stderr:
-                            stderr_line = write_with_cr_handling(
-                                char, sys.stderr, stderr_line
-                            )
-                        else:
-                            stdout_line = write_with_cr_handling(
-                                char, sys.stdout, stdout_line
-                            )
-                        # Log file gets raw output (newlines for each update for readability)
-                        if char == "\r":
-                            log_file.write("\n")
-                        else:
-                            log_file.write(char)
+                    # Read chunk (bytes)
+                    chunk = pipe.read(4096)
+                    if not chunk:
+                        continue
 
-            # Drain any remaining output after process exits
-            for pipe, out, line_buf in [
-                (process.stdout, sys.stdout, stdout_line),
-                (process.stderr, sys.stderr, stderr_line),
-            ]:
-                remaining = pipe.read()
-                if remaining:
-                    for char in remaining:
-                        if char == "\r":
-                            out.write("\r\033[K")
-                            log_file.write("\n")
-                        elif char == "\n":
-                            out.write(char)
-                            log_file.write(char)
-                        else:
-                            out.write(char)
-                            log_file.write(char)
-                    out.flush()
+                    # Direct binary pass-through to terminal
+                    if pipe == process.stderr:
+                        sys.stderr.buffer.write(chunk)
+                        sys.stderr.buffer.flush()
+                        # Log file: decode and replace \r with \n
+                        log_file.write(
+                            chunk.decode("utf-8", errors="replace").replace("\r", "\n")
+                        )
+                    else:
+                        sys.stdout.buffer.write(chunk)
+                        sys.stdout.buffer.flush()
+                        log_file.write(chunk.decode("utf-8", errors="replace"))
 
-            log_file.flush()
+                log_file.flush()
+
             return process.returncode == 0
 
     except Exception as e:

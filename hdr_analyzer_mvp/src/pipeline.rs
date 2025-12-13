@@ -18,7 +18,7 @@ fn copy_frame(frame: &MadVRFrame) -> MadVRFrame {
     }
 }
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use ffmpeg_next::{codec, format, frame, software};
 
@@ -247,6 +247,7 @@ fn run_native_analysis_pipeline(
             .unwrap());
         pb
     };
+    pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
     pb.set_message("Analyzing");
 
     if sample_rate > 1 {
