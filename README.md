@@ -104,9 +104,10 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
   - Windows: Install FFmpeg dev libraries or use vcpkg
 - Build tools: C compiler and build tools (Xcode CLT on macOS, build-essential on Linux, MSVC on Windows)
 
-## Installation
+## Installation & Setup
 
-Clone the repository and build all workspace members:
+### 1. Build the Rust Tools
+Clone the repository and build the workspace. This compiles `hdr_analyzer_mvp` (the core analysis engine) and `verifier`.
 
 ```bash
 git clone https://github.com/tinof/hdr-analyze.git
@@ -114,19 +115,52 @@ cd hdr-analyze
 cargo build --release --workspace
 ```
 
-Executables:
-- Analyzer: `./target/release/hdr_analyzer_mvp`
-- Verifier: `./target/release/verifier`
+The compiled binaries will be located in `target/release/`.
 
-### Building individual tools
+### 2. Install mkvdolby (Python Wrapper)
+The `mkvdolby` command is a Python wrapper that orchestrates the entire conversion process. On modern Linux distributions (Ubuntu 24.04+, Debian 12+), you should install it using `pipx` to avoid conflicts with system packages.
+
+**Prerequisite:** Install pipx (if not already installed)
+```bash
+sudo apt install pipx
+pipx ensurepath
+```
+*Note: You may need to restart your terminal after `ensurepath`.*
+
+**Install mkvdolby in editable mode:**
+Installing in "editable" mode (`-e`) allows the tool to use the Python source files in your current directory directly.
+```bash
+pipx install -e mkvdolby/ --force
+```
+
+**Verify Installation:**
+```bash
+mkvdolby --help
+```
+
+### 3. Updating (After `git pull`)
+When you pull new changes from the repository, you **must** rebuild the Rust binaries to ensure they match the updated source code.
 
 ```bash
-# Build only the main analyzer
-cargo build --release -p hdr_analyzer_mvp
+# 1. Pull changes
+git pull
 
-# Build only the verifier tool
-cargo build --release -p verifier
+# 2. Rebuild Rust binaries (CRITICAL)
+cargo build --release --workspace
+
+# 3. (Optional) If Python dependencies changed, re-install mkvdolby
+# Since we used -e (editable), code changes are automatic, but dependency updates require:
+pipx install -e mkvdolby/ --force
 ```
+
+**Troubleshooting Updates:**
+- If `mkvdolby` complains about missing features or behaves inconsistently, ensure you ran `cargo build --release --workspace`.
+- If you see "command not found" or weird path errors, run `hash -r` or open a new terminal.
+
+### Executables Locations
+- Analyzer: `./target/release/hdr_analyzer_mvp`
+- Verifier: `./target/release/verifier`
+- Wrapper: `mkvdolby` (in your `$PATH` via pipx)
 
 ## Usage
 
