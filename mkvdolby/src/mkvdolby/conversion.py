@@ -1,5 +1,5 @@
 import os
-import re
+
 import shutil
 import argparse
 from typing import Optional, List
@@ -22,7 +22,6 @@ from .metadata import (
     parse_madvr_details_for_trims,
     generate_extra_json,
     get_duration_from_mediainfo,
-    get_frame_count_from_mediainfo,
 )
 from .verify import verify_post_mux
 
@@ -121,6 +120,10 @@ def convert_hlg_to_pq(
 
     cmd = [
         "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-stats",
         "-i",
         input_file,
         "-y",
@@ -164,6 +167,10 @@ def extract_hdr10plus_metadata(input_file: str, temp_dir: str) -> Optional[str]:
     if not run_ffmpeg_with_progress(
         [
             "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-stats",
             "-i",
             input_file,
             "-y",
@@ -326,7 +333,7 @@ def convert_file(input_file: str, temp_dir: str, args: argparse.Namespace) -> bo
         bl_source_file = pq_path
 
     elif hdr_type == HdrFormat.UNSUPPORTED:
-        print_color("red", f"Unsupported HDR format for conversion. Skipping.")
+        print_color("red", "Unsupported HDR format for conversion. Skipping.")
         return False
 
     static_meta = get_static_metadata(input_file)
@@ -360,6 +367,10 @@ def convert_file(input_file: str, temp_dir: str, args: argparse.Namespace) -> bo
     if not run_ffmpeg_with_progress(
         [
             "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-stats",
             "-i",
             bl_source_file,
             "-y",

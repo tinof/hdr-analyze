@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use madvr_parse::{MadVRFrame, MadVRScene};
 use std::collections::VecDeque;
-use std::io::Write;
+
 use std::time::{Duration, Instant};
 
 /// Create a copy of a MadVRFrame (MadVRFrame doesn't implement Clone)
@@ -18,116 +18,7 @@ fn copy_frame(frame: &MadVRFrame) -> MadVRFrame {
     }
 }
 
-/// Progress display helper that writes to stderr for reliable subprocess piping
-struct ProgressDisplay {
-    start_time: Instant,
-    last_update: Instant,
-    update_interval: Duration,
-    total_frames: Option<u32>,
-    stage: String,
-}
-
-impl ProgressDisplay {
-    fn new(total_frames: Option<u32>) -> Self {
-        Self {
-            start_time: Instant::now(),
-            last_update: Instant::now(),
-            update_interval: Duration::from_millis(250), // Update 4x per second
-            total_frames,
-            stage: String::from("Analyzing"),
-        }
-    }
-
-    fn set_stage(&mut self, stage: &str) {
-        self.stage = stage.to_string();
-    }
-
-    fn format_eta(seconds: u64) -> String {
-        if seconds >= 3600 {
-            format!("{}h {:02}m", seconds / 3600, (seconds % 3600) / 60)
-        } else if seconds >= 60 {
-            format!("{}m {:02}s", seconds / 60, seconds % 60)
-        } else {
-            format!("{}s", seconds)
-        }
-    }
-
-    fn should_update(&mut self) -> bool {
-        let now = Instant::now();
-        if now.duration_since(self.last_update) >= self.update_interval {
-            self.last_update = now;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn update(&mut self, frame_count: u32, force: bool) {
-        if !force && !self.should_update() {
-            return;
-        }
-
-        let elapsed = self.start_time.elapsed();
-        let elapsed_secs = elapsed.as_secs_f64();
-        let fps = if elapsed_secs > 0.5 {
-            frame_count as f64 / elapsed_secs
-        } else {
-            0.0
-        };
-
-        let elapsed_str = format_duration(elapsed);
-
-        // Build progress line
-        let progress_line = if let Some(total) = self.total_frames {
-            let progress = (frame_count as f64 / total as f64) * 100.0;
-            let remaining_frames = total.saturating_sub(frame_count);
-
-            // Calculate ETA
-            let eta_str = if fps > 0.5 && frame_count > 100 {
-                let eta_secs = (remaining_frames as f64 / fps) as u64;
-                format!(" | ETA: {}", Self::format_eta(eta_secs))
-            } else {
-                String::new()
-            };
-
-            // Progress bar (20 chars wide)
-            let bar_width = 20;
-            let filled = ((progress / 100.0) * bar_width as f64) as usize;
-            let empty = bar_width - filled;
-            let bar = format!("[{}{}]", "█".repeat(filled), "░".repeat(empty));
-
-            format!(
-                "\r{}: {} {:.1}% ({}/{}) | {:.1} fps | {}{}    ",
-                self.stage, bar, progress, frame_count, total, fps, elapsed_str, eta_str
-            )
-        } else {
-            format!(
-                "\r{}: {} frames | {:.1} fps | {}    ",
-                self.stage, frame_count, fps, elapsed_str
-            )
-        };
-
-        // Write to stderr for reliable output through subprocess pipes
-        eprint!("{}", progress_line);
-        std::io::stderr().flush().unwrap_or(());
-    }
-
-    fn finish(&self, frame_count: u32) {
-        let elapsed = self.start_time.elapsed();
-        let fps = if elapsed.as_secs_f64() > 0.0 {
-            frame_count as f64 / elapsed.as_secs_f64()
-        } else {
-            0.0
-        };
-        eprintln!(
-            "\r{}: Complete! {} frames in {} ({:.1} fps avg)                    ",
-            self.stage,
-            frame_count,
-            format_duration(elapsed),
-            fps
-        );
-    }
-}
+use indicatif::{ProgressBar, ProgressStyle};
 
 use ffmpeg_next::{codec, format, frame, software};
 
@@ -341,9 +232,22 @@ fn run_native_analysis_pipeline(
 
     let start_time = Instant::now();
 
-    // Create progress display
-    let mut progress = ProgressDisplay::new(total_frames);
-    progress.set_stage("Analyzing");
+    // Create progress bar
+    let pb = if let Some(total) = total_frames {
+        let pb = ProgressBar::new(total as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {percent}% ({pos}/{len}) {per_sec} ETA: {eta}")
+            .unwrap()
+            .progress_chars("=>-"));
+        pb
+    } else {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg} [{elapsed_precise}] {pos} frames {per_sec}")
+            .unwrap());
+        pb
+    };
+    pb.set_message("Analyzing");
 
     if sample_rate > 1 {
         eprintln!(
@@ -358,7 +262,7 @@ fn run_native_analysis_pipeline(
     } else {
         eprintln!("Processing frames with native pipeline...");
     }
-    progress.update(0, true); // Show initial progress immediately
+    pb.set_position(0); // Show initial progress immediately
 
     for (stream, packet) in input_context.packets() {
         if stream.index() == video_stream_index {
@@ -454,7 +358,7 @@ fn run_native_analysis_pipeline(
                 frame_count += 1;
 
                 // Update progress display
-                progress.update(frame_count, false);
+                pb.set_position(frame_count as u64);
             }
         }
     }
@@ -542,11 +446,11 @@ fn run_native_analysis_pipeline(
 
         frames.push(analyzed_frame);
         frame_count += 1;
-        progress.update(frame_count, false);
+        pb.set_position(frame_count as u64);
     }
 
     // Finalize progress display
-    progress.finish(frame_count);
+    pb.finish_with_message("Complete");
 
     let scenes = convert_scene_cuts_to_scenes(scene_cuts, frame_count);
     println!(
