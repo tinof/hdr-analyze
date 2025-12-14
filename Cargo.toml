@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2" # Good practice for modern workspaces
 members = [
-    "hdr_analyzer_mvp",
+    "hdr_analyzer_mvp", "mkvdolby",
     "verifier",
 ]
 
