@@ -164,6 +164,7 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 
 ### mkvdolby
 - `--verify`: Run our verifier + dovi_tool info/mediainfo post-mux and fail on inconsistencies
+- `--hwaccel <cuda|none>`: Hardware acceleration hint for analysis and HLG conversion (default: none)
 
 ## Refactoring (Milestone R) - ✓ COMPLETE
 

@@ -231,7 +231,11 @@ mkvdolby "input.mkv"
 mkvdolby "input.mkv" --keep-source
 
 # Additional flags
+# Additional flags
 mkvdolby --help
+
+# Hardware Acceleration
+mkvdolby "input.mkv" --hwaccel cuda
 ```
 
 ### Verifier

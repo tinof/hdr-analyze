@@ -11,6 +11,7 @@ The following core features have been implemented and are currently being valida
 -   **Dynamic Clipping Heuristics**: Optimizer profiles (`conservative`, `balanced`, `aggressive`) and dynamic knee detection are implemented. *Next step: Long-term qualitative tuning.*
 -   **Native HLG Support**: In-memory HLG-to-PQ conversion is active. *Next step: Formal regression testing against reference streams.*
 -   **Noise Robustness**: Percentile-based peaks (P99/P99.9) and histogram smoothing are live.
+-   **NVIDIA CUDA Support**: Added `--hwaccel` flag to `mkvdolby` for accelerated analysis and HLG conversion (using `hevc_nvenc`).
 
 ---
 

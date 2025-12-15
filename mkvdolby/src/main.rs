@@ -2,9 +2,9 @@ use clap::Parser;
 use colored::Colorize;
 
 mod cli;
-mod pipeline;
 mod external;
 mod metadata;
+mod pipeline;
 mod verify;
 
 use cli::Args;
@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
-    // Note: We need to propagate the modified peak_source to the pipeline maybe via a modified Args struct 
+    // Note: We need to propagate the modified peak_source to the pipeline maybe via a modified Args struct
     // or passing it explicitly. The pipeline currently takes &Args.
     // For MVP, since Args is owned in main, we can mutate it if we make it mutable, but Clap struct fields are pub.
     // Let's hack it: struct update syntax or just mutability.
@@ -47,11 +47,13 @@ fn main() -> anyhow::Result<()> {
         .split(',')
         .map(|s| s.trim().parse::<u32>())
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| anyhow::anyhow!("--trim-targets must be a comma-separated list of integers."))?;
+        .map_err(|_| {
+            anyhow::anyhow!("--trim-targets must be a comma-separated list of integers.")
+        })?;
 
     // Validate trim target parsing early
     if trim_targets.is_empty() {
-         anyhow::bail!("--trim-targets cannot be empty");
+        anyhow::bail!("--trim-targets cannot be empty");
     }
 
     println!("{} mkvdolby", "Starting".green().bold());
@@ -65,7 +67,7 @@ fn main() -> anyhow::Result<()> {
             let entry = entry?;
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "mkv") {
-                 files.push(path.to_string_lossy().to_string());
+                files.push(path.to_string_lossy().to_string());
             }
         }
         if files.is_empty() {
@@ -78,16 +80,24 @@ fn main() -> anyhow::Result<()> {
     for file in files {
         // Skip already converted
         if file.ends_with(".DV.mkv") {
-            println!("{}", format!("Skipping already converted file: {}", file).yellow());
+            println!(
+                "{}",
+                format!("Skipping already converted file: {}", file).yellow()
+            );
             continue;
         }
-        
+
         match pipeline::convert_file(&file, &final_args) {
             Ok(success) => {
-                if !success { had_failure = true; }
+                if !success {
+                    had_failure = true;
+                }
             }
             Err(e) => {
-                println!("{}", format!("Error processing file '{}': {}", file, e).red());
+                println!(
+                    "{}",
+                    format!("Error processing file '{}': {}", file, e).red()
+                );
                 had_failure = true;
             }
         }

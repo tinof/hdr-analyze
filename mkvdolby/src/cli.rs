@@ -64,6 +64,25 @@ pub struct Args {
     /// Do not delete the source file and intermediate files after successful conversion.
     #[arg(long)]
     pub keep_source: bool,
+
+    /// Hardware acceleration hint for analysis and encoding.
+    #[arg(long, value_enum, default_value_t = HwAccel::None)]
+    pub hwaccel: HwAccel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum HwAccel {
+    None,
+    Cuda,
+}
+
+impl std::fmt::Display for HwAccel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HwAccel::None => write!(f, "none"),
+            HwAccel::Cuda => write!(f, "cuda"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

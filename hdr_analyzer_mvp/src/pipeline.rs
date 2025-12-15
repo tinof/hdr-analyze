@@ -242,9 +242,11 @@ fn run_native_analysis_pipeline(
         pb
     } else {
         let pb = ProgressBar::new_spinner();
-        pb.set_style(ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg} [{elapsed_precise}] {pos} frames {per_sec}")
-            .unwrap());
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg} [{elapsed_precise}] {pos} frames {per_sec}")
+                .unwrap(),
+        );
         pb
     };
     pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));

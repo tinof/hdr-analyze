@@ -1,0 +1,2 @@
+    Checking mkvdolby v0.1.0 (C:\Users\tinof\Documents\GitHub\hdr-analyze\mkvdolby)
+    Finished `release` profile [optimized] target(s) in 0.38s

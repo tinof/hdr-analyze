@@ -31,18 +31,18 @@ pub fn find_tool(tool_name: &str) -> Option<PathBuf> {
     {
         return Some(PathBuf::from(tool_name));
     }
-    
-     // Windows fallback
-    if cfg!(target_os = "windows") {
-         if Command::new("where")
+
+    // Windows fallback
+    if cfg!(target_os = "windows")
+        && Command::new("where")
             .arg(tool_name)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .map(|s| s.success())
-            .unwrap_or(false) {
-                 return Some(PathBuf::from(tool_name));
-            }
+            .unwrap_or(false)
+    {
+        return Some(PathBuf::from(tool_name));
     }
 
     None
@@ -57,10 +57,10 @@ pub fn run_command(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     // Write command line for debugging
     writeln!(writer, "Running command: {:?}", cmd)?;
     writer.flush()?;
-    
+
     // Redirect stderr to stdout to capture everything
     cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped()); 
+    cmd.stderr(Stdio::piped());
 
     // Actually, std::process::Command doesn't support "stderr -> stdout" fd redirection easily without shell.
     // Better to pipe both.
@@ -74,16 +74,16 @@ pub fn run_command(cmd: &mut Command, log_path: &Path) -> Result<bool> {
 
     // We want to stream both to the log file.
     // We can use threads to drive this.
-    
+
     // Simplification: For non-live commands, just wait_with_output is easier,
     // but we want to log it potentially.
     // Let's use wait_with_output for simple commands and dump to file.
-    
+
     let output = child.wait_with_output()?;
-    
+
     writer.write_all(&output.stdout)?;
     writer.write_all(&output.stderr)?;
-    
+
     Ok(output.status.success())
 }
 
@@ -93,7 +93,7 @@ pub fn run_command_live(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     let log_file = File::create(log_path).context("Failed to create log file")?;
     // We clone the file handle for the threads
     let mut log_writer = std::io::BufWriter::new(log_file);
-    
+
     writeln!(log_writer, "Running command live: {:?}", cmd)?;
 
     cmd.stdout(Stdio::piped());
@@ -106,19 +106,21 @@ pub fn run_command_live(cmd: &mut Command, log_path: &Path) -> Result<bool> {
 
     // Channels to send output back to main thread or just distinct threads handling writing
     // The Python script uses `select`. In Rust, threads are easier for cross-platform.
-    
+
     let (tx, rx) = mpsc::channel();
     let tx_err = tx.clone();
-    
+
     let t_out = thread::spawn(move || {
         let reader = BufReader::new(stdout);
         // We read byte by byte or chunk to preserve exact output (including \r)
-        // copy() might buffer too much? 
+        // copy() might buffer too much?
         // Let's just read chunks.
         let mut reader = reader;
         let mut binding = [0u8; 1024];
         while let Ok(n) = reader.read(&mut binding) {
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             let _ = tx.send((false, binding[..n].to_vec()));
         }
     });
@@ -126,9 +128,11 @@ pub fn run_command_live(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     let t_err = thread::spawn(move || {
         let reader = BufReader::new(stderr);
         let mut reader = reader;
-         let mut binding = [0u8; 1024];
+        let mut binding = [0u8; 1024];
         while let Ok(n) = reader.read(&mut binding) {
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             let _ = tx_err.send((true, binding[..n].to_vec()));
         }
     });
@@ -136,7 +140,7 @@ pub fn run_command_live(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     // Main loop: receive from channel, write to log + screen
     let mut stdout_handle = std::io::stdout();
     let mut stderr_handle = std::io::stderr();
-    
+
     for (is_err, data) in rx {
         // Write to log (replacing \r with \n for readability in logs, as python did)
         // Python: chunk.decode(...).replace('\r', '\n')
@@ -145,21 +149,21 @@ pub fn run_command_live(cmd: &mut Command, log_path: &Path) -> Result<bool> {
         let s = String::from_utf8_lossy(&data);
         let clean_s = s.replace('\r', "\n");
         let _ = log_writer.write_all(clean_s.as_bytes());
-        
+
         // Write to terminal (raw)
         if is_err {
             let _ = stderr_handle.write_all(&data);
             let _ = stderr_handle.flush();
         } else {
-             let _ = stdout_handle.write_all(&data);
-             let _ = stdout_handle.flush();
+            let _ = stdout_handle.write_all(&data);
+            let _ = stdout_handle.flush();
         }
     }
-    
+
     // Close up
     let _ = t_out.join();
     let _ = t_err.join();
-    
+
     let status = child.wait()?;
     Ok(status.success())
 }
@@ -170,19 +174,25 @@ pub fn check_dependencies() -> Result<()> {
 
     for tool in required {
         if find_tool(tool).is_none() {
-            println!("{}", format!("Error: Required command '{}' not found in PATH.", tool).red());
+            println!(
+                "{}",
+                format!("Error: Required command '{}' not found in PATH.", tool).red()
+            );
             missing = true;
         }
     }
 
     if find_tool("mediainfo").is_none() && find_tool("ffprobe").is_none() {
-        println!("{}", "Error: Neither 'mediainfo' nor 'ffprobe' found. One is required.".red());
+        println!(
+            "{}",
+            "Error: Neither 'mediainfo' nor 'ffprobe' found. One is required.".red()
+        );
         missing = true;
     }
 
     if find_tool("dovi_tool").is_none() {
-         println!("{}", "Error: Required command 'dovi_tool' not found.".red());
-         missing = true;
+        println!("{}", "Error: Required command 'dovi_tool' not found.".red());
+        missing = true;
     }
 
     if missing {
@@ -195,9 +205,9 @@ pub fn check_dependencies() -> Result<()> {
 pub fn get_command_output(cmd: &mut Command) -> Result<String> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::null()); // Silence stderr for data fetching commands usually
-    
+
     let output = cmd.output().context("Failed to execute command")?;
-    
+
     if output.status.success() {
         let s = String::from_utf8(output.stdout).context("Command output is not valid UTF-8")?;
         Ok(s)
@@ -210,7 +220,7 @@ pub fn get_command_output(cmd: &mut Command) -> Result<String> {
 pub fn run_command_inherit_stderr(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     let log_file = File::create(log_path).context("Failed to create log file")?;
     let mut log_writer = std::io::BufWriter::new(log_file);
-    
+
     writeln!(log_writer, "Running command (stderr inherited): {:?}", cmd)?;
 
     cmd.stdout(Stdio::piped());
@@ -222,32 +232,34 @@ pub fn run_command_inherit_stderr(cmd: &mut Command, log_path: &Path) -> Result<
 
     // We only need one thread for stdout
     let (tx, rx) = mpsc::channel();
-    
+
     let t_out = thread::spawn(move || {
         let reader = BufReader::new(stdout);
         let mut reader = reader;
         let mut binding = [0u8; 1024];
         while let Ok(n) = reader.read(&mut binding) {
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             let _ = tx.send(binding[..n].to_vec());
         }
     });
 
     let mut stdout_handle = std::io::stdout();
-    
+
     for data in rx {
         // Write to log
         let s = String::from_utf8_lossy(&data);
         let clean_s = s.replace('\r', "\n");
         let _ = log_writer.write_all(clean_s.as_bytes());
-        
+
         // Write to terminal
         let _ = stdout_handle.write_all(&data);
         let _ = stdout_handle.flush();
     }
-    
+
     let _ = t_out.join();
-    
+
     let status = child.wait()?;
     Ok(status.success())
 }

@@ -1,0 +1,119 @@
+    Checking mkvdolby v0.1.0 (C:\Users\tinof\Documents\GitHub\hdr-analyze\mkvdolby)
+error: this `if` statement can be collapsed
+  --> mkvdolby\src\external.rs:36:5
+   |
+36 | /     if cfg!(target_os = "windows") {
+37 | |         if Command::new("where")
+38 | |             .arg(tool_name)
+39 | |             .stdout(Stdio::null())
+...  |
+46 | |         }
+47 | |     }
+   | |_____^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
+   = note: `-D clippy::collapsible-if` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+   |
+36 ~     if cfg!(target_os = "windows") && Command::new("where")
+37 +             .arg(tool_name)
+38 +             .stdout(Stdio::null())
+39 +             .stderr(Stdio::null())
+40 +             .status()
+41 +             .map(|s| s.success())
+42 +             .unwrap_or(false) {
+43 +         return Some(PathBuf::from(tool_name));
+44 +     }
+   |
+
+error: this `if` statement can be collapsed
+   --> mkvdolby\src\pipeline.rs:310:5
+    |
+310 | /     if external::run_command_inherit_stderr(&mut cmd, &temp_dir.join("analyzer.log"))? {
+311 | |         if out_path.exists() {
+312 | |             return Ok(Some(out_path));
+313 | |         }
+314 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
+help: collapse nested if block
+    |
+310 ~     if external::run_command_inherit_stderr(&mut cmd, &temp_dir.join("analyzer.log"))? && out_path.exists() {
+311 +         return Ok(Some(out_path));
+312 +     }
+    |
+
+error: this `if` statement can be collapsed
+   --> mkvdolby\src\pipeline.rs:351:5
+    |
+351 | /     if run_command(&mut tool, &temp_dir.join("hdr10plus_tool.log"))? {
+352 | |         if json_out.exists() && fs::metadata(&json_out)?.len() > 0 {
+353 | |             return Ok(Some(json_out));
+354 | |         }
+355 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
+help: collapse nested if block
+    |
+351 ~     if run_command(&mut tool, &temp_dir.join("hdr10plus_tool.log"))? && json_out.exists() && fs::metadata(&json_out)?.len() > 0 {
+352 +         return Ok(Some(json_out));
+353 +     }
+    |
+
+error: this `if` statement can be collapsed
+   --> mkvdolby\src\pipeline.rs:474:5
+    |
+474 | /     if run_command_live(&mut cmd, &log_path)? {
+475 | |         if out_path.exists() {
+476 | |             println!("{}", "Converted HLG to PQ successfully.".green());
+477 | |             return Ok(out_path);
+478 | |         }
+479 | |     }
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
+help: collapse nested if block
+    |
+474 ~     if run_command_live(&mut cmd, &log_path)? && out_path.exists() {
+475 +         println!("{}", "Converted HLG to PQ successfully.".green());
+476 +         return Ok(out_path);
+477 +     }
+    |
+
+error: method `name` is never used
+  --> mkvdolby\src\metadata.rs:21:12
+   |
+20 | impl HdrFormat {
+   | -------------- method in this implementation
+21 |     pub fn name(&self) -> &'static str {
+   |            ^^^^
+   |
+   = note: `-D dead-code` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(dead_code)]`
+
+error: redundant pattern matching, consider using `is_err()`
+  --> mkvdolby\src\verify.rs:40:20
+   |
+40 |             if let Err(_) = run_command(&mut cmd, &temp_dir.join("verifier.log")) {
+   |             -------^^^^^^-------------------------------------------------------- help: try: `if run_command(&mut cmd, &temp_dir.join("verifier.log")).is_err()`
+   |
+   = note: this will change drop order of the result, as well as all temporaries
+   = note: add `#[allow(clippy::redundant_pattern_matching)]` if this is important
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#redundant_pattern_matching
+   = note: `-D clippy::redundant-pattern-matching` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::redundant_pattern_matching)]`
+
+error: redundant pattern matching, consider using `is_err()`
+  --> mkvdolby\src\verify.rs:57:12
+   |
+57 |     if let Err(_) = run_command(&mut dovi, &temp_dir.join("dovi_info.log")) {
+   |     -------^^^^^^---------------------------------------------------------- help: try: `if run_command(&mut dovi, &temp_dir.join("dovi_info.log")).is_err()`
+   |
+   = note: this will change drop order of the result, as well as all temporaries
+   = note: add `#[allow(clippy::redundant_pattern_matching)]` if this is important
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#redundant_pattern_matching
+
+error: could not compile `mkvdolby` (bin "mkvdolby") due to 7 previous errors
