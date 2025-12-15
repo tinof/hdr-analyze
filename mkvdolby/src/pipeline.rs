@@ -47,18 +47,26 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let mut hdr10plus_json: Option<PathBuf> = None;
     let mut bl_source_file = PathBuf::from(input_file);
 
+    // Pre-handle HDR10+ to allow fallback to HDR10Unsupported if metadata is missing
+    if hdr_type == HdrFormat::Hdr10Plus {
+        match extract_hdr10plus_metadata(input_file, &temp_dir) {
+            Ok(Some(json_path)) => hdr10plus_json = Some(json_path),
+            Ok(None) => {
+                println!(
+                    "{}",
+                    "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis."
+                        .yellow()
+                );
+                hdr_type = HdrFormat::Hdr10Unsupported;
+            }
+            Err(_) => return Ok(false),
+        }
+    }
+
     // Logic branching
     match hdr_type {
         HdrFormat::Hdr10Plus => {
-            // Extract JSON
-            match extract_hdr10plus_metadata(input_file, &temp_dir) {
-                Ok(Some(json_path)) => hdr10plus_json = Some(json_path),
-                Ok(None) => {
-                    // NO_DYNAMIC_METADATA equivalent
-                    hdr_type = HdrFormat::Hdr10Unsupported;
-                }
-                Err(_) => return Ok(false),
-            }
+            // Metadata already extracted above
         }
         HdrFormat::Hlg => {
             // HLG Logic
