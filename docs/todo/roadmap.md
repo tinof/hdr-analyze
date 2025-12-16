@@ -68,4 +68,5 @@ The following tasks are prioritized to stabilize the V1.4 codebase and enable sa
 ## Future Enhancements
 
 -   [ ] **Hardware Decode Contexts**: Implement full support for VAAPI and VideoToolbox for hardware-accelerated decoding on Linux and macOS.
+    -   *Status*: **Partial**. `img_convert` pipeline in `mkvdolby` now supports `videotoolbox` encoding on macOS. Decode contexts for analysis are deferred.
 -   [ ] **Broader CI Coverage**: Expand CI to build and test on multiple platforms (Linux, macOS, Windows) and run a more comprehensive integration test suite.

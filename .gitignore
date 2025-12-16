@@ -58,3 +58,6 @@ docs/VIDEOTOOLBOX_OPTIMIZATION_SUMMARY.md
 AGENTS.md
 tools/compare_baseline/dovi_tool
 tools/compare_baseline/hdr10plus_tool
+tools/compare_baseline/dovi_tool
+tools/compare_baseline/hdr10plus_tool
+dovi_tool

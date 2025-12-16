@@ -1,8 +1,8 @@
 # HDR-Analyze: Dynamic HDR Metadata Generator
 
-A powerful, open-source workspace containing tools for analyzing HDR10 video files to generate dynamic metadata for Dolby Vision conversion.
+A powerful, open-source workspace containing tools for analyzing HDR10 and HLG video files to generate dynamic metadata for Dolby Vision conversion.
 
-This workspace implements advanced, research-backed algorithms to analyze video on a per-frame and per-scene basis, creating measurement files that can be used by tools like `dovi_tool` to produce high-quality Dolby Vision Profile 8.1 content from a standard HDR10 source.
+This workspace implements advanced, research-backed algorithms to analyze video on a per-frame and per-scene basis, creating measurement files that can be used by tools like `dovi_tool` to produce high-quality Dolby Vision Profile 8.1 content from standard HDR10 or HLG sources.
 
 ## Project Structure
 
@@ -82,8 +82,16 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
 
 ### Hardware acceleration support
 
+### Analyzer (Decoding)
+
+
 - CUDA: Attempts the `hevc_cuvid` decoder when `--hwaccel cuda` is specified (automatic fallback to software decoding if unavailable).
 - VAAPI / VideoToolbox: Currently log and use software decoding paths; proper device contexts are planned. The pipeline remains fully functional via software decoding.
+
+### Converter (Encoding via mkvdolby)
+- **macOS Apple Silicon**: Supports `hevc_videotoolbox` for accelerated HLG-to-PQ conversion. Use `--encoder videotoolbox` to enable.
+- **Other Platforms**: Defaults to `libx265` (software) for maximum compatibility and quality.
+
 
 ### Throughput controls and ARM optimizations
 
@@ -103,6 +111,9 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
   - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev pkg-config`
   - Windows: Install FFmpeg dev libraries or use vcpkg
 - Build tools: C compiler and build tools (Xcode CLT on macOS, build-essential on Linux, MSVC on Windows)
+- External Tools (NOT included):
+  - `dovi_tool`: Required for final RPU generation. Download from [quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool/releases) and place in your PATH.
+  - `hdr10plus_tool`: Required for HDR10+ analysis. Download from [quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool/releases) and place in your PATH.
 
 ## Installation & Setup
 
@@ -236,6 +247,10 @@ mkvdolby --help
 
 # Hardware Acceleration
 mkvdolby "input.mkv" --hwaccel cuda
+
+# Hardware Encoding on macOS (Apple Silicon)
+# Speed up HLG -> PQ conversion significantly (~10x) using VideoToolbox
+mkvdolby "input.mkv" --encoder videotoolbox
 ```
 
 ### Verifier
@@ -368,3 +383,12 @@ Expected:
 ## License
 
 MIT License
+
+## Legal & Trademarks
+
+This software is a research project for video analysis and is not an official product of Dolby Laboratories.
+
+- **Dolby Vision** is a trademark of Dolby Laboratories.
+- **HDR10+** is a trademark of HDR10+ Technologies, LLC.
+
+This project is not affiliated with, endorsed by, or sponsored by Dolby Laboratories or HDR10+ Technologies, LLC. Reference to these standards is strictly for compatibility and interoperability purposes.
