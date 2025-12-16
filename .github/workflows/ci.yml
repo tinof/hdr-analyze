@@ -137,6 +137,6 @@ jobs:
         with:
           toolchain: 1.82.0
       - name: Install cargo-audit
-        run: cargo install --locked cargo-audit
+        run: cargo install --locked cargo-audit --version 0.21.2
       - name: Run Security Audit
         run: cargo audit
