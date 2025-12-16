@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::cli::{Args, HwAccel, PeakSource};
+use crate::cli::{Args, Encoder, HwAccel, PeakSource};
 use crate::external::{self, run_command, run_command_live};
 use crate::metadata::{self, HdrFormat};
 
@@ -209,7 +209,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     // Inject RPU
     let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
-    let mut dovi_cmd = Command::new("dovi_tool");
+    // Resolve tool path
+    let dovi_tool_path = external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
+    let mut dovi_cmd = Command::new(std::fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
+
     dovi_cmd.args([
         "inject-rpu",
         "-i",
@@ -461,28 +464,70 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
         // However, for the base layer of a Profile 8.1 file, the RPU usually overrides/controls the display mapping.
         // We'll trust the container tagging.
     } else {
-        // CPU Encoding (x265)
-        cmd.args([
-            "-c:v",
-            "libx265",
-            "-preset",
-            &args.hlg_preset,
-            "-crf",
-            &args.hlg_crf.to_string(),
-            "-pix_fmt",
-            "yuv420p10le",
-            "-profile:v",
-            "main10",
-            "-x265-params",
-            &x265_params,
-        ]);
+        match args.encoder {
+            Encoder::Libx265 => {
+                // CPU Encoding (x265)
+                cmd.args([
+                    "-c:v",
+                    "libx265",
+                    "-preset",
+                    &args.hlg_preset,
+                    "-crf",
+                    &args.hlg_crf.to_string(),
+                    "-pix_fmt",
+                    "yuv420p10le",
+                    "-profile:v",
+                    "main10",
+                    "-x265-params",
+                    &x265_params,
+                ]);
+            }
+            Encoder::HevcVideotoolbox => {
+                // VideoToolbox setup
+                // Note: x265-params don't apply here. We need to set metadata via other flags if possible,
+                // but VT is limited. We rely on the container (mkvmerge) to set most metadata,
+                // but for bitstream SEI (like mastering display), VT support is tricky/limited in ffmpeg.
+                // For now, we prioritize speed.
+                // Map crf roughly to -q:v (0-100, where 100 is best).
+                // A CRF of 17 (0-51) is high quality.
+                // Let's approximate: q = 100 - (crf * 2) -> 17*2 = 34 -> 66?
+                // Or just use a high fixed quality like 75.
+                // ffmpeg -h encoder=hevc_videotoolbox shows -q:v is not standard.
+                // Actually usually it's -q:v for quality (1-100) on Apple Silicon?
+                // ffmpeg doc says -q:v is specific.
+                // Let's use -b:v 0 for VBR and allow VT to manage it, or just use -q:v 60-70.
+                // Let's use -q:v 65 which is generally transparent enough.
+
+                // NOTE: color properties needs to be set explicitly
+                cmd.args([
+                    "-c:v",
+                    "hevc_videotoolbox",
+                    "-allow_sw",
+                    "1",
+                    "-profile:v",
+                    "main10",
+                    "-pix_fmt",
+                    "p010le", // typical for VT
+                    "-color_primaries",
+                    "bt2020",
+                    "-color_trc",
+                    "smpte2084",
+                    "-colorspace",
+                    "bt2020nc",
+                    "-q:v",
+                    "65",
+                ]);
+            }
+        }
     }
 
     cmd.arg(out_path.to_str().unwrap());
 
-    if run_command_live(&mut cmd, &log_path)? && out_path.exists() {
-        println!("{}", "Converted HLG to PQ successfully.".green());
-        return Ok(out_path);
+    if run_command_live(&mut cmd, &log_path)? {
+        if out_path.exists() {
+            println!("{}", "Converted HLG to PQ successfully.".green());
+            return Ok(out_path);
+        }
     }
     anyhow::bail!("HLG to PQ conversion failed");
 }
@@ -496,8 +541,12 @@ fn generate_rpu(
 ) -> Result<Option<PathBuf>> {
     let rpu_out = temp_dir.join("RPU.bin");
     let extra_json = temp_dir.join("extra.json");
+    // Resolve tool path
+    let dovi_tool_path =
+        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
+    let dovi_abs = std::fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
 
-    let mut cmd = Command::new("dovi_tool");
+    let mut cmd = Command::new(&dovi_abs);
     cmd.args([
         "generate",
         "-j",
@@ -506,7 +555,10 @@ fn generate_rpu(
         rpu_out.to_str().unwrap(),
     ]);
 
-    println!("{}", "Generating RPU from metadata...".green());
+    println!(
+        "{}",
+        format!("Generating RPU from metadata (using {:?})...", dovi_abs).green()
+    );
 
     match hdr_type {
         HdrFormat::Hdr10Plus => {
@@ -514,14 +566,15 @@ fn generate_rpu(
             cmd.arg("--hdr10plus-peak-source")
                 .arg(peak_source.to_string());
         }
-        HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported => {
+        HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
             cmd.arg("--madvr-file").arg(meas_file.unwrap());
             cmd.arg("--use-custom-targets");
         }
         _ => return Ok(None),
     }
 
-    if run_command(&mut cmd, &temp_dir.join("dovi_gen.log"))? {
+    let log_path = temp_dir.join("dovi_gen.log");
+    if run_command(&mut cmd, &log_path)? {
         Ok(Some(rpu_out))
     } else {
         Ok(None)

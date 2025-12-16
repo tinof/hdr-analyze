@@ -68,6 +68,10 @@ pub struct Args {
     /// Hardware acceleration hint for analysis and encoding.
     #[arg(long, value_enum, default_value_t = HwAccel::None)]
     pub hwaccel: HwAccel,
+
+    /// Encoder to use for HLG to PQ conversion (libx265 or hevc_videotoolbox).
+    #[arg(long, value_enum, default_value_t = Encoder::Libx265)]
+    pub encoder: Encoder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -81,6 +85,22 @@ impl std::fmt::Display for HwAccel {
         match self {
             HwAccel::None => write!(f, "none"),
             HwAccel::Cuda => write!(f, "cuda"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Encoder {
+    Libx265,
+    #[clap(name = "videotoolbox")]
+    HevcVideotoolbox,
+}
+
+impl std::fmt::Display for Encoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Encoder::Libx265 => write!(f, "libx265"),
+            Encoder::HevcVideotoolbox => write!(f, "hevc_videotoolbox"),
         }
     }
 }
