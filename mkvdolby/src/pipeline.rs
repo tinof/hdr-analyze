@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
-
-use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use anyhow::{Context, Result};
+use colored::Colorize;
 
 use crate::cli::{Args, Encoder, HwAccel, PeakSource};
 use crate::external::{self, run_command, run_command_live};

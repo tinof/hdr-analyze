@@ -1,8 +1,8 @@
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
 use anyhow::{Context, Result};
 use madvr_parse::{MadVRFrame, MadVRScene};
-use std::collections::VecDeque;
-
-use std::time::{Duration, Instant};
 
 /// Create a copy of a MadVRFrame (MadVRFrame doesn't implement Clone)
 fn copy_frame(frame: &MadVRFrame) -> MadVRFrame {
