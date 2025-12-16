@@ -526,11 +526,9 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
 
     cmd.arg(out_path.to_str().unwrap());
 
-    if run_command_live(&mut cmd, &log_path)? {
-        if out_path.exists() {
-            println!("{}", "Converted HLG to PQ successfully.".green());
-            return Ok(out_path);
-        }
+    if run_command_live(&mut cmd, &log_path)? && out_path.exists() {
+        println!("{}", "Converted HLG to PQ successfully.".green());
+        return Ok(out_path);
     }
     anyhow::bail!("HLG to PQ conversion failed");
 }

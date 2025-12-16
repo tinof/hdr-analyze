@@ -110,12 +110,12 @@ mod tests {
     #[test]
     fn test_cut_allowed_min_len() {
         // First cut at frame 10 not allowed if min len 24
-        assert_eq!(cut_allowed(Some(0), 10, 24), false);
+        assert!(!cut_allowed(Some(0), 10, 24));
         // Cut at frame 24 allowed
-        assert_eq!(cut_allowed(Some(0), 24, 24), true);
+        assert!(cut_allowed(Some(0), 24, 24));
         // Subsequent cut needs another 24 frames
-        assert_eq!(cut_allowed(Some(24), 40, 24), false);
-        assert_eq!(cut_allowed(Some(24), 48, 24), true);
+        assert!(!cut_allowed(Some(24), 40, 24));
+        assert!(cut_allowed(Some(24), 48, 24));
     }
 
     #[test]

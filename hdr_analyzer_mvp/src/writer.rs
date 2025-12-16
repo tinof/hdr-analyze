@@ -154,6 +154,17 @@ fn compute_falls(frames: &[MadVRFrame]) -> (u32, u32) {
     (maxfall, avgfall)
 }
 
+fn percentile_u32(values: &[u32], p: f64) -> u32 {
+    if values.is_empty() {
+        return 0;
+    }
+    let mut v = values.to_vec();
+    v.sort_unstable();
+    let p = p.clamp(0.0, 1.0);
+    let idx = ((p * (v.len() as f64)) - 1.0).ceil().max(0.0) as usize;
+    v[idx.min(v.len() - 1)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,12 +205,12 @@ mod tests {
         ];
         let (maxfall, avgfall) = compute_falls(&frames);
         assert!(
-            maxfall >= 300 - 1 && maxfall <= 300 + 1,
+            (300 - 1..=300 + 1).contains(&maxfall),
             "maxfall ~300, got {}",
             maxfall
         );
         assert!(
-            avgfall >= 200 - 1 && avgfall <= 200 + 1,
+            (200 - 1..=200 + 1).contains(&avgfall),
             "avgfall ~200, got {}",
             avgfall
         );
@@ -215,13 +226,4 @@ mod tests {
     }
 }
 
-fn percentile_u32(values: &[u32], p: f64) -> u32 {
-    if values.is_empty() {
-        return 0;
-    }
-    let mut v = values.to_vec();
-    v.sort_unstable();
-    let p = p.clamp(0.0, 1.0);
-    let idx = ((p * (v.len() as f64)) - 1.0).ceil().max(0.0) as usize;
-    v[idx.min(v.len() - 1)]
-}
+
