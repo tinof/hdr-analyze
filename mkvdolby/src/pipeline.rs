@@ -210,8 +210,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // Inject RPU
     let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
     // Resolve tool path
-    let dovi_tool_path = external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let mut dovi_cmd = Command::new(std::fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
+    let dovi_tool_path =
+        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
+    let mut dovi_cmd =
+        Command::new(std::fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
 
     dovi_cmd.args([
         "inject-rpu",
