@@ -66,7 +66,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             name: hdr-analyze-x86_64-unknown-linux-gnu.tar.gz
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm64
@@ -99,7 +99,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Install FFmpeg & Toolchain (Ubuntu x86_64)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \

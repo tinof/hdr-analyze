@@ -1,5 +1,9 @@
 # HDR-Analyze: Dynamic HDR Metadata Generator
 
+[![CI Build](https://github.com/tinof/hdr-analyze/actions/workflows/rust.yml/badge.svg)](https://github.com/tinof/hdr-analyze/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://github.com/rust-lang/rust)
+
 A powerful, open-source workspace containing tools for analyzing HDR10 and HLG video files to generate dynamic metadata for Dolby Vision conversion.
 
 This workspace implements advanced, research-backed algorithms to analyze video on a per-frame and per-scene basis, creating measurement files that can be used by tools like `dovi_tool` to produce high-quality Dolby Vision Profile 8.1 content from standard HDR10 or HLG sources.

@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software in your research or work, please cite it as below."
+authors:
+  - family-names: "Fotiou"
+    given-names: "Konstantinos"
+    # orcid: "https://orcid.org/0000-0000-0000-0000" # Optional: Add your ORCID if you have one
+title: "HDR-Analyze: Dynamic HDR Metadata Generator for Dolby Vision"
+version: 1.4.0
+# doi: 10.5281/zenodo.1234  # Optional: Get a DOI via Zenodo/GitHub integration
+date-released: 2025-12-16
+url: "https://github.com/tinof/hdr-analyze"
+preferred-citation:
+  type: software
+  authors:
+  - family-names: "Fotiou"
+    given-names: "Konstantinos"
+  title: "HDR-Analyze: Dynamic HDR Metadata Generator for Dolby Vision"
+  year: 2025
+keywords:
+  - hdr
+  - dolby-vision
+  - video-analysis
+  - rust
+  - signal-processing
+license: MIT
