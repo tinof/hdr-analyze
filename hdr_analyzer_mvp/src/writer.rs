@@ -225,5 +225,3 @@ mod tests {
         assert_eq!(percentile_u32(&[], 0.5), 0);
     }
 }
-
-
