@@ -1,0 +1,9 @@
+# rustfmt configuration (stable options only)
+# https://rust-lang.github.io/rustfmt/
+
+edition = "2021"
+max_width = 100
+tab_spaces = 4
+hard_tabs = false
+newline_style = "Auto"
+reorder_imports = true

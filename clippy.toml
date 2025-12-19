@@ -1,0 +1,137 @@
+# =============================================================================
+# CLIPPY CONFIGURATION
+# =============================================================================
+# Official documentation: https://doc.rust-lang.org/clippy/configuration.html
+# Lint list: https://rust-lang.github.io/rust-clippy/master/index.html
+#
+# Run: cargo clippy --workspace --all-targets -- -D warnings
+#
+# Note: This file configures clippy thresholds and options.
+# For lint levels (warn/deny/allow), use Cargo.toml [lints] section.
+
+# =============================================================================
+# MSRV (Minimum Supported Rust Version)
+# =============================================================================
+# Prevents clippy from suggesting features newer than your MSRV
+# Matches rust-toolchain.toml
+msrv = "1.82.0"
+
+# =============================================================================
+# COMPLEXITY THRESHOLDS
+# =============================================================================
+# These control when clippy warns about overly complex code.
+# Values tuned for video processing / FFI code which tends to be complex.
+
+# Cognitive complexity threshold (default: 25)
+# Video processing pipelines can be legitimately complex
+cognitive-complexity-threshold = 30
+
+# Type complexity threshold (default: 250)
+# FFI wrappers often have complex types
+type-complexity-threshold = 400
+
+# Maximum arguments for a function (default: 7)
+# FFI functions often need many parameters
+too-many-arguments-threshold = 10
+
+# Maximum lines per function (default: 100)
+too-many-lines-threshold = 150
+
+# Maximum size of enum variant (default: 200 bytes)
+# State machines and result types can be large
+enum-variant-size-threshold = 500
+
+# Maximum struct size for pass-by-value (default: 256 bytes)
+large-error-threshold = 256
+
+# =============================================================================
+# TEST ALLOWANCES
+# =============================================================================
+# Allow common patterns in test code that would otherwise trigger lints
+
+# Allow unwrap() in tests (tests should panic on failure)
+allow-unwrap-in-tests = true
+
+# Allow expect() in tests
+allow-expect-in-tests = true
+
+# Allow panic!() in tests
+allow-panic-in-tests = true
+
+# Allow print!() / println!() in tests (for debugging)
+allow-print-in-tests = true
+
+# Allow dbg!() in tests
+allow-dbg-in-tests = true
+
+# Allow assert_eq!() on mixed types in tests
+# allow-mixed-uninlined-format-args = true  # Nightly only
+
+# =============================================================================
+# FFI / UNSAFE CODE SETTINGS
+# =============================================================================
+# Settings for projects with FFI bindings (like ffmpeg-next)
+
+# Check private items for lints (disable for FFI bindings)
+# Set to false because ffmpeg-next generates private FFI items
+check-private-items = false
+
+# Don't suggest breaking API changes
+avoid-breaking-exported-api = true
+
+# =============================================================================
+# DISALLOWED PATTERNS
+# =============================================================================
+# Patterns that should not appear in production code
+
+# Disallowed macros - debugging tools that shouldn't be committed
+[[disallowed-macros]]
+path = "std::dbg"
+reason = "debugging macro should not be committed to production code"
+
+[[disallowed-macros]]
+path = "std::todo"
+reason = "incomplete code marker should not be committed"
+
+# Note: print!/println! are allowed because this is a CLI tool
+# For libraries, you would add:
+# [[disallowed-macros]]
+# path = "std::print"
+# reason = "use logging framework instead"
+
+# =============================================================================
+# DOCUMENTATION REQUIREMENTS
+# =============================================================================
+# Settings for documentation lints
+
+# Require docs for all public items (set via Cargo.toml lints instead)
+# missing-docs-in-crate-items = true
+
+# =============================================================================
+# STYLE PREFERENCES
+# =============================================================================
+# These affect how clippy suggests reformatting code
+
+# Allow future-incompatible names
+# future-incompatible-names = []
+
+# Single character binding names to allow
+# (default allows common: i, j, k, x, y, z, etc.)
+# allowed-idents-below-min-chars = ["x", "y", "i", "j"]
+
+# Minimum identifier length (default: 1)
+# min-ident-chars-threshold = 1
+
+# Standard macro names to recognize
+# standard-macro-braces = []
+
+# =============================================================================
+# PERFORMANCE SETTINGS
+# =============================================================================
+# Thresholds for performance-related lints
+
+# Trivial copy size (types smaller than this are "trivially copyable")
+trivial-copy-size-limit = 16
+
+# Array index refactoring threshold
+array-size-threshold = 512

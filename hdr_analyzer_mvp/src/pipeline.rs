@@ -168,6 +168,9 @@ fn run_native_analysis_pipeline(
     let mut decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
         .context("Failed to create decoder context from stream parameters")?;
 
+    // SAFETY: decoder_context is valid and as_mut_ptr() returns a valid mutable pointer.
+    // Setting thread_count to 0 enables FFmpeg's automatic thread count selection,
+    // which is a safe operation that only affects the decoder's threading behavior.
     unsafe {
         let ctx = decoder_context.as_mut_ptr();
         (*ctx).thread_count = 0;

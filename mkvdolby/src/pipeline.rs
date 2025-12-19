@@ -214,7 +214,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let dovi_tool_path =
         external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
     let mut dovi_cmd =
-        Command::new(std::fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
+        Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
 
     dovi_cmd.args([
         "inject-rpu",
@@ -298,8 +298,8 @@ fn run_hdr_analyzer(
     let tool_name = "hdr_analyzer_mvp";
     // Check local target/release (dev workflow) first?
     let mut exe = PathBuf::from(tool_name);
-    if std::path::Path::new("target/release/hdr_analyzer_mvp").exists() {
-        exe = std::path::Path::new("target/release/hdr_analyzer_mvp").to_path_buf();
+    if Path::new("target/release/hdr_analyzer_mvp").exists() {
+        exe = Path::new("target/release/hdr_analyzer_mvp").to_path_buf();
     }
 
     // Command
@@ -545,7 +545,7 @@ fn generate_rpu(
     // Resolve tool path
     let dovi_tool_path =
         external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let dovi_abs = std::fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
+    let dovi_abs = fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
 
     let mut cmd = Command::new(&dovi_abs);
     cmd.args([

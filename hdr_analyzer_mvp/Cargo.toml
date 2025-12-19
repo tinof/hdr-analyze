@@ -30,3 +30,11 @@ madvr_parse = "1.0.2"
 rayon = "1.11"
 ffmpeg-next = "8.0"
 indicatif = "0.18.3"
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

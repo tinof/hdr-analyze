@@ -10,13 +10,13 @@ mod verify;
 use cli::Args;
 
 fn main() -> anyhow::Result<()> {
-    // Check dependencies first
+    let args = Args::parse();
+
+    // Check dependencies after parsing so `--help`/`--version` work without tools installed.
     if let Err(e) = external::check_dependencies() {
         eprintln!("{}", format!("Dependency check failed: {}", e).red());
         std::process::exit(1);
     }
-
-    let args = Args::parse();
 
     // Basic handling for "boost" logic modification
     let mut peak_source = args.peak_source;

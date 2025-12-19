@@ -166,6 +166,7 @@ The analyzer uses a native Rust pipeline via `ffmpeg-next` for direct video fram
 - `--verify`: Run our verifier + dovi_tool info/mediainfo post-mux and fail on inconsistencies
 - `--keep-source`: Disable default auto-cleanup (retains source file and intermediate artifacts after success)
 - **Note**: By default, `mkvdolby` deletes the input file and associated `.measurements`/`Details.txt` files upon successful conversion.
+- `--hwaccel <cuda|none>`: Hardware acceleration hint for analysis and HLG conversion (default: none)
 
 ## Refactoring (Milestone R) - ✓ COMPLETE
 

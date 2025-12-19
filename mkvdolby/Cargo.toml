@@ -12,5 +12,13 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 regex = "1.10"
-walkdir = "2.5" # For glob/directory walking
+walkdir = "2.5"
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
 

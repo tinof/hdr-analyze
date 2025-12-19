@@ -1,0 +1,166 @@
+# =============================================================================
+# CARGO-DENY CONFIGURATION
+# =============================================================================
+# Official documentation: https://embarkstudios.github.io/cargo-deny/
+#
+# Run all checks: cargo deny check
+# Run specific check: cargo deny check licenses
+#
+# Install: cargo install --locked cargo-deny
+
+# =============================================================================
+# [GRAPH] - Dependency Graph Construction
+# =============================================================================
+[graph]
+# Target platforms to check (matches rust-toolchain.toml targets)
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+# Include all features when checking
+all-features = false
+
+# =============================================================================
+# [OUTPUT] - Diagnostic Output
+# =============================================================================
+[output]
+feature-depth = 1
+
+# =============================================================================
+# [ADVISORIES] - Security Vulnerability Checks
+# =============================================================================
+# Checks crates against RustSec advisory database
+[advisories]
+# Path for advisory database cache
+# db-path = "~/.cargo/advisory-dbs"
+
+# Advisory database URLs (default: RustSec)
+# db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# Lint level for security vulnerabilities (deny = fail CI)
+# vulnerability = "deny"
+
+# Lint level for unmaintained crates (warn = don't fail CI)
+unmaintained = "warn"
+
+# Lint level for yanked crates
+yanked = "warn"
+
+# Lint level for crates with known unsoundness
+# unsound = "warn"
+
+# Advisory IDs to ignore (with justification)
+ignore = [
+    # Example format:
+    # { id = "RUSTSEC-2024-0001", reason = "Not using affected functionality" },
+]
+
+# =============================================================================
+# [LICENSES] - License Compliance Checks
+# =============================================================================
+# Ensures all dependencies use acceptable licenses
+[licenses]
+# Confidence threshold for license detection (0.0 - 1.0)
+# Higher = stricter matching to SPDX license text
+confidence-threshold = 0.8
+
+# Explicitly allowed licenses (SPDX identifiers)
+# This project is MIT licensed, so we allow common permissive licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "0BSD",
+    "MPL-2.0",
+]
+
+# Per-crate license exceptions
+exceptions = [
+    # ffmpeg-next uses LGPL which is compatible with our MIT license
+    # when dynamically linked (which is how we use it)
+    # { allow = ["LGPL-2.1"], crate = "ffmpeg-sys-next" },
+]
+
+# Clarify licenses for crates with unclear licensing
+# [[licenses.clarify]]
+# crate = "ring"
+# expression = "MIT AND ISC AND OpenSSL"
+# license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# Private crate handling
+[licenses.private]
+ignore = false
+registries = []
+
+# =============================================================================
+# [BANS] - Crate Banning and Duplicate Detection
+# =============================================================================
+# Controls which crates are allowed and handles duplicates
+[bans]
+# Lint level for multiple versions of same crate
+# "warn" during development, consider "deny" for releases
+multiple-versions = "warn"
+
+# Lint level for wildcard (*) version requirements
+wildcards = "allow"
+
+# How to highlight duplicate versions
+highlight = "all"
+
+# Explicitly allowed crates (if empty, all are allowed by default)
+allow = []
+
+# Explicitly denied crates
+deny = [
+    # Example: Ban in favor of alternatives
+    # { crate = "openssl", use-instead = "rustls", reason = "Security concerns" },
+    # { crate = "cmake", use-instead = "cc", reason = "Build simplicity" },
+]
+
+# Skip duplicate version checking for specific crates
+# Useful for crates that commonly have multiple versions
+skip = [
+    # Example:
+    # { crate = "windows-sys@0.48.0", reason = "Ecosystem hasn't converged" },
+]
+
+# Skip entire dependency trees from duplicate checking
+skip-tree = [
+    # windows-sys frequently has multiple versions across the ecosystem
+    # { crate = "windows-sys", reason = "Multiple versions common in ecosystem" },
+]
+
+# =============================================================================
+# [SOURCES] - Crate Source Restrictions
+# =============================================================================
+# Ensures crates only come from trusted sources
+[sources]
+# Lint level for crates from unknown registries
+unknown-registry = "warn"
+
+# Lint level for crates from unknown git repositories
+unknown-git = "warn"
+
+# Allowed registries (crates.io by default)
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# Allowed git repositories (add your private repos here)
+allow-git = []
+
+# Allow from specific organizations
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

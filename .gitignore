@@ -53,9 +53,15 @@ lcov.info
 codebase.md
 VIDEOTOOLBOX_OPTIMIZATION_SUMMARY.md
 DOCUMENTATION_UPDATE_SUMMARY.md
-tests
+/tests/
 docs/VIDEOTOOLBOX_OPTIMIZATION_SUMMARY.md
 AGENTS.md
+
+# Local agent/tooling state
+.swarm/
+.claude-flow/
+.codanna/
+
 tools/compare_baseline/dovi_tool
 tools/compare_baseline/hdr10plus_tool
 tools/compare_baseline/dovi_tool

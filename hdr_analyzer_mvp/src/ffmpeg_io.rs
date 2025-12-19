@@ -66,6 +66,10 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
 
     let decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
         .context("Failed to create decoder context")?;
+    // SAFETY: decoder_context is valid and as_ptr() returns a non-null pointer.
+    // We only read the color_trc field which is a simple integer value.
+    // The pointer dereference is safe because Context guarantees the underlying
+    // AVCodecContext is valid for the lifetime of the Context object.
     let transfer_characteristic =
         unsafe { color::TransferCharacteristic::from((*decoder_context.as_ptr()).color_trc) };
     let decoder = decoder_context
@@ -158,7 +162,10 @@ pub fn setup_hardware_decoder(
             // Try to find CUDA-specific decoder
             if let Some(cuda_decoder) = codec::decoder::find_by_name("hevc_cuvid") {
                 let mut context = codec::context::Context::new_with_codec(cuda_decoder);
-                // Copy parameters from the original context
+                // SAFETY: Both context pointers are valid - context is newly created and
+                // decoder_context is passed by value (moved). We copy simple POD fields
+                // (width, height, pix_fmt) which are safe integer/enum values.
+                // The mutable pointer is valid because we own `context`.
                 unsafe {
                     (*context.as_mut_ptr()).width = (*decoder_context.as_ptr()).width;
                     (*context.as_mut_ptr()).height = (*decoder_context.as_ptr()).height;

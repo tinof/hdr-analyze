@@ -3,6 +3,7 @@ use clap::Parser;
 // --- Command Line Interface ---
 #[derive(Parser)]
 #[command(name = "hdr_analyzer_mvp")]
+#[command(version)]
 #[command(about = "HDR10 to Dolby Vision converter - Phase 1 MVP")]
 pub struct Cli {
     /// Path to the input video file (positional)
