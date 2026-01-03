@@ -57,7 +57,12 @@ We welcome several types of contributions:
 
 - **Rust toolchain** (1.70 or later): Install from [rustup.rs](https://rustup.rs/)
 - **FFmpeg**: Must be installed and available in your system PATH
-- **Git**: For version control
+- **Tools**:
+  - `git` (Version Control)
+  - `mkvmerge` (MKVToolNix)
+  - `mediainfo`
+  - `dovi_tool`
+  - `hdr10plus_tool`
 
 ### Building the Project
 
@@ -75,6 +80,32 @@ cargo build --release
 # Run the tool
 ./target/debug/hdr_analyzer_mvp --help
 ```
+
+### Running the Tools manually
+
+While `cargo run` works, the workspace includes scripts and specialized workflows.
+
+#### 1. The `mkvdolby` Script
+The `mkvdolby` script provides an end-to-end workflow for processing video files.
+
+-   **Standard Run**:
+    ```bash
+    PYTHONPATH="mkvdolby/src" python -m mkvdolby.cli "<input_video>"
+    ```
+-   **Run with Verification**:
+    ```bash
+    PYTHONPATH="mkvdolby/src" python -m mkvdolby.cli "<input_video>" --verify
+    ```
+
+#### 2. Running the Analyzer Directly
+-   **PQ/HDR10 Content**:
+    ```bash
+    cargo run -p hdr_analyzer_mvp --release -- "video.mkv" -o "video_measurements.bin"
+    ```
+-   **HLG Content (Native Path)**:
+    ```bash
+    cargo run -p hdr_analyzer_mvp --release -- "video_hlg.mkv" -o "video_hlg_measurements.bin" --hlg-peak-nits 1000
+    ```
 
 ### Running Tests
 
@@ -130,6 +161,37 @@ cargo test test_name
 - **Integration tests**: Test complete workflows
 - **Performance tests**: Verify optimization improvements
 - **Compatibility tests**: Test with different video formats
+
+## Verification & QA Workflows
+
+### 1. Verifying Measurement Files (`.bin`)
+Use the `verifier` tool to inspect and validate the generated measurement files.
+
+```bash
+target/release/verifier "path/to/measurements.bin"
+```
+
+### 2. Verifying Dolby Vision Output
+To inspect the final Dolby Vision MKV file:
+
+1.  **Check MediaInfo**:
+    ```bash
+    mediainfo "output.DV.mkv"
+    ```
+2.  **Inspect RPU with `dovi_tool`**:
+    ```bash
+    dovi_tool extract-rpu -i "output.DV.mkv" -o RPU.bin
+    dovi_tool info -i RPU.bin --summary
+    ```
+
+### 3. Baseline Comparison Harness
+To guard against regressions, use the `compare_baseline` tool.
+
+1.  **Build the tool**: `cargo build --release -p compare_baseline`
+2.  **Run comparison**:
+    ```bash
+    target/release/compare_baseline --baseline ./path/to/baseline_bins --current ./path/to/current_bins
+    ```
 
 ## Submitting Changes
 
@@ -209,6 +271,22 @@ Please use the provided issue templates when available:
 - **Use different resolutions** (1080p, 4K, 8K)
 - **Try different frame rates** (24fps, 30fps, 60fps)
 - **Test edge cases** (very dark/bright content, rapid scene changes)
+
+### Performance Profiling
+
+The analyzer supports internal profiling metrics.
+
+1. **Build release binary**: `cargo build --release -p hdr_analyzer_mvp`
+2. **Run with profiling**:
+   ```bash
+   ./target/release/hdr_analyzer_mvp \
+       --input sample_hdr10.mkv \
+       --profile-performance \
+       --analysis-threads 8
+   ```
+3. **Analyze Output**: Look for "Analysis FPS" and "Rayon worker count".
+
+**Comparison**: Run with `--analysis-threads 1` to establish a baseline.
 
 ### Debugging
 
