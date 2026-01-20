@@ -31,7 +31,10 @@ fn test_missing_input_shows_error() {
 
 #[test]
 fn test_nonexistent_input_file() {
-    analyzer_cmd().arg("nonexistent_video.mkv").assert().failure();
+    analyzer_cmd()
+        .arg("nonexistent_video.mkv")
+        .assert()
+        .failure();
 }
 
 #[test]

@@ -19,7 +19,10 @@ fn test_missing_input_shows_usage() {
 
 #[test]
 fn test_nonexistent_file() {
-    verifier_cmd().arg("nonexistent_file.bin").assert().failure();
+    verifier_cmd()
+        .arg("nonexistent_file.bin")
+        .assert()
+        .failure();
 }
 
 #[test]
