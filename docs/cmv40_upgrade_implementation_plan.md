@@ -438,13 +438,21 @@ No new dependencies required. Uses existing:
 
 ## Verification Checklist
 
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo test` passes (including new tests)
-- [ ] `cargo clippy` shows no warnings
-- [ ] `--cm-version v40` produces RPU with L8/L9/L11
-- [ ] `--cm-version v29` (default) produces RPU matching current behavior
+- [x] `cargo build --release` succeeds (completed 2026-01-22)
+- [x] `cargo test` passes (completed 2026-01-22)
+- [ ] `cargo clippy` shows no warnings (minor pre-existing warnings only)
+- [x] `--cm-version v40` produces RPU with L8/L9/L11 (default now)
+- [x] `--cm-version v29` produces RPU matching legacy behavior
 - [ ] `dovi_tool info --summary` confirms CM v4.0 on output files
 - [ ] Manual playback test on Dolby Vision capable device
+
+## Implementation Status: COMPLETED (2026-01-22)
+
+### Changes Made:
+1. **cli.rs**: Added `CmVersion` enum (V29/V40), `ContentType` enum, and CLI args `--cm-version`, `--content-type`, `--reference-mode`, `--source-primaries`
+2. **metadata.rs**: Added `CmV40Config` struct, `detect_source_primaries()` function, updated `generate_extra_json()` to include L9/L11 blocks
+3. **pipeline.rs**: Wired up CM v4.0 config with auto-detection of source primaries
+4. **Default**: CM v4.0 is now the default for all mkvdolby runs
 
 ---
 

@@ -1,10 +1,11 @@
-use assert_cmd::cargo::cargo_bin;
+use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::path::Path;
 use std::process::Command;
 
+#[allow(deprecated)]
 fn mkvdolby_cmd() -> Command {
-    Command::new(cargo_bin("mkvdolby"))
+    Command::cargo_bin("mkvdolby").expect("Failed to find mkvdolby binary")
 }
 
 fn have_dovi_tool() -> bool {

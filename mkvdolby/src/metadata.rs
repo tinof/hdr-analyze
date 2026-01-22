@@ -30,6 +30,27 @@ impl HdrFormat {
     }
 }
 
+/// Configuration for CM v4.0 metadata generation
+#[derive(Debug, Clone)]
+pub struct CmV40Config {
+    /// Source primary index for L9 (0=BT.2020, 1=P3-D65, 2=BT.709)
+    pub source_primary_index: u8,
+    /// Content type for L11 (0-6, see ContentType enum)
+    pub content_type: u8,
+    /// Reference mode flag for L11
+    pub reference_mode: bool,
+}
+
+impl Default for CmV40Config {
+    fn default() -> Self {
+        Self {
+            source_primary_index: 0, // BT.2020
+            content_type: 4,         // Cinema
+            reference_mode: true,
+        }
+    }
+}
+
 pub fn get_mediainfo_json(input_file: &str) -> Result<Value> {
     // Basic cache logic could be added using OnceLock or just re-run (fast enough)
     let mut cmd = Command::new("mediainfo");
@@ -254,17 +275,51 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
     meta
 }
 
+/// Detect source color primaries from MediaInfo
+#[allow(dead_code)]
+pub fn detect_source_primaries(input_file: &str) -> u8 {
+    if let Ok(json) = get_mediainfo_json(input_file) {
+        if let Some(tracks) = json
+            .get("media")
+            .and_then(|m| m.get("track"))
+            .and_then(|t| t.as_array())
+        {
+            for track in tracks {
+                if track.get("@type").and_then(|s| s.as_str()) == Some("Video") {
+                    // Check colour_primaries field
+                    if let Some(primaries) = track
+                        .get("colour_primaries")
+                        .or_else(|| track.get("ColorPrimaries"))
+                        .and_then(|s| s.as_str())
+                    {
+                        let p = primaries.to_uppercase();
+                        if p.contains("P3") || p.contains("DCI") || p.contains("DISPLAY P3") {
+                            return 1; // P3-D65
+                        }
+                        if p.contains("709") {
+                            return 2; // BT.709
+                        }
+                    }
+                }
+            }
+        }
+    }
+    0 // Default: BT.2020
+}
+
 pub fn generate_extra_json(
     output_path: &Path,
     metadata: &HashMap<String, f64>,
     trim_targets: &[u32],
+    cm_v40_config: Option<&CmV40Config>,
 ) -> Result<()> {
     let min_dml = metadata.get("min_dml").unwrap_or(&0.005);
     let max_dml = metadata.get("max_dml").unwrap_or(&1000.0);
     let max_cll = metadata.get("max_cll").unwrap_or(&1000.0);
     let max_fall = metadata.get("max_fall").unwrap_or(&400.0);
 
-    let json_content = json!({
+    let mut json_content = json!({
+        "profile": "8.1",
         "target_nits": trim_targets,
         "level6": {
             "max_display_mastering_luminance": *max_dml as u32,
@@ -273,6 +328,66 @@ pub fn generate_extra_json(
             "max_frame_average_light_level": *max_fall as u32,
         }
     });
+
+    // Add CM v4.0 specific configuration
+    if let Some(cfg) = cm_v40_config {
+        json_content["cm_version"] = json!("V40");
+
+        // Build default metadata blocks with L2 trims for each target nit level, plus L9 and L11
+        let mut default_blocks = Vec::new();
+
+        // Add L2 trims for each target nit level (100, 600, 1000, etc.)
+        // These provide baseline trim values that dovi_tool will use
+        // PQ values: 100 nits ≈ 2081, 600 nits ≈ 2851, 1000 nits ≈ 3079
+        let target_pq_map: [(u32, u32); 6] = [
+            (100, 2081),
+            (300, 2525),
+            (600, 2851),
+            (1000, 3079),
+            (2000, 3388),
+            (4000, 3696),
+        ];
+
+        for target in trim_targets {
+            // Find matching PQ value or interpolate
+            let target_pq = target_pq_map
+                .iter()
+                .find(|(nits, _)| nits == target)
+                .map(|(_, pq)| *pq)
+                .unwrap_or(3079); // Default to 1000 nits PQ
+
+            default_blocks.push(json!({
+                "Level2": {
+                    "target_max_pq": target_pq,
+                    "trim_slope": 2048,
+                    "trim_offset": 2048,
+                    "trim_power": 2048,
+                    "trim_chroma_weight": 2048,
+                    "trim_saturation_gain": 2048,
+                    "ms_weight": 2048
+                }
+            }));
+        }
+
+        // Add L9 (source primaries)
+        default_blocks.push(json!({
+            "Level9": {
+                "length": 1,
+                "source_primary_index": cfg.source_primary_index
+            }
+        }));
+
+        // Add L11 (content type)
+        default_blocks.push(json!({
+            "Level11": {
+                "content_type": cfg.content_type,
+                "whitepoint": 0,
+                "reference_mode_flag": cfg.reference_mode
+            }
+        }));
+
+        json_content["default_metadata_blocks"] = json!(default_blocks);
+    }
 
     let file = File::create(output_path)?;
     serde_json::to_writer_pretty(file, &json_content)?;

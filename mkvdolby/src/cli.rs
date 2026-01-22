@@ -57,6 +57,22 @@ pub struct Args {
     #[arg(long)]
     pub boost_experimental: bool,
 
+    /// Content Mapping version for Dolby Vision RPU generation.
+    #[arg(long, value_enum, default_value_t = CmVersion::V40)]
+    pub cm_version: CmVersion,
+
+    /// Content type for L11 metadata (affects display tone mapping).
+    #[arg(long, value_enum, default_value_t = ContentType::Cinema)]
+    pub content_type: ContentType,
+
+    /// Enable reference mode for L11 (critical/studio viewing environment).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub reference_mode: bool,
+
+    /// Source color primaries index for L9 (0=BT.2020, 1=P3-D65, 2=BT.709). Auto-detected if not set.
+    #[arg(long)]
+    pub source_primaries: Option<u8>,
+
     /// Optimizer profile for hdr_analyzer_mvp.
     #[arg(long, value_enum, default_value_t = OptimizerProfile::Conservative)]
     pub optimizer_profile: OptimizerProfile,
@@ -123,6 +139,49 @@ impl std::fmt::Display for PeakSource {
             PeakSource::Histogram => write!(f, "histogram"),
             PeakSource::Histogram99 => write!(f, "histogram99"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum CmVersion {
+    /// Content Mapping v2.9 (legacy, L1/L2/L5/L6 only)
+    V29,
+    /// Content Mapping v4.0 (enhanced tone mapping with L8/L9/L11)
+    #[default]
+    V40,
+}
+
+impl std::fmt::Display for CmVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CmVersion::V29 => write!(f, "V29"),
+            CmVersion::V40 => write!(f, "V40"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum ContentType {
+    /// Unknown content type
+    Unknown = 0,
+    /// Film (traditional cinema, 24fps)
+    Film = 1,
+    /// Live action (sports, concerts)
+    Live = 2,
+    /// Animation
+    Animation = 3,
+    /// Cinema generic (default for movies)
+    #[default]
+    Cinema = 4,
+    /// Gaming content
+    Gaming = 5,
+    /// Graphics/UI
+    Graphics = 6,
+}
+
+impl ContentType {
+    pub fn as_u8(&self) -> u8 {
+        *self as u8
     }
 }
 

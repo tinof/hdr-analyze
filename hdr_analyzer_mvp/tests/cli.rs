@@ -1,10 +1,10 @@
-use assert_cmd::cargo::cargo_bin;
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::process::Command;
 
+#[allow(deprecated)]
 fn analyzer_cmd() -> Command {
-    Command::new(cargo_bin("hdr_analyzer_mvp"))
+    Command::cargo_bin("hdr_analyzer_mvp").expect("Failed to find hdr_analyzer_mvp binary")
 }
 
 #[test]

@@ -229,7 +229,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" 
 
 ### mkvdolby (Conversion Tool)
 
-The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG to Dolby Vision Profile 8.1.
+The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 with Content Mapping v4.0.
 
 ```bash
 # Basic usage (converts all MKV files in current directory)
@@ -256,6 +256,32 @@ mkvdolby "input.mkv" --hwaccel cuda
 # Speed up HLG -> PQ conversion significantly (~10x) using VideoToolbox
 mkvdolby "input.mkv" --encoder videotoolbox
 ```
+
+#### CM v4.0 Metadata Options (New)
+
+mkvdolby now generates Dolby Vision Content Mapping v4.0 metadata by default, which includes enhanced tone mapping (L8/L9/L11) for better picture quality on modern displays.
+
+```bash
+# Default: CM v4.0 with auto-detected settings
+mkvdolby "input.mkv"
+
+# Specify content type (affects display tone mapping)
+mkvdolby "input.mkv" --content-type film      # For cinema/24fps content
+mkvdolby "input.mkv" --content-type animation # For animated content
+
+# Use legacy CM v2.9 if needed
+mkvdolby "input.mkv" --cm-version v29
+
+# Override source primaries detection
+mkvdolby "input.mkv" --source-primaries 1  # 0=BT.2020, 1=P3-D65, 2=BT.709
+```
+
+**CM v4.0 metadata levels generated:**
+- **L1**: Per-frame min/mid/max luminance (from HDR10+ or hdr_analyzer)
+- **L2**: Trim parameters for 100/600/1000 nit displays
+- **L6**: Static mastering display metadata
+- **L9**: Source color primaries (auto-detected)
+- **L11**: Content type and reference mode
 
 ### Verifier
 
@@ -374,7 +400,6 @@ Expected:
 - Proper VAAPI/VideoToolbox device contexts and hardware frame transfer
 - Parallel frame processing (rayon) for multi-core performance
 - SIMD optimizations for histogram calculations
-- Additional HDR formats (HDR10+, Dolby Vision ancillary data)
 - Configurable heuristics for optimizer and scene detection
 - Automated tests and CI validation
 

@@ -5,7 +5,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use colored::Colorize;
 
-use crate::cli::{Args, Encoder, HwAccel, PeakSource};
+use crate::cli::{Args, CmVersion, Encoder, HwAccel, PeakSource};
 use crate::external::{self, run_command, run_command_live};
 use crate::metadata::{self, HdrFormat};
 
@@ -142,6 +142,35 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let static_meta = metadata::get_static_metadata(input_file);
     // TODO: Validate metadata (logic in metadata.rs, just print warnings)
 
+    // Build CM v4.0 config if enabled
+    let cm_v40_config = if args.cm_version == CmVersion::V40 {
+        // Detect or use provided source primaries
+        let source_primaries = args
+            .source_primaries
+            .unwrap_or_else(|| metadata::detect_source_primaries(input_file));
+
+        Some(metadata::CmV40Config {
+            source_primary_index: source_primaries,
+            content_type: args.content_type.as_u8(),
+            reference_mode: args.reference_mode,
+        })
+    } else {
+        None
+    };
+
+    if args.cm_version == CmVersion::V40 {
+        if let Some(ref cfg) = cm_v40_config {
+            println!(
+                "{}",
+                format!(
+                    "Using CM v4.0 (L9: primaries={}, L11: content_type={}, reference_mode={})",
+                    cfg.source_primary_index, cfg.content_type, cfg.reference_mode
+                )
+                .cyan()
+            );
+        }
+    }
+
     // Generate extra.json
     let extra_json_path = temp_dir.join("extra.json");
     // Parse trim targets
@@ -164,7 +193,12 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
     }
 
-    metadata::generate_extra_json(&extra_json_path, &static_meta, &final_trims)?;
+    metadata::generate_extra_json(
+        &extra_json_path,
+        &static_meta,
+        &final_trims,
+        cm_v40_config.as_ref(),
+    )?;
 
     // Generate RPU
     let rpu_path = generate_rpu(
@@ -213,8 +247,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // Resolve tool path
     let dovi_tool_path =
         external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let mut dovi_cmd =
-        Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
+    let mut dovi_cmd = Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
 
     dovi_cmd.args([
         "inject-rpu",

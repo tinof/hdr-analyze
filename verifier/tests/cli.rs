@@ -1,12 +1,12 @@
-use assert_cmd::cargo::cargo_bin;
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+#[allow(deprecated)]
 fn verifier_cmd() -> Command {
-    Command::new(cargo_bin("verifier"))
+    Command::cargo_bin("verifier").expect("Failed to find verifier binary")
 }
 
 #[test]
