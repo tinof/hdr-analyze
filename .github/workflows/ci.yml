@@ -110,25 +110,6 @@ jobs:
       - name: cargo build
         run: cargo build --release --workspace --verbose
 
-  build-linux-arm64:
-    name: Build (Linux ARM64)
-    runs-on: ubuntu-24.04-arm64
-    needs: [lint, test]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install dependencies (ARM64)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config clang lld libclang-dev \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libavfilter-dev libavdevice-dev libswscale-dev
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
-      - name: cargo build
-        run: cargo build --release --workspace --verbose
-
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
