@@ -45,7 +45,7 @@ feature-depth = 1
 # vulnerability = "deny"
 
 # Lint level for unmaintained crates (warn = don't fail CI)
-unmaintained = "warn"
+# unmaintained = "warn"
 
 # Lint level for yanked crates
 yanked = "warn"
@@ -57,6 +57,7 @@ yanked = "warn"
 ignore = [
     # Example format:
     # { id = "RUSTSEC-2024-0001", reason = "Not using affected functionality" },
+    { id = "RUSTSEC-2025-0119", reason = "Transitive dependency of indicatif, no safe upgrade available yet" },
 ]
 
 # =============================================================================
@@ -84,6 +85,7 @@ allow = [
     "CC0-1.0",
     "0BSD",
     "MPL-2.0",
+    "WTFPL",
 ]
 
 # Per-crate license exceptions
