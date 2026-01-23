@@ -25,61 +25,82 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          name: HDR-Analyze ${{ github.ref_name }}
+          name: HDR-Analyze Suite ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: false
           body: |
-            ## HDR-Analyze Release ${{ github.ref }}
+            ## HDR-Analyze Suite ${{ github.ref_name }}
             
-            ### Download the appropriate binary for your platform:
+            This release includes **three tools** for HDR video analysis and processing:
             
-            - **Windows**: `hdr-analyze-${{ github.ref }}-x86_64-pc-windows-msvc.zip`
-            - **macOS (Intel)**: `hdr-analyze-${{ github.ref }}-x86_64-apple-darwin.tar.gz`
-            - **macOS (Apple Silicon)**: `hdr-analyze-${{ github.ref }}-aarch64-apple-darwin.tar.gz`
-            - **Linux**: `hdr-analyze-${{ github.ref }}-x86_64-unknown-linux-gnu.tar.gz`
-            - **Linux (ARM64/AArch64)**: `hdr-analyze-${{ github.ref }}-aarch64-unknown-linux-gnu.tar.gz`
+            ### 🎬 Included Tools
             
-            ### Prerequisites
-            - FFmpeg must be installed and available in your system PATH
+            | Tool | Description |
+            |------|-------------|
+            | `hdr_analyzer_mvp` | HDR10+ metadata analyzer and measurement extractor |
+            | `mkvdolby` | Dolby Vision metadata processor for MKV files |
+            | `verifier` | Binary file verification utility |
             
-            ### Usage
+            ### 📦 Download
+            
+            Choose the appropriate archive for your platform:
+            
+            | Platform | Archive |
+            |----------|---------|
+            | **Windows (x64)** | `hdr-analyze-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip` |
+            | **macOS (Intel)** | `hdr-analyze-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz` |
+            | **macOS (Apple Silicon)** | `hdr-analyze-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
+            | **Linux (x64)** | `hdr-analyze-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
+            
+            ### ⚙️ Prerequisites
+            
+            - **FFmpeg** must be installed and available in your system PATH
+            
+            ### 🚀 Quick Start
+            
             ```bash
-            # Basic analysis
+            # HDR10+ Analysis
             ./hdr_analyzer_mvp -i input.mkv -o measurements.bin
             
-            # With advanced optimizer (recommended)
+            # With advanced optimizer
             ./hdr_analyzer_mvp -i input.mkv -o measurements.bin --enable-optimizer
+            
+            # Process Dolby Vision metadata
+            ./mkvdolby --help
+            
+            # Verify binary files
+            ./verifier --help
             ```
             
-            ### What's New
+            ### 📝 What's New
+            
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for detailed changes.
             
-            ### Support
-            - Report issues: [GitHub Issues](https://github.com/${{ github.repository }}/issues)
-            - Documentation: [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+            ### 🆘 Support
+            
+            - [Report Issues](https://github.com/${{ github.repository }}/issues)
+            - [Documentation](https://github.com/${{ github.repository }}/blob/main/README.md)
 
   build:
-    name: Build
+    name: Build (${{ matrix.target }})
     needs: create-release
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
-            name: hdr-analyze-x86_64-unknown-linux-gnu.tar.gz
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm64
-            name: hdr-analyze-aarch64-unknown-linux-gnu.tar.gz
+            archive_name: hdr-analyze-x86_64-unknown-linux-gnu.tar.gz
           - target: x86_64-apple-darwin
             os: macos-13
-            name: hdr-analyze-x86_64-apple-darwin.tar.gz
+            archive_name: hdr-analyze-x86_64-apple-darwin.tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: hdr-analyze-aarch64-apple-darwin.tar.gz
+            archive_name: hdr-analyze-aarch64-apple-darwin.tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            name: hdr-analyze-x86_64-pc-windows-msvc.zip
+            archive_name: hdr-analyze-x86_64-pc-windows-msvc.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -97,7 +118,7 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install FFmpeg & Toolchain (Ubuntu x86_64)
+      - name: Install FFmpeg & Toolchain (Ubuntu)
         if: matrix.os == 'ubuntu-24.04'
         run: |
           sudo apt-get update
@@ -107,17 +128,15 @@ jobs:
             libavfilter-dev libavdevice-dev libswscale-dev
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
 
-      - name: Install FFmpeg & Toolchain (Ubuntu ARM64)
-        if: matrix.os == 'ubuntu-24.04-arm64'
+      - name: Install FFmpeg & Toolchain (macOS Intel)
+        if: matrix.os == 'macos-13'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config clang lld libclang-dev \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libavfilter-dev libavdevice-dev libswscale-dev
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
+          brew install llvm ffmpeg pkg-config
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(brew --prefix)/include" >> $GITHUB_ENV
 
-      - name: Install FFmpeg & Toolchain (macOS)
+      - name: Install FFmpeg & Toolchain (macOS ARM)
         if: matrix.os == 'macos-latest'
         run: |
           brew install llvm ffmpeg pkg-config
@@ -144,55 +163,52 @@ jobs:
           echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "PKG_CONFIG_PATH=$env:VCPKG_INSTALLATION_ROOT\\installed\\x64-windows\\lib\\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build Binary
-        run: cargo build --verbose --release --target ${{ matrix.target }}
+      - name: Build All Binaries
+        run: cargo build --verbose --release --workspace --target ${{ matrix.target }}
 
       - name: Build Archive (Linux/macOS)
-        if: matrix.os != 'windows-latest'
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          binary_name="hdr_analyzer_mvp"
-          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            binary_name="${binary_name}.exe"
-          fi
-          
           # Create staging directory
           staging="hdr-analyze-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir -p "$staging"
+          mkdir -p "$staging/bin"
           
-          # Copy binary
-          cp "target/${{ matrix.target }}/release/$binary_name" "$staging/"
+          # Copy all binaries
+          cp "target/${{ matrix.target }}/release/hdr_analyzer_mvp" "$staging/bin/"
+          cp "target/${{ matrix.target }}/release/mkvdolby" "$staging/bin/"
+          cp "target/${{ matrix.target }}/release/verifier" "$staging/bin/"
           
           # Copy documentation
-          cp README.md "$staging/" 2>/dev/null || echo "README file not found, skipping"
-          cp CHANGELOG.md "$staging/" 2>/dev/null || echo "CHANGELOG file not found, skipping"
-          cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE file not found, skipping"
+          cp README.md "$staging/" 2>/dev/null || echo "README not found"
+          cp CHANGELOG.md "$staging/" 2>/dev/null || echo "CHANGELOG not found"
+          cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE not found"
           
           # Create archive
-          tar czf "${{ matrix.name }}" "$staging"
-          echo "ASSET=${{ matrix.name }}" >> $GITHUB_ENV
+          tar czf "${{ matrix.archive_name }}" "$staging"
+          echo "ASSET=${{ matrix.archive_name }}" >> $GITHUB_ENV
 
       - name: Build Archive (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: bash
         run: |
-          binary_name="hdr_analyzer_mvp.exe"
-          
           # Create staging directory
           staging="hdr-analyze-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir -p "$staging"
+          mkdir -p "$staging/bin"
           
-          # Copy binary
-          cp "target/${{ matrix.target }}/release/$binary_name" "$staging/"
+          # Copy all binaries
+          cp "target/${{ matrix.target }}/release/hdr_analyzer_mvp.exe" "$staging/bin/"
+          cp "target/${{ matrix.target }}/release/mkvdolby.exe" "$staging/bin/"
+          cp "target/${{ matrix.target }}/release/verifier.exe" "$staging/bin/"
           
           # Copy documentation
-          cp README.md "$staging/" 2>/dev/null || echo "README file not found, skipping"
-          cp CHANGELOG.md "$staging/" 2>/dev/null || echo "CHANGELOG file not found, skipping"
-          cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE file not found, skipping"
+          cp README.md "$staging/" 2>/dev/null || echo "README not found"
+          cp CHANGELOG.md "$staging/" 2>/dev/null || echo "CHANGELOG not found"
+          cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE not found"
           
           # Create archive
-          7z a "${{ matrix.name }}" "$staging"
-          echo "ASSET=${{ matrix.name }}" >> $GITHUB_ENV
+          7z a "${{ matrix.archive_name }}" "$staging"
+          echo "ASSET=${{ matrix.archive_name }}" >> $GITHUB_ENV
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
@@ -223,10 +239,10 @@ jobs:
             libavfilter-dev libavdevice-dev libswscale-dev
 
       - name: Run Tests
-        run: cargo test --verbose
+        run: cargo test --verbose --workspace
 
       - name: Run Clippy
-        run: cargo clippy --release -- -D warnings
+        run: cargo clippy --workspace --release -- -D warnings
 
       - name: Check Formatting
         run: cargo fmt --all -- --check
@@ -263,40 +279,47 @@ jobs:
           script: |
             const tag_name = context.ref.replace('refs/tags/', '');
 
-            // Get current release by tag
             const { data: release } = await github.rest.repos.getReleaseByTag({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag: tag_name
             });
 
-            // Update release body with success status
             const updatedBody = release.body + `
 
             ---
 
-            ### Build Status ✅
+            ### ✅ Build Status
 
-            All builds completed successfully and passed quality checks:
-            - ✅ Cross-platform builds (Windows, macOS, Linux)
+            All builds completed successfully:
+            - ✅ Cross-platform builds (Windows, macOS Intel, macOS ARM, Linux)
+            - ✅ All three tools built: \`hdr_analyzer_mvp\`, \`mkvdolby\`, \`verifier\`
             - ✅ Test suite passed
             - ✅ Code quality checks (clippy, formatting)
             - ✅ Security audit passed
 
-            ### Installation Verification
+            ### 📋 Archive Contents
 
-            After downloading, verify the binary works:
-            \`\`\`bash
-            # Check version and help
-            ./hdr_analyzer_mvp --help
-
-            # Test with a sample file
-            ./hdr_analyzer_mvp -i sample.mkv -o test.bin
+            Each archive contains:
+            \`\`\`
+            hdr-analyze-${tag_name}-<platform>/
+            ├── bin/
+            │   ├── hdr_analyzer_mvp
+            │   ├── mkvdolby
+            │   └── verifier
+            ├── README.md
+            ├── CHANGELOG.md
+            └── LICENSE
             \`\`\`
 
-            ### Checksums
+            ### 🔐 Verification
 
-            For security verification, check the SHA256 checksums of downloaded files.
+            After downloading, verify the binaries:
+            \`\`\`bash
+            ./bin/hdr_analyzer_mvp --help
+            ./bin/mkvdolby --help
+            ./bin/verifier --help
+            \`\`\`
             `;
 
             await github.rest.repos.updateRelease({
@@ -314,10 +337,18 @@ jobs:
     steps:
       - name: Release Status Summary
         run: |
-          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Status**: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Test Status**: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Security Audit**: ${{ needs.security-audit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Release is now available at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tag** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Build** | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tests** | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Security Audit** | ${{ needs.security-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Included Tools" >> $GITHUB_STEP_SUMMARY
+          echo "- \`hdr_analyzer_mvp\` - HDR10+ analyzer" >> $GITHUB_STEP_SUMMARY
+          echo "- \`mkvdolby\` - Dolby Vision processor" >> $GITHUB_STEP_SUMMARY
+          echo "- \`verifier\` - Binary verifier" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 **Download**: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
