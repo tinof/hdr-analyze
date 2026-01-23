@@ -122,7 +122,7 @@ jobs:
             os: ubuntu-24.04
             archive_name: hdr-analyze-x86_64-unknown-linux-gnu.tar.gz
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             archive_name: hdr-analyze-x86_64-apple-darwin.tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -158,7 +158,7 @@ jobs:
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
 
       - name: Install FFmpeg & Toolchain (macOS Intel)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15-intel'
         run: |
           brew install llvm ffmpeg pkg-config
           echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
