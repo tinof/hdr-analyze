@@ -304,10 +304,22 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
     }
 
-    // Cleanup
-    if !args.keep_source {
-        println!("{}", "Cleaning up...".green());
-        let _ = fs::remove_dir_all(&temp_dir);
+    // Cleanup temp directory
+    println!("{}", "Cleaning up temp files...".green());
+    let _ = fs::remove_dir_all(&temp_dir);
+
+    // Delete source file if requested
+    if args.delete_source {
+        println!(
+            "{}",
+            format!("Deleting source file: {}", input_file).yellow()
+        );
+        if let Err(e) = fs::remove_file(input_file) {
+            println!(
+                "{}",
+                format!("Warning: Failed to delete source file: {}", e).yellow()
+            );
+        }
     }
 
     println!(
