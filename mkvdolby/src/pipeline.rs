@@ -308,8 +308,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     println!("{}", "Cleaning up temp files...".green());
     let _ = fs::remove_dir_all(&temp_dir);
 
-    // Delete source file if requested
-    if args.delete_source {
+    // Delete source file unless --keep-source is set
+    if !args.keep_source {
         println!(
             "{}",
             format!("Deleting source file: {}", input_file).yellow()

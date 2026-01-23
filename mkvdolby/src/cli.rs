@@ -77,9 +77,9 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = OptimizerProfile::Conservative)]
     pub optimizer_profile: OptimizerProfile,
 
-    /// Delete the source file after successful conversion.
+    /// Keep the source file after successful conversion (by default it is deleted).
     #[arg(long)]
-    pub delete_source: bool,
+    pub keep_source: bool,
 
     /// Hardware acceleration hint for analysis and encoding.
     #[arg(long, value_enum, default_value_t = HwAccel::None)]
