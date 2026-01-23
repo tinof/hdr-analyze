@@ -90,7 +90,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.82.0
           targets: ${{ matrix.target }}
 
       - name: Setup Cache
@@ -121,11 +120,19 @@ jobs:
       - name: Install FFmpeg & Toolchain (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew update
           brew install llvm ffmpeg pkg-config
           echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(brew --prefix)/include" >> $GITHUB_ENV
+
+      - name: Cache vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: ${{ runner.os }}-vcpkg-ffmpeg-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-ffmpeg-
 
       - name: Install FFmpeg & Toolchain (Windows)
         if: matrix.os == 'windows-latest'
@@ -203,8 +210,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.82.0
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
@@ -237,7 +242,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
 
       - name: Run Security Audit
         run: cargo audit
