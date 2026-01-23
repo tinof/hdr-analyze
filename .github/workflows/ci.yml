@@ -55,7 +55,7 @@ jobs:
             libavfilter-dev libavdevice-dev libswscale-dev
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
       - name: cargo test (locked)
-        run: cargo test --workspace --verbose --locked
+        run: cargo test --workspace --verbose
 
   build:
     name: Build (xplat)
