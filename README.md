@@ -246,7 +246,6 @@ mkvdolby "input.mkv"
 mkvdolby "input.mkv" --keep-source
 
 # Additional flags
-# Additional flags
 mkvdolby --help
 
 # Hardware Acceleration
@@ -255,7 +254,20 @@ mkvdolby "input.mkv" --hwaccel cuda
 # Hardware Encoding on macOS (Apple Silicon)
 # Speed up HLG -> PQ conversion significantly (~10x) using VideoToolbox
 mkvdolby "input.mkv" --encoder videotoolbox
+
+# Verbose mode: show raw command output (useful for debugging)
+mkvdolby "input.mkv" --verbose
+
+# Quiet mode: minimal output (only errors and final result)
+mkvdolby "input.mkv" --quiet
 ```
+
+#### Progress Indicators
+
+mkvdolby provides visual feedback for all operations:
+- **Spinners** with elapsed time for long-running operations (dovi_tool, mkvmerge, hdr10plus_tool)
+- **Success/failure indicators** (✓/✗) with timing information
+- **TTY detection**: Automatically disables spinners for non-interactive/CI environments
 
 #### CM v4.0 Metadata Options (New)
 

@@ -88,6 +88,14 @@ pub struct Args {
     /// Encoder to use for HLG to PQ conversion (libx265 or hevc_videotoolbox).
     #[arg(long, value_enum, default_value_t = Encoder::Libx265)]
     pub encoder: Encoder,
+
+    /// Verbose mode: show raw command output (useful for debugging).
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    /// Quiet mode: minimal output (only errors and final result).
+    #[arg(short, long)]
+    pub quiet: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

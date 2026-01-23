@@ -85,13 +85,10 @@ avoid-breaking-exported-api = true
 # Patterns that should not appear in production code
 
 # Disallowed macros - debugging tools that shouldn't be committed
-[[disallowed-macros]]
-path = "std::dbg"
-reason = "debugging macro should not be committed to production code"
-
-[[disallowed-macros]]
-path = "std::todo"
-reason = "incomplete code marker should not be committed"
+disallowed-macros = [
+    { path = "std::dbg", reason = "debugging macro should not be committed to production code" },
+    { path = "std::todo", reason = "incomplete code marker should not be committed" },
+]
 
 # Note: print!/println! are allowed because this is a CLI tool
 # For libraries, you would add:

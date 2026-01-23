@@ -7,6 +7,8 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 
+use crate::progress::{self, Spinner};
+
 /// Find a specific tool, checking local directory first, then PATH.
 pub fn find_tool(tool_name: &str) -> Option<PathBuf> {
     // 1. Check current directory
@@ -85,6 +87,54 @@ pub fn run_command(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     writer.write_all(&output.stderr)?;
 
     Ok(output.status.success())
+}
+
+/// Run a command with a spinner, logging output to a file.
+/// Shows elapsed time and success/failure status.
+pub fn run_command_with_spinner(cmd: &mut Command, log_path: &Path, message: &str) -> Result<bool> {
+    let spinner = Spinner::new(message);
+
+    // In verbose mode, use live output instead
+    if progress::is_verbose() {
+        let result = run_command_live(cmd, log_path)?;
+        if result {
+            spinner.finish_success();
+        } else {
+            spinner.finish_error(Some("command failed"));
+        }
+        return Ok(result);
+    }
+
+    let log_file = File::create(log_path).context("Failed to create log file")?;
+    let mut writer = std::io::BufWriter::new(log_file);
+
+    // Write command line for debugging
+    writeln!(writer, "Running command: {:?}", cmd)?;
+    writer.flush()?;
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().context("Failed to spawn command")?;
+
+    let _stdout = child.stdout.take().expect("Failed to open stdout");
+    let _stderr = child.stderr.take().expect("Failed to open stderr");
+
+    let output = child.wait_with_output()?;
+
+    writer.write_all(&output.stdout)?;
+    writer.write_all(&output.stderr)?;
+
+    if output.status.success() {
+        spinner.finish_success();
+        Ok(true)
+    } else {
+        // Try to extract error from output
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        let err_hint = stderr_str.lines().last().unwrap_or("check log for details");
+        spinner.finish_error(Some(err_hint));
+        Ok(false)
+    }
 }
 
 /// Run a command and stream output to both terminal (stderr mainly for progress) and a log file.

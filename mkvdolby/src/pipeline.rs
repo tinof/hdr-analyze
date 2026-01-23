@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 
 use crate::cli::{Args, CmVersion, Encoder, HwAccel, PeakSource};
-use crate::external::{self, run_command, run_command_live};
+use crate::external::{self, run_command_live, run_command_with_spinner};
 use crate::metadata::{self, HdrFormat};
 
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
@@ -259,8 +259,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         bl_rpu_hevc.to_str().unwrap(),
     ]);
 
-    println!("{}", "Injecting RPU...".green());
-    if !run_command(&mut dovi_cmd, &temp_dir.join("dovi_inject.log"))? {
+    if !run_command_with_spinner(
+        &mut dovi_cmd,
+        &temp_dir.join("dovi_inject.log"),
+        "Injecting RPU into base layer",
+    )? {
         return Ok(false);
     }
 
@@ -277,8 +280,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     mkvmerge_cmd.arg(&bl_rpu_hevc);
     mkvmerge_cmd.arg("--no-video").arg(input_file);
 
-    println!("{}", "Muxing final MKV...".green());
-    if !run_command(&mut mkvmerge_cmd, &temp_dir.join("mkvmerge.log"))? {
+    if !run_command_with_spinner(
+        &mut mkvmerge_cmd,
+        &temp_dir.join("mkvmerge.log"),
+        "Muxing final MKV",
+    )? {
         return Ok(false);
     }
 
@@ -395,8 +401,11 @@ fn extract_hdr10plus_metadata(input: &str, temp_dir: &Path) -> Result<Option<Pat
         json_out.to_str().unwrap(),
     ]);
 
-    if run_command(&mut tool, &temp_dir.join("hdr10plus_tool.log"))?
-        && json_out.exists()
+    if run_command_with_spinner(
+        &mut tool,
+        &temp_dir.join("hdr10plus_tool.log"),
+        "Extracting HDR10+ metadata",
+    )? && json_out.exists()
         && fs::metadata(&json_out)?.len() > 0
     {
         return Ok(Some(json_out));
@@ -608,7 +617,7 @@ fn generate_rpu(
     }
 
     let log_path = temp_dir.join("dovi_gen.log");
-    if run_command(&mut cmd, &log_path)? {
+    if run_command_with_spinner(&mut cmd, &log_path, "Generating Dolby Vision RPU")? {
         Ok(Some(rpu_out))
     } else {
         Ok(None)

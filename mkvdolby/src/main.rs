@@ -5,12 +5,17 @@ mod cli;
 mod external;
 mod metadata;
 mod pipeline;
+mod progress;
 mod verify;
 
 use cli::Args;
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // Initialize progress module with verbosity settings
+    progress::set_verbose(args.verbose);
+    progress::set_quiet(args.quiet);
 
     // Check dependencies after parsing so `--help`/`--version` work without tools installed.
     if let Err(e) = external::check_dependencies() {
