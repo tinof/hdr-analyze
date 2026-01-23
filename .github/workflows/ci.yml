@@ -107,8 +107,8 @@ jobs:
           echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "PKG_CONFIG_PATH=$env:VCPKG_INSTALLATION_ROOT\\installed\\x64-windows\\lib\\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: cargo build (locked)
-        run: cargo build --release --workspace --verbose --locked
+      - name: cargo build
+        run: cargo build --release --workspace --verbose
 
   build-linux-arm64:
     name: Build (Linux ARM64)
@@ -126,8 +126,8 @@ jobs:
             libavformat-dev libavcodec-dev libavutil-dev \
             libavfilter-dev libavdevice-dev libswscale-dev
           echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
-      - name: cargo build (locked)
-        run: cargo build --release --workspace --verbose --locked
+      - name: cargo build
+        run: cargo build --release --workspace --verbose
 
   security-audit:
     name: Security Audit
