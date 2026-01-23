@@ -1,6 +1,6 @@
 # HDR-Analyze: Dynamic HDR Metadata Generator
 
-[![CI Build](https://github.com/tinof/hdr-analyze/actions/workflows/rust.yml/badge.svg)](https://github.com/tinof/hdr-analyze/actions)
+[![CI](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml/badge.svg)](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Version](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://github.com/rust-lang/rust)
 
@@ -88,14 +88,13 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
 
 ### Analyzer (Decoding)
 
-
 - CUDA: Attempts the `hevc_cuvid` decoder when `--hwaccel cuda` is specified (automatic fallback to software decoding if unavailable).
 - VAAPI / VideoToolbox: Currently log and use software decoding paths; proper device contexts are planned. The pipeline remains fully functional via software decoding.
 
 ### Converter (Encoding via mkvdolby)
+
 - **macOS Apple Silicon**: Supports `hevc_videotoolbox` for accelerated HLG-to-PQ conversion. Use `--encoder videotoolbox` to enable.
 - **Other Platforms**: Defaults to `libx265` (software) for maximum compatibility and quality.
-
 
 ### Throughput controls and ARM optimizations
 
@@ -109,7 +108,7 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
 
 ## Prerequisites
 
-- Rust toolchain: Install from https://rustup.rs/
+- Rust toolchain: Install from <https://rustup.rs/>
 - FFmpeg development libraries: Required for compiling `ffmpeg-next`
   - macOS: `brew install ffmpeg pkg-config`
   - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev pkg-config`
@@ -119,9 +118,15 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
   - `dovi_tool`: Required for final RPU generation. Download from [quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool/releases) and place in your PATH.
   - `hdr10plus_tool`: Required for HDR10+ analysis. Download from [quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool/releases) and place in your PATH.
 
+## Automated Releases
+
+Binaries for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux** are automatically built and released on GitHub.
+Check the [Releases Page](https://github.com/tinof/hdr-analyze/releases) for the latest versions.
+
 ## Installation & Setup
 
 ### 1. Build the Rust Tools
+
 Clone the repository and build the workspace. This compiles `hdr_analyzer_mvp` (the core analysis engine) and `verifier`.
 
 ```bash
@@ -133,6 +138,7 @@ cargo build --release --workspace
 The compiled binaries will be located in `target/release/`.
 
 ### 2. mkvdolby (Full Conversion Tool)
+
 `mkvdolby` is now a native Rust binary included in the workspace. It orchestrates the entire conversion process without requiring Python or pipx.
 
 To use it, simply build the workspace (as above). The binary will be at:
@@ -141,6 +147,7 @@ To use it, simply build the workspace (as above). The binary will be at:
 You can add it to your PATH or run it directly.
 
 ### 3. Updating (After `git pull`)
+
 When you pull new changes from the repository, you **must** rebuild the Rust binaries to ensure they match the updated source code.
 
 ```bash
@@ -152,6 +159,7 @@ cargo build --release --workspace
 ```
 
 ### Executables Locations
+
 - Analyzer: `./target/release/hdr_analyzer_mvp`
 - Verifier: `./target/release/verifier`
 - Converter: `./target/release/mkvdolby`
@@ -161,22 +169,26 @@ cargo build --release --workspace
 ### Analyzer
 
 Standard analysis (optimized by default):
+
 ```bash
 ./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements.bin"
 ```
 
 Disable optimizer:
+
 ```bash
 ./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements_noopt.bin" --disable-optimizer
 ```
 
 Version selection (v5 default; v6 for broader compatibility):
+
 ```bash
 # Write v6 file, set target_peak_nits to 1000 (if omitted, defaults to computed MaxCLL)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements_v6.bin" --madvr-version 6 --target-peak-nits 1000
 ```
 
 Scene detection sensitivity and controls:
+
 ```bash
 # Increase/decrease sensitivity (default 0.3)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --scene-threshold 0.25
@@ -189,6 +201,7 @@ Scene detection sensitivity and controls:
 ```
 
 Hardware acceleration (attempts CUDA; others fall back to software):
+
 ```bash
 # NVIDIA GPUs on Windows/Linux (attempts hevc_cuvid)
 ./target/release/hdr_analyzer_mvp --hwaccel cuda -i "video.mkv" -o "out.bin"
@@ -199,6 +212,7 @@ Hardware acceleration (attempts CUDA; others fall back to software):
 ```
 
 Noise robustness for grainy content:
+
 ```bash
 # Default behavior (histogram99 peak with EMA smoothing enabled)
 ./target/release/hdr_analyzer_mvp -i "grainy_video.mkv" -o "out.bin"
@@ -223,6 +237,7 @@ Noise robustness for grainy content:
 ```
 
 Using cargo:
+
 ```bash
 cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3 --downscale 2
 ```
@@ -265,6 +280,7 @@ mkvdolby "input.mkv" --quiet
 #### Progress Indicators
 
 mkvdolby provides visual feedback for all operations:
+
 - **Spinners** with elapsed time for long-running operations (dovi_tool, mkvmerge, hdr10plus_tool)
 - **Success/failure indicators** (✓/✗) with timing information
 - **TTY detection**: Automatically disables spinners for non-interactive/CI environments
@@ -289,6 +305,7 @@ mkvdolby "input.mkv" --source-primaries 1  # 0=BT.2020, 1=P3-D65, 2=BT.709
 ```
 
 **CM v4.0 metadata levels generated:**
+
 - **L1**: Per-frame min/mid/max luminance (from HDR10+ or hdr_analyzer)
 - **L2**: Trim parameters for 100/600/1000 nit displays
 - **L6**: Static mastering display metadata
@@ -304,6 +321,7 @@ cargo run -p verifier -- "measurements.bin"
 ```
 
 Verifier reports:
+
 - File format (version, flags)
 - Scene/frame stats
 - Peak brightness and avg PQ
@@ -314,6 +332,7 @@ Verifier reports:
 ## Command line arguments
 
 ### Core Options
+
 - `-i, --input <PATH>`: Input HDR video file
 - `-o, --output <PATH>`: Output `.bin` measurement file
 - `--madvr-version <5|6>`: Output file version (default: 5)
@@ -323,16 +342,19 @@ Verifier reports:
 - `--no-crop`: Disable active-area crop detection (analyze full frame)
 
 ### Scene Detection
+
 - `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
 - `--min-scene-length <frames>`: Drop cuts closer than N frames (default: 24)
 - `--scene-smoothing <frames>`: Rolling window over scene-change metric (default: 5)
 
 ### Optimizer
+
 - `--disable-optimizer`: Disable dynamic target nits generation (enabled by default)
 - `--optimizer-profile <conservative|balanced|aggressive>`: Optimizer behavior preset (default: balanced)
 - `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
 
 ### Noise Robustness (New in v1.4)
+
 - `--peak-source <max|histogram99|histogram999>`: Peak brightness source (default: histogram99 for balanced/aggressive, max for conservative)
   - `max`: Direct max from Y-plane (most responsive to noise)
   - `histogram99`: 99th percentile from histogram (recommended, reduces noise impact)
@@ -344,32 +366,38 @@ Verifier reports:
   - `nlmeans`: Non-local means denoising (reserved for future)
 
 ### Performance & Diagnostics
+
 - `--analysis-threads <N>`: Override Rayon worker count for histogram analysis (default: logical cores)
 - `--profile-performance`: Print per-stage throughput metrics (decode vs. analysis) when finished
 
 Notes for v6 output:
+
 - Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently duplicated from BT.2020 (`peak_pq_2020`) as a compatibility placeholder. Proper per-gamut computation is planned.
 
 ## Minimal Beta Validation
 
 1) Build:
+
 ```bash
 cargo build --release --workspace
 ```
 
-2) Analyze (v5 and v6):
+1) Analyze (v5 and v6):
+
 ```bash
 ./target/release/hdr_analyzer_mvp -i sample_hdr10.mkv -o measurements_v5.bin
 ./target/release/hdr_analyzer_mvp -i sample_hdr10.mkv -o measurements_v6.bin --madvr-version 6 --target-peak-nits 1000
 ```
 
-3) Verify:
+1) Verify:
+
 ```bash
 ./target/release/verifier measurements_v5.bin
 ./target/release/verifier measurements_v6.bin
 ```
 
 Expected:
+
 - Version: 5 or 6 (matches selection)
 - Flags: 2 (no optimizer) or 3 (optimizer enabled)
 - Histograms: 256 bins, sums ≈ 100
@@ -382,6 +410,7 @@ Expected:
 - Rayon-backed histogram analysis saturates available cores; tune with `--analysis-threads` if you need to pin execution to available vCPUs.
 - Use `--profile-performance` to capture decode vs. analysis throughput when validating new instances.
 - Recommended packages (Ubuntu 22.04/24.04 arm64):
+
   ```bash
   sudo apt update
   sudo apt install -y \
@@ -389,6 +418,7 @@ Expected:
     libavformat-dev libavcodec-dev libavutil-dev \
     libavfilter-dev libavdevice-dev libswscale-dev
   ```
+
   - `clang` + `lld` provide much faster linking, especially with LTO.
 - Build and run using the steps above. Performance is CPU-bound; for higher throughput, planned improvements include parallelizing histogram accumulation across rows/tiles.
 - Enabled optimizations: auto-threaded decode, skip-scaler when possible, fast scaling, host CPU tuning (`target-cpu=native`). Use `--downscale` for additional speedups. On Linux ARM64, the build uses the LLD linker when available.
@@ -396,16 +426,16 @@ Expected:
 ## Local Quality Gates (Recommended)
 
 - Pre-commit hooks (fmt, clippy):
+
   ```bash
   pipx install pre-commit  # or: pip install --user pre-commit
   pre-commit install        # installs pre-commit hook (fmt, clippy)
   pre-commit install --hook-type pre-push  # optional: quick tests on push
   ```
+
   Configuration lives in `.pre-commit-config.yaml`. Hooks run `cargo fmt --check` and `cargo clippy -D warnings` before commit.
 
 - Pinned toolchain: rustc, clippy, and rustfmt are pinned via `rust-toolchain.toml` for reproducible CI/dev builds.
-
-
 
 ## Roadmap
 

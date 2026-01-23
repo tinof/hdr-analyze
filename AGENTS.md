@@ -7,6 +7,7 @@
 A Rust monorepo (Cargo workspace) for HDR video analysis and Dolby Vision metadata generation.
 
 **Workspace members:**
+
 - `hdr_analyzer_mvp/` - Core HDR10 analysis engine (generates PQ-based histograms and DV metadata)
 - `mkvdolby/` - MKV container handling and Dolby Vision metadata injection
 - `verifier/` - MadVR measurement file validation
@@ -18,6 +19,7 @@ A Rust monorepo (Cargo workspace) for HDR video analysis and Dolby Vision metada
 ## Build, Test & Lint Commands
 
 ### Build
+
 ```bash
 cargo build                              # Debug build
 cargo build --release --workspace        # Release build (all crates)
@@ -25,6 +27,7 @@ cargo build --release -p hdr_analyzer_mvp  # Single crate
 ```
 
 ### Test
+
 ```bash
 cargo test --workspace                   # Run all tests
 cargo test --workspace -- --nocapture    # With stdout output
@@ -34,6 +37,7 @@ cargo test -p verifier -- test_name      # Single test in specific crate
 ```
 
 ### Lint & Format
+
 ```bash
 cargo fmt --all                          # Format all code
 cargo fmt --all -- --check               # Check formatting (CI)
@@ -41,6 +45,7 @@ cargo clippy --workspace --all-targets -- -D warnings  # Lint (must pass)
 ```
 
 ### Audit & Verify
+
 ```bash
 cargo audit                              # Security vulnerability check
 cargo deny check                         # License/crate ban enforcement
@@ -51,6 +56,7 @@ cargo deny check                         # License/crate ban enforcement
 ## Code Style Guidelines
 
 ### Imports
+
 - Use **absolute imports** with `crate::` for internal modules
 - **Group imports** from the same crate with curly braces
 - **Order:** std library → third-party crates → internal `crate::` modules
@@ -66,6 +72,7 @@ use crate::cli::Cli;
 ```
 
 ### Naming Conventions
+
 | Element          | Convention          | Example                    |
 |------------------|---------------------|----------------------------|
 | Files/Dirs       | `snake_case`        | `ffmpeg_io.rs`, `analysis/` |
@@ -75,11 +82,13 @@ use crate::cli::Cli;
 | Traits           | `PascalCase`        | `FrameProcessor`           |
 
 ### Type Definitions
+
 - Define types in modules corresponding to their purpose
 - Use `derive` macros for standard traits: `#[derive(Debug, Clone, Parser)]`
 - Prefer structs with named fields over tuples for clarity
 
 ### Error Handling
+
 - Use `anyhow::Result<T>` for application-level functions
 - Propagate errors with `?` operator
 - Add context with `.context()` or `.with_context()`
@@ -95,12 +104,14 @@ fn load_config(path: &Path) -> Result<Config> {
 ```
 
 ### Function Style
+
 - Use `fn` declarations (not arrow functions)
 - Closures for inline functional operations (`map`, `filter`)
 - Large orchestrator functions delegate to smaller helpers
 - Visibility: explicit `pub` or `pub(crate)` modifiers
 
 ### Documentation
+
 - Use `///` for public API documentation
 - Use `//` for inline implementation notes
 - Use `// SAFETY:` to justify `unsafe` blocks
@@ -185,6 +196,7 @@ mod tests {
 ## Pre-commit Checks
 
 Before committing, ensure:
+
 ```bash
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
@@ -192,6 +204,7 @@ cargo test --workspace
 ```
 
 The project uses `.pre-commit-config.yaml` with hooks for:
+
 - `cargo-fmt` (on commit)
 - `cargo-clippy` (on commit)
 - `cargo-test` (on push)
@@ -226,6 +239,7 @@ target/release/verifier "path/to/measurements.bin"
 mkvdolby generates Dolby Vision Content Mapping v4.0 metadata by default.
 
 ### CLI Arguments
+
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--cm-version` | `v40` | Content Mapping version (v29 or v40) |
@@ -236,6 +250,7 @@ mkvdolby generates Dolby Vision Content Mapping v4.0 metadata by default.
 | `-q, --quiet` | `false` | Minimal output (only errors and final result) |
 
 ### Generated Metadata Levels
+
 - **L1**: Per-frame luminance from HDR10+ or hdr_analyzer
 - **L2**: Trim parameters for 100/600/1000 nit target displays
 - **L6**: Static mastering display metadata (MaxCLL, MaxFALL)
@@ -243,8 +258,62 @@ mkvdolby generates Dolby Vision Content Mapping v4.0 metadata by default.
 - **L11**: Content type and reference mode hints
 
 ### Progress Indicators
+
 mkvdolby uses `indicatif` for user-friendly progress feedback:
+
 - **Spinners** with elapsed time for long-running operations (dovi_tool, mkvmerge, hdr10plus_tool)
 - **Success/failure indicators** (✓/✗) with timing information
 - **TTY detection**: Automatically disables spinners for non-interactive/CI environments
 - Use `--verbose` to see raw tool output for debugging
+
+---
+
+## CI/CD & Releases
+
+This project uses **GitHub Actions** for continuous integration and automated releases.
+
+### Workflows
+
+| File | Trigger | Description |
+|------|---------|-------------|
+| `ci.yml` | Push to `main`/`fix-*` <br> PR to `main` | Runs lint, test, build, audit, and dependency checks |
+| `release.yml` | Tag `v*.*.*` | Builds all binaries, creates GitHub release, and uploads archives |
+
+### CI Checks (Mandatory for PRs)
+
+AI agents modifying code must ensure these checks pass:
+
+1. **Code Format:** `cargo fmt --all -- --check`
+2. **Clippy Lints:** `cargo clippy --workspace --all-targets -- -D warnings`
+3. **Tests:** `cargo test --workspace`
+    - *Note: `--locked` is removed from CI test/build commands to tolerate minor lockfile drifts, but `Cargo.lock` should still be kept up-to-date.*
+4. **Security:** `cargo audit`
+5. **Dependencies:** `cargo deny check` (Advisories, Licenses, Bans)
+    - *Note: `indicatif` advisory RUSTSEC-2025-0119 is ignored.*
+    - *Note: `WTFPL` license is explicitly allowed for `ffmpeg-next`.*
+
+### Creating a Release
+
+To trigger a release deployment:
+
+1. **Update Version:** Bump version in `Cargo.toml` for all crates.
+2. **Update Changelog:** Add entry to `CHANGELOG.md`.
+3. **Tag & Push:**
+
+    ```bash
+    git tag v1.X.X
+    git push origin v1.X.X
+    ```
+
+The `release.yml` workflow will automatically:
+
+- Build binaries for **Windows (x64)**, **macOS (Intel & ARM)**, and **Linux (x64)**.
+- Create a GitHub Release with the tag name.
+- Upload archives containing:
+  - `bin/hdr_analyzer_mvp`
+  - `bin/mkvdolby`
+  - `bin/verifier`
+  - `README.md`, `LICENSE`, `CHANGELOG.md`
+- Update release notes with build status and checksum instructions.
+
+**Note:** Linux ARM64 builds are **not** currently automated due to GitHub runner limitations (requires paid/self-hosted runners).
