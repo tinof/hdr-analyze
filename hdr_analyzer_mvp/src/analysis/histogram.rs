@@ -157,7 +157,7 @@ pub fn select_peak_pq(histogram: &[f64], direct_max_pq: f64, peak_source: &str) 
 /// Apply exponential moving average (EMA) smoothing to histogram bins.
 ///
 /// This reduces frame-to-frame noise in the histogram while preserving temporal trends.
-/// Uses the formula: smoothed[i] = beta * current[i] + (1-beta) * ema_state[i]
+/// Uses the formula: `smoothed[i] = beta * current[i] + (1-beta) * ema_state[i]`
 ///
 /// # Arguments
 /// * `histogram` - Current frame's histogram (will be smoothed in-place)
