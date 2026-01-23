@@ -53,6 +53,18 @@ jobs:
             | **macOS (Apple Silicon)** | `hdr-analyze-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
             | **Linux (x64)** | `hdr-analyze-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
             
+            ### ⚡ One-Line Install
+            
+            **Linux/macOS:**
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | bash
+            ```
+            
+            **Windows (PowerShell):**
+            ```powershell
+            irm https://github.com/${{ github.repository }}/releases/latest/download/install.ps1 | iex
+            ```
+            
             ### ⚙️ Prerequisites
             
             - **FFmpeg** must be installed and available in your system PATH
@@ -81,6 +93,23 @@ jobs:
             
             - [Report Issues](https://github.com/${{ github.repository }}/issues)
             - [Documentation](https://github.com/${{ github.repository }}/blob/main/README.md)
+
+  upload-install-scripts:
+    name: Upload Install Scripts
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload Install Scripts
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            scripts/install.sh
+            scripts/install.ps1
 
   build:
     name: Build (${{ matrix.target }})

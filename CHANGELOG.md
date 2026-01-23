@@ -4,7 +4,29 @@ This document provides a historical record of completed milestones, feature impl
 
 ---
 
-## V1.5: Dolby Vision CM v4.0 & Toolchain Upgrade
+## [0.1.0] - 2026-01-23
+
+First public release of the HDR-Analyze suite.
+
+### Highlights
+- Complete HDR10/PQ analysis engine with madVR v5/v6 compatible output
+- Dolby Vision Content Mapping v4.0 metadata generation (mkvdolby)
+- Measurement file verification tool (verifier)
+- Cross-platform support: Linux, macOS (Intel + Apple Silicon), Windows
+
+### What's Included
+- **hdr_analyzer_mvp**: Core HDR10 frame analysis with scene detection, noise-robust peak detection, and dynamic target nits optimization
+- **mkvdolby**: MKV to Dolby Vision Profile 8.1 conversion with CM v4.0 metadata (L1/L2/L6/L9/L11)
+- **verifier**: madVR measurement file validation tool
+
+---
+
+## Pre-Release Development History
+
+> The milestones below document internal development prior to the first public release.
+> They are not SemVer versions.
+
+### Milestone 5: Dolby Vision CM v4.0 & Toolchain Upgrade
 
 - **Dolby Vision Content Mapping v4.0**: Full CM v4.0 implementation in mkvdolby.
   - Added `--cm-version` flag with `v29` (legacy) and `v40` (default) options.
@@ -19,7 +41,7 @@ This document provides a historical record of completed milestones, feature impl
   - Changed `rust-toolchain.toml` to use `channel = "stable"` instead of fixed version.
 - **Test Infrastructure**: Fixed deprecated `cargo_bin` usage in integration tests.
 
-## V1.4: Performance & Quality Enhancements
+### Milestone 4: Performance & Quality Enhancements
 
 - **PQ Noise Robustness**: Implemented a suite of features to improve measurement stability on noisy or grainy content.
   - Added `--peak-source` flag with `max`, `histogram99`, and `histogram999` options for robust peak detection. `histogram99` is now the default for balanced/aggressive profiles.
@@ -32,13 +54,13 @@ This document provides a historical record of completed milestones, feature impl
   - Added `--analysis-threads` flag to control worker count.
   - Added `--profile-performance` flag to emit per-stage throughput metrics for performance analysis.
 
-## V1.3: Advanced Optimization & Format Support
+### Milestone 3: Advanced Optimization & Format Support
 
 - **Scene-Aware Optimizer**: Enhanced the optimizer with configurable profiles (`conservative`, `balanced`, `aggressive`) and a dynamic clipping heuristic that uses per-scene knee smoothing to prevent banding.
 - **Hue Histogram**: Implemented a real 31-bin chroma-derived hue histogram from the U/V planes, replacing the previous zeroed-out placeholder. The verifier was also extended to validate its distribution.
 - **madVR v6 Gamut Peaks**: Replaced the simple duplication of BT.2020 peaks with a gamut-aware approximation for DCI-P3 (99%) and BT.709 (95%) peaks.
 
-## Milestone R: Codebase Modularization
+### Milestone R: Codebase Modularization
 
 - **Refactored `main.rs`**: Successfully refactored the monolithic `main.rs` file (originally ~1860 lines) into a modular structure with a thin (63-line) entry point.
 - **Created Modules**: Logic was separated into distinct modules with single responsibilities:
@@ -49,7 +71,7 @@ This document provides a historical record of completed milestones, feature impl
   - `analysis/`: Modules for frame, scene, histogram, and HLG analysis.
 - **Preserved Behavior**: All unit tests were migrated and passed, ensuring behavior was preserved post-refactor.
 
-## V1.2: Core Accuracy and Stabilization
+### Milestone 2: Core Accuracy and Stabilization
 
 - **Baseline & Harness**: Established a baseline test pack and created the `tools/compare_baseline` harness for regression testing.
 - **Core Analysis Features**:
@@ -60,7 +82,7 @@ This document provides a historical record of completed milestones, feature impl
   - Added support for both positional and flag-based (`-i/--input`) input.
   - Enhanced the `verifier` tool with additional checks for FALL metrics and data consistency.
 
-## Initial Implementation
+### Milestone 1: Initial Implementation
 
 - **Native FFmpeg Pipeline**: Initial version of the tool using `ffmpeg-next` for a native Rust video processing pipeline.
 - **madVR v5/v6 Output**: Core support for writing madVR-compatible `.bin` measurement files.

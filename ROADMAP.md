@@ -1,10 +1,13 @@
 # HDR-Analyze Roadmap
 
-This document outlines the development roadmap for `hdr-analyze`. It focuses on upcoming features, quality improvements, and long-term goals. For a detailed history of completed work, see [`CHANGELOG.md`](CHANGELOG.md) (noting V1.4 features like robust noise handling and scene-aware smoothing are now live).
+This document outlines the development roadmap for `hdr-analyze`. It focuses on upcoming features, quality improvements, and long-term goals. For a detailed history of completed work, see [`CHANGELOG.md`](CHANGELOG.md) (noting Milestone 4 features like robust noise handling and scene-aware smoothing are now live).
+
+> **Versioning**: This project follows [Semantic Versioning](https://semver.org/). 
+> The first public release is `v0.1.0`. During the `0.x` series, minor version bumps may include breaking changes.
 
 ---
 
-## Recently Completed / In Validation (V1.5)
+## Recently Completed / In Validation (v0.1.0)
 
 The following core features have been implemented and are currently being validated in production:
 
