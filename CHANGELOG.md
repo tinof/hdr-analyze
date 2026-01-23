@@ -4,6 +4,21 @@ This document provides a historical record of completed milestones, feature impl
 
 ---
 
+## V1.5: Dolby Vision CM v4.0 & Toolchain Upgrade
+
+- **Dolby Vision Content Mapping v4.0**: Full CM v4.0 implementation in mkvdolby.
+  - Added `--cm-version` flag with `v29` (legacy) and `v40` (default) options.
+  - Added `--content-type` flag for L11 metadata (film, live, animation, cinema, gaming, graphics).
+  - Added `--reference-mode` flag for L11 reference viewing environment hint.
+  - Added `--source-primaries` flag with auto-detection from MediaInfo (BT.2020/P3/709).
+  - Generate L2 trim parameters for 100/600/1000 nit target displays.
+  - Generate L9 (source primaries) and L11 (content type, reference mode) metadata blocks.
+  - All metadata written to `extra.json` for `dovi_tool generate`.
+- **Rust Toolchain Upgrade**: Upgraded from pinned Rust 1.82.0 to stable channel (1.93.0).
+  - Enables latest dependency updates (e.g., madvr_parse 1.0.3 with Rust 2024 edition).
+  - Changed `rust-toolchain.toml` to use `channel = "stable"` instead of fixed version.
+- **Test Infrastructure**: Fixed deprecated `cargo_bin` usage in integration tests.
+
 ## V1.4: Performance & Quality Enhancements
 
 - **PQ Noise Robustness**: Implemented a suite of features to improve measurement stability on noisy or grainy content.

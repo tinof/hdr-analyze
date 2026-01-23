@@ -1,39 +1,53 @@
 # HDR-Analyze Roadmap
 
-This document outlines the development roadmap for `hdr-analyze`. It focuses on upcoming features, quality improvements, and long-term goals. For a detailed history of completed work, see [`docs/CHANGELOG.md`](../../CHANGELOG.md) (noting V1.4 features like robust noise handling and scene-aware smoothing are now live).
+This document outlines the development roadmap for `hdr-analyze`. It focuses on upcoming features, quality improvements, and long-term goals. For a detailed history of completed work, see [`CHANGELOG.md`](CHANGELOG.md) (noting V1.4 features like robust noise handling and scene-aware smoothing are now live).
 
 ---
 
-## Recently Completed / In Validation (V1.4)
+## Recently Completed / In Validation (V1.5)
 
 The following core features have been implemented and are currently being validated in production:
 
--   **Dynamic Clipping Heuristics**: Optimizer profiles (`conservative`, `balanced`, `aggressive`) and dynamic knee detection are implemented. *Next step: Long-term qualitative tuning.*
--   **Native HLG Support**: In-memory HLG-to-PQ conversion is active. *Next step: Formal regression testing against reference streams.*
+-   **Dolby Vision CM v4.0 (NEW)**: Full Content Mapping v4.0 implementation in mkvdolby with:
+    - L2 trim parameters for 100/600/1000 nit target displays
+    - L9 source primaries (auto-detected from MediaInfo)
+    - L11 content type and reference mode hints
+    - CM v4.0 is now the default for all mkvdolby runs
+-   **Dynamic Clipping Heuristics**: Optimizer profiles (`conservative`, `balanced`, `aggressive`) and dynamic knee detection are implemented.
+-   **Native HLG Support**: In-memory HLG-to-PQ conversion is active.
 -   **Noise Robustness**: Percentile-based peaks (P99/P99.9) and histogram smoothing are live.
--   **NVIDIA CUDA Support**: Added `--hwaccel` flag to `mkvdolby` for accelerated analysis and HLG conversion (using `hevc_nvenc`).
+-   **NVIDIA CUDA Support**: Added `--hwaccel` flag to `mkvdolby` for accelerated analysis.
+-   **Rust 1.93 Toolchain**: Upgraded from pinned 1.82 to stable channel.
 
 ---
 
 ## Prioritized Task Order (Next Steps)
 
-The following tasks are prioritized to stabilize the V1.4 codebase and enable safe future expansion.
+The following tasks are prioritized to ship CM v4.0 as a stable product and enable safe future expansion.
 
-1.  **Benchmark Corpus & CI Integration (Critical)**:
+1.  **Release Packaging & Distribution (Critical)**:
+    -   Update GitHub release workflow to include `mkvdolby` and `verifier` binaries (currently only packages `hdr_analyzer_mvp`).
+    -   Update README documentation to reflect mkvdolby as a core component.
+    -   *Why*: CM v4.0 is implemented but not shipped to users via releases.
+
+2.  **Benchmark Corpus & CI Integration (Critical)**:
     -   Establish an official benchmark corpus with ground-truth annotations.
-    -   Integrate the `compare_baseline` tool and `dovi_tool` smoke tests into the CI pipeline to catch regressions in the V1.4 logic automatically.
-    -   *Why*: Essential to safely refactor or tune the complex heuristics added in V1.4.
+    -   Add regression tests for CM v4.0 metadata generation.
+    -   Integrate `compare_baseline` and `dovi_tool` smoke tests into CI.
+    -   *Why*: Essential to safely tune complex heuristics without breaking CM v4.0.
 
-2.  **Scene Detection (Hybrid Metric)**:
-    -   Implement a hybrid scene detection metric that fuses the current histogram distance with optical flow (e.g., Farnebäck) to improve cut accuracy, especially on grainy content.
-    -   *Status*: Currently a prototype flag (`--scene-metric hybrid`) that falls back to histogram-only.
+3.  **mkvdolby UX Improvements**:
+    -   Add `--dry-run` mode to preview commands without execution.
+    -   Add `--keep-temp` / `--keep-logs` for debugging failed conversions.
+    -   Improve dependency checks (include `hdr10plus_tool` when needed).
+    -   Consider safer defaults (keep source by default, require `--delete-source`).
 
-3.  **madVR v6 Gamut Peaks (Full RGB Conversion)**:
-    -   Replace the current V1.3 luminance-based approximation (0.99x/0.95x scaling) for DCI-P3 and BT.709 peaks.
-    -   Implement a color-accurate RGB transformation pipeline for precise per-gamut peak measurement.
+4.  **Scene Detection (Hybrid Metric)**:
+    -   Implement hybrid scene detection fusing histogram distance with optical flow.
+    -   *Status*: Prototype flag (`--scene-metric hybrid`) falls back to histogram-only.
 
-4.  **Dolby Vision XML Export**:
-    -   Implement a feature to directly export Dolby Vision metadata as CMv2.9 and CMv4.0 XML files, ensuring compatibility with professional tools like DaVinci Resolve and Dolby Metafier.
+5.  **madVR v6 Gamut Peaks (Full RGB Conversion)**:
+    -   Replace luminance-based approximation with color-accurate RGB transformation.
 
 ---
 
@@ -50,9 +64,10 @@ The following tasks are prioritized to stabilize the V1.4 codebase and enable sa
 
 **Objective**: Achieve parity with Dolby's `cm_analyze` for professional metadata generation.
 
--   [ ] **Long-Play / Shot Metadata Mode**: Add support for per-shot analysis with edit-offset handling to correctly manage dissolves and transitions.
--   [ ] **Canvas & Aspect Metadata**: Capture and embed mastering display specs, active image area, and target trims.
--   [ ] **Validation Workflow**: Integrate Metafier (or an open-source equivalent) checks into CI to validate generated XML against standard QC rules.
+-   [x] **CM v4.0 Metadata Generation**: Generate L1/L2/L6/L9/L11 metadata via `extra.json` for `dovi_tool`.
+-   [ ] **Dolby Vision XML Export**: Direct XML export for DaVinci Resolve and Dolby Metafier compatibility.
+-   [ ] **Long-Play / Shot Metadata Mode**: Per-shot analysis with edit-offset handling for dissolves.
+-   [ ] **Canvas & Aspect Metadata**: Capture mastering display specs and active image area.
 
 ---
 
