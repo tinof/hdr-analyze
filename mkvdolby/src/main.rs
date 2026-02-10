@@ -3,6 +3,7 @@ use colored::Colorize;
 
 mod cli;
 mod external;
+mod fel_composite;
 mod metadata;
 mod pipeline;
 mod progress;

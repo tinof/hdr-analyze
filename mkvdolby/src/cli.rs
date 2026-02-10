@@ -44,6 +44,14 @@ pub struct Args {
     #[arg(long, default_value_t = 1000)]
     pub hlg_peak_nits: u32,
 
+    /// CRF to use for Profile 7 FEL re-encoding (default: 18).
+    #[arg(long, default_value_t = 18)]
+    pub fel_crf: u8,
+
+    /// x265 preset to use for FEL re-encoding (default: medium).
+    #[arg(long, default_value = "medium")]
+    pub fel_preset: String,
+
     /// After muxing, run verification: our verifier on the measurements and DV checks.
     #[arg(long)]
     pub verify: bool,

@@ -14,6 +14,7 @@ pub enum HdrFormat {
     Hdr10WithMeasurements,
     Hdr10Unsupported,
     Hlg,
+    DolbyVisionFel,
     Unsupported,
 }
 
@@ -25,6 +26,7 @@ impl HdrFormat {
             HdrFormat::Hdr10WithMeasurements => "HDR10 (with measurements)",
             HdrFormat::Hdr10Unsupported => "HDR10 (no measurements)",
             HdrFormat::Hlg => "HLG",
+            HdrFormat::DolbyVisionFel => "Dolby Vision Profile 7 FEL",
             HdrFormat::Unsupported => "Unsupported",
         }
     }
@@ -133,6 +135,35 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(_) => String::new(),
     };
+
+    // Check for Dolby Vision Profile 7 FEL (dual layer)
+    // MediaInfo shows "dvhe.07" or "Dolby Vision, Version 1.0, Profile 7"
+    let mi_dv_text = match Command::new("mediainfo")
+        .args([
+            "--Inform=Video;%HDR_Format%/%HDR_Format_Profile%/%HDR_Format_Level%",
+            input_file,
+        ])
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => String::new(),
+    };
+
+    // Detect DV Profile 7 with dual-layer (FEL or MEL)
+    if mi_dv_text.contains("dvhe") || mi_text.contains("Dolby Vision") {
+        // Check codec_id for profile 7 dual-layer
+        let mi_codec = match Command::new("mediainfo")
+            .args(["--Inform=Video;%CodecID%", input_file])
+            .output()
+        {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+            Err(_) => String::new(),
+        };
+
+        if mi_codec.contains("dvhe.07") || mi_dv_text.contains("7") {
+            return HdrFormat::DolbyVisionFel;
+        }
+    }
 
     let measurements = find_measurements_file(path).is_some();
 

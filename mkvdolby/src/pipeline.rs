@@ -7,6 +7,7 @@ use colored::Colorize;
 
 use crate::cli::{Args, CmVersion, Encoder, HwAccel, PeakSource};
 use crate::external::{self, run_command_live, run_command_with_spinner};
+use crate::fel_composite;
 use crate::metadata::{self, HdrFormat};
 
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
@@ -68,6 +69,29 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     match hdr_type {
         HdrFormat::Hdr10Plus => {
             // Metadata already extracted above
+        }
+        HdrFormat::DolbyVisionFel => {
+            // Profile 7 FEL: composite BL+EL, then treat as HDR10 for RPU generation
+            println!("{}", "Dolby Vision Profile 7 FEL detected!".cyan().bold());
+
+            let composited_mkv = fel_composite::convert_fel_to_hdr10(input_file, &temp_dir, args)?;
+            bl_source_file = composited_mkv.clone();
+
+            // Generate measurements from the composited output
+            let composited_str = composited_mkv.to_str().unwrap();
+            let mut extra_args = Vec::new();
+            add_optimizer_args(&mut extra_args, args);
+            measurements_file = run_hdr_analyzer(composited_str, &temp_dir, &extra_args, args)?;
+            if measurements_file.is_none() {
+                println!(
+                    "{}",
+                    "Failed to generate measurements from composited FEL output.".red()
+                );
+                return Ok(false);
+            }
+
+            // Override hdr_type for RPU generation (treat as HDR10 with measurements)
+            hdr_type = HdrFormat::Hdr10WithMeasurements;
         }
         HdrFormat::Hlg => {
             // HLG Logic

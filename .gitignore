@@ -92,3 +92,12 @@ coordination/orchestration/*
 *.sqlite-wal
 claude-flow
 hive-mind-prompt-*.txt
+.osgrep
+
+# Tool caches
+.ck/
+.fastembed_cache
+
+# Python build artifacts
+mkvdolby/build/
+*.egg-info/
