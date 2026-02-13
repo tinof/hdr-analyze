@@ -4,6 +4,23 @@ This document provides a historical record of completed milestones, feature impl
 
 ---
 
+## [0.2.0] - 2026-02-13
+
+### Major Feature: Dolby Vision Profile 7 FEL Conversion
+
+- **Full BL+EL Compositing**: Implemented the complete pipeline to composite the Enhancement Layer (EL) into the Base Layer (BL) for Profile 7 sources.
+  - **Polynomial Reshaping**: Supports `luma` piecewise polynomial reshaping (L1).
+  - **MMR Reshaping**: Supports `chroma` Multi-channel Multiple Regression (MMR) reshaping.
+  - **NLQ Processing**: Applies Non-Linear Quantization (NLQ) LinearDeadzone residuals per pixel.
+- **Streaming Pipeline**: Eliminated the need for multi-TB intermediate YUV files by piping composited frames directly to the FFmpeg encoder.
+- **Smart Resolution Handling**: Automatically detects and upscales EL only when dimensions differ from BL.
+- **Metadata Preservation**: improved extraction of mastering display primaries and best-effort injection of HDR10 SEI metadata for hardware encoders.
+- **New CLI Arguments**:
+  - `--fel-crf`: Control re-encoding quality (default: 18).
+  - `--fel-preset`: Control encoding preset (default: medium).
+
+---
+
 ## [0.1.0] - 2026-01-23
 
 First public release of the HDR-Analyze suite.

@@ -1,0 +1,15 @@
+# Detect manual Option to Result conversion patterns
+# Uses kind: if_expression for optimized matching via potential_kinds
+id: manual-ok-or
+language: rust
+severity: hint
+message: "Use .ok_or() or .ok_or_else() instead of manual match/if"
+note: "option.ok_or(err) is more idiomatic than if let Some(x) = option { Ok(x) } else { Err(err) }"
+rule:
+  kind: if_expression
+  pattern: |
+    if let Some($X) = $OPT {
+        Ok($X)
+    } else {
+        Err($ERR)
+    }

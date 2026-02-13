@@ -1,0 +1,10 @@
+# Detect dbg!() macro usage (should not be committed)
+# Uses kind: macro_invocation for optimized matching via potential_kinds
+id: dbg-macro
+language: rust
+severity: error
+message: "Remove dbg!() macro before committing"
+note: "dbg!() is for debugging only and prints to stderr"
+rule:
+  kind: macro_invocation
+  pattern: dbg!($$$)

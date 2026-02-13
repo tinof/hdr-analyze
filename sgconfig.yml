@@ -1,0 +1,10 @@
+# ast-grep configuration for hdr-analyze
+# Optimized with potential_kinds for faster matching (see: ast-grep.github.io/blog/optimize-ast-grep.html)
+
+ruleDirs:
+  - rules/rust
+
+# Language-specific settings
+languageGlobs:
+  rust:
+    - "**/*.rs"

@@ -1,0 +1,19 @@
+# Detect expect() calls in library code (not tests)
+# Uses kind: call_expression for optimized matching via potential_kinds
+id: expect-in-lib
+language: rust
+severity: warning
+message: "Prefer .context() over .expect() in library code"
+note: "expect() can panic; use anyhow's .context() for recoverable errors"
+rule:
+  kind: call_expression
+  pattern: $EXPR.expect($MSG)
+  not:
+    inside:
+      kind: function_item
+      has:
+        kind: attribute_item
+        pattern: "#[test]"
+files:
+  - "!**/tests/**"
+  - "!**/*_test.rs"

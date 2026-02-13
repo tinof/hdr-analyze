@@ -246,6 +246,25 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
                             }
                         }
                     }
+
+                    // Parse MasteringDisplay_ColorPrimaries
+                    if let Some(mdcp) = track
+                        .get("MasteringDisplay_ColorPrimaries")
+                        .and_then(|s| s.as_str())
+                    {
+                        if let Some((gx, gy, bx, by, rx, ry, wpx, wpy)) =
+                            parse_mastering_display_color_primaries(mdcp)
+                        {
+                            meta.insert("md_gx".to_string(), gx as f64);
+                            meta.insert("md_gy".to_string(), gy as f64);
+                            meta.insert("md_bx".to_string(), bx as f64);
+                            meta.insert("md_by".to_string(), by as f64);
+                            meta.insert("md_rx".to_string(), rx as f64);
+                            meta.insert("md_ry".to_string(), ry as f64);
+                            meta.insert("md_wpx".to_string(), wpx as f64);
+                            meta.insert("md_wpy".to_string(), wpy as f64);
+                        }
+                    }
                     // MaxCLL
                     if let Some(val) = track.get("MaxCLL") {
                         if let Some(f) = val.as_f64() {
@@ -304,6 +323,47 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
     }
 
     meta
+}
+
+fn parse_mastering_display_color_primaries(
+    mdcp: &str,
+) -> Option<(u32, u32, u32, u32, u32, u32, u32, u32)> {
+    fn parse_xy(mdcp: &str, label: &str) -> Option<(f64, f64)> {
+        // Accept both:
+        // - G(x=0.1700, y=0.7970)
+        // - G(0.1700,0.7970)
+        let re = Regex::new(&format!(
+            r"{}\(\s*(?:x=)?([0-9]*\.?[0-9]+)\s*,\s*(?:y=)?([0-9]*\.?[0-9]+)\s*\)",
+            regex::escape(label)
+        ))
+        .ok()?;
+
+        let caps = re.captures(mdcp)?;
+        let x = caps.get(1)?.as_str().parse::<f64>().ok()?;
+        let y = caps.get(2)?.as_str().parse::<f64>().ok()?;
+        Some((x, y))
+    }
+
+    fn to_int(v: f64) -> u32 {
+        let scaled = (v * 50000.0).round();
+        scaled.clamp(0.0, 50000.0) as u32
+    }
+
+    let (gx, gy) = parse_xy(mdcp, "G")?;
+    let (bx, by) = parse_xy(mdcp, "B")?;
+    let (rx, ry) = parse_xy(mdcp, "R")?;
+    let (wpx, wpy) = parse_xy(mdcp, "WP")?;
+
+    Some((
+        to_int(gx),
+        to_int(gy),
+        to_int(bx),
+        to_int(by),
+        to_int(rx),
+        to_int(ry),
+        to_int(wpx),
+        to_int(wpy),
+    ))
 }
 
 /// Detect source color primaries from MediaInfo

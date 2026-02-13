@@ -1,0 +1,9 @@
+# Detect TODO/FIXME comments that should be addressed
+# Uses kind: line_comment for optimized matching
+id: todo-fixme
+language: rust
+severity: hint
+message: "TODO/FIXME comment found - consider addressing before release"
+rule:
+  kind: line_comment
+  regex: "(TODO|FIXME|XXX|HACK)"

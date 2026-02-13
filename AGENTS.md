@@ -148,7 +148,8 @@ hdr-analyze/
 │   ├── src/
 │   │   ├── cli.rs          # CLI with --cm-version, --content-type
 │   │   ├── metadata.rs     # CmV40Config, L2/L9/L11 generation
-│   │   └── pipeline.rs     # Conversion orchestration
+│   │   ├── pipeline.rs     # Conversion orchestration
+│   │   └── fel_composite.rs # Profile 7 FEL compositing & reshaping
 ├── verifier/               # Measurement validator
 ├── coordination/           # Orchestration/memory bank
 ├── tools/                  # Auxiliary scripts

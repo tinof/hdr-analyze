@@ -1,0 +1,10 @@
+# Detect .iter().collect::<Vec<_>>() which clones unnecessarily
+# Uses kind: call_expression for optimized matching via potential_kinds
+id: collect-vec-iter
+language: rust
+severity: hint
+message: "Consider .to_vec() instead of .iter().collect()"
+note: ".to_vec() is clearer and equivalent for slices"
+rule:
+  kind: call_expression
+  pattern: $SLICE.iter().collect::<Vec<_>>()

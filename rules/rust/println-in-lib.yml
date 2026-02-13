@@ -1,0 +1,22 @@
+# Detect println!() in library code (prefer proper logging or return values)
+# Uses kind: macro_invocation for optimized matching via potential_kinds
+id: println-in-lib
+language: rust
+severity: hint
+message: "Consider using tracing/log macros instead of println!()"
+note: "println!() is fine for CLI output but libraries should use structured logging"
+rule:
+  kind: macro_invocation
+  any:
+    - pattern: println!($$$)
+    - pattern: print!($$$)
+  not:
+    inside:
+      kind: function_item
+      has:
+        kind: attribute_item
+        pattern: "#[test]"
+files:
+  - "!**/main.rs"
+  - "!**/cli.rs"
+  - "!**/tests/**"

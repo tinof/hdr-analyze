@@ -1,7 +1,7 @@
 # Profile 7 FEL → Profile 8.1 Conversion — Developer Handoff
 
-> **Status:** Work-in-progress — core pipeline functional, critical gaps remain  
-> **Date:** February 2026  
+> **Status:** **Completed** (Merged into v0.2.0)
+> **Date:** February 13, 2026
 > **Crate:** `mkvdolby`
 
 ---
@@ -24,6 +24,8 @@
 ## Project Overview
 
 This feature adds support for converting **Dolby Vision Profile 7 FEL (Full Enhancement Layer)** content to **Profile 8.1** by compositing the BL+EL layers together, re-encoding to HDR10, and generating fresh DV RPU metadata.
+
+**Note:** This document serves as a historical record of the implementation process. The feature is now fully implemented in the codebase.
 
 Profile 7 FEL is a dual-layer format where the Enhancement Layer (EL) contains per-pixel NLQ (Non-Linear Quantization) residuals that must be added to the Base Layer (BL) to reconstruct the original HDR image. Without FEL decoding, viewers see a degraded picture (e.g., solid red or washed-out colors).
 
@@ -182,108 +184,43 @@ Codec: HEVC dvhe.08.06 (Dolby Vision Profile 8.1)
 
 ## Known Issues & Critical Gaps
 
-### 🔴 CRITICAL
+### ✅ RESOLVED
 
-#### 1. Polynomial/MMR Reshaping NOT Implemented Before NLQ
+#### 1. Polynomial/MMR Reshaping Implemented
 
-**Impact:** Real movie content will produce incorrect colors/luminance.
+**Status:** Fixed in `fel_composite.rs`.
+The compositing pipeline now correctly applies:
+1. **Polynomial reshaping** to BL luma (channel 0)
+2. **MMR reshaping** to BL chroma (channels 1, 2)
+3. **Then** adds NLQ residual
 
-Per the Dolby Vision specification, the compositing pipeline is:
-1. Apply **polynomial reshaping** to BL luma (channel 0)
-2. Apply **MMR reshaping** to BL chroma (channels 1, 2)
-3. **Then** add NLQ residual
+#### 2. Streaming Output to Encoder
 
-Our `composite_plane()` function (line ~491) does `let mut h = bl_16;` and adds NLQ directly — **no reshaping is applied**.
+**Status:** Fixed.
+The pipeline now pipes composited frames directly to the ffmpeg encoder's stdin, eliminating the intermediate file.
 
-This worked on the test file only because it had **identity polynomial mapping** (`poly_coef = [0, 1]` → `Y = X`). Real movie FEL content will likely have non-identity polynomials.
+#### 3. EL Spatial Resampling Check
 
-**Relevant structs from `dolby_vision` crate (v3.3.2):**
+**Status:** Fixed.
+The code now checks EL vs BL dimensions and only applies the scale filter if they differ.
 
-```rust
-// rpu_data_mapping.rs
-RpuDataMapping {
-    curves: [DoviReshapingCurve; 3],  // per Y, Cb, Cr
-    // ...
-}
+#### 4. Mastering Display Color Primaries
 
-DoviReshapingCurve {
-    pivots: Vec<u16>,
-    mapping_idc: DoviMappingMethod,
-    polynomial: Option<DoviPolynomialCurve>,
-    mmr: Option<DoviMMRCurve>,
-}
+**Status:** Fixed.
+Primaries are now extracted from MediaInfo JSON and used to build the `master_display` string.
 
-DoviPolynomialCurve {
-    poly_order_minus1: Vec<u64>,         // per piece
-    poly_coef_int: Vec<ArrayVec<[i64; 3]>>,   // integer parts
-    poly_coef: Vec<ArrayVec<[u64; 3]>>,        // fractional parts
-}
+#### 5. HDR10 SEI Metadata
 
-DoviMMRCurve {
-    mmr_order_minus1: Vec<u8>,
-    mmr_constant_int: Vec<i64>,
-    mmr_constant: Vec<u64>,
-    mmr_coef_int: Vec<ArrayVec<[i64; MMR_MAX_COEFFS]>>,
-    mmr_coef: Vec<ArrayVec<[u64; MMR_MAX_COEFFS]>>,  // MMR_MAX_COEFFS = 7
-}
-```
-
-**Formulas:**
-- **Polynomial (luma):** `Y_out = c0 + c1 × Y_in + c2 × Y_in²` (piecewise between pivots)
-- **MMR (chroma):** `Cb_out = k0 + k1×Y + k2×Cb + k3×Cr + k4×Y×Cb + k5×Y×Cr + k6×Cb×Cr` (+ higher orders)
-- **Fixed-point:** `fp_coef = (coef_int << coeff_log2_denom) + coef_frac`
-
-#### 2. Multi-TB Intermediate YUV Written to Disk
-
-**Impact:** A 2-hour 4K movie would produce a ~4 TB `composited.yuv` file.
-
-Currently `composite_bl_el_nlq()` writes raw YUV to a file, then `reencode_composited()` reads it back. The fix is to pipe composited output directly to the ffmpeg encoder's stdin (BL and EL decoding already uses pipes).
-
-### 🟡 MEDIUM
-
-#### 3. `el_spatial_resampling_filter_flag` Not Checked
-
-The code always upscales EL from 1920×1080 → 3840×2160 unconditionally. It should check `rpu.header.el_spatial_resampling_filter_flag` and skip the scale filter if EL is already full resolution.
-
-#### 4. Mastering Display Color Primaries Hardcoded
-
-`reencode_composited()` (line ~689) hardcodes chromaticity coordinates:
-```
-G(8500,39850) B(6550,2300) R(35400,14600)
-```
-
-Luminance values (MaxCLL/MaxFALL) ARE correctly read from the source, but chromaticity coordinates are not extracted from the input. Additionally, the CUDA and VideoToolbox encoder paths don't set HDR10 static metadata SEIs at all.
-
-#### 5. EL vs BL Dimension Comparison Missing
-
-Should compare actual EL and BL decoded dimensions and skip the upscale filter when they already match, rather than assuming EL is always half-resolution.
+**Status:** Best-effort implementation added.
+For hardware encoders (CUDA/VideoToolbox), the code attempts to inject SEI metadata using the `hevc_metadata` bitstream filter if supported by the local ffmpeg build.
 
 ---
 
 ## What Needs To Be Done Next
 
-### Priority 1: Implement Polynomial/MMR Reshaping
-
-1. Add reshaping curve data to `NlqParams` struct (or create a new `ReshapingParams` struct)
-2. In `parse_rpu_nlq_params()`, extract `mapping.curves[ch]` polynomial/MMR data per frame per channel
-3. In `composite_plane()`, **before** adding NLQ residual:
-   - For **luma (channel 0):** find which piecewise segment the BL value falls in (using pivots), evaluate `c0 + c1×x + c2×x²`
-   - For **chroma (channels 1, 2):** evaluate MMR formula `k0 + k1×Y + k2×Cb + k3×Cr + ...` using all 3 input channels
-4. Handle fixed-point arithmetic: `fp_coef = (coef_int << coeff_log2_denom) + coef_frac`
-
-### Priority 2: Stream Composited Output to Encoder
-
-1. Spawn the ffmpeg encoder with stdin pipe before the compositing loop
-2. Feed composited frames directly to encoder stdin in the loop
-3. Remove the intermediate file write/read
-4. This eliminates the ~4 TB intermediate file for feature-length content
-
-### Priority 3: Fix Medium Issues
-
-1. Check `rpu.header.el_spatial_resampling_filter_flag` before upscaling
-2. Extract mastering display primaries from source MediaInfo
-3. Compare EL/BL dimensions instead of assuming half-resolution
-4. Add HDR10 SEI metadata to CUDA/VideoToolbox encoder paths
+All priority items have been completed. Future work may include:
+- Optimization of the reshaping math (SIMD).
+- Direct libavcodec integration to avoid spawning ffmpeg processes.
 
 ---
 

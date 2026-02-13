@@ -1,0 +1,10 @@
+# Suggest push_str over format! for simple string concatenation
+# Uses kind: macro_invocation for optimized matching via potential_kinds
+id: string-format-concat
+language: rust
+severity: hint
+message: "Consider push_str() for simple string concatenation"
+note: "format!(\"{}{}\", a, b) allocates; a.push_str(&b) is more efficient"
+rule:
+  kind: macro_invocation
+  pattern: format!("{}{}", $A, $B)

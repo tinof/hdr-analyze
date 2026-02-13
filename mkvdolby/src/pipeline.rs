@@ -466,9 +466,18 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
     let min_dml_int = (min_dml * 10000.0) as u32;
     let max_dml_int = max_dml * 10000;
 
+    let gx = static_meta.get("md_gx").copied().unwrap_or(8500.0) as u32;
+    let gy = static_meta.get("md_gy").copied().unwrap_or(39850.0) as u32;
+    let bx = static_meta.get("md_bx").copied().unwrap_or(6550.0) as u32;
+    let by = static_meta.get("md_by").copied().unwrap_or(2300.0) as u32;
+    let rx = static_meta.get("md_rx").copied().unwrap_or(35400.0) as u32;
+    let ry = static_meta.get("md_ry").copied().unwrap_or(14600.0) as u32;
+    let wpx = static_meta.get("md_wpx").copied().unwrap_or(15635.0) as u32;
+    let wpy = static_meta.get("md_wpy").copied().unwrap_or(16450.0) as u32;
+
     let master_display = format!(
-        "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L({},{})",
-        max_dml_int, min_dml_int
+        "G({},{})B({},{})R({},{})WP({},{})L({},{})",
+        gx, gy, bx, by, rx, ry, wpx, wpy, max_dml_int, min_dml_int
     );
 
     let x265_params = format!(

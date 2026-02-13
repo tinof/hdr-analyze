@@ -60,6 +60,7 @@ hdr_project/
   - Per-bin EMA smoothing with scene-aware resets to stabilize APL measurements.
   - Optional temporal median filtering and pre-analysis denoising for extremely noisy content.
 - Native HLG workflow: Automatically detects ARIB STD-B67 transfers and converts to PQ histograms in-memory using the configurable `--hlg-peak-nits` (default 1000 nits).
+- Dolby Vision Profile 7 FEL Support: Converts Profile 7 FEL (Full Enhancement Layer) to Profile 8.1 by compositing the BL+EL layers with full polynomial/MMR reshaping and NLQ processing.
 - Professional output: Writes madVR-compatible `.bin` measurement files through the `madvr_parse` library.
 - Cross-platform: CPU decoding on all platforms with optional CUDA attempt on NVIDIA (graceful fallback to software decoding everywhere else).
 - Performance Tuned: Optimized for software decoding on ARM64. Features smart frame sampling (`--sample-rate`) and analysis downscaling (`--downscale`) to boost throughput by 3-4x on CPU-limited systems.
@@ -246,6 +247,8 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" 
 
 The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 with Content Mapping v4.0.
 
+It now supports **Profile 7 FEL conversion**, preserving the visual improvements of the Enhancement Layer by compositing it into the Base Layer before generating metadata.
+
 ```bash
 # Basic usage (converts all MKV files in current directory)
 mkvdolby
@@ -259,6 +262,7 @@ mkvdolby "input.mkv"
 
 # To keep the source file and all intermediate files:
 mkvdolby "input.mkv" --keep-source
+mkvdolby "input.mkv" --keep-source --fel-crf 16 --fel-preset medium
 
 # Additional flags
 mkvdolby --help
@@ -276,6 +280,13 @@ mkvdolby "input.mkv" --verbose
 # Quiet mode: minimal output (only errors and final result)
 mkvdolby "input.mkv" --quiet
 ```
+
+#### Profile 7 FEL Features (New)
+
+- **Full Compositing**: Applies Polynomial (luma) and MMR (chroma) reshaping followed by NLQ LinearDeadzone residuals.
+- **Streaming Pipeline**: Pipes composited frames directly to the encoder, eliminating multi-TB intermediate files.
+- **Smart Resolution**: Automatically detects if EL needs upscaling to match BL.
+- **Metadata**: Preserves mastering display primaries and injects HDR10 SEI metadata (best-effort for hardware encoders).
 
 #### Progress Indicators
 

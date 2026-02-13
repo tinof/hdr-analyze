@@ -1,0 +1,19 @@
+# Detect unwrap() calls in library code (not tests)
+# Uses kind: call_expression for optimized matching via potential_kinds
+id: unwrap-in-lib
+language: rust
+severity: warning
+message: "Prefer .context() or .ok_or_else() over .unwrap() in library code"
+note: "unwrap() can panic; use anyhow's .context() for better error messages"
+rule:
+  kind: call_expression
+  pattern: $EXPR.unwrap()
+  not:
+    inside:
+      kind: function_item
+      has:
+        kind: attribute_item
+        pattern: "#[test]"
+files:
+  - "!**/tests/**"
+  - "!**/*_test.rs"

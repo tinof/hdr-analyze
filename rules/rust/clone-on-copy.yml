@@ -1,0 +1,18 @@
+# Detect .clone() that might be unnecessary
+# Uses kind: call_expression for optimized matching via potential_kinds
+id: clone-review
+language: rust
+severity: hint
+message: "Review if .clone() is necessary"
+note: "Clone can be expensive; consider borrowing or using references"
+rule:
+  kind: call_expression
+  pattern: $EXPR.clone()
+  not:
+    inside:
+      kind: function_item
+      has:
+        kind: attribute_item
+        pattern: "#[test]"
+files:
+  - "!**/tests/**"
