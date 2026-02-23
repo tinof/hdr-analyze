@@ -9,10 +9,19 @@ mod pipeline;
 mod progress;
 mod verify;
 
-use cli::Args;
+use cli::{Args, SubCmd};
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // Dispatch subcommands first (before dependency checks that require full toolchain)
+    if let Some(subcmd) = &args.subcmd {
+        match subcmd {
+            SubCmd::CompositePipe(pipe_args) => {
+                return fel_composite::run_composite_pipe(pipe_args);
+            }
+        }
+    }
 
     // Initialize progress module with verbosity settings
     progress::set_verbose(args.verbose);

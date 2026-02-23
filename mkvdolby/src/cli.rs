@@ -1,8 +1,51 @@
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum SubCmd {
+    /// Output raw NLQ-composited frames to stdout (for piping to an encoder).
+    /// Only runs BL+EL compositing — no encoding, no muxing.
+    #[command(name = "composite-pipe")]
+    CompositePipe(CompositePipeArgs),
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct CompositePipeArgs {
+    /// Path to the base layer HEVC file.
+    #[arg(long)]
+    pub bl: String,
+
+    /// Path to the enhancement layer HEVC file.
+    #[arg(long)]
+    pub el: String,
+
+    /// Path to the RPU binary file.
+    #[arg(long)]
+    pub rpu: String,
+
+    /// Video width in pixels.
+    #[arg(short = 'w', long)]
+    pub width: u32,
+
+    /// Video height in pixels.
+    #[arg(short = 'H', long)]
+    pub height: u32,
+
+    /// Frames per second numerator (e.g., 24000).
+    #[arg(long, default_value_t = 24000)]
+    pub fps_num: u32,
+
+    /// Frames per second denominator (e.g., 1001).
+    #[arg(long, default_value_t = 1001)]
+    pub fps_den: u32,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "A tool to convert HDR10/HDR10+ files to Dolby Vision.", long_about = None)]
 pub struct Args {
+    /// Subcommand (e.g., composite-pipe). If omitted, runs the default convert pipeline.
+    #[command(subcommand)]
+    pub subcmd: Option<SubCmd>,
+
     /// One or more input video files. If not provided, processes all .mkv files in the current directory.
     #[arg(required = false)]
     pub input: Vec<String>,
@@ -44,13 +87,22 @@ pub struct Args {
     #[arg(long, default_value_t = 1000)]
     pub hlg_peak_nits: u32,
 
-    /// CRF to use for Profile 7 FEL re-encoding (default: 18).
+    /// Quality parameter for Profile 7 FEL re-encoding (default: 18).
+    /// Used as CRF for libx265 local encode, or QP for hevc_nvenc (Modal/CUDA).
     #[arg(long, default_value_t = 18)]
     pub fel_crf: u8,
 
-    /// x265 preset to use for FEL re-encoding (default: medium).
+    /// x265 preset to use for local FEL re-encoding (default: medium).
     #[arg(long, default_value = "medium")]
     pub fel_preset: String,
+
+    /// Encoder backend for FEL re-encoding: local (default) or modal (offload to Modal.com).
+    #[arg(long, value_enum, default_value_t = FelEncoder::Local)]
+    pub fel_encoder: FelEncoder,
+
+    /// NVENC preset for Modal/CUDA encoding (default: p5). Range: p1 (fastest) to p7 (best quality).
+    #[arg(long, default_value = "p5")]
+    pub fel_nvenc_preset: String,
 
     /// After muxing, run verification: our verifier on the measurements and DV checks.
     #[arg(long)]
@@ -133,6 +185,23 @@ impl std::fmt::Display for Encoder {
         match self {
             Encoder::Libx265 => write!(f, "libx265"),
             Encoder::HevcVideotoolbox => write!(f, "hevc_videotoolbox"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FelEncoder {
+    /// Use local ffmpeg/x265 for FEL re-encoding (default).
+    Local,
+    /// Offload quality encode to Modal.com (local lossless intermediate → cloud x265).
+    Modal,
+}
+
+impl std::fmt::Display for FelEncoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FelEncoder::Local => write!(f, "local"),
+            FelEncoder::Modal => write!(f, "modal"),
         }
     }
 }

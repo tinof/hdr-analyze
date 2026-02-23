@@ -17,9 +17,12 @@ use colored::Colorize;
 use dolby_vision::rpu::rpu_data_mapping::DoviMappingMethod;
 use dolby_vision::rpu::utils::parse_rpu_file;
 
-use crate::cli::{Args, Encoder, HwAccel};
+use crate::cli::{Args, CompositePipeArgs, Encoder, FelEncoder, HwAccel};
 use crate::external::{self, run_command_live, run_command_with_spinner};
 use crate::metadata;
+
+/// Path to the modal-ffmpeg script (absolute path on the deployment host).
+const MODAL_FFMPEG_SCRIPT: &str = "/home/ubuntu/modal-ffmpeg/src/modal_ffmpeg.py";
 
 /// Information extracted from the Profile 7 FEL RPU
 #[derive(Debug)]
@@ -181,72 +184,158 @@ pub fn convert_fel_to_hdr10(input_file: &str, temp_dir: &Path, args: &Args) -> R
     let (width, height) = get_hevc_dimensions(&bl_hevc)?;
     let (_, _, fps_num, fps_den) = get_video_properties(input_file)?;
 
-    // Step 4: Composite BL+EL via NLQ and stream directly into ffmpeg encoder
+    // Step 4: Composite BL+EL via NLQ and encode
     let composited_mkv = temp_dir.join("FEL_composited.mkv");
-    println!(
-        "{}",
-        "Step 4/5: Compositing BL+EL via NLQ (streaming to encoder; this may take a while)..."
-            .green()
-    );
 
-    let (mut enc_proc, enc_log_path) = spawn_reencode_composited_from_stdin(
-        &composited_mkv,
-        width,
-        height,
-        fps_num,
-        fps_den,
-        input_file,
-        args,
-        temp_dir,
-    )?;
+    match args.fel_encoder {
+        FelEncoder::Modal => {
+            // Upload BL+EL+RPU to Modal for composite + encode (no FFV1 intermediate)
+            println!(
+                "{}",
+                "Step 4/5: Uploading BL+EL+RPU to Modal for composite + NVENC encode...".green()
+            );
 
-    let composite_result = {
-        let stdin = enc_proc
-            .stdin
-            .take()
-            .context("Failed to open ffmpeg stdin for rawvideo input")?;
-        let mut enc_stdin = std::io::BufWriter::new(stdin);
+            encode_via_modal(
+                &bl_hevc,
+                &el_hevc,
+                &rpu_bin,
+                &composited_mkv,
+                width,
+                height,
+                fps_num,
+                fps_den,
+                input_file,
+                args,
+            )?;
 
-        composite_bl_el_nlq(
-            &bl_hevc,
-            &el_hevc,
-            &rpu_bin,
-            width,
-            height,
-            &mut enc_stdin,
-            temp_dir,
-        )
-    };
+            // Clean up intermediate files
+            let _ = fs::remove_file(&bl_hevc);
+            let _ = fs::remove_file(&el_hevc);
 
-    if let Err(err) = composite_result {
-        let _ = enc_proc.kill();
-        let _ = enc_proc.wait();
-        return Err(err)
-            .with_context(|| format!("ffmpeg reencode log: {}", enc_log_path.display()));
+            println!(
+                "{}",
+                "Step 5/5: Modal encode complete! Proceeding with DV RPU generation..."
+                    .green()
+                    .bold()
+            );
+        }
+        FelEncoder::Local => {
+            // Original streaming encode path
+            println!(
+                "{}",
+                "Step 4/5: Compositing BL+EL via NLQ (streaming to encoder; this may take a while)..."
+                    .green()
+            );
+
+            let (mut enc_proc, enc_log_path) = spawn_reencode_composited_from_stdin(
+                &composited_mkv,
+                width,
+                height,
+                fps_num,
+                fps_den,
+                input_file,
+                args,
+                temp_dir,
+            )?;
+
+            let composite_result = {
+                let stdin = enc_proc
+                    .stdin
+                    .take()
+                    .context("Failed to open ffmpeg stdin for rawvideo input")?;
+                let mut enc_stdin = std::io::BufWriter::new(stdin);
+
+                composite_bl_el_nlq(
+                    &bl_hevc,
+                    &el_hevc,
+                    &rpu_bin,
+                    width,
+                    height,
+                    &mut enc_stdin,
+                    temp_dir,
+                )
+            };
+
+            if let Err(err) = composite_result {
+                let _ = enc_proc.kill();
+                let _ = enc_proc.wait();
+                return Err(err)
+                    .with_context(|| format!("ffmpeg reencode log: {}", enc_log_path.display()));
+            }
+
+            let status = enc_proc
+                .wait()
+                .context("Failed to wait for ffmpeg re-encode process")?;
+            if !status.success() {
+                bail!(
+                    "Failed to re-encode composited output (see {})",
+                    enc_log_path.display()
+                );
+            }
+
+            // Clean up large intermediate files
+            let _ = fs::remove_file(&bl_hevc);
+            let _ = fs::remove_file(&el_hevc);
+
+            println!(
+                "{}",
+                "Step 5/5: FEL compositing complete! Proceeding with DV RPU generation..."
+                    .green()
+                    .bold()
+            );
+        }
     }
-
-    let status = enc_proc
-        .wait()
-        .context("Failed to wait for ffmpeg re-encode process")?;
-    if !status.success() {
-        bail!(
-            "Failed to re-encode composited output (see {})",
-            enc_log_path.display()
-        );
-    }
-
-    // Clean up large intermediate files
-    let _ = fs::remove_file(&bl_hevc);
-    let _ = fs::remove_file(&el_hevc);
-
-    println!(
-        "{}",
-        "Step 5/5: FEL compositing complete! Proceeding with DV RPU generation..."
-            .green()
-            .bold()
-    );
 
     Ok(composited_mkv)
+}
+
+/// Run the `composite-pipe` subcommand: composite BL+EL via NLQ and write raw frames to stdout.
+///
+/// This is designed for piping into an external encoder (e.g., ffmpeg with NVENC).
+/// Output format: `yuv420p16le` raw frames on stdout.
+/// All progress/status output goes to stderr.
+pub fn run_composite_pipe(pipe_args: &CompositePipeArgs) -> Result<()> {
+    let bl_hevc = Path::new(&pipe_args.bl);
+    let el_hevc = Path::new(&pipe_args.el);
+    let rpu_bin = Path::new(&pipe_args.rpu);
+
+    if !bl_hevc.exists() {
+        bail!("BL file not found: {}", pipe_args.bl);
+    }
+    if !el_hevc.exists() {
+        bail!("EL file not found: {}", pipe_args.el);
+    }
+    if !rpu_bin.exists() {
+        bail!("RPU file not found: {}", pipe_args.rpu);
+    }
+
+    eprintln!(
+        "composite-pipe: {}x{} @ {}/{} fps",
+        pipe_args.width, pipe_args.height, pipe_args.fps_num, pipe_args.fps_den
+    );
+
+    // Use a temp dir for decoder log files
+    let temp_dir = std::env::temp_dir().join("mkvdolby-composite-pipe");
+    fs::create_dir_all(&temp_dir)?;
+
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+
+    composite_bl_el_nlq(
+        bl_hevc,
+        el_hevc,
+        rpu_bin,
+        pipe_args.width,
+        pipe_args.height,
+        &mut out,
+        &temp_dir,
+    )?;
+
+    // Clean up temp dir
+    let _ = fs::remove_dir_all(&temp_dir);
+
+    eprintln!("composite-pipe: done");
+    Ok(())
 }
 
 // --- Internal helpers ---
@@ -348,7 +437,7 @@ fn composite_bl_el_nlq(
     let nlq_params = parse_rpu_params(rpu_bin, temp_dir)?;
     let total_frames = nlq_params.len();
 
-    println!(
+    eprintln!(
         "{}",
         format!(
             "  Compositing {} frames at {}x{} (BL 16-bit + EL 10-bit → 10-bit output)",
@@ -427,8 +516,11 @@ fn composite_bl_el_nlq(
         .take()
         .context("Failed to capture ffmpeg EL stdout")?;
 
-    // Progress bar
-    let pb = indicatif::ProgressBar::new(total_frames as u64);
+    // Progress bar (stderr so stdout stays clean for piped rawvideo output)
+    let pb = indicatif::ProgressBar::with_draw_target(
+        Some(total_frames as u64),
+        indicatif::ProgressDrawTarget::stderr(),
+    );
     pb.set_style(
         indicatif::ProgressStyle::default_bar()
             .template(
@@ -916,7 +1008,7 @@ fn composite_plane(
 
 /// Parse RPU binary to extract NLQ and reshaping parameters per frame
 fn parse_rpu_params(rpu_bin: &Path, _temp_dir: &Path) -> Result<Vec<FrameParams>> {
-    println!(
+    eprintln!(
         "{}",
         "  Parsing RPU binary with dolby_vision crate...".cyan()
     );
@@ -924,7 +1016,7 @@ fn parse_rpu_params(rpu_bin: &Path, _temp_dir: &Path) -> Result<Vec<FrameParams>
     let rpus = parse_rpu_file(rpu_bin).context("Failed to parse RPU binary file")?;
     let total_frames = rpus.len();
 
-    println!(
+    eprintln!(
         "{}",
         format!(
             "  Parsed {} RPU frames, extracting parameters...",
@@ -933,7 +1025,10 @@ fn parse_rpu_params(rpu_bin: &Path, _temp_dir: &Path) -> Result<Vec<FrameParams>
         .cyan()
     );
 
-    let pb = indicatif::ProgressBar::new(total_frames as u64);
+    let pb = indicatif::ProgressBar::with_draw_target(
+        Some(total_frames as u64),
+        indicatif::ProgressDrawTarget::stderr(),
+    );
     pb.set_style(
         indicatif::ProgressStyle::default_bar()
             .template(
@@ -1150,7 +1245,7 @@ fn parse_rpu_params(rpu_bin: &Path, _temp_dir: &Path) -> Result<Vec<FrameParams>
         .iter()
         .filter(|p| !p.nlq.disable_residual_flag)
         .count();
-    println!(
+    eprintln!(
         "{}",
         format!(
             "  NLQ active: {}/{} frames ({}%)",
@@ -1160,7 +1255,7 @@ fn parse_rpu_params(rpu_bin: &Path, _temp_dir: &Path) -> Result<Vec<FrameParams>
         )
         .cyan()
     );
-    println!(
+    eprintln!(
         "{}",
         format!(
             "  Reshaping active: {}/{} frames ({}%)",
@@ -1174,19 +1269,15 @@ fn parse_rpu_params(rpu_bin: &Path, _temp_dir: &Path) -> Result<Vec<FrameParams>
     Ok(all_params)
 }
 
-/// Spawn ffmpeg to re-encode composited rawvideo from stdin into an HDR10 HEVC MKV.
-///
-/// The caller must write `yuv420p16le` frames to `child.stdin`, close stdin, then wait.
-fn spawn_reencode_composited_from_stdin(
-    output_mkv: &Path,
-    width: u32,
-    height: u32,
-    fps_num: u32,
-    fps_den: u32,
-    original_file: &str,
-    args: &Args,
-    temp_dir: &Path,
-) -> Result<(Child, PathBuf)> {
+/// HDR10 static metadata extracted from the source file.
+struct Hdr10Metadata {
+    master_display: String,
+    max_cll: u32,
+    max_fall: u32,
+}
+
+/// Extract HDR10 static metadata (mastering display + MaxCLL/MaxFALL) from the original file.
+fn extract_hdr10_metadata(original_file: &str) -> Hdr10Metadata {
     let static_meta = metadata::get_static_metadata(original_file);
     let max_dml = *static_meta.get("max_dml").unwrap_or(&1000.0) as u32;
     let min_dml = static_meta.get("min_dml").unwrap_or(&0.005);
@@ -1209,6 +1300,137 @@ fn spawn_reencode_composited_from_stdin(
         "G({},{})B({},{})R({},{})WP({},{})L({},{})",
         gx, gy, bx, by, rx, ry, wpx, wpy, max_dml_int, min_dml_int
     );
+
+    Hdr10Metadata {
+        master_display,
+        max_cll,
+        max_fall,
+    }
+}
+
+/// Upload BL+EL+RPU to Modal and run composite + NVENC encode in the cloud.
+///
+/// Calls `modal run modal_ffmpeg.py --mode composite` with BL/EL/RPU paths.
+/// No local FFV1 intermediate — compositing happens on Modal's GPU instance.
+fn encode_via_modal(
+    bl_hevc: &Path,
+    el_hevc: &Path,
+    rpu_bin: &Path,
+    output_mkv: &Path,
+    width: u32,
+    height: u32,
+    fps_num: u32,
+    fps_den: u32,
+    original_file: &str,
+    args: &Args,
+) -> Result<()> {
+    let hdr10 = extract_hdr10_metadata(original_file);
+    let max_cll_str = format!("{},{}", hdr10.max_cll, hdr10.max_fall);
+
+    let bl_abs = fs::canonicalize(bl_hevc).unwrap_or_else(|_| bl_hevc.to_path_buf());
+    let el_abs = fs::canonicalize(el_hevc).unwrap_or_else(|_| el_hevc.to_path_buf());
+    let rpu_abs = fs::canonicalize(rpu_bin).unwrap_or_else(|_| rpu_bin.to_path_buf());
+    let output_abs = fs::canonicalize(output_mkv.parent().unwrap_or(Path::new(".")))
+        .unwrap_or_else(|_| output_mkv.parent().unwrap_or(Path::new(".")).to_path_buf())
+        .join(output_mkv.file_name().unwrap());
+
+    let qp_str = args.fel_crf.to_string();
+    let width_str = width.to_string();
+    let height_str = height.to_string();
+    let fps_num_str = fps_num.to_string();
+    let fps_den_str = fps_den.to_string();
+
+    let mut cmd = Command::new("modal");
+    cmd.args([
+        "run",
+        MODAL_FFMPEG_SCRIPT,
+        "--mode",
+        "composite",
+        "--bl",
+        bl_abs.to_str().unwrap(),
+        "--el",
+        el_abs.to_str().unwrap(),
+        "--rpu",
+        rpu_abs.to_str().unwrap(),
+        "--output",
+        output_abs.to_str().unwrap(),
+        "--width",
+        &width_str,
+        "--height",
+        &height_str,
+        "--fps-num",
+        &fps_num_str,
+        "--fps-den",
+        &fps_den_str,
+        "--preset",
+        &args.fel_nvenc_preset,
+        "--qp",
+        &qp_str,
+        "--master-display",
+        &hdr10.master_display,
+        "--max-cll",
+        &max_cll_str,
+    ]);
+
+    let bl_mb = fs::metadata(bl_hevc)
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0);
+    let el_mb = fs::metadata(el_hevc)
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0);
+    println!(
+        "{}",
+        format!(
+            "  Modal composite: BL {} MB + EL {} MB → hevc_nvenc preset={} qp={}",
+            bl_mb, el_mb, args.fel_nvenc_preset, args.fel_crf
+        )
+        .cyan()
+    );
+
+    let log_path = output_mkv
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("modal_encode.log");
+
+    if !run_command_live(&mut cmd, &log_path)? {
+        bail!("Modal composite+encode failed (see {})", log_path.display());
+    }
+
+    if !output_abs.exists() {
+        bail!(
+            "Modal composite+encode completed but output file not found: {}",
+            output_abs.display()
+        );
+    }
+
+    let output_size = fs::metadata(&output_abs)
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0);
+    println!(
+        "{}",
+        format!("  Modal encode output: {} MB", output_size).cyan()
+    );
+
+    Ok(())
+}
+
+/// Spawn ffmpeg to re-encode composited rawvideo from stdin into an HDR10 HEVC MKV.
+///
+/// The caller must write `yuv420p16le` frames to `child.stdin`, close stdin, then wait.
+fn spawn_reencode_composited_from_stdin(
+    output_mkv: &Path,
+    width: u32,
+    height: u32,
+    fps_num: u32,
+    fps_den: u32,
+    original_file: &str,
+    args: &Args,
+    temp_dir: &Path,
+) -> Result<(Child, PathBuf)> {
+    let hdr10 = extract_hdr10_metadata(original_file);
+    let master_display = &hdr10.master_display;
+    let max_cll = hdr10.max_cll;
+    let max_fall = hdr10.max_fall;
 
     let framerate = format!("{}/{}", fps_num, fps_den);
     let resolution = format!("{}x{}", width, height);
@@ -1236,17 +1458,18 @@ fn spawn_reencode_composited_from_stdin(
     ]);
 
     if args.hwaccel == HwAccel::Cuda {
+        let qp_str = args.fel_crf.to_string();
         cmd.args([
             "-c:v",
             "hevc_nvenc",
             "-preset",
-            "p7",
+            &args.fel_nvenc_preset,
             "-tune",
             "hq",
             "-rc",
             "constqp",
             "-qp",
-            "18",
+            &qp_str,
             "-pix_fmt",
             "yuv420p10le",
             "-profile:v",
