@@ -1372,17 +1372,23 @@ fn encode_via_modal(
         &max_cll_str,
     ]);
 
-    let bl_mb = fs::metadata(bl_hevc)
-        .map(|m| m.len() / (1024 * 1024))
-        .unwrap_or(0);
-    let el_mb = fs::metadata(el_hevc)
-        .map(|m| m.len() / (1024 * 1024))
-        .unwrap_or(0);
+    let bl_bytes = fs::metadata(bl_hevc).map(|m| m.len()).unwrap_or(0);
+    let el_bytes = fs::metadata(el_hevc).map(|m| m.len()).unwrap_or(0);
+    let fmt_size = |bytes: u64| -> String {
+        if bytes >= 1024 * 1024 {
+            format!("{} MB", bytes / (1024 * 1024))
+        } else {
+            format!("{} KB", bytes / 1024)
+        }
+    };
     println!(
         "{}",
         format!(
-            "  Modal composite: BL {} MB + EL {} MB → hevc_nvenc preset={} qp={}",
-            bl_mb, el_mb, args.fel_nvenc_preset, args.fel_crf
+            "  Modal composite: BL {} + EL {} → hevc_nvenc preset={} qp={}",
+            fmt_size(bl_bytes),
+            fmt_size(el_bytes),
+            args.fel_nvenc_preset,
+            args.fel_crf
         )
         .cyan()
     );
