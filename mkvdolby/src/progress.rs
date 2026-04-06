@@ -3,8 +3,6 @@
 //! Provides spinners and progress bars using indicatif, with automatic
 //! TTY detection and verbose mode support.
 
-#![allow(dead_code)] // Helper functions for future use
-
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -79,6 +77,7 @@ impl Spinner {
     }
 
     /// Update the spinner message
+    #[allow(dead_code)]
     pub fn set_message(&self, msg: &str) {
         self.bar.set_message(msg.to_string());
     }
@@ -119,6 +118,7 @@ impl Spinner {
     }
 
     /// Get elapsed time
+    #[allow(dead_code)]
     pub fn elapsed(&self) -> Duration {
         self.bar.elapsed()
     }
@@ -135,10 +135,12 @@ impl Drop for Spinner {
 // --- Progress Bar ---
 
 /// A progress bar for operations with known total (e.g., frame processing)
+#[allow(dead_code)]
 pub struct Progress {
     bar: ProgressBar,
 }
 
+#[allow(dead_code)]
 impl Progress {
     /// Create a new progress bar with the given total
     pub fn new(total: u64, message: &str) -> Self {
@@ -178,10 +180,16 @@ impl Progress {
 
 // --- Step Printer ---
 
-/// Print a step header (for major pipeline stages)
+/// Print a step header (for major pipeline stages).
+/// If `total` is 0, the step number is shown without a total (e.g. during detection
+/// before the total is known).
 pub fn print_step(step: u8, total: u8, message: &str) {
     if !is_quiet() {
-        eprintln!("\n{} {}", format!("[{}/{}]", step, total), message);
+        if total > 0 {
+            eprintln!("\n{} {}", format!("[{}/{}]", step, total), message);
+        } else {
+            eprintln!("\n[{}] {}", step, message);
+        }
     }
 }
 
@@ -200,6 +208,7 @@ pub fn print_warn(message: &str) {
 }
 
 /// Print a success message
+#[allow(dead_code)]
 pub fn print_success(message: &str) {
     if !is_quiet() {
         eprintln!("{} {}", "\u{2713}", message);
@@ -222,6 +231,11 @@ fn format_duration(d: Duration) -> String {
     } else {
         format!("{}h{}m{}s", secs / 3600, (secs % 3600) / 60, secs % 60)
     }
+}
+
+/// Public wrapper for format_duration, usable from other modules.
+pub fn format_duration_pub(d: Duration) -> String {
+    format_duration(d)
 }
 
 #[cfg(test)]

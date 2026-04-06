@@ -1,21 +1,20 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use colored::Colorize;
 
 use crate::cli::{Args, CmVersion, Encoder, HwAccel, PeakSource};
-use crate::external::{self, run_command_live, run_command_with_spinner};
+use crate::external::{self, run_command_with_spinner};
 use crate::metadata::{self, HdrFormat};
+use crate::progress;
 
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let input_path = Path::new(input_file);
     if !input_path.exists() {
-        println!(
-            "{}",
-            format!("Warning: Input file not found: {}", input_file).yellow()
-        );
+        progress::print_warn(&format!("Input file not found: {}", input_file));
         return Ok(false);
     }
 
@@ -25,38 +24,78 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let output_file = dir.join(format!("{}.DV.mkv", stem));
 
     if output_file.exists() {
-        println!(
-            "{}",
-            format!("Output file '{:?}' already exists. Skipping.", output_file).yellow()
-        );
+        progress::print_warn(&format!(
+            "Output file '{}' already exists. Skipping.",
+            output_file.display()
+        ));
         return Ok(true);
     }
 
-    println!(
-        "{}",
-        format!("\n----- Processing: {} -----", input_file).green()
-    );
+    // --- File header ---
+    let display_name = input_path.file_name().unwrap_or_default().to_string_lossy();
+    if !progress::is_quiet() {
+        eprintln!(
+            "\n{}",
+            format!("━━━ Processing: {} ━━━", display_name)
+                .cyan()
+                .bold()
+        );
+    }
+
+    let file_start = Instant::now();
 
     // Create temp directory
     let temp_dir_name = format!("mkvdolby_temp_{}", stem);
     let temp_dir = dir.join(&temp_dir_name);
     fs::create_dir_all(&temp_dir).context("Failed to create temp directory")?;
 
-    // Determine format
+    // --- Step 1: Detect HDR format ---
+    progress::print_step(1, 0, "Detecting HDR format...");
     let mut hdr_type = metadata::check_hdr_format(input_file);
     let mut measurements_file: Option<PathBuf> = None;
     let mut hdr10plus_json: Option<PathBuf> = None;
     let mut bl_source_file = PathBuf::from(input_file);
 
+    let format_label = match hdr_type {
+        HdrFormat::Hdr10Plus => "HDR10+",
+        HdrFormat::Hlg => "HLG",
+        HdrFormat::Hdr10WithMeasurements => "HDR10 (measurements found)",
+        HdrFormat::Hdr10Unsupported => "HDR10",
+        HdrFormat::Unsupported => "Unsupported",
+    };
+    progress::print_info(&format!("Detected: {}", format_label));
+
+    if hdr_type == HdrFormat::Unsupported {
+        progress::print_error("Unsupported HDR format. Cannot process this file.");
+        let _ = fs::remove_dir_all(&temp_dir);
+        return Ok(false);
+    }
+
+    // Compute total steps based on the detected format
+    let total_steps: u8 = match hdr_type {
+        HdrFormat::Hdr10Plus => 7, // detect, extract HEVC, extract meta, config, RPU, inject, mux
+        HdrFormat::Hlg => 8,       // detect, analyze, HLG→PQ, config, RPU, extract BL, inject, mux
+        HdrFormat::Hdr10WithMeasurements => 6, // detect, config, RPU, extract BL, inject, mux
+        HdrFormat::Hdr10Unsupported => 7, // detect, analyze, config, RPU, extract BL, inject, mux
+        HdrFormat::Unsupported => 0, // unreachable — handled above
+    };
+
+    let mut current_step: u8 = 1; // Step 1 (detect) already done
+
+    // --- Format-specific metadata extraction ---
     // Pre-handle HDR10+ to allow fallback to HDR10Unsupported if metadata is missing
     if hdr_type == HdrFormat::Hdr10Plus {
+        current_step += 1;
+        progress::print_step(
+            current_step,
+            total_steps,
+            "Extracting HEVC stream for HDR10+ analysis...",
+        );
         match extract_hdr10plus_metadata(input_file, &temp_dir) {
             Ok(Some(json_path)) => hdr10plus_json = Some(json_path),
             Ok(None) => {
-                println!(
-                    "{}",
-                    "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis."
-                        .yellow()
+                progress::print_warn(
+                    "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis.",
                 );
                 hdr_type = HdrFormat::Hdr10Unsupported;
             }
@@ -71,28 +110,30 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
         HdrFormat::Hlg => {
             // HLG Logic
-            // 1. Run analyzer with --hlg-peak-nits
+            current_step += 1;
+            progress::print_step(
+                current_step,
+                total_steps,
+                &format!(
+                    "Generating measurements (HLG, --hlg-peak-nits={})...",
+                    args.hlg_peak_nits
+                ),
+            );
+
             let mut extra_args = vec![
                 "--hlg-peak-nits".to_string(),
                 args.hlg_peak_nits.to_string(),
             ];
             add_optimizer_args(&mut extra_args, args);
 
-            println!(
-                "{}",
-                format!(
-                    "HLG detected. Running analyzer natively with --hlg-peak-nits={}...",
-                    args.hlg_peak_nits
-                )
-                .green()
-            );
-
             measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
             if measurements_file.is_none() {
                 return Ok(false);
             }
 
-            // 2. Convert HLG -> PQ for Base Layer
+            // Convert HLG -> PQ for Base Layer
+            current_step += 1;
+            progress::print_step(current_step, total_steps, "Converting HLG to PQ...");
             match convert_hlg_to_pq(input_file, &temp_dir, args) {
                 Ok(path) => bl_source_file = path,
                 Err(_) => return Ok(false),
@@ -103,24 +144,24 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             measurements_file = metadata::find_measurements_file(input_path);
 
             if measurements_file.is_some() {
+                progress::print_info("Using existing measurements file.");
                 if args.boost_experimental {
-                    println!(
-                        "{}",
-                        "Experimental boost requested, but using existing measurements.".yellow()
+                    progress::print_warn(
+                        "Experimental boost requested, but using existing measurements.",
                     );
                 }
             } else if hdr_type == HdrFormat::Hdr10WithMeasurements {
                 // Should have found it
-                println!("{}", "Expected madVR measurements file not found.".red());
+                progress::print_error("Expected madVR measurements file not found.");
                 return Ok(false);
             } else {
                 // Generate them
+                current_step += 1;
+                progress::print_step(current_step, total_steps, "Generating measurements...");
+
                 let mut extra_args = Vec::new();
                 if args.boost_experimental {
-                    println!(
-                        "{}",
-                        "Experimental boost: using 'aggressive' optimizer.".green()
-                    );
+                    progress::print_info("Experimental boost: using 'aggressive' optimizer.");
                     extra_args
                         .extend(["--optimizer-profile".to_string(), "aggressive".to_string()]);
                 } else {
@@ -133,14 +174,21 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             }
         }
         HdrFormat::Unsupported => {
-            println!("{}", "Unsupported HDR format.".red());
-            return Ok(false);
+            // Already handled above
+            unreachable!();
         }
     }
 
+    // --- Configuration step ---
+    current_step += 1;
+    progress::print_step(
+        current_step,
+        total_steps,
+        "Preparing Dolby Vision configuration...",
+    );
+
     // Static Metadata
     let static_meta = metadata::get_static_metadata(input_file);
-    // TODO: Validate metadata (logic in metadata.rs, just print warnings)
 
     // Build CM v4.0 config if enabled
     let cm_v40_config = if args.cm_version == CmVersion::V40 {
@@ -160,36 +208,24 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     if args.cm_version == CmVersion::V40 {
         if let Some(ref cfg) = cm_v40_config {
-            println!(
-                "{}",
-                format!(
-                    "Using CM v4.0 (L9: primaries={}, L11: content_type={}, reference_mode={})",
-                    cfg.source_primary_index, cfg.content_type, cfg.reference_mode
-                )
-                .cyan()
-            );
+            progress::print_info(&format!(
+                "CM v4.0 — L9: primaries={}, L11: content_type={}, reference_mode={}",
+                cfg.source_primary_index, cfg.content_type, cfg.reference_mode
+            ));
         }
     }
 
     // Generate extra.json
     let extra_json_path = temp_dir.join("extra.json");
-    // Parse trim targets
-    // Assuming trim_targets logic is simple: use args, or override from Details.txt if enabled
     let final_trims: Vec<u32> = args
         .trim_targets
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
-    // We already parsed this in main.rs but let's re-parse or pass it down.
-    // Ideally args should have Vec<u32>.
-    // Just re-parsing for now.
-
     if args.trim_from_details {
         if let Some(_details) = metadata::find_details_file(input_path) {
             // Logic to parse details for trims would go here
-            // Using stub or simplified logic
-            // For now, sticking to CLI defaults unless exact logic ported
         }
     }
 
@@ -199,8 +235,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         &final_trims,
         cm_v40_config.as_ref(),
     )?;
+    progress::print_info("Configuration written.");
 
-    // Generate RPU
+    // --- Generate RPU ---
+    current_step += 1;
+    progress::print_step(current_step, total_steps, "Generating Dolby Vision RPU...");
     let rpu_path = generate_rpu(
         hdr_type,
         &temp_dir,
@@ -214,11 +253,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
     let rpu_path = rpu_path.unwrap();
 
-    // Extract BL (if needed, or copy)
-    // Actually we need to extract HEVC bitstream to INJECT RPU
+    // --- Extract base layer ---
+    current_step += 1;
+    progress::print_step(current_step, total_steps, "Extracting base layer...");
     let bl_hevc = temp_dir.join("BL.hevc");
 
-    // Run ffmpeg to extract HEVC
     let mut ffmpeg_cmd = Command::new("ffmpeg");
     ffmpeg_cmd.args([
         "-hide_banner",
@@ -237,14 +276,22 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         bl_hevc.to_str().unwrap(),
     ]);
 
-    println!("{}", "Extracting BL to HEVC...".green());
-    if !run_command_live(&mut ffmpeg_cmd, &temp_dir.join("ffmpeg_extract_bl.log"))? {
+    if !run_command_with_spinner(
+        &mut ffmpeg_cmd,
+        &temp_dir.join("ffmpeg_extract_bl.log"),
+        "Extracting base layer HEVC stream",
+    )? {
         return Ok(false);
     }
 
-    // Inject RPU
+    // --- Inject RPU ---
+    current_step += 1;
+    progress::print_step(
+        current_step,
+        total_steps,
+        "Injecting RPU into base layer...",
+    );
     let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
-    // Resolve tool path
     let dovi_tool_path =
         external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
     let mut dovi_cmd = Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
@@ -267,7 +314,9 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         return Ok(false);
     }
 
-    // Mux
+    // --- Mux ---
+    current_step += 1;
+    progress::print_step(current_step, total_steps, "Muxing final MKV...");
     let mut mkvmerge_cmd = Command::new("mkvmerge");
     mkvmerge_cmd.arg("-q").arg("-o").arg(&output_file);
     if args.drop_tags {
@@ -288,10 +337,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         return Ok(false);
     }
 
-    // Optional post-mux verification
+    // --- Optional verification ---
     if args.verify {
-        println!("{}", "Running post-mux verification (--verify)...".green());
-        let measurements_file_path = measurements_file.clone(); // Need pathbuf, it's optional
+        progress::print_info("Running post-mux verification (--verify)...");
+        let measurements_file_path = measurements_file.clone();
         let ok = crate::verify::verify_post_mux(
             input_file,
             &output_file,
@@ -299,35 +348,38 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             &temp_dir,
         );
         if !ok {
-            println!("{}", "Inconsistencies detected during verification.".red());
+            progress::print_error("Inconsistencies detected during verification.");
             return Ok(false);
         }
+        progress::print_info("Verification passed.");
     }
 
-    // Cleanup temp directory
-    println!("{}", "Cleaning up temp files...".green());
+    // --- Cleanup ---
     let _ = fs::remove_dir_all(&temp_dir);
 
     // Delete source file unless --keep-source is set
     if !args.keep_source {
-        println!(
-            "{}",
-            format!("Deleting source file: {}", input_file).yellow()
-        );
+        progress::print_info(&format!("Deleting source file: {}", display_name));
         if let Err(e) = fs::remove_file(input_file) {
-            println!(
-                "{}",
-                format!("Warning: Failed to delete source file: {}", e).yellow()
-            );
+            progress::print_warn(&format!("Failed to delete source file: {}", e));
         }
     }
 
-    println!(
-        "{}",
-        format!("✓ Success! Created: {:?}", output_file.file_name().unwrap())
+    // --- Success ---
+    let elapsed = file_start.elapsed();
+    let elapsed_str = progress::format_duration_pub(elapsed);
+    if !progress::is_quiet() {
+        eprintln!(
+            "\n{}",
+            format!(
+                "✓ Done: {} ({})",
+                output_file.file_name().unwrap().to_string_lossy(),
+                elapsed_str
+            )
             .green()
             .bold()
-    );
+        );
+    }
     Ok(true)
 }
 
@@ -342,20 +394,12 @@ fn run_hdr_analyzer(
     extra_args: &[String],
     args: &Args,
 ) -> Result<Option<PathBuf>> {
-    // Find analyzer executable
-    // Note: We are in the workspace. Ideally we use the one in target/release if we are running from cargo?
-    // Or we assume it's in PATH.
-    // Python script looked for "hdr_analyzer_mvp" or "hdranalyze".
     let tool_name = "hdr_analyzer_mvp";
-    // Check local target/release (dev workflow) first?
     let mut exe = PathBuf::from(tool_name);
     if Path::new("target/release/hdr_analyzer_mvp").exists() {
         exe = Path::new("target/release/hdr_analyzer_mvp").to_path_buf();
     }
 
-    // Command
-    let _out_name = Path::new(input).with_extension("measurements.bin");
-    // Wait, python script puts measurements next to input file?
     let dir = Path::new(input).parent().unwrap_or(Path::new("."));
     let stem = Path::new(input).file_stem().unwrap().to_string_lossy();
     let out_path = dir.join(format!("{}_measurements.bin", stem));
@@ -370,7 +414,6 @@ fn run_hdr_analyzer(
         cmd.arg("--hwaccel").arg(args.hwaccel.to_string());
     }
 
-    println!("{}", "Generating measurements...".green());
     // Use inherit_stderr so indicatif progress bar works correctly (detects TTY)
     if external::run_command_inherit_stderr(&mut cmd, &temp_dir.join("analyzer.log"))?
         && out_path.exists()
@@ -399,7 +442,11 @@ fn extract_hdr10plus_metadata(input: &str, temp_dir: &Path) -> Result<Option<Pat
         hevc.to_str().unwrap(),
     ]);
 
-    if !run_command_live(&mut cmd, &temp_dir.join("ffmpeg_extract_hdr10p.log"))? {
+    if !run_command_with_spinner(
+        &mut cmd,
+        &temp_dir.join("ffmpeg_extract_hdr10p.log"),
+        "Extracting HEVC stream",
+    )? {
         return Ok(None);
     }
 
@@ -422,16 +469,12 @@ fn extract_hdr10plus_metadata(input: &str, temp_dir: &Path) -> Result<Option<Pat
     {
         return Ok(Some(json_out));
     }
-    // Check log for "no dynamic metadata"
-    // Skipping logic for brevity, assume failed if no file.
     Ok(None)
 }
 
 fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBuf> {
     let out_path = temp_dir.join("HLG_to_PQ.mkv");
     let log_path = temp_dir.join("ffmpeg_hlg2pq.log");
-
-    println!("{}", "Converting HLG to PQ...".green());
 
     let static_meta = metadata::get_static_metadata(input);
     let max_dml = *static_meta.get("max_dml").unwrap_or(&1000.0) as u32;
@@ -476,16 +519,6 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
     ]);
 
     if args.hwaccel == HwAccel::Cuda {
-        // NVENC Encoding
-        // Translate x265 params to NVENC equivs where possible
-        // Mastering display and CLL are handled via specific flags if supported by the ffmpeg build
-        // or -sei arguments.
-
-        // Note: Modern ffmpeg hevc_nvenc supports -master_display and -max_cll?
-        // Let's assume a reasonably recent ffmpeg or use the generic side data pass-through if filter chain preserves it.
-        // Actually, zscale re-creates the frame. We need to re-tag.
-
-        // We will use standard high-quality NVENC settings.
         cmd.args([
             "-c:v",
             "hevc_nvenc",
@@ -496,14 +529,13 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
             "-rc",
             "constqp",
             "-qp",
-            "19", // Approx equivalent to CRF 17 for high quality
+            "19",
             "-pix_fmt",
             "yuv420p10le",
             "-profile:v",
             "main10",
         ]);
 
-        // Explicitly set VUI to be safe
         cmd.args([
             "-color_primaries",
             "bt2020",
@@ -514,16 +546,9 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
             "-color_range",
             "tv",
         ]);
-
-        // Attempt to pass mastering display metadata.
-        // Note: As of typical ffmpeg builds, hevc_nvenc might not accept the x265 text format for master-display.
-        // It's safer to rely on the container signaling for now, or use bitstream filters if strict correctness is needed.
-        // However, for the base layer of a Profile 8.1 file, the RPU usually overrides/controls the display mapping.
-        // We'll trust the container tagging.
     } else {
         match args.encoder {
             Encoder::Libx265 => {
-                // CPU Encoding (x265)
                 cmd.args([
                     "-c:v",
                     "libx265",
@@ -540,22 +565,6 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
                 ]);
             }
             Encoder::HevcVideotoolbox => {
-                // VideoToolbox setup
-                // Note: x265-params don't apply here. We need to set metadata via other flags if possible,
-                // but VT is limited. We rely on the container (mkvmerge) to set most metadata,
-                // but for bitstream SEI (like mastering display), VT support is tricky/limited in ffmpeg.
-                // For now, we prioritize speed.
-                // Map crf roughly to -q:v (0-100, where 100 is best).
-                // A CRF of 17 (0-51) is high quality.
-                // Let's approximate: q = 100 - (crf * 2) -> 17*2 = 34 -> 66?
-                // Or just use a high fixed quality like 75.
-                // ffmpeg -h encoder=hevc_videotoolbox shows -q:v is not standard.
-                // Actually usually it's -q:v for quality (1-100) on Apple Silicon?
-                // ffmpeg doc says -q:v is specific.
-                // Let's use -b:v 0 for VBR and allow VT to manage it, or just use -q:v 60-70.
-                // Let's use -q:v 65 which is generally transparent enough.
-
-                // NOTE: color properties needs to be set explicitly
                 cmd.args([
                     "-c:v",
                     "hevc_videotoolbox",
@@ -564,7 +573,7 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
                     "-profile:v",
                     "main10",
                     "-pix_fmt",
-                    "p010le", // typical for VT
+                    "p010le",
                     "-color_primaries",
                     "bt2020",
                     "-color_trc",
@@ -580,11 +589,12 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
 
     cmd.arg(out_path.to_str().unwrap());
 
-    if run_command_live(&mut cmd, &log_path)? && out_path.exists() {
-        println!("{}", "Converted HLG to PQ successfully.".green());
+    if run_command_with_spinner(&mut cmd, &log_path, "Converting HLG to PQ (encoding)")?
+        && out_path.exists()
+    {
         return Ok(out_path);
     }
-    anyhow::bail!("HLG to PQ conversion failed");
+    anyhow::bail!("HLG to PQ conversion failed")
 }
 
 fn generate_rpu(
@@ -609,11 +619,6 @@ fn generate_rpu(
         "--rpu-out",
         rpu_out.to_str().unwrap(),
     ]);
-
-    println!(
-        "{}",
-        format!("Generating RPU from metadata (using {:?})...", dovi_abs).green()
-    );
 
     match hdr_type {
         HdrFormat::Hdr10Plus => {
