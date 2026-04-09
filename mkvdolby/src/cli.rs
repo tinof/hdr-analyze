@@ -3,7 +3,7 @@ use clap::{Parser, ValueEnum};
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "A tool to convert HDR10/HDR10+ files to Dolby Vision.", long_about = None)]
 pub struct Args {
-    /// One or more input video files. If not provided, processes all .mkv files in the current directory.
+    /// One or more input video files. If not provided, processes all .mkv files recursively from the current directory.
     #[arg(required = false)]
     pub input: Vec<String>,
 

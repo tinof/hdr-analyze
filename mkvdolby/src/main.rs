@@ -1,7 +1,10 @@
+use std::cmp::Ordering;
 use std::time::Instant;
 
 use clap::Parser;
 use colored::Colorize;
+use regex::Regex;
+use walkdir::WalkDir;
 
 mod cli;
 mod external;
@@ -11,6 +14,118 @@ mod progress;
 mod verify;
 
 use cli::Args;
+
+fn natural_segment_cmp(a: &str, b: &str) -> Ordering {
+    let mut ia = 0usize;
+    let mut ib = 0usize;
+    let ba = a.as_bytes();
+    let bb = b.as_bytes();
+
+    while ia < ba.len() && ib < bb.len() {
+        let ca = ba[ia];
+        let cb = bb[ib];
+
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            let sa = ia;
+            let sb = ib;
+            while ia < ba.len() && ba[ia].is_ascii_digit() {
+                ia += 1;
+            }
+            while ib < bb.len() && bb[ib].is_ascii_digit() {
+                ib += 1;
+            }
+
+            let na = &a[sa..ia];
+            let nb = &b[sb..ib];
+
+            let na_trim = na.trim_start_matches('0');
+            let nb_trim = nb.trim_start_matches('0');
+
+            let na_eff = if na_trim.is_empty() { "0" } else { na_trim };
+            let nb_eff = if nb_trim.is_empty() { "0" } else { nb_trim };
+
+            match na_eff.len().cmp(&nb_eff.len()) {
+                Ordering::Equal => match na_eff.cmp(nb_eff) {
+                    Ordering::Equal => match na.len().cmp(&nb.len()) {
+                        Ordering::Equal => {}
+                        ord => return ord,
+                    },
+                    ord => return ord,
+                },
+                ord => return ord,
+            }
+        } else {
+            let la = ca.to_ascii_lowercase();
+            let lb = cb.to_ascii_lowercase();
+            match la.cmp(&lb) {
+                Ordering::Equal => {
+                    ia += 1;
+                    ib += 1;
+                }
+                ord => return ord,
+            }
+        }
+    }
+
+    ba.len().cmp(&bb.len())
+}
+
+fn episode_sort_key(path: &str, episode_re: &Regex) -> (u32, u32, String) {
+    let lower = path.to_lowercase();
+
+    if let Some(caps) = episode_re.captures(&lower) {
+        let season = caps
+            .get(1)
+            .and_then(|m| m.as_str().parse::<u32>().ok())
+            .unwrap_or(u32::MAX);
+        let episode = caps
+            .get(2)
+            .and_then(|m| m.as_str().parse::<u32>().ok())
+            .unwrap_or(u32::MAX);
+        return (season, episode, lower);
+    }
+
+    (u32::MAX, u32::MAX, lower)
+}
+
+fn collect_default_inputs() -> anyhow::Result<Vec<String>> {
+    let mut files: Vec<String> = WalkDir::new(".")
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            !e.path().components().any(|c| {
+                c.as_os_str()
+                    .to_string_lossy()
+                    .starts_with("mkvdolby_temp_")
+            })
+        })
+        .filter(|e| e.file_type().is_file() || e.file_type().is_symlink())
+        .map(|e| e.into_path())
+        .filter(|p| {
+            p.extension()
+                .map_or(false, |e| e.eq_ignore_ascii_case("mkv"))
+        })
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    let episode_re = Regex::new(r"s(\d{1,2})e(\d{1,3})")
+        .map_err(|e| anyhow::anyhow!("Invalid episode regex: {}", e))?;
+
+    files.sort_by(|a, b| {
+        let ka = episode_sort_key(a, &episode_re);
+        let kb = episode_sort_key(b, &episode_re);
+
+        match ka.0.cmp(&kb.0) {
+            Ordering::Equal => match ka.1.cmp(&kb.1) {
+                Ordering::Equal => natural_segment_cmp(a, b),
+                ord => ord,
+            },
+            ord => ord,
+        }
+    });
+
+    Ok(files)
+}
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -69,16 +184,9 @@ fn main() -> anyhow::Result<()> {
     // Process files
     let mut files = final_args.input.clone();
     if files.is_empty() {
-        // Glob *.mkv in current dir
-        for entry in std::fs::read_dir(".")? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "mkv") {
-                files.push(path.to_string_lossy().to_string());
-            }
-        }
+        files = collect_default_inputs()?;
         if files.is_empty() {
-            eprintln!("No MKV files found in the current directory.");
+            eprintln!("No MKV files found in the current directory tree.");
             return Ok(());
         }
     }

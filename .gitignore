@@ -104,3 +104,4 @@ coordination/orchestration/*
 claude-flow
 hive-mind-prompt-*.txt
 .osgrep
+upgrade-mkvdolby.sh
