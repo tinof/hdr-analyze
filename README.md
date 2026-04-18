@@ -1,12 +1,14 @@
-# HDR-Analyze: Dynamic HDR Metadata Generator
+# HDR-Analyze
 
 [![CI](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml/badge.svg)](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Version](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://github.com/rust-lang/rust)
 
-A powerful, open-source workspace containing tools for analyzing HDR10 and HLG video files to generate dynamic metadata for Dolby Vision conversion.
+Convert any HDR10, HLG, or HDR10+ video to dynamic metadata — entirely free and open-source.
 
-This workspace implements advanced, research-backed algorithms to analyze video on a per-frame and per-scene basis, creating measurement files that can be used by tools like `dovi_tool` to produce high-quality Dolby Vision Profile 8.1 content from standard HDR10 or HLG sources.
+HDR-Analyze reads raw 10-bit pixel data frame-by-frame, computes precise per-frame luminance measurements, and generates dynamic metadata (.bin) compatible with existing open-source tools like `dovi_tool`. The companion `mkvdolby` tool then packages the result into a final MKV with dynamic tone-mapping metadata.
+
+**Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdolby → Dynamic HDR MKV`
 
 ## Project Structure
 
@@ -42,14 +44,14 @@ hdr_project/
 
 ### Workspace Members
 
-- `hdr_analyzer_mvp`: Main HDR analysis application that processes video files and generates madVR-compatible measurement files
-- `verifier`: Utility tool for reading, validating, and inspecting madVR measurement files
+- `hdr_analyzer_mvp`: Main HDR analysis application that processes video files and generates compatible measurement files
+- `verifier`: Utility tool for reading, validating, and inspecting `.bin` measurement files
 
 ## Key Features
 
 - Native video processing: Built with `ffmpeg-next` for direct access to high-bit-depth video data, enabling precise 10-bit luminance analysis.
 - Accurate per-frame analysis: Peak Brightness (MaxCLL) and Average Picture Level (APL) computed from 10-bit YUV420P10LE frames, with active-video crop detection to ignore black bars.
-- v5-compatible luminance histogram: 256-bin luminance histogram with SDR/HDR split (64 + 192) and mid-bin averaging, consistent with madVR v5 layout.
+- v5-compatible luminance histogram: 256-bin luminance histogram with SDR/HDR split (64 + 192) and mid-bin averaging, consistent with the v5 profile layout.
 - Native scene detection: Real-time histogram-distance based scene cut detection with configurable threshold.
 - Dynamic metadata optimizer (optional): Per-frame target nits generation using a 240-frame rolling average, 99th percentile highlight knee detection, and scene-aware heuristics.
   - Scene-aware APL blending and per-scene smoothing resets to avoid cross-scene lag.
@@ -60,7 +62,7 @@ hdr_project/
   - Per-bin EMA smoothing with scene-aware resets to stabilize APL measurements.
   - Optional temporal median filtering and pre-analysis denoising for extremely noisy content.
 - Native HLG workflow: Automatically detects ARIB STD-B67 transfers and converts to PQ histograms in-memory using the configurable `--hlg-peak-nits` (default 1000 nits).
-- Professional output: Writes madVR-compatible `.bin` measurement files through the `madvr_parse` library.
+- Professional output: Writes compatible `.bin` measurement files using the MIT-licensed community library `madvr_parse`.
 - Cross-platform: CPU decoding on all platforms with optional CUDA attempt on NVIDIA (graceful fallback to software decoding everywhere else).
 - Performance Tuned: Optimized for software decoding on ARM64. Features smart frame sampling (`--sample-rate`) and analysis downscaling (`--downscale`) to boost throughput by 3-4x on CPU-limited systems.
 - Visual Progress Tracking: Real-time progress bar with ETA, frame count, and processing speed.
@@ -70,7 +72,7 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
 ### 10-bit luminance and PQ domain
 
 - Frames are converted/scaled to YUV420P10LE for consistent 10-bit luminance (Y-plane) access.
-- Histogram binning follows madVR v5 layout:
+- Histogram binning follows the v5 layout:
   - SDR portion (bins 0–63) and HDR portion (bins 64–255)
   - Mid-bin center values used for weighted average (APL) estimation
   - Heuristic black-bar filtering on bin 0
@@ -244,7 +246,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" 
 
 ### mkvdolby (Conversion Tool)
 
-The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 with Content Mapping v4.0.
+The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG to Profile 8.1 format with Content Mapping v4.0 metadata.
 
 ```bash
 # Basic usage (converts all MKV files in current directory)
@@ -287,7 +289,7 @@ mkvdolby provides visual feedback for all operations:
 
 #### CM v4.0 Metadata Options (New)
 
-mkvdolby now generates Dolby Vision Content Mapping v4.0 metadata by default, which includes enhanced tone mapping (L8/L9/L11) for better picture quality on modern displays.
+mkvdolby now generates Content Mapping v4.0 metadata by default, which includes enhanced dynamic tone mapping (L8/L9/L11) for better picture quality on modern displays.
 
 ```bash
 # Default: CM v4.0 with auto-detected settings
@@ -374,7 +376,7 @@ Notes for v6 output:
 
 - Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently duplicated from BT.2020 (`peak_pq_2020`) as a compatibility placeholder. Proper per-gamut computation is planned.
 
-## Minimal Beta Validation
+## Quick Start Validation
 
 1) Build:
 
@@ -440,15 +442,13 @@ Expected:
 ## Roadmap
 
 - Proper VAAPI/VideoToolbox device contexts and hardware frame transfer
-- Parallel frame processing (rayon) for multi-core performance
 - SIMD optimizations for histogram calculations
-- Configurable heuristics for optimizer and scene detection
-- Automated tests and CI validation
 
 ## Acknowledgements
 
+- **quietvoid**: For creating `dovi_tool`, `hdr10plus_tool`, and the MIT-licensed `madvr_parse` library.
+- **The Doom9 Community**: For the collective reverse-engineering and documentation of HDR formats.
 - `ffmpeg-next`: Rust bindings for FFmpeg
-- `madvr_parse`: Library for reading/writing madVR measurement files
 - `clap`, `anyhow`: CLI and error handling
 
 ## License
