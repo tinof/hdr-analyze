@@ -108,6 +108,10 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
 - **Decoder threading**: Enables FFmpeg multi-threading (auto thread count) for better CPU utilization.
 - **Rust build tuning**: Workspace includes `.cargo/config.toml` with `-C target-cpu=native` to enable host-specific optimizations (NEON on ARM).
 
+## Project Status
+
+This is a personal research project, shared as-is under the MIT license. Issues and pull requests are welcome, but there is no support SLA. Please do not expect production-level maintenance.
+
 ## Prerequisites
 
 - Rust toolchain: Install from <https://rustup.rs/>
@@ -119,6 +123,7 @@ Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-
 - External Tools (NOT included):
   - `dovi_tool`: Required for final RPU generation. Download from [quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool/releases) and place in your PATH.
   - `hdr10plus_tool`: Required for HDR10+ analysis. Download from [quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool/releases) and place in your PATH.
+  - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): Required by `mkvdolby` for final MKV packaging. Install via your OS package manager (`brew install mkvtoolnix`, `apt install mkvtoolnix`, or download from the official site) and ensure it is in your PATH.
 
 ## Automated Releases
 
@@ -246,7 +251,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" 
 
 ### mkvdolby (Conversion Tool)
 
-The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG to Profile 8.1 format with Content Mapping v4.0 metadata.
+The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG input to a Profile 8.1-compatible MKV with Content Mapping v4.0 metadata. Internally it calls `dovi_tool` and `mkvmerge` — these must be installed separately (see Prerequisites).
 
 ```bash
 # Basic usage (converts all MKV files in current directory)
@@ -454,6 +459,13 @@ Expected:
 ## License
 
 MIT License
+
+## What This Is NOT
+
+- Does not include, redistribute, or reverse-engineer any Dolby Laboratories proprietary code, lookup tables, CMv4.0 trims, or binary blobs.
+- Does not bypass, circumvent, or interfere with any DRM or content-protection mechanism.
+- Not an official Dolby or HDR10+ Technologies product; no trademarks claimed.
+- The analyzer outputs generic per-frame luminance data. Final packaging into a playback-compatible stream is done by `dovi_tool` and `mkvmerge`, which the user installs independently.
 
 ## Legal & Trademarks
 

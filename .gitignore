@@ -58,12 +58,10 @@ docs/VIDEOTOOLBOX_OPTIMIZATION_SUMMARY.md
 AGENTS.md
 
 # Local agent/tooling state
-.swarm/
+.agent/
 .claude-flow/
-.codanna/
 .fastembed_cache/
 .opencode/
-.osgrep/
 .serena/
 
 # Local scratch/checkouts
@@ -84,7 +82,6 @@ SKILL.md
 .claude/settings.local.json
 .mcp.json
 claude-flow.config.json
-.hive-mind/
 memory/
 coordination/
 memory/claude-flow-data.json
@@ -102,6 +99,6 @@ coordination/orchestration/*
 *.sqlite-journal
 *.sqlite-wal
 claude-flow
-hive-mind-prompt-*.txt
 .osgrep
 upgrade-mkvdolby.sh
+RELEASE_STRATEGY.md
