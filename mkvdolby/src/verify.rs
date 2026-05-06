@@ -34,10 +34,7 @@ pub fn verify_post_mux(
             let mut cmd = Command::new(exe);
             cmd.arg(meas_path);
 
-            // Capturing output to check for errors/warnings?
-            // Python: just ran it. 'verifier' exits non-zero on error?
-            // Assuming yes.
-            if run_command(&mut cmd, &temp_dir.join("verifier.log")).is_err() {
+            if !run_logged_command(&mut cmd, &temp_dir.join("verifier.log")) {
                 println!("{}", "Verifier tool reported issues.".red());
                 ok = false;
             }
@@ -49,12 +46,45 @@ pub fn verify_post_mux(
         }
     }
 
-    // 2. dovi_tool info check
+    // 2. Dolby Vision RPU check. dovi_tool info expects an RPU file, so extract
+    // from the muxed video stream first to validate the final output.
     println!("{}", "Checking with dovi_tool info...".cyan());
+    let hevc_path = temp_dir.join("verify_video.hevc");
+    let rpu_path = temp_dir.join("verify_rpu.bin");
+
+    let mut ffmpeg = Command::new("ffmpeg");
+    ffmpeg.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        output_file.to_str().unwrap(),
+        "-map",
+        "0:v:0",
+        "-c:v",
+        "copy",
+        "-f",
+        "hevc",
+        "-y",
+        hevc_path.to_str().unwrap(),
+    ]);
+
+    let mut extract_rpu = Command::new("dovi_tool");
+    extract_rpu.args([
+        "extract-rpu",
+        "-i",
+        hevc_path.to_str().unwrap(),
+        "-o",
+        rpu_path.to_str().unwrap(),
+    ]);
+
     let mut dovi = Command::new("dovi_tool");
-    dovi.args(["info", "-i", output_file.to_str().unwrap()]);
-    // dovi_tool info doesn't fail easily, but if it crashes it's bad.
-    if run_command(&mut dovi, &temp_dir.join("dovi_info.log")).is_err() {
+    dovi.args(["info", "--summary", "-i", rpu_path.to_str().unwrap()]);
+
+    if !run_logged_command(&mut ffmpeg, &temp_dir.join("verify_extract_hevc.log"))
+        || !run_logged_command(&mut extract_rpu, &temp_dir.join("verify_extract_rpu.log"))
+        || !run_logged_command(&mut dovi, &temp_dir.join("dovi_info.log"))
+    {
         println!("{}", "dovi_tool check failed.".red());
         ok = false;
     }
@@ -86,4 +116,8 @@ pub fn verify_post_mux(
 // Helper needed because metadata::get_duration expects &str but sometimes we have Path
 fn get_duration_from_file(path: &Path) -> Option<f64> {
     metadata::get_duration_from_mediainfo(path.to_str()?)
+}
+
+fn run_logged_command(cmd: &mut Command, log_path: &Path) -> bool {
+    matches!(run_command(cmd, log_path), Ok(true))
 }

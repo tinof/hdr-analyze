@@ -303,7 +303,7 @@ mkvdolby "input.mkv" --content-type animation # For animated content
 mkvdolby "input.mkv" --cm-version v29
 
 # Override source primaries detection
-mkvdolby "input.mkv" --source-primaries 1  # 0=BT.2020, 1=P3-D65, 2=BT.709
+mkvdolby "input.mkv" --source-primaries 2  # 0=P3-D65, 1=BT.709, 2=BT.2020
 ```
 
 **CM v4.0 metadata levels generated:**

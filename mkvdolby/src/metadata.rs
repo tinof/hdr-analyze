@@ -33,7 +33,7 @@ impl HdrFormat {
 /// Configuration for CM v4.0 metadata generation
 #[derive(Debug, Clone)]
 pub struct CmV40Config {
-    /// Source primary index for L9 (0=BT.2020, 1=P3-D65, 2=BT.709)
+    /// Source primary index for L9 (0=P3-D65, 1=BT.709, 2=BT.2020)
     pub source_primary_index: u8,
     /// Content type for L11 (0-6, see ContentType enum)
     pub content_type: u8,
@@ -44,7 +44,7 @@ pub struct CmV40Config {
 impl Default for CmV40Config {
     fn default() -> Self {
         Self {
-            source_primary_index: 0, // BT.2020
+            source_primary_index: 2, // BT.2020
             content_type: 4,         // Cinema
             reference_mode: true,
         }
@@ -122,8 +122,9 @@ pub fn find_details_file(input_file: &Path) -> Option<PathBuf> {
 pub fn check_hdr_format(input_file: &str) -> HdrFormat {
     let path = Path::new(input_file);
 
-    // 1. MediaInfo Text Check
-    let mi_text = match Command::new("mediainfo")
+    // 1. MediaInfo checks. Some HLG MKVs expose HLG only as
+    // transfer_characteristics_Original while HDR_Format remains empty.
+    let mut mi_hints = match Command::new("mediainfo")
         .args([
             "--Inform=Video;%HDR_Format%/%HDR_Format_Compatibility%",
             input_file,
@@ -134,20 +135,14 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
         Err(_) => String::new(),
     };
 
+    if let Ok(json) = get_mediainfo_json(input_file) {
+        append_mediainfo_video_hints(&json, &mut mi_hints);
+    }
+
     let measurements = find_measurements_file(path).is_some();
 
-    if mi_text.contains("SMPTE ST 2094 App 4") || mi_text.contains("HDR10+") {
-        return HdrFormat::Hdr10Plus;
-    }
-    if mi_text.contains("HLG") {
-        return HdrFormat::Hlg;
-    }
-    if mi_text.contains("HDR10") || mi_text.contains("PQ") || mi_text.contains("ST 2084") {
-        return if measurements {
-            HdrFormat::Hdr10WithMeasurements
-        } else {
-            HdrFormat::Hdr10Unsupported
-        };
+    if let Some(format) = classify_hdr_hints(&mi_hints, measurements) {
+        return format;
     }
 
     // 2. Fallback to FFprobe
@@ -160,16 +155,8 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
         if let Some(streams) = json.get("streams").and_then(|v| v.as_array()) {
             for stream in streams {
                 if let Some(transfer) = stream.get("color_transfer").and_then(|s| s.as_str()) {
-                    let t = transfer.to_uppercase();
-                    if t.contains("ARIB") || t.contains("HLG") {
-                        return HdrFormat::Hlg;
-                    }
-                    if t.contains("SMPTE2084") || t.contains("PQ") {
-                        return if measurements {
-                            HdrFormat::Hdr10WithMeasurements
-                        } else {
-                            HdrFormat::Hdr10Unsupported
-                        };
+                    if let Some(format) = classify_hdr_hints(transfer, measurements) {
+                        return format;
                     }
                 }
             }
@@ -177,6 +164,62 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
     }
 
     HdrFormat::Unsupported
+}
+
+fn append_mediainfo_video_hints(json: &Value, hints: &mut String) {
+    let Some(tracks) = json
+        .get("media")
+        .and_then(|m| m.get("track"))
+        .and_then(|t| t.as_array())
+    else {
+        return;
+    };
+
+    for track in tracks {
+        if track.get("@type").and_then(|s| s.as_str()) != Some("Video") {
+            continue;
+        }
+
+        let Some(fields) = track.as_object() else {
+            continue;
+        };
+
+        for (key, value) in fields {
+            let key_lower = key.to_ascii_lowercase();
+            if !(key_lower.contains("hdr") || key_lower.contains("transfer_characteristics")) {
+                continue;
+            }
+
+            if let Some(value) = value.as_str() {
+                hints.push('\n');
+                hints.push_str(value);
+            }
+        }
+    }
+}
+
+fn classify_hdr_hints(hints: &str, measurements: bool) -> Option<HdrFormat> {
+    let hints = hints.to_uppercase();
+
+    if hints.contains("SMPTE ST 2094 APP 4") || hints.contains("HDR10+") {
+        return Some(HdrFormat::Hdr10Plus);
+    }
+    if hints.contains("HLG") || hints.contains("ARIB") {
+        return Some(HdrFormat::Hlg);
+    }
+    if hints.contains("HDR10")
+        || hints.contains("PQ")
+        || hints.contains("ST 2084")
+        || hints.contains("SMPTE2084")
+    {
+        return Some(if measurements {
+            HdrFormat::Hdr10WithMeasurements
+        } else {
+            HdrFormat::Hdr10Unsupported
+        });
+    }
+
+    None
 }
 
 pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
@@ -294,17 +337,17 @@ pub fn detect_source_primaries(input_file: &str) -> u8 {
                     {
                         let p = primaries.to_uppercase();
                         if p.contains("P3") || p.contains("DCI") || p.contains("DISPLAY P3") {
-                            return 1; // P3-D65
+                            return 0; // P3-D65
                         }
                         if p.contains("709") {
-                            return 2; // BT.709
+                            return 1; // BT.709
                         }
                     }
                 }
             }
         }
     }
-    0 // Default: BT.2020
+    2 // Default: BT.2020
 }
 
 pub fn generate_extra_json(
@@ -405,19 +448,79 @@ pub fn get_duration_from_mediainfo(input_file: &str) -> Option<f64> {
                 if track.get("@type").and_then(|s| s.as_str()) == Some("Video") {
                     // Duration
                     if let Some(val) = track.get("Duration") {
-                        if let Some(f) = val.as_f64() {
-                            // If it's a float, it might be seconds or ms? context says ms usually in mediainfo json
-                            // But let's check
-                            return Some(f / 1000.0);
-                        } else if let Some(s) = val.as_str() {
-                            if let Ok(ms) = s.parse::<f64>() {
-                                return Some(ms / 1000.0);
-                            }
-                        }
+                        return parse_mediainfo_duration_seconds(val);
                     }
                 }
             }
         }
     }
     None
+}
+
+fn parse_mediainfo_duration_seconds(value: &Value) -> Option<f64> {
+    let duration = value
+        .as_f64()
+        .or_else(|| value.as_str()?.parse::<f64>().ok())?;
+
+    // MediaInfo JSON normally reports seconds. Older comments in this code
+    // expected milliseconds, so keep a conservative fallback for obviously
+    // millisecond-scale values.
+    Some(if duration > 86_400.0 {
+        duration / 1000.0
+    } else {
+        duration
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_hlg_from_original_transfer_characteristics() {
+        let hints = "BT.2020 (10-bit)\nHLG / BT.2020 (10-bit)";
+
+        assert_eq!(classify_hdr_hints(hints, false), Some(HdrFormat::Hlg));
+    }
+
+    #[test]
+    fn classify_bt2020_transfer_alone_as_unknown() {
+        let hints = "BT.2020 (10-bit)";
+
+        assert_eq!(classify_hdr_hints(hints, false), None);
+    }
+
+    #[test]
+    fn classify_pq_as_hdr10_with_measurement_state() {
+        assert_eq!(
+            classify_hdr_hints("SMPTE ST 2084", true),
+            Some(HdrFormat::Hdr10WithMeasurements)
+        );
+        assert_eq!(
+            classify_hdr_hints("SMPTE ST 2084", false),
+            Some(HdrFormat::Hdr10Unsupported)
+        );
+    }
+
+    #[test]
+    fn cm_v40_default_source_primaries_are_bt2020_for_dovi_tool() {
+        assert_eq!(CmV40Config::default().source_primary_index, 2);
+    }
+
+    #[test]
+    fn parse_mediainfo_duration_seconds_preserves_seconds() {
+        assert_eq!(
+            parse_mediainfo_duration_seconds(&json!("3438.032")),
+            Some(3438.032)
+        );
+        assert_eq!(parse_mediainfo_duration_seconds(&json!(15.56)), Some(15.56));
+    }
+
+    #[test]
+    fn parse_mediainfo_duration_seconds_handles_millisecond_scale_values() {
+        assert_eq!(
+            parse_mediainfo_duration_seconds(&json!("3438032")),
+            Some(3438.032)
+        );
+    }
 }

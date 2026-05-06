@@ -69,7 +69,7 @@ pub struct Args {
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub reference_mode: bool,
 
-    /// Source color primaries index for L9 (0=BT.2020, 1=P3-D65, 2=BT.709). Auto-detected if not set.
+    /// Source color primaries index for L9 (0=P3-D65, 1=BT.709, 2=BT.2020). Auto-detected if not set.
     #[arg(long)]
     pub source_primaries: Option<u8>,
 

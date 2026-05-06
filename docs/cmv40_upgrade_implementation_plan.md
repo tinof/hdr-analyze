@@ -92,10 +92,10 @@ Based on `dovi_tool`'s `full_example.json`:
 /// Source primary index for L9 metadata
 #[derive(Debug, Clone, Copy, Default)]
 pub enum SourcePrimaryIndex {
+    P3D65 = 0,
+    BT709 = 1,
     #[default]
-    BT2020 = 0,        // Default for most UHD content
-    P3D65 = 1,
-    BT709 = 2,
+    BT2020 = 2,        // Default for most UHD content
 }
 
 /// Content type for L11 metadata
@@ -116,7 +116,7 @@ pub enum ContentType {
 
 ```rust
 pub struct CmV40Config {
-    pub source_primary_index: u8,  // L9: 0 = BT.2020, 1 = P3-D65, 2 = BT.709
+    pub source_primary_index: u8,  // L9: 0 = P3-D65, 1 = BT.709, 2 = BT.2020
     pub content_type: u8,          // L11: 1-6 (see enum above)
     pub reference_mode: bool,      // L11: true for reference viewing
 }
@@ -205,8 +205,8 @@ pub struct Args {
     #[arg(long, default_value = "v29")]
     pub cm_version: CmVersion,
 
-    /// Source color primaries for L9 metadata (0=BT.2020, 1=P3-D65, 2=BT.709)
-    #[arg(long, default_value_t = 0)]
+    /// Source color primaries for L9 metadata (0=P3-D65, 1=BT.709, 2=BT.2020)
+    #[arg(long, default_value_t = 2)]
     pub source_primaries: u8,
 
     /// Content type for L11 metadata (1=Film, 2=Live, 3=Animation, 4=Cinema, 5=Gaming, 6=Graphics)
@@ -274,17 +274,17 @@ pub fn detect_source_primaries(input_file: &str) -> u8 {
                     {
                         let p = primaries.to_uppercase();
                         if p.contains("P3") || p.contains("DCI") {
-                            return 1; // P3-D65
+                            return 0; // P3-D65
                         }
                         if p.contains("709") {
-                            return 2; // BT.709
+                            return 1; // BT.709
                         }
                     }
                 }
             }
         }
     }
-    0 // Default: BT.2020
+    2 // Default: BT.2020
 }
 ```
 
@@ -327,7 +327,7 @@ fn test_cmv40_json_generation() {
     metadata.insert("max_fall".to_string(), 800.0);
     
     let cfg = CmV40Config {
-        source_primary_index: 0,
+        source_primary_index: 2,
         content_type: 4,
         reference_mode: true,
     };
@@ -377,11 +377,11 @@ dovi_tool info -i output.DV.mkv --summary
 
 | Index | Color Space | When to Use |
 |-------|-------------|-------------|
-| 0 | BT.2020 | Default for UHD Blu-ray, streaming 4K HDR |
-| 1 | P3-D65 | Digital cinema masters, some Netflix originals |
-| 2 | BT.709 | SDR upconverts, HD sources |
+| 0 | P3-D65 | Digital cinema masters, some Netflix originals |
+| 1 | BT.709 | SDR upconverts, HD sources |
+| 2 | BT.2020 | Default for UHD Blu-ray, streaming 4K HDR |
 
-**Recommendation**: Auto-detect from MediaInfo `colour_primaries`. Fall back to 0 (BT.2020).
+**Recommendation**: Auto-detect from MediaInfo `colour_primaries`. Fall back to 2 (BT.2020).
 
 ### L11: Content Type
 
