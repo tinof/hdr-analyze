@@ -35,7 +35,7 @@ impl HdrFormat {
 pub struct CmV40Config {
     /// Source primary index for L9 (0=P3-D65, 1=BT.709, 2=BT.2020)
     pub source_primary_index: u8,
-    /// Content type for L11 (0-6, see ContentType enum)
+    /// Content type for L11 (0-4, see ContentType enum)
     pub content_type: u8,
     /// Reference mode flag for L11
     pub reference_mode: bool,
@@ -45,8 +45,8 @@ impl Default for CmV40Config {
     fn default() -> Self {
         Self {
             source_primary_index: 2, // BT.2020
-            content_type: 4,         // Cinema
-            reference_mode: true,
+            content_type: 1,         // Movies
+            reference_mode: false,
         }
     }
 }
@@ -318,36 +318,52 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
     meta
 }
 
-/// Detect source color primaries from MediaInfo
+/// Detect source mastering-display primaries from MediaInfo.
 #[allow(dead_code)]
 pub fn detect_source_primaries(input_file: &str) -> u8 {
-    if let Ok(json) = get_mediainfo_json(input_file) {
-        if let Some(tracks) = json
-            .get("media")
-            .and_then(|m| m.get("track"))
-            .and_then(|t| t.as_array())
-        {
-            for track in tracks {
-                if track.get("@type").and_then(|s| s.as_str()) == Some("Video") {
-                    // Check colour_primaries field
-                    if let Some(primaries) = track
+    get_mediainfo_json(input_file)
+        .ok()
+        .and_then(|json| detect_source_primaries_from_mediainfo(&json))
+        .unwrap_or(2) // Default: BT.2020
+}
+
+fn detect_source_primaries_from_mediainfo(json: &Value) -> Option<u8> {
+    let tracks = json
+        .get("media")
+        .and_then(|m| m.get("track"))
+        .and_then(|t| t.as_array())?;
+
+    tracks
+        .iter()
+        .filter(|track| track.get("@type").and_then(|s| s.as_str()) == Some("Video"))
+        .find_map(|track| {
+            // L9 describes the mastering display, not the BT.2020 signal container.
+            track
+                .get("MasteringDisplay_ColorPrimaries")
+                .or_else(|| track.get("mastering_display_color_primaries"))
+                .and_then(|value| value.as_str())
+                .and_then(primary_index_from_label)
+                .or_else(|| {
+                    track
                         .get("colour_primaries")
                         .or_else(|| track.get("ColorPrimaries"))
-                        .and_then(|s| s.as_str())
-                    {
-                        let p = primaries.to_uppercase();
-                        if p.contains("P3") || p.contains("DCI") || p.contains("DISPLAY P3") {
-                            return 0; // P3-D65
-                        }
-                        if p.contains("709") {
-                            return 1; // BT.709
-                        }
-                    }
-                }
-            }
-        }
+                        .and_then(|value| value.as_str())
+                        .and_then(primary_index_from_label)
+                })
+        })
+}
+
+fn primary_index_from_label(primaries: &str) -> Option<u8> {
+    let primaries = primaries.to_uppercase();
+    if primaries.contains("P3") || primaries.contains("DCI") {
+        Some(0) // P3-D65
+    } else if primaries.contains("709") {
+        Some(1) // BT.709
+    } else if primaries.contains("2020") {
+        Some(2) // BT.2020
+    } else {
+        None
     }
-    2 // Default: BT.2020
 }
 
 pub fn generate_extra_json(
@@ -363,7 +379,6 @@ pub fn generate_extra_json(
 
     let mut json_content = json!({
         "profile": "8.1",
-        "target_nits": trim_targets,
         "level6": {
             "max_display_mastering_luminance": *max_dml as u32,
             "min_display_mastering_luminance": (*min_dml * 10000.0) as u32,
@@ -380,24 +395,9 @@ pub fn generate_extra_json(
         let mut default_blocks = Vec::new();
 
         // Add L2 trims for each target nit level (100, 600, 1000, etc.)
-        // These provide baseline trim values that dovi_tool will use
-        // PQ values: 100 nits ≈ 2081, 600 nits ≈ 2851, 1000 nits ≈ 3079
-        let target_pq_map: [(u32, u32); 6] = [
-            (100, 2081),
-            (300, 2525),
-            (600, 2851),
-            (1000, 3079),
-            (2000, 3388),
-            (4000, 3696),
-        ];
-
+        // These provide baseline trim values that dovi_tool will use.
         for target in trim_targets {
-            // Find matching PQ value or interpolate
-            let target_pq = target_pq_map
-                .iter()
-                .find(|(nits, _)| nits == target)
-                .map(|(_, pq)| *pq)
-                .unwrap_or(3079); // Default to 1000 nits PQ
+            let target_pq = nits_to_pq_code(*target);
 
             default_blocks.push(json!({
                 "Level2": {
@@ -435,6 +435,22 @@ pub fn generate_extra_json(
     let file = File::create(output_path)?;
     serde_json::to_writer_pretty(file, &json_content)?;
     Ok(())
+}
+
+fn nits_to_pq_code(nits: u32) -> u32 {
+    const MAX_NITS: f64 = 10_000.0;
+    const MAX_PQ_CODE: f64 = 4095.0;
+    const M1: f64 = 2610.0 / 16384.0;
+    const M2: f64 = 2523.0 / 32.0;
+    const C1: f64 = 3424.0 / 4096.0;
+    const C2: f64 = 2413.0 / 128.0;
+    const C3: f64 = 2392.0 / 128.0;
+
+    let normalized_luminance = f64::from(nits.min(MAX_NITS as u32)) / MAX_NITS;
+    let luminance_m1 = normalized_luminance.powf(M1);
+    let pq = ((C1 + C2 * luminance_m1) / (1.0 + C3 * luminance_m1)).powf(M2);
+
+    (pq * MAX_PQ_CODE).round() as u32
 }
 
 pub fn get_duration_from_mediainfo(input_file: &str) -> Option<f64> {
@@ -505,6 +521,77 @@ mod tests {
     #[test]
     fn cm_v40_default_source_primaries_are_bt2020_for_dovi_tool() {
         assert_eq!(CmV40Config::default().source_primary_index, 2);
+    }
+
+    #[test]
+    fn cm_v40_default_l11_uses_movies_without_reference_mode() {
+        let config = CmV40Config::default();
+
+        assert_eq!(config.content_type, 1);
+        assert!(!config.reference_mode);
+    }
+
+    #[test]
+    fn source_primaries_prefer_display_p3_mastering_display_over_bt2020_container() {
+        let mediainfo = json!({
+            "media": {
+                "track": [{
+                    "@type": "Video",
+                    "colour_primaries": "BT.2020",
+                    "MasteringDisplay_ColorPrimaries": "Display P3"
+                }]
+            }
+        });
+
+        assert_eq!(detect_source_primaries_from_mediainfo(&mediainfo), Some(0));
+    }
+
+    #[test]
+    fn source_primaries_fall_back_to_container_when_mastering_display_is_absent() {
+        let mediainfo = json!({
+            "media": {
+                "track": [{
+                    "@type": "Video",
+                    "colour_primaries": "BT.2020"
+                }]
+            }
+        });
+
+        assert_eq!(detect_source_primaries_from_mediainfo(&mediainfo), Some(2));
+    }
+
+    #[test]
+    fn cm_v40_json_uses_requested_l9_and_l11_values() {
+        let output = tempfile::NamedTempFile::new().unwrap();
+        let metadata = HashMap::from([
+            ("min_dml".to_string(), 0.0001),
+            ("max_dml".to_string(), 1000.0),
+            ("max_cll".to_string(), 211.0),
+            ("max_fall".to_string(), 125.0),
+        ]);
+        let config = CmV40Config {
+            source_primary_index: 0,
+            content_type: 1,
+            reference_mode: false,
+        };
+
+        generate_extra_json(output.path(), &metadata, &[100, 600, 1000], Some(&config)).unwrap();
+
+        let json: Value = serde_json::from_reader(File::open(output.path()).unwrap()).unwrap();
+        let blocks = json["default_metadata_blocks"].as_array().unwrap();
+        assert!(json.get("target_nits").is_none());
+        assert_eq!(blocks[3]["Level9"]["source_primary_index"], 0);
+        assert_eq!(blocks[4]["Level11"]["content_type"], 1);
+        assert_eq!(blocks[4]["Level11"]["reference_mode_flag"], false);
+    }
+
+    #[test]
+    fn trim_target_nits_are_converted_to_pq_codes() {
+        assert_eq!(nits_to_pq_code(100), 2081);
+        assert_eq!(nits_to_pq_code(600), 2851);
+        assert_eq!(nits_to_pq_code(1000), 3079);
+        assert!(nits_to_pq_code(680) > nits_to_pq_code(600));
+        assert!(nits_to_pq_code(680) < nits_to_pq_code(1000));
     }
 
     #[test]

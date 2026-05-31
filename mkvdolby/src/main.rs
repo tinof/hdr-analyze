@@ -144,7 +144,9 @@ fn main() -> anyhow::Result<()> {
     let mut peak_source = args.peak_source;
     if args.boost {
         match peak_source {
-            cli::PeakSource::MaxSclLuminance | cli::PeakSource::Histogram => {
+            cli::PeakSource::MaxSclLuminance
+            | cli::PeakSource::MaxScl
+            | cli::PeakSource::Histogram => {
                 if !progress::is_quiet() {
                     eprintln!(
                         "{}",

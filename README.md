@@ -10,9 +10,13 @@ HDR-Analyze reads raw 10-bit pixel data frame-by-frame, computes precise per-fra
 
 **Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdolby → Dynamic HDR MKV`
 
+For HDR10+ inputs, `mkvdolby` extracts the source HDR10+ metadata directly and passes it to
+`dovi_tool`; it does not run `hdr_analyzer_mvp` unless HDR10+ metadata extraction fails and the
+workflow falls back to HDR10 analysis.
+
 ## Project Structure
 
-This is a Rust workspace containing two main components:
+This is a Rust workspace containing three shipped binaries:
 
 ```
 hdr_project/
@@ -36,6 +40,9 @@ hdr_project/
 │       ├── writer.rs       # .bin file writing
 │       ├── cli.rs          # CLI definition
 │       └── crop.rs         # Active area detection
+├── mkvdolby/               # Full conversion orchestrator
+│   ├── Cargo.toml
+│   └── src/
 └── verifier/               # Measurement file verification tool
     ├── Cargo.toml
     └── src/
@@ -45,6 +52,7 @@ hdr_project/
 ### Workspace Members
 
 - `hdr_analyzer_mvp`: Main HDR analysis application that processes video files and generates compatible measurement files
+- `mkvdolby`: Native HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 conversion orchestrator
 - `verifier`: Utility tool for reading, validating, and inspecting `.bin` measurement files
 
 ## Key Features
@@ -121,8 +129,8 @@ This is a personal research project, shared as-is under the MIT license. Issues 
   - Windows: Install FFmpeg dev libraries or use vcpkg
 - Build tools: C compiler and build tools (Xcode CLT on macOS, build-essential on Linux, MSVC on Windows)
 - External Tools (NOT included):
-  - `dovi_tool`: Required for final RPU generation. Download from [quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool/releases) and place in your PATH.
-  - `hdr10plus_tool`: Required for HDR10+ analysis. Download from [quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool/releases) and place in your PATH.
+  - `dovi_tool`: Required for final RPU generation and injection. Version 2.3.2 or newer is recommended because 2.3.2 fixes duplicated end-padding metadata in `inject-rpu`. Download from [quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool/releases) and place in your PATH.
+  - `hdr10plus_tool`: Required when processing HDR10+ inputs. Download from [quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool/releases) and place in your PATH.
   - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): Required by `mkvdolby` for final MKV packaging. Install via your OS package manager (`brew install mkvtoolnix`, `apt install mkvtoolnix`, or download from the official site) and ensure it is in your PATH.
 
 ## Automated Releases
@@ -134,7 +142,7 @@ Check the [Releases Page](https://github.com/tinof/hdr-analyze/releases) for the
 
 ### 1. Build the Rust Tools
 
-Clone the repository and build the workspace. This compiles `hdr_analyzer_mvp` (the core analysis engine) and `verifier`.
+Clone the repository and build the workspace. This compiles `hdr_analyzer_mvp`, `mkvdolby`, and `verifier`.
 
 ```bash
 git clone https://github.com/tinof/hdr-analyze.git
@@ -165,11 +173,23 @@ git pull
 cargo build --release --workspace
 ```
 
-### Executables Locations
+### Executable Locations
 
 - Analyzer: `./target/release/hdr_analyzer_mvp`
 - Verifier: `./target/release/verifier`
 - Converter: `./target/release/mkvdolby`
+
+For a local Unix installation from a source checkout:
+
+```bash
+install -Dm755 target/release/hdr_analyzer_mvp "$HOME/.local/bin/hdr_analyzer_mvp"
+install -Dm755 target/release/mkvdolby "$HOME/.local/bin/mkvdolby"
+install -Dm755 target/release/verifier "$HOME/.local/bin/verifier"
+install -Dm755 scripts/mkvdolby_hifi_workflow.sh "$HOME/.local/bin/mkvdolby_hifi_workflow.sh"
+```
+
+`mkvdolby_hifi_workflow.sh` is a specialist comparison helper for regenerating files that already
+contain Dolby Vision metadata. Use `mkvdolby` directly for HDR10+ sources.
 
 ## Usage
 
@@ -237,7 +257,7 @@ Noise robustness for grainy content:
 
 # Tweak target_nits smoothing (enabled by default)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --target-smoother off
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --smoother-alpha 0.1 --smoother-bidirectional false
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --smoother-alpha 0.1
 
 # Native HLG content handling (auto-detected, override peak if desired)
 ./target/release/hdr_analyzer_mvp -i "hlg_video.mkv" -o "out.bin" --hlg-peak-nits 1200
@@ -251,7 +271,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" 
 
 ### mkvdolby (Conversion Tool)
 
-The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG input to a Profile 8.1-compatible MKV with Content Mapping v4.0 metadata. Internally it calls `dovi_tool` and `mkvmerge` — these must be installed separately (see Prerequisites).
+The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG input to a Profile 8.1-compatible MKV with Content Mapping v4.0 metadata. Internally it calls `dovi_tool`, `mkvmerge`, and `hdr10plus_tool` for HDR10+ sources; these must be installed separately (see Prerequisites).
 
 ```bash
 # Basic usage (converts all MKV files in current directory)
@@ -261,10 +281,10 @@ mkvdolby
 mkvdolby "input.mkv"
 
 # Automatic Cleanup (Default Behavior)
-# By default, mkvdolby deletes the source file and intermediate artifacts (.measurements, Details.txt)
-# after a successful conversion to save space.
+# By default, mkvdolby deletes the source file after successful conversion.
+# Temporary extraction artifacts are also removed.
 
-# To keep the source file and all intermediate files:
+# Keep the source file for A/B testing:
 mkvdolby "input.mkv" --keep-source
 
 # Additional flags
@@ -284,6 +304,36 @@ mkvdolby "input.mkv" --verbose
 mkvdolby "input.mkv" --quiet
 ```
 
+#### HDR10+ Peak Mapping
+
+For HDR10+ input, `mkvdolby` forwards the selected peak source to
+`dovi_tool generate --hdr10plus-peak-source`:
+
+- `histogram` is the default and recommended balanced baseline.
+- `histogram99` uses the last HDR10+ histogram percentile, usually 99.98%, and is available
+  explicitly with `--boost` when a brighter mapping is desired.
+- `max-scl` uses the largest RGB MaxSCL component and is more sensitive to channel highlights
+  and outliers.
+- `max-scl-luminance` calculates luminance from MaxSCL components and can look dimmer.
+
+The standard neutral L2 compatibility trim targets remain `100,600,1000`. They are not a
+panel-calibration control: do not replace them with your TV's measured peak brightness. A Dolby
+Vision-capable display applies its own display mapping.
+
+For movie or episodic HDR10+ content on an LG OLED C9-class display, start with the defaults and
+preserve the source for A/B testing:
+
+```bash
+mkvdolby --keep-source --verify "input.mkv"
+```
+
+Use `--boost` only as an intentional brighter alternative after comparing the default output.
+For playback troubleshooting, start with the TV's Dolby Vision **Cinema** picture mode and enable
+**Ultra HD Deep Color** for the Shield HDMI input. Avoid using **Cinema Home** as the diagnostic
+baseline: it is brighter, but it can raise blacks in dark scenes. On Shield, enable Dolby Vision
+under **Settings > Device Preferences > Display & Sound > Dolby Vision**; if necessary, choose a
+custom display mode labelled **Dolby Vision Ready**.
+
 #### Progress Indicators
 
 mkvdolby provides visual feedback for all operations:
@@ -294,15 +344,15 @@ mkvdolby provides visual feedback for all operations:
 
 #### CM v4.0 Metadata Options (New)
 
-mkvdolby now generates Content Mapping v4.0 metadata by default, which includes enhanced dynamic tone mapping (L8/L9/L11) for better picture quality on modern displays.
+mkvdolby now generates Content Mapping v4.0 metadata by default. HDR10+ inputs derive L1 brightness metadata from the source HDR10+ scenes, while CM v4.0 adds L9/L11 metadata and `dovi_tool` CM v4 defaults alongside the CM v2.9-compatible L2/L6 blocks.
 
 ```bash
 # Default: CM v4.0 with auto-detected settings
 mkvdolby "input.mkv"
 
-# Specify content type (affects display tone mapping)
-mkvdolby "input.mkv" --content-type film      # For cinema/24fps content
-mkvdolby "input.mkv" --content-type animation # For animated content
+# Specify Dolby Vision IQ content type metadata when needed
+mkvdolby "input.mkv" --content-type movies # Preserve movie artistic intent
+mkvdolby "input.mkv" --content-type sport  # High-motion sports content
 
 # Use legacy CM v2.9 if needed
 mkvdolby "input.mkv" --cm-version v29
@@ -313,11 +363,16 @@ mkvdolby "input.mkv" --source-primaries 2  # 0=P3-D65, 1=BT.709, 2=BT.2020
 
 **CM v4.0 metadata levels generated:**
 
-- **L1**: Per-frame min/mid/max luminance (from HDR10+ or hdr_analyzer)
-- **L2**: Trim parameters for 100/600/1000 nit displays
+- **L1**: Scene min/mid/max luminance (from HDR10+ or hdr_analyzer)
+- **L2**: Neutral compatibility trim parameters for 100/600/1000 nit displays
 - **L6**: Static mastering display metadata
-- **L9**: Source color primaries (auto-detected)
-- **L11**: Content type and reference mode
+- **L9**: Mastering-display color primaries (auto-detected)
+- **L11**: Dolby Vision IQ content type and reference mode
+- **L254**: Default CM v4.0 algorithm metadata (added by dovi_tool)
+
+`mkvdolby` does not synthesize L3 offsets or creative L8 trims. With `dovi_tool` 2.3.2, the
+generator adds its default L254 block; producing authored offsets or trims requires a separate
+workflow.
 
 ### Verifier
 
