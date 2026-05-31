@@ -76,6 +76,12 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = OptimizerProfile::Conservative)]
     pub optimizer_profile: OptimizerProfile,
 
+    /// Analysis quality for HDR10/HLG sources.
+    /// fast = half-res, every 3rd frame (old default); balanced = half-res, every frame;
+    /// accurate = full-res, every frame (slowest but most precise L1).
+    #[arg(long, value_enum, default_value_t = AnalysisQuality::Balanced)]
+    pub analysis_quality: AnalysisQuality,
+
     /// Keep the source file after successful conversion (by default it is deleted).
     #[arg(long)]
     pub keep_source: bool,
@@ -208,4 +214,17 @@ impl std::fmt::Display for OptimizerProfile {
             OptimizerProfile::Aggressive => write!(f, "aggressive"),
         }
     }
+}
+
+/// Controls the resolution and frame-sampling rate of the hdr_analyzer_mvp pass.
+/// Higher quality = more accurate per-scene L1 luminance, at the cost of analysis time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum AnalysisQuality {
+    /// Half-resolution, every 3rd frame — fastest; may miss brief peak frames.
+    Fast,
+    /// Half-resolution, every frame — good balance of speed and accuracy.
+    #[default]
+    Balanced,
+    /// Full resolution, every frame — most accurate L1; significantly slower.
+    Accurate,
 }

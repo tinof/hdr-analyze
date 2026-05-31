@@ -1,12 +1,14 @@
-use std::fs;
+use std::collections::HashSet;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
 use colored::Colorize;
+use serde_json::Value;
 
-use crate::cli::{Args, CmVersion, Encoder, HwAccel, PeakSource};
+use crate::cli::{AnalysisQuality, Args, CmVersion, Encoder, HwAccel, PeakSource};
 use crate::external::{self, run_command_with_spinner};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
@@ -215,6 +217,25 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
     }
 
+    // Warn when generated HDR10+ scene L1 peaks look suspicious. This is advisory:
+    // valid sources can contain outliers, so never clamp them silently.
+    if let (Some(metadata_path), Some(&max_dml)) =
+        (hdr10plus_json.as_deref(), static_meta.get("max_dml"))
+    {
+        match inspect_hdr10plus_scene_peaks(metadata_path, args.peak_source, max_dml * 3.0) {
+            Ok(Some(stats)) => progress::print_warn(&format!(
+                "{} HDR10+ scene(s) produce L1 peaks above 3× the mastering display peak \
+                 ({:.0} nits); highest selected peak is {:.0} nits. Review the source metadata \
+                 and compare --peak-source modes before deciding whether to use an opt-in clamp.",
+                stats.outlier_scene_count, max_dml, stats.max_peak_nits
+            )),
+            Ok(None) => {}
+            Err(e) => progress::print_warn(&format!(
+                "Could not inspect extracted HDR10+ scene peaks: {e}"
+            )),
+        }
+    }
+
     // Generate extra.json
     let extra_json_path = temp_dir.join("extra.json");
     let final_trims: Vec<u32> = args
@@ -335,11 +356,16 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     if args.verify {
         progress::print_info("Running post-mux verification (--verify)...");
         let measurements_file_path = measurements_file.clone();
-        let ok = crate::verify::verify_post_mux(
+        let expected_cm = match args.cm_version {
+            CmVersion::V40 => Some("V40"),
+            CmVersion::V29 => None,
+        };
+        let ok = crate::verify::verify_post_mux_with_options(
             input_file,
             &output_file,
             measurements_file_path.as_deref(),
             &temp_dir,
+            expected_cm,
         );
         if !ok {
             progress::print_error("Inconsistencies detected during verification.");
@@ -398,10 +424,11 @@ fn run_hdr_analyzer(
     let stem = Path::new(input).file_stem().unwrap().to_string_lossy();
     let out_path = dir.join(format!("{}_measurements.bin", stem));
 
+    let (downscale, sample_rate) = analysis_quality_args(args.analysis_quality);
+
     let mut cmd = Command::new(&exe);
     cmd.arg(input).arg("-o").arg(&out_path);
-    // Fast mode defaults
-    cmd.args(["--downscale", "2", "--sample-rate", "3"]);
+    cmd.args(["--downscale", downscale, "--sample-rate", sample_rate]);
     cmd.args(extra_args);
 
     if args.hwaccel != HwAccel::None {
@@ -415,6 +442,115 @@ fn run_hdr_analyzer(
         return Ok(Some(out_path));
     }
     Ok(None)
+}
+
+fn analysis_quality_args(quality: AnalysisQuality) -> (&'static str, &'static str) {
+    match quality {
+        AnalysisQuality::Fast => ("2", "3"),
+        AnalysisQuality::Balanced => ("2", "1"),
+        AnalysisQuality::Accurate => ("1", "1"),
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct Hdr10PlusPeakStats {
+    max_peak_nits: f64,
+    outlier_scene_count: usize,
+}
+
+fn inspect_hdr10plus_scene_peaks(
+    metadata_path: &Path,
+    peak_source: PeakSource,
+    outlier_threshold_nits: f64,
+) -> Result<Option<Hdr10PlusPeakStats>> {
+    let metadata: Value = serde_json::from_reader(
+        File::open(metadata_path).context("Failed to open extracted HDR10+ metadata JSON")?,
+    )
+    .context("Failed to parse extracted HDR10+ metadata JSON")?;
+    hdr10plus_scene_peak_stats(&metadata, peak_source, outlier_threshold_nits)
+}
+
+fn hdr10plus_scene_peak_stats(
+    metadata: &Value,
+    peak_source: PeakSource,
+    outlier_threshold_nits: f64,
+) -> Result<Option<Hdr10PlusPeakStats>> {
+    let scene_info = metadata
+        .get("SceneInfo")
+        .and_then(Value::as_array)
+        .context("HDR10+ metadata is missing SceneInfo")?;
+    let first_frame_indices = metadata
+        .pointer("/SceneInfoSummary/SceneFirstFrameIndex")
+        .and_then(Value::as_array)
+        .context("HDR10+ metadata is missing SceneInfoSummary.SceneFirstFrameIndex")?;
+    let first_frame_offset = first_frame_indices
+        .first()
+        .and_then(Value::as_u64)
+        .context("HDR10+ metadata has no scene first-frame indices")?;
+
+    let mut outlier_scenes = HashSet::new();
+    let mut max_peak_nits = 0.0_f64;
+    for scene_index in first_frame_indices {
+        let source_index = scene_index
+            .as_u64()
+            .context("HDR10+ scene first-frame index is not an integer")?;
+        let relative_index = source_index
+            .checked_sub(first_frame_offset)
+            .context("HDR10+ scene first-frame index precedes the first scene")?;
+        let scene = scene_info
+            .get(relative_index as usize)
+            .context("HDR10+ scene first-frame index is out of range")?;
+        let peak_nits = hdr10plus_peak_nits(scene, peak_source)
+            .context("HDR10+ scene is missing peak-brightness metadata")?;
+
+        if peak_nits > outlier_threshold_nits {
+            outlier_scenes.insert(source_index);
+            max_peak_nits = max_peak_nits.max(peak_nits);
+        }
+    }
+
+    if outlier_scenes.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(Hdr10PlusPeakStats {
+            max_peak_nits,
+            outlier_scene_count: outlier_scenes.len(),
+        }))
+    }
+}
+
+fn hdr10plus_peak_nits(scene: &Value, peak_source: PeakSource) -> Option<f64> {
+    let luminance = scene.get("LuminanceParameters")?;
+    let tenths_of_a_nit = match peak_source {
+        PeakSource::Histogram => luminance
+            .pointer("/LuminanceDistributions/DistributionValues")?
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_u64)
+            .max()? as f64,
+        PeakSource::Histogram99 => luminance
+            .pointer("/LuminanceDistributions/DistributionValues")?
+            .as_array()?
+            .last()?
+            .as_u64()? as f64,
+        PeakSource::MaxScl => luminance
+            .get("MaxScl")?
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_u64)
+            .max()? as f64,
+        PeakSource::MaxSclLuminance => {
+            let max_scl = luminance.get("MaxScl")?.as_array()?;
+            let [r, g, b] = max_scl.as_slice() else {
+                return None;
+            };
+            (0.2627 * r.as_u64()? as f64)
+                + (0.678 * g.as_u64()? as f64)
+                + (0.0593 * b.as_u64()? as f64)
+        }
+    };
+
+    Some(tenths_of_a_nit / 10.0)
 }
 
 fn extract_hdr10plus_metadata(input: &str, temp_dir: &Path) -> Result<Option<PathBuf>> {
@@ -632,5 +768,65 @@ fn generate_rpu(
         Ok(Some(rpu_out))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn analysis_quality_maps_to_analyzer_sampling_args() {
+        assert_eq!(analysis_quality_args(AnalysisQuality::Fast), ("2", "3"));
+        assert_eq!(analysis_quality_args(AnalysisQuality::Balanced), ("2", "1"));
+        assert_eq!(analysis_quality_args(AnalysisQuality::Accurate), ("1", "1"));
+    }
+
+    #[test]
+    fn hdr10plus_outlier_stats_use_selected_scene_peak_source() {
+        let metadata = json!({
+            "SceneInfo": [
+                {
+                    "LuminanceParameters": {
+                        "LuminanceDistributions": { "DistributionValues": [100, 35000] },
+                        "MaxScl": [1000, 1100, 1200]
+                    }
+                },
+                {
+                    "LuminanceParameters": {
+                        "LuminanceDistributions": { "DistributionValues": [100, 20000] },
+                        "MaxScl": [1000, 1100, 1200]
+                    }
+                }
+            ],
+            "SceneInfoSummary": { "SceneFirstFrameIndex": [0, 1] }
+        });
+
+        assert_eq!(
+            hdr10plus_scene_peak_stats(&metadata, PeakSource::Histogram, 3000.0).unwrap(),
+            Some(Hdr10PlusPeakStats {
+                max_peak_nits: 3500.0,
+                outlier_scene_count: 1,
+            })
+        );
+        assert_eq!(
+            hdr10plus_scene_peak_stats(&metadata, PeakSource::MaxScl, 3000.0).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn hdr10plus_max_scl_luminance_matches_upstream_weighting() {
+        let scene = json!({
+            "LuminanceParameters": {
+                "LuminanceDistributions": { "DistributionValues": [100] },
+                "MaxScl": [1000, 2000, 3000]
+            }
+        });
+
+        let peak_nits = hdr10plus_peak_nits(&scene, PeakSource::MaxSclLuminance).unwrap();
+
+        assert!((peak_nits - 179.66).abs() < 1e-9);
     }
 }

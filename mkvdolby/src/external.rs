@@ -9,45 +9,30 @@ use std::thread;
 
 use crate::progress::{self, Spinner};
 
-/// Find a specific tool, checking local directory first, then PATH.
+/// Find a specific tool on PATH.
 pub fn find_tool(tool_name: &str) -> Option<PathBuf> {
-    // 1. Check current directory
-    let local_path = Path::new(".").join(tool_name);
-    if local_path.exists() {
-        // Simple check, on unix we might wanna check executable bit but simple existence is usually enough
-        return Some(local_path);
-    }
-
-    // 2. Check PATH
-    // "which" command is a simple cross-platform way if we don't want extra deps,
-    // or just try to spawn it.
-    // However, explicit checking is better for error messages.
-    // For simplicity without 'which' crate:
-    if Command::new("which")
+    let locator = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    let output = Command::new(locator)
         .arg(tool_name)
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-    {
-        return Some(PathBuf::from(tool_name));
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
     }
 
-    // Windows fallback
-    if cfg!(target_os = "windows")
-        && Command::new("where")
-            .arg(tool_name)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    {
-        return Some(PathBuf::from(tool_name));
-    }
-
-    None
+    String::from_utf8(output.stdout)
+        .ok()?
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Run a command and log its output to a file.

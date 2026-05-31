@@ -223,12 +223,7 @@ fn classify_hdr_hints(hints: &str, measurements: bool) -> Option<HdrFormat> {
 }
 
 pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
-    let mut meta = HashMap::new();
-    // Default values
-    meta.insert("max_dml".to_string(), 1000.0);
-    meta.insert("min_dml".to_string(), 0.0050);
-    meta.insert("max_cll".to_string(), 1000.0);
-    meta.insert("max_fall".to_string(), 400.0);
+    let mut meta: HashMap<String, f64> = HashMap::new();
 
     // Try MediaInfo
     if let Ok(json) = get_mediainfo_json(input_file) {
@@ -290,16 +285,12 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
         }
     }
 
-    // Details.txt override
+    // Details.txt override (MaxCLL/MaxFALL only; mastering display comes from container metadata)
     if let Some(details_path) = find_details_file(Path::new(input_file)) {
         if let Ok(content) = std::fs::read_to_string(details_path) {
-            // simplified regex parsing for details.txt
             let re_cll = Regex::new(r"(?i)MaxCLL\s*:\s*([0-9.,]+)").unwrap();
             let re_fall = Regex::new(r"(?i)MaxFALL\s*:\s*([0-9.,]+)").unwrap();
 
-            // Very loose parsing, but matching python script is key.
-            // Python script logic is detailed (after clipping vs before), we simplify for M1.
-            // TODO: Make this robust.
             if let Some(caps) = re_cll.captures(&content) {
                 let s = caps[1].replace(',', ".");
                 if let Ok(v) = s.parse::<f64>() {
@@ -315,16 +306,53 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
         }
     }
 
+    // Warn for any values that could not be sourced from file metadata, then apply fallbacks.
+    // These warnings matter: the display will build its tone-mapping from these values.
+    let fallbacks: &[(&str, f64, &str)] = &[
+        (
+            "max_dml",
+            1000.0,
+            "mastering display peak luminance (L6 MaxDML)",
+        ),
+        (
+            "min_dml",
+            0.005,
+            "mastering display min luminance (L6 MinDML)",
+        ),
+        ("max_cll", 1000.0, "MaxCLL (L6)"),
+        ("max_fall", 400.0, "MaxFALL (L6)"),
+    ];
+    for &(key, default, label) in fallbacks {
+        if !meta.contains_key(key) {
+            eprintln!(
+                "WARNING: {} not found in source metadata; using default {:.4} nits for the Dolby Vision L6 block. \
+                 Use mediainfo to verify the source has mastering display / light-level metadata.",
+                label, default
+            );
+            meta.insert(key.to_string(), default);
+        }
+    }
+
     meta
 }
 
 /// Detect source mastering-display primaries from MediaInfo.
-#[allow(dead_code)]
+/// Warns and returns BT.2020 (index 2) when primaries cannot be determined.
 pub fn detect_source_primaries(input_file: &str) -> u8 {
-    get_mediainfo_json(input_file)
+    match get_mediainfo_json(input_file)
         .ok()
         .and_then(|json| detect_source_primaries_from_mediainfo(&json))
-        .unwrap_or(2) // Default: BT.2020
+    {
+        Some(idx) => idx,
+        None => {
+            eprintln!(
+                "WARNING: Source color primaries not detected from MediaInfo; \
+                 defaulting to BT.2020 (L9 index 2). \
+                 Use --source-primaries 0 to override if content was mastered on P3-D65."
+            );
+            2
+        }
+    }
 }
 
 fn detect_source_primaries_from_mediainfo(json: &Value) -> Option<u8> {
@@ -372,18 +400,24 @@ pub fn generate_extra_json(
     trim_targets: &[u32],
     cm_v40_config: Option<&CmV40Config>,
 ) -> Result<()> {
-    let min_dml = metadata.get("min_dml").unwrap_or(&0.005);
-    let max_dml = metadata.get("max_dml").unwrap_or(&1000.0);
-    let max_cll = metadata.get("max_cll").unwrap_or(&1000.0);
-    let max_fall = metadata.get("max_fall").unwrap_or(&400.0);
+    let required = |key| {
+        metadata
+            .get(key)
+            .copied()
+            .with_context(|| format!("Missing required static metadata value: {key}"))
+    };
+    let min_dml = required("min_dml")?;
+    let max_dml = required("max_dml")?;
+    let max_cll = required("max_cll")?;
+    let max_fall = required("max_fall")?;
 
     let mut json_content = json!({
         "profile": "8.1",
         "level6": {
-            "max_display_mastering_luminance": *max_dml as u32,
-            "min_display_mastering_luminance": (*min_dml * 10000.0) as u32,
-            "max_content_light_level": *max_cll as u32,
-            "max_frame_average_light_level": *max_fall as u32,
+            "max_display_mastering_luminance": max_dml as u32,
+            "min_display_mastering_luminance": (min_dml * 10000.0) as u32,
+            "max_content_light_level": max_cll as u32,
+            "max_frame_average_light_level": max_fall as u32,
         }
     });
 
@@ -583,6 +617,16 @@ mod tests {
         assert_eq!(blocks[3]["Level9"]["source_primary_index"], 0);
         assert_eq!(blocks[4]["Level11"]["content_type"], 1);
         assert_eq!(blocks[4]["Level11"]["reference_mode_flag"], false);
+    }
+
+    #[test]
+    fn json_generation_rejects_missing_static_metadata() {
+        let output = tempfile::NamedTempFile::new().unwrap();
+        let metadata = HashMap::new();
+
+        let error = generate_extra_json(output.path(), &metadata, &[], None).unwrap_err();
+
+        assert!(error.to_string().contains("min_dml"));
     }
 
     #[test]
