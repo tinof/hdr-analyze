@@ -29,7 +29,7 @@ Please provide detailed steps to reproduce the behavior:
 **Command Used**
 ```bash
 # Paste the exact command you ran here
-./target/release/hdr_analyzer_mvp -i "input.mkv" -o "output.bin" --enable-optimizer
+./target/release/hdr_analyzer_mvp -i "input.mkv" -o "output.bin"
 ```
 
 ## System Information

@@ -137,6 +137,8 @@ This is a personal research project, shared as-is under the MIT license. Issues 
 
 Binaries for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux** are automatically built and released on GitHub.
 Check the [Releases Page](https://github.com/tinof/hdr-analyze/releases) for the latest versions.
+Unix release archives also include `mkvdolby_hifi_workflow.sh`, the specialist
+comparison helper for sources that already contain Dolby Vision metadata.
 
 ## Installation & Setup
 
@@ -302,6 +304,11 @@ mkvdolby "input.mkv" --verbose
 
 # Quiet mode: minimal output (only errors and final result)
 mkvdolby "input.mkv" --quiet
+
+# HDR10/HLG analysis quality: balanced is the default
+mkvdolby "input.mkv" --analysis-quality fast
+mkvdolby "input.mkv" --analysis-quality balanced
+mkvdolby "input.mkv" --analysis-quality accurate
 ```
 
 #### HDR10+ Peak Mapping
@@ -328,6 +335,9 @@ mkvdolby --keep-source --verify "input.mkv"
 ```
 
 Use `--boost` only as an intentional brighter alternative after comparing the default output.
+When the selected HDR10+ peak source produces scene L1 peaks above three times the mastering
+display peak, `mkvdolby` warns and leaves the source metadata unchanged. This is advisory because
+real sources can contain valid outliers; `mkvdolby` never clamps peaks silently.
 For playback troubleshooting, start with the TV's Dolby Vision **Cinema** picture mode and enable
 **Ultra HD Deep Color** for the Shield HDMI input. Avoid using **Cinema Home** as the diagnostic
 baseline: it is brighter, but it can raise blacks in dark scenes. On Shield, enable Dolby Vision
@@ -374,6 +384,19 @@ mkvdolby "input.mkv" --source-primaries 2  # 0=P3-D65, 1=BT.709, 2=BT.2020
 generator adds its default L254 block; producing authored offsets or trims requires a separate
 workflow.
 
+#### Post-Mux Verification
+
+Pass `--verify` to validate the generated file before cleanup:
+
+```bash
+mkvdolby --keep-source --verify "input.mkv"
+```
+
+For HDR10/HLG sources with a measurements file, `mkvdolby` resolves the installed `verifier`
+from `PATH`. It then extracts the final RPU and validates structured `dovi_tool info --frame 0`
+JSON: Profile 8, ordered L1 values, sane L6 metadata, and required L9/L11/L254 blocks for CM v4.0.
+Missing source L6 fields or L9 primaries are reported when warned fallbacks are used.
+
 ### Verifier
 
 ```bash
@@ -415,7 +438,7 @@ Verifier reports:
 - `--optimizer-profile <conservative|balanced|aggressive>`: Optimizer behavior preset (default: balanced)
 - `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
 
-### Noise Robustness (New in v1.4)
+### Noise Robustness
 
 - `--peak-source <max|histogram99|histogram999>`: Peak brightness source (default: histogram99 for balanced/aggressive, max for conservative)
   - `max`: Direct max from Y-plane (most responsive to noise)
@@ -434,7 +457,8 @@ Verifier reports:
 
 Notes for v6 output:
 
-- Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently duplicated from BT.2020 (`peak_pq_2020`) as a compatibility placeholder. Proper per-gamut computation is planned.
+- Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently approximated from BT.2020
+  (`peak_pq_2020`) using 99% and 95% factors. More exact gamut-aware computation remains planned.
 
 ## Quick Start Validation
 
@@ -497,7 +521,8 @@ Expected:
 
   Configuration lives in `.pre-commit-config.yaml`. Hooks run `cargo fmt --check` and `cargo clippy -D warnings` before commit.
 
-- Pinned toolchain: rustc, clippy, and rustfmt are pinned via `rust-toolchain.toml` for reproducible CI/dev builds.
+- Toolchain: `rust-toolchain.toml` selects stable Rust with clippy, rustfmt, and the configured
+  cross-compilation targets.
 
 ## Roadmap
 
