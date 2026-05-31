@@ -18,6 +18,26 @@ fn test_missing_input_shows_usage() {
 }
 
 #[test]
+fn test_help_flag() {
+    verifier_cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Validate a madVR measurement file",
+        ));
+}
+
+#[test]
+fn test_version_flag() {
+    verifier_cmd()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verifier 0.2.0"));
+}
+
+#[test]
 fn test_nonexistent_file() {
     verifier_cmd()
         .arg("nonexistent_file.bin")

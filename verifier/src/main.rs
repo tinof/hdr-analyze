@@ -4,8 +4,8 @@
 //! their contents and verifying the format integrity.
 
 use anyhow::{Context, Result};
+use clap::Parser;
 use madvr_parse::{MadVRFrame, MadVRMeasurements, MadVRScene};
-use std::env;
 use std::fs;
 
 // --- Constants for PQ Conversion ---
@@ -28,14 +28,16 @@ fn pq_to_nits(pq: f64) -> f64 {
     y * ST2084_Y_MAX
 }
 
-fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <measurement_file.bin>", args[0]);
-        std::process::exit(1);
-    }
+#[derive(clap::Parser)]
+#[command(version, about = "Validate a madVR measurement file")]
+struct Args {
+    /// Path to the madVR measurement file to validate.
+    measurement_file: String,
+}
 
-    let file_path = &args[1];
+fn main() -> Result<()> {
+    let args = Args::parse();
+    let file_path = &args.measurement_file;
     println!("Verifying measurement file: {}", file_path);
 
     let (scenes, frames, has_optimizer, header) = read_measurement_file(file_path)?;

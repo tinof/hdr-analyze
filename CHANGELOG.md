@@ -4,6 +4,34 @@ This document provides a historical record of completed milestones, feature impl
 
 ---
 
+## [0.2.0] - 2026-05-31
+
+Quality and observability release for native HDR10, HDR10+, and HLG to Dolby
+Vision conversion.
+
+### Highlights
+- Corrected HDR10+ peak-source defaults and metadata generation for balanced
+  Dolby Vision Profile 8.1 output.
+- Added `mkvdolby --analysis-quality <fast|balanced|accurate>` with a new
+  balanced default that analyzes every frame at half resolution.
+- Added warnings when L6 metadata or L9 source primaries require fallbacks.
+- Added advisory warnings when selected HDR10+ scene peaks exceed three times
+  the mastering-display peak. Outliers are never clamped silently.
+- Hardened `mkvdolby --verify`: installed tools are resolved from `PATH`, and
+  post-mux RPU frame JSON is checked for Profile 8, ordered L1 values, sane L6,
+  and required CM v4.0 L9/L11/L254 blocks.
+
+### Documentation
+- Clarified that generated L2 blocks are neutral compatibility trims, not panel
+  calibration controls.
+- Clarified that authored L8 creative trims remain outside the default
+  conversion workflow.
+- Documented the specialist scope of `scripts/mkvdolby_hifi_workflow.sh`.
+- Fixed release archive naming so the one-line installers fetch the uploaded
+  versioned assets, and included the specialist helper in Unix archives.
+
+---
+
 ## [0.1.0] - 2026-01-23
 
 First public release of the HDR-Analyze suite.

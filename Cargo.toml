@@ -5,6 +5,7 @@ members = [
     "mkvdolby",
     "verifier",
 ]
+exclude = ["tools/compare_baseline"]
 
 [profile.release]
 lto = "fat"

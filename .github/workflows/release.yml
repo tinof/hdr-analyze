@@ -38,9 +38,9 @@ jobs:
             
             | Tool | Description |
             |------|-------------|
-            | `hdr_analyzer_mvp` | HDR10+ metadata analyzer and measurement extractor |
-            | `mkvdolby` | Dolby Vision metadata processor for MKV files |
-            | `verifier` | Binary file verification utility |
+            | `hdr_analyzer_mvp` | HDR10/HLG frame analyzer and measurement generator |
+            | `mkvdolby` | HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 converter |
+            | `verifier` | madVR measurement file verification utility |
             
             ### 📦 Download
             
@@ -68,18 +68,17 @@ jobs:
             ### ⚙️ Prerequisites
             
             - **FFmpeg** must be installed and available in your system PATH
+            - **mkvdolby** also requires `mkvmerge`, `dovi_tool` 2.3.2 or newer,
+              and `hdr10plus_tool` when converting HDR10+ sources
             
             ### 🚀 Quick Start
             
             ```bash
-            # HDR10+ Analysis
+            # HDR10 analysis
             ./hdr_analyzer_mvp -i input.mkv -o measurements.bin
             
-            # With advanced optimizer
-            ./hdr_analyzer_mvp -i input.mkv -o measurements.bin --enable-optimizer
-            
-            # Process Dolby Vision metadata
-            ./mkvdolby --help
+            # Convert to Dolby Vision while preserving the source for A/B testing
+            ./mkvdolby --keep-source --verify input.mkv
             
             # Verify binary files
             ./verifier --help
@@ -87,6 +86,10 @@ jobs:
             
             ### 📝 What's New
             
+            - Balanced-by-default HDR analysis quality presets
+            - Explicit warnings for metadata fallbacks and suspicious HDR10+ scene peaks
+            - Structured post-mux Dolby Vision RPU verification
+
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for detailed changes.
             
             ### 🆘 Support
@@ -120,16 +123,12 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
-            archive_name: hdr-analyze-x86_64-unknown-linux-gnu.tar.gz
           - target: x86_64-apple-darwin
             os: macos-15-intel
-            archive_name: hdr-analyze-x86_64-apple-darwin.tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
-            archive_name: hdr-analyze-aarch64-apple-darwin.tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            archive_name: hdr-analyze-x86_64-pc-windows-msvc.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -207,6 +206,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/hdr_analyzer_mvp" "$staging/bin/"
           cp "target/${{ matrix.target }}/release/mkvdolby" "$staging/bin/"
           cp "target/${{ matrix.target }}/release/verifier" "$staging/bin/"
+          cp scripts/mkvdolby_hifi_workflow.sh "$staging/bin/"
           
           # Copy documentation
           cp README.md "$staging/" 2>/dev/null || echo "README not found"
@@ -214,8 +214,9 @@ jobs:
           cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE not found"
           
           # Create archive
-          tar czf "${{ matrix.archive_name }}" "$staging"
-          echo "ASSET=${{ matrix.archive_name }}" >> $GITHUB_ENV
+          asset="hdr-analyze-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
+          tar czf "$asset" "$staging"
+          echo "ASSET=$asset" >> $GITHUB_ENV
 
       - name: Build Archive (Windows)
         if: runner.os == 'Windows'
@@ -236,8 +237,9 @@ jobs:
           cp LICENSE "$staging/" 2>/dev/null || echo "LICENSE not found"
           
           # Create archive
-          7z a "${{ matrix.archive_name }}" "$staging"
-          echo "ASSET=${{ matrix.archive_name }}" >> $GITHUB_ENV
+          asset="hdr-analyze-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          7z a "$asset" "$staging"
+          echo "ASSET=$asset" >> $GITHUB_ENV
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
@@ -335,7 +337,8 @@ jobs:
             ├── bin/
             │   ├── hdr_analyzer_mvp
             │   ├── mkvdolby
-            │   └── verifier
+            │   ├── verifier
+            │   └── mkvdolby_hifi_workflow.sh (Linux/macOS)
             ├── README.md
             ├── CHANGELOG.md
             └── LICENSE

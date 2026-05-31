@@ -86,7 +86,7 @@ download_and_install() {
     fi
 
     info "Installing to ${INSTALL_DIR}..."
-    for binary in hdr_analyzer_mvp mkvdolby verifier; do
+    for binary in hdr_analyzer_mvp mkvdolby verifier mkvdolby_hifi_workflow.sh; do
         if [[ -f "${bin_dir}/${binary}" ]]; then
             cp "${bin_dir}/${binary}" "$INSTALL_DIR/"
             chmod +x "${INSTALL_DIR}/${binary}"
