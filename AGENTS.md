@@ -42,9 +42,13 @@
 
 ## mkvdolby operational gotchas (easy to miss)
 - `mkvdolby` **checks external tools at runtime** (`external::check_dependencies`): requires `ffmpeg`, `mkvmerge`, `dovi_tool`, and either `mediainfo` or `ffprobe`.
+- HDR10+ processing additionally invokes `hdr10plus_tool`; keep it in `PATH` when converting HDR10+ inputs.
+- `dovi_tool` 2.3.2 or newer is recommended: its `inject-rpu` padding fix is used automatically by the existing orchestration call.
 - If no input args are given, it recursively processes `.mkv` files from cwd, skipping `mkvdolby_temp_*` paths and files already ending with `.DV.mkv`.
 - Successful conversion deletes the source input by default; pass `--keep-source` to prevent deletion.
 - For HDR10 without found measurements, it auto-runs `hdr_analyzer_mvp` and currently injects fast defaults `--downscale 2 --sample-rate 3`.
+- For HDR10+ input, `mkvdolby` derives L1 from source HDR10+ metadata; the panel peak is not passed as a `--trim-targets` override.
+- `scripts/mkvdolby_hifi_workflow.sh` is a specialist comparison helper for inputs that already contain Dolby Vision metadata. Use `mkvdolby` directly for HDR10+ sources.
 
 ## Testing quirks
 - Integration tests for `mkvdolby` are environment-dependent:

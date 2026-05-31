@@ -223,12 +223,6 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
-    if args.trim_from_details {
-        if let Some(_details) = metadata::find_details_file(input_path) {
-            // Logic to parse details for trims would go here
-        }
-    }
-
     metadata::generate_extra_json(
         &extra_json_path,
         &static_meta,

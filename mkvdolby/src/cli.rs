@@ -8,19 +8,18 @@ pub struct Args {
     pub input: Vec<String>,
 
     /// Controls the --hdr10plus-peak-source flag in dovi_tool generate.
-    #[arg(long, value_enum, default_value_t = PeakSource::Histogram99)]
+    #[arg(long, value_enum, default_value_t = PeakSource::Histogram)]
     pub peak_source: PeakSource,
 
     /// Comma-separated list of nits values for the Dolby Vision trim pass (e.g., '100,600,1000').
     #[arg(long, default_value = "100,600,1000")]
     pub trim_targets: String,
 
-    /// Derive target_nits automatically from madVR Details.txt (uses real display peak and maximum target nits).
-    /// Enabled by default. Use --no-trim-from-details to disable.
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    /// Legacy no-op retained for CLI compatibility.
+    #[arg(long, hide = true, default_value_t = true, action = clap::ArgAction::Set)]
     pub trim_from_details: bool,
 
-    /// Disable deriving target_nits from Details.txt (Legacy flag support, functionality handled by trim_from_details=false).
+    /// Legacy no-op retained for CLI compatibility.
     #[arg(long, hide = true, action = clap::ArgAction::SetFalse, overrides_with = "trim_from_details")]
     pub no_trim_from_details: bool,
 
@@ -49,7 +48,7 @@ pub struct Args {
     pub verify: bool,
 
     /// Enable a brighter Dolby Vision mapping preset for HDR10+ sources.
-    /// If --peak-source is set to 'max-scl-luminance' or 'histogram', this switches it to 'histogram99'.
+    /// If another --peak-source is selected, this switches it to 'histogram99'.
     #[arg(short, long)]
     pub boost: bool,
 
@@ -62,11 +61,11 @@ pub struct Args {
     pub cm_version: CmVersion,
 
     /// Content type for L11 metadata (affects display tone mapping).
-    #[arg(long, value_enum, default_value_t = ContentType::Cinema)]
+    #[arg(long, value_enum, default_value_t = ContentType::Movies)]
     pub content_type: ContentType,
 
     /// Enable reference mode for L11 (critical/studio viewing environment).
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
     pub reference_mode: bool,
 
     /// Source color primaries index for L9 (0=P3-D65, 1=BT.709, 2=BT.2020). Auto-detected if not set.
@@ -131,12 +130,14 @@ impl std::fmt::Display for Encoder {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum PeakSource {
-    /// Use max-scl from metadata (most conservative; can look dim).
-    MaxSclLuminance,
-    /// Use the max value from histogram (more conservative).
+    /// (Default) Use the max value from histogram metadata.
     Histogram,
-    /// (Default) Use the 99th percentile from histogram (good balance of detail vs brightness).
+    /// Brighter mapping: use the last histogram percentile, usually 99.98% brightness.
     Histogram99,
+    /// Use the max value from the max-scl components.
+    MaxScl,
+    /// Use luminance calculated from max-scl metadata (most conservative; can look dim).
+    MaxSclLuminance,
 }
 
 impl std::fmt::Display for PeakSource {
@@ -144,6 +145,7 @@ impl std::fmt::Display for PeakSource {
         // Map enum variants to string values expected by dovi_tool CLI
         match self {
             PeakSource::MaxSclLuminance => write!(f, "max-scl-luminance"),
+            PeakSource::MaxScl => write!(f, "max-scl"),
             PeakSource::Histogram => write!(f, "histogram"),
             PeakSource::Histogram99 => write!(f, "histogram99"),
         }
@@ -154,7 +156,7 @@ impl std::fmt::Display for PeakSource {
 pub enum CmVersion {
     /// Content Mapping v2.9 (legacy, L1/L2/L5/L6 only)
     V29,
-    /// Content Mapping v4.0 (enhanced tone mapping with L8/L9/L11)
+    /// Content Mapping v4.0 (adds L9/L11 and dovi_tool defaults; authored workflows may add L8)
     #[default]
     V40,
 }
@@ -170,21 +172,19 @@ impl std::fmt::Display for CmVersion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum ContentType {
-    /// Unknown content type
-    Unknown = 0,
-    /// Film (traditional cinema, 24fps)
-    Film = 1,
-    /// Live action (sports, concerts)
-    Live = 2,
-    /// Animation
-    Animation = 3,
-    /// Cinema generic (default for movies)
+    /// Default Dolby Vision playback behavior
+    Default = 0,
+    /// Movies: minimizes post-processing to preserve artistic intent
     #[default]
-    Cinema = 4,
-    /// Gaming content
-    Gaming = 5,
-    /// Graphics/UI
-    Graphics = 6,
+    #[value(alias = "cinema", alias = "film")]
+    Movies = 1,
+    /// Game: minimizes input latency
+    #[value(alias = "gaming")]
+    Game = 2,
+    /// Sport: enables frame rate conversion for high-motion content
+    Sport = 3,
+    /// User-generated content: enables compensating post-processing
+    UserGeneratedContent = 4,
 }
 
 impl ContentType {
