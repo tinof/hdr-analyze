@@ -7,6 +7,30 @@
       "skillPath": "skills/coding-guidelines/SKILL.md",
       "computedHash": "0742312a0de5eb6bd84e093c1815b1db98126130b92713ea5fc2cf902338aa3b"
     },
+    "core-actionbook": {
+      "source": "actionbook/rust-skills",
+      "sourceType": "github",
+      "skillPath": "skills/core-actionbook/SKILL.md",
+      "computedHash": "52f2dc1a62a5a9fe071265e14cd29dc2e6a01492fe7e434af21bcd833d84d541"
+    },
+    "core-agent-browser": {
+      "source": "actionbook/rust-skills",
+      "sourceType": "github",
+      "skillPath": "skills/core-agent-browser/SKILL.md",
+      "computedHash": "e373a42fc0a9b586463bc26c0416b64b43a62bd9e064215fa82ee19c116b9d27"
+    },
+    "core-dynamic-skills": {
+      "source": "actionbook/rust-skills",
+      "sourceType": "github",
+      "skillPath": "skills/core-dynamic-skills/SKILL.md",
+      "computedHash": "7663df4de3177c4ec2395afdb2c5b769cf35b05711040bec1b745c5f94f53fe5"
+    },
+    "core-fix-skill-docs": {
+      "source": "actionbook/rust-skills",
+      "sourceType": "github",
+      "skillPath": "skills/core-fix-skill-docs/SKILL.md",
+      "computedHash": "3794d89554650ac94bc9eef7330bc0806a17b1c907fac9508a1caafbdb7f0d2c"
+    },
     "domain-cli": {
       "source": "actionbook/rust-skills",
       "sourceType": "github",
@@ -174,6 +198,12 @@
       "sourceType": "github",
       "skillPath": "skills/rust-refactor-helper/SKILL.md",
       "computedHash": "614d54b2b16a57965412a3fff048c6d36e6f1535fcbb9ac2cf71e7a987e5a119"
+    },
+    "rust-router": {
+      "source": "actionbook/rust-skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-router/SKILL.md",
+      "computedHash": "787e5244b55d9d943abc49a81318bde7d1bbf88dd43bc60dc58ec74023ba3788"
     },
     "rust-skill-creator": {
       "source": "actionbook/rust-skills",

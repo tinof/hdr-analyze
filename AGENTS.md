@@ -1,5 +1,7 @@
 # AGENTS.md
+# Project Agents
 
+See `.rust-skills/AGENTS.md` for Rust development guidelines.
 ## What this repo actually is
 - Rust workspace with **three shipped binaries**: `hdr_analyzer_mvp`, `mkvdolby`, `verifier`.
 - Workspace members in root `Cargo.toml`: `hdr_analyzer_mvp`, `mkvdolby`, `verifier`.
