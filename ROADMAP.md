@@ -1,90 +1,114 @@
 # HDR-Analyze Roadmap
 
-This document outlines the development roadmap for `hdr-analyze`. It focuses on upcoming features, quality improvements, and long-term goals. For a detailed history of completed work, see [`CHANGELOG.md`](CHANGELOG.md) (noting Milestone 4 features like robust noise handling and scene-aware smoothing are now live).
+This document outlines the development roadmap for `hdr-analyze`: current status, near-term engineering,
+and the long-term path toward **Dolby Vision `cm_analyze` parity**. For completed history, see
+[`CHANGELOG.md`](CHANGELOG.md). For the detailed parity gap analysis and design, see
+[`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md).
 
-> **Versioning**: This project follows [Semantic Versioning](https://semver.org/). 
-> The first public release is `v0.1.0`. During the `0.x` series, minor version bumps may include breaking changes.
+> **North star:** approach the accuracy and feature set of Dolby Vision's `cm_analyze` with a fully
+> open-source, research-based analyzer — experimental, but engineering-grounded. Parity is something we
+> **measure**, never assert.
 
----
-
-## Recently Completed / In Validation (v0.1.0)
-
-The following core features have been implemented and are currently being validated in production:
-
--   **Dolby Vision CM v4.0 (NEW)**: Full Content Mapping v4.0 implementation in mkvdolby with:
-    - L2 trim parameters for 100/600/1000 nit target displays
-    - L9 source primaries (auto-detected from MediaInfo)
-    - L11 content type and reference mode hints
-    - CM v4.0 is now the default for all mkvdolby runs
--   **Dynamic Clipping Heuristics**: Optimizer profiles (`conservative`, `balanced`, `aggressive`) and dynamic knee detection are implemented.
--   **Native HLG Support**: In-memory HLG-to-PQ conversion is active.
--   **Noise Robustness**: Percentile-based peaks (P99/P99.9) and histogram smoothing are live.
--   **NVIDIA CUDA Support**: Added `--hwaccel` flag to `mkvdolby` for accelerated analysis.
--   **Rust 1.93 Toolchain**: Upgraded from pinned 1.82 to stable channel.
+> **Versioning:** [Semantic Versioning](https://semver.org/). During the `0.x` series, minor version
+> bumps may include breaking changes.
 
 ---
 
-## Prioritized Task Order (Next Steps)
+## Conversion Quality (current priority)
 
-The following tasks are prioritized to ship CM v4.0 as a stable product and enable safe future expansion.
+Perfecting HDR10 / HDR10+ / HLG → Dolby Vision conversion is the active focus. Full findings and
+rationale in [`docs/CONVERSION_QUALITY.md`](docs/CONVERSION_QUALITY.md). External tools are current
+(`dovi_tool 2.3.2`, `hdr10plus_tool 1.7.1`).
 
-1.  **Release Packaging & Distribution (Critical)**:
-    -   Update GitHub release workflow to include `mkvdolby` and `verifier` binaries (currently only packages `hdr_analyzer_mvp`).
-    -   Update README documentation to reflect mkvdolby as a core component.
-    -   *Why*: CM v4.0 is implemented but not shipped to users via releases.
+> **Decision:** the default output becomes **source-honest / reference-accurate** — accurate content L1,
+> neutral trims, no optimizer target-nits baked into the RPU; the display does its own mapping. The
+> madMeasureHDR-style per-display optimizer (e.g. "680 nits") becomes an **opt-in `--target-nits`**.
 
-2.  **Benchmark Corpus & CI Integration (Critical)**:
-    -   Establish an official benchmark corpus with ground-truth annotations.
-    -   Add regression tests for CM v4.0 metadata generation.
-    -   Integrate `compare_baseline` and `dovi_tool` smoke tests into CI.
-    -   *Why*: Essential to safely tune complex heuristics without breaking CM v4.0.
-
-3.  **mkvdolby UX Improvements**:
-    -   Add `--dry-run` mode to preview commands without execution.
-    -   Add `--keep-temp` / `--keep-logs` for debugging failed conversions.
-    -   Improve dependency checks (include `hdr10plus_tool` when needed).
-    -   Consider safer defaults (keep source by default, require `--delete-source`).
-
-4.  **Scene Detection (Hybrid Metric)**:
-    -   Implement hybrid scene detection fusing histogram distance with optical flow.
-    -   *Status*: Prototype flag (`--scene-metric hybrid`) falls back to histogram-only.
-
-5.  **madVR v6 Gamut Peaks (Full RGB Conversion)**:
-    -   Replace luminance-based approximation with color-accurate RGB transformation.
+- [ ] **P0 — Verify empirically** *(gate)*: `dovi_tool info` on a generated RPU to confirm exactly what
+  we emit and what `--use-custom-targets` does (= [WS0](docs/CM_ANALYZE_PARITY.md)).
+- [ ] **P1 — Source-honest default**: stop baking optimizer targets by default; consider full-res
+  analysis as the quality-first default.
+- [ ] **P2 — Robust L1 min + true-mean avg** (targets raised blacks) — see [WS1](docs/CM_ANALYZE_PARITY.md).
+- [ ] **P3 — Emit L5 active area** from detected crop (letterbox/levels) — see [WS3](docs/CM_ANALYZE_PARITY.md).
+- [ ] **P4 — `--target-nits` opt-in** display-targeted mode (the 680-nits workflow).
+- [ ] **P5 — Robustness**: `hdr10plus_tool --skip-reorder` fallback; HLG `master-display` primaries →
+  BT.2020; harden L9 detection.
+- [ ] **P6 — Problematic-source detection** (warn + default to the safe path).
 
 ---
 
-## Phase A: madVRhdrMeasure Feature Parity
+## Current Status (v0.2.0)
 
-**Objective**: Achieve feature parity with `madVRhdrMeasure` for key output fidelity metrics.
+Shipped and in validation:
 
--   [ ] **Reference Comparison Harness**: Create an integration test that runs both `hdr-analyze` and `madVRhdrMeasure` on a reference clip and automatically diffs the key statistics (scene boundaries, MaxCLL/FALL, optimizer targets) to within a defined tolerance.
--   [ ] **Long-term Smoothing Audit**: Verify if the V1.4 bidirectional EMA implementation matches the "feel" of the reference tool's temporal stability.
-
----
-
-## Phase B: Dolby Vision `cm_analyze` Parity
-
-**Objective**: Achieve parity with Dolby's `cm_analyze` for professional metadata generation.
-
--   [x] **CM v4.0 Metadata Generation**: Generate L1/L2/L6/L9/L11 metadata via `extra.json` for `dovi_tool`.
--   [ ] **Dolby Vision XML Export**: Direct XML export for DaVinci Resolve and Dolby Metafier compatibility.
--   [ ] **Long-Play / Shot Metadata Mode**: Per-shot analysis with edit-offset handling for dissolves.
--   [ ] **Canvas & Aspect Metadata**: Capture mastering display specs and active image area.
-
----
-
-## Phase C: Novel Research & Quality Enhancements
-
-**Objective**: Explore and implement state-of-the-art techniques to push beyond existing tool capabilities.
-
--   [ ] **Adaptive Scene Detection Research**: Evaluate advanced scene detection methods (e.g., ML-based models like TransNetV2, multi-metric fusion) to eliminate manual threshold tuning.
--   [ ] **Temporal Consistency Modeling**: Prototype a "future-aware" optimizer that uses a larger context window to minimize flicker and create more stable `target_nits`.
+- **Three binaries released** for Linux, macOS (Intel + Apple Silicon), and Windows —
+  `hdr_analyzer_mvp`, `mkvdolby`, `verifier` (plus `mkvdolby_hifi_workflow.sh` on Unix).
+- **Dolby Vision CM v4.0** is the default `mkvdolby` output: L1 (from HDR10+ or `hdr_analyzer_mvp`),
+  neutral L2 compatibility trims, L6, L9 (auto-detected primaries), L11 (content type / reference mode),
+  L254 (via `dovi_tool`).
+- **HDR10+ peak mapping** with corrected `--peak-source` defaults; advisory warnings (never silent
+  clamps) when scene L1 peaks exceed 3× the mastering-display peak.
+- **`--analysis-quality`** presets (`fast` / `balanced` (default) / `accurate`).
+- **`--verify`** post-mux validation hardened (Profile 8, ordered L1, sane L6, required L9/L11/L254).
+- **Noise robustness**: percentile peaks (P99/P99.9), per-bin EMA, temporal median, `median3` denoise.
+- **Native HLG** in-memory HLG→PQ; **NVIDIA CUDA** analysis hint; stable Rust toolchain.
+- **Docs**: README slimmed to a front door; full reference split into `docs/` (CLI, Dolby Vision,
+  technical). Crop single-frame limitation documented (issue #3).
 
 ---
 
-## Future Enhancements
+## Near-term Engineering
 
--   [ ] **Hardware Decode Contexts**: Implement full support for VAAPI and VideoToolbox for hardware-accelerated decoding on Linux and macOS.
-    -   *Status*: **Partial**. `img_convert` pipeline in `mkvdolby` now supports `videotoolbox` encoding on macOS. Decode contexts for analysis are deferred.
--   [ ] **Broader CI Coverage**: Expand CI to build and test on multiple platforms (Linux, macOS, Windows) and run a more comprehensive integration test suite.
+Practical improvements, independent of the parity workstreams below:
+
+1. **Benchmark corpus & CI regression** *(also gates parity — see WS0)*: curated reference clips with
+   ground-truth L1, `dovi_tool` smoke tests, and `tools/compare_baseline` wired into CI.
+2. **Crop detection robustness** (issue [#3](https://github.com/tinof/hdr-analyze/issues/3)): stream-level
+   multi-frame probing instead of trusting the first analyzed frame; per-scene crop as a follow-up.
+3. **mkvdolby UX**: `--dry-run` (preview commands), `--keep-temp` / `--keep-logs` for debugging.
+4. **Hybrid scene metric**: finish `--scene-metric hybrid` (histogram + optical flow); currently a
+   prototype that falls back to histogram-only.
+5. **Hardware decode contexts**: full VAAPI / VideoToolbox *decode* paths (encode via VideoToolbox already
+   works on Apple Silicon).
+
+---
+
+## Path to `cm_analyze` Parity
+
+Dependency-ordered workstreams. Full detail, per-level gap table, and validation methodology in
+[`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md). Nothing claims parity until **WS0** can measure
+it.
+
+- [ ] **WS0 — Validation foundation** *(prerequisite for all parity claims)*: reference corpus from real
+  DV masters (reference L1 via `dovi_tool extract-rpu` + export) and ITU/Dolby test patterns; an L1 diff
+  harness (extending `tools/compare_baseline`) reporting min/avg/max error in PQ; CI smoke comparison.
+- [ ] **WS1 — L1 accuracy**: robust low-percentile **min** (active area, noise-rejected), true
+  full-precision **mean** avg, luminance/**max-RGB peak** (subsumes "v6 full-RGB gamut peaks"), and
+  active-area correctness (consumes the multi-frame crop from issue #3).
+- [ ] **WS2 — Shot model & temporal stability**: per-shot L1 aggregation and an optional L4-style
+  temporal filter / shot anchor; promote the hybrid scene metric once it beats histogram-only on WS0.
+- [ ] **WS3 — L5 active-area emission**: emit correct L5 offsets from the detected crop instead of
+  `dovi_tool` defaults.
+- [ ] **WS4 — L2/L8 trim derivation** *(experimental, opt-in, A/B-gated)*: derive target-display trims
+  from an open tone-mapping baseline (ITU-R BT.2390 EETF). **Neutral L2 stays the default**; non-neutral
+  output ships only if blinded A/B on real content shows it is at least as good as neutral.
+- [ ] **WS5 — Dolby Vision XML export**: DV metadata XML for DaVinci Resolve / Dolby Metafier; doubles as
+  an independent validation/interchange path.
+
+---
+
+## Done
+
+- [x] **CM v4.0 metadata generation** (L1/L2/L6/L9/L11 via `extra.json` for `dovi_tool`) — see
+  [`docs/cmv40_upgrade_implementation_plan.md`](docs/cmv40_upgrade_implementation_plan.md).
+- [x] **Release packaging** of all three binaries; README/docs refresh.
+- [x] **Native HLG**, **noise-robust peaks**, **scene-aware optimizer**, **CUDA analysis hint**.
+
+---
+
+## Explicit Non-Goals
+
+- No proprietary Dolby code, LUTs, tone curves, or binary blobs (see
+  [`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md#7-non-goals--risk-register)).
+- No silent peak clamping (advisory warnings only).
+- No claim of `cm_analyze` parity without WS0 measurements to back it.
