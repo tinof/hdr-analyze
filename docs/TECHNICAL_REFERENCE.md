@@ -82,3 +82,47 @@ Once in the linear domain, the nit values must be binned into the project's exis
 -   **HDR Datasets**:
     -   **LIVE HDR Video Quality Database (UT Austin)**: Provides a collection of high-quality HDR10 clips for testing.
     -   **Netflix Open Content**: Offers several 4K HDR10 demo sequences that serve as realistic test cases.
+
+---
+
+## 4. Implementation Details (as built)
+
+This section documents how the analyzer is actually implemented, moved here from the README to keep
+the front page concise.
+
+### 4.1. 10-bit luminance and the PQ-domain histogram
+
+- Frames are converted/scaled to **YUV420P10LE** for consistent 10-bit luminance (Y-plane) access.
+- Histogram binning follows the v5 layout:
+    -   SDR portion (bins 0–63) and HDR portion (bins 64–255).
+    -   Mid-bin center values are used for the weighted average (APL) estimation.
+    -   Heuristic black-bar filtering on bin 0.
+- The active per-frame analysis path normalizes HDR10 limited-range codes (nominal 64–940) to
+  `[0,1]` before mapping into the v5 histogram bins (aligns with practical HDR10 limited-range
+  content).
+- The average PQ is computed using the same mid-bin approach as consumers of v5 measurements,
+  ensuring consistent values for downstream tooling.
+
+### 4.2. Scene detection
+
+- Histogram distance metric (chi-squared-like, symmetric form) with a small epsilon for stability.
+- Default threshold `0.3` (configurable via `--scene-threshold`).
+- Cut detection runs during frame analysis and is converted to scene ranges after processing.
+- A prototype `--scene-metric hybrid` fuses histogram distance with optical-flow cues.
+
+### 4.3. Active-area crop detection (current behavior & limitation)
+
+- `detect_crop` (`hdr_analyzer_mvp/src/crop.rs`) scans the 10-bit Y-plane of a frame for
+  rows/columns with ≥10% non-black samples (sampled every 10 px), rounding the result to even
+  coordinates/dimensions for chroma safety.
+- **Limitation:** crop is detected **once**, on the first frame selected for analysis, and reused
+  for the entire stream (`pipeline.rs`, guarded by `if crop_rect_opt.is_none()`). Early black
+  frames, fades, studio logos, or variable-aspect-ratio (e.g. IMAX) content can therefore yield a
+  wrong crop. Use `--no-crop` to analyze the full frame. Multi-frame / per-scene crop probing is
+  tracked in [issue #3](https://github.com/tinof/hdr-analyze/issues/3).
+
+### 4.4. Direct pixel access
+
+Unlike wrapper tools that parse text logs from external binaries, HDR-Analyze inspects raw 10-bit
+pixel data directly in application memory. This avoids inter-process overhead and enables precise,
+per-pixel luminance operations that text-based analysis cannot express.

@@ -1,319 +1,95 @@
-# AGENTS.md - AI Agent Guidelines for HDR-Analyze
+# CLAUDE.md
 
-> Guidelines for AI coding agents operating in this Rust-based HDR video analysis workspace.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+> Single source of truth for AI agents in this repo. `AGENTS.md` points here. See `.rust-skills/AGENTS.md` for general Rust development guidelines.
 
-A Rust monorepo (Cargo workspace) for HDR video analysis and Dolby Vision metadata generation.
+## What this repo actually is
 
-**Workspace members:**
+- Rust workspace (`resolver = "2"`) with **three shipped binaries**: `hdr_analyzer_mvp` (HDR10 analysis → PQ histograms + DV L1 metadata), `mkvdolby` (MKV container + Dolby Vision metadata injection, CM v4.0), `verifier` (MadVR / RPU measurement validation).
+- `tools/compare_baseline` is a separate utility crate, **excluded** from the workspace. Build/run it explicitly with `--manifest-path tools/compare_baseline/Cargo.toml`.
+- Release profile is tuned: `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = "abort"` — release builds are slow to link; expect it.
 
-- `hdr_analyzer_mvp/` - Core HDR10 analysis engine (generates PQ-based histograms and DV metadata)
-- `mkvdolby/` - MKV container handling and Dolby Vision metadata injection
-- `verifier/` - MadVR measurement file validation
+## Toolchain and platform quirks
 
-**Language:** Rust 1.82.0 (see `rust-toolchain.toml`)
+- `rust-toolchain.toml` pins `channel = "stable"` (not a fixed version number) with components `clippy` + `rustfmt` and explicit cross targets. CI uses `dtolnay/rust-toolchain@stable`.
+- `.cargo/config.toml` sets `-C target-cpu=native` globally; on Linux ARM64 (`aarch64-unknown-linux-gnu`) it also forces `clang` + `lld`. This host is Oracle ARM/Ampere. Don't remove unless you mean to change perf/link behavior.
+- `ffmpeg-next` is used, so local/CI builds need FFmpeg dev libs + `clang`/`libclang` and `BINDGEN_EXTRA_CLANG_ARGS` configured (see `ci.yml` for the exact apt/brew/vcpkg packages and env per OS).
 
----
+## High-signal commands (use these exact forms)
 
-## Build, Test & Lint Commands
+- Fast local quality gate (matches pre-commit + CI lint intent):
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace --verbose`
+- Build all release binaries: `cargo build --release --workspace`
+- Test one crate: `cargo test -p hdr_analyzer_mvp` (or `-p mkvdolby`, `-p verifier`)
+- Run a single test by name: `cargo test -p <crate> -- <test_name>`
+- Run one binary: `cargo run -p <crate> -- ...`
 
-### Build
+## CI behavior that affects edits
 
-```bash
-cargo build                              # Debug build
-cargo build --release --workspace        # Release build (all crates)
-cargo build --release -p hdr_analyzer_mvp  # Single crate
-```
+- Job order in `.github/workflows/ci.yml`: **lint (fmt + clippy) → test → cross-platform build** (Ubuntu/macOS/Windows). Each later job `needs` the earlier ones.
+- Security/dependency checks also run: `cargo audit`, and `cargo deny check` for `advisories` (allowed to fail, `continue-on-error`) and `bans licenses sources` (must pass). Exceptions live in `deny.toml` (incl. ignored `RUSTSEC-2025-0119` for `indicatif`, and `WTFPL` allowed for `ffmpeg-next`).
+- Pre-commit hooks (`.pre-commit-config.yaml`): **on commit** = fmt check + clippy deny-warnings; **on push** = `cargo test --workspace -q`.
 
-### Test
+## Real entrypoints and boundaries
 
-```bash
-cargo test --workspace                   # Run all tests
-cargo test --workspace -- --nocapture    # With stdout output
-cargo test test_name                     # Run single test by name
-cargo test -p hdr_analyzer_mvp           # Run tests for single crate
-cargo test -p verifier -- test_name      # Single test in specific crate
-```
+- `hdr_analyzer_mvp/src/main.rs`: CLI parse + validation; orchestrates via `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `writer.rs`.
+- `mkvdolby/src/main.rs`: file discovery/sorting + per-file orchestration via `pipeline::convert_file`. Key modules: `external.rs` (tool checks/invocation), `metadata.rs` (`CmV40Config`, L2/L9/L11 generation), `verify.rs`, `progress.rs`.
+- `verifier/src/main.rs`: standalone measurement-validator CLI.
 
-### Lint & Format
+## mkvdolby operational gotchas (easy to miss)
 
-```bash
-cargo fmt --all                          # Format all code
-cargo fmt --all -- --check               # Check formatting (CI)
-cargo clippy --workspace --all-targets -- -D warnings  # Lint (must pass)
-```
+- **Checks external tools at runtime** (`external::check_dependencies`): requires `ffmpeg`, `mkvmerge`, `dovi_tool`, and either `mediainfo` or `ffprobe`. HDR10+ processing additionally invokes `hdr10plus_tool` — keep it in `PATH` for HDR10+ inputs.
+- `dovi_tool` 2.3.2+ is recommended; its `inject-rpu` padding fix is relied on by the existing orchestration call.
+- With no input args, it recursively processes `.mkv` files from cwd, skipping `mkvdolby_temp_*` paths and files already ending `.DV.mkv`.
+- **Successful conversion deletes the source input by default**; pass `--keep-source` to prevent deletion.
+- For HDR10 without found measurements, it auto-runs `hdr_analyzer_mvp`. `--analysis-quality` controls sampling (downscale/sample-rate): `fast` = half-res/every 3rd frame, `balanced` = half-res/every frame (default), `accurate` = full-res/every frame.
+- For HDR10+ input, L1 is derived from source HDR10+ metadata; panel peak is **not** passed as a `--trim-targets` override. HDR10+ scene peaks above 3× mastering-display peak produce advisory warnings only — **never add a silent clamp**.
+- `--verify` resolves tools from `PATH`, validates structured RPU frame JSON, and hard-fails malformed Profile 8 / L1 / L6 / CM v4.0 L9/L11/L254 metadata.
+- `scripts/mkvdolby_hifi_workflow.sh` is a specialist comparison helper for inputs that **already** contain DV metadata. Use `mkvdolby` directly for HDR10+ sources.
 
-### Audit & Verify
+### Generated DV metadata levels (mkvdolby, CM v4.0 by default)
 
-```bash
-cargo audit                              # Security vulnerability check
-cargo deny check                         # License/crate ban enforcement
-```
+- **L1** per-frame luminance (from HDR10+ or hdr_analyzer) · **L2** trims for 100/600/1000-nit targets · **L6** static mastering metadata (MaxCLL/MaxFALL) · **L9** source primaries (auto-detected) · **L11** content type + reference mode.
+- Defaults: `--cm-version v40` (or `v29`); `--content-type movies` (default — valid: `default`, `movies`, `game`, `sport`, `user-generated-content`; `cinema`/`film` alias `movies`, `gaming` aliases `game`); `--reference-mode false`; `--source-primaries` auto (`0=P3-D65, 1=BT.709, 2=BT.2020`). `-v/--verbose` shows raw tool output; `-q/--quiet` minimal.
+- Progress uses `indicatif` spinners with TTY detection (auto-disabled in CI/non-interactive).
 
----
-
-## Code Style Guidelines
-
-### Imports
-
-- Use **absolute imports** with `crate::` for internal modules
-- **Group imports** from the same crate with curly braces
-- **Order:** std library → third-party crates → internal `crate::` modules
+## Testing quirks
 
-```rust
-use std::path::PathBuf;
-
-use anyhow::{Context, Result};
-use clap::Parser;
-
-use crate::analysis::FrameData;
-use crate::cli::Cli;
-```
-
-### Naming Conventions
-
-| Element          | Convention          | Example                    |
-|------------------|---------------------|----------------------------|
-| Files/Dirs       | `snake_case`        | `ffmpeg_io.rs`, `analysis/` |
-| Functions/Vars   | `snake_case`        | `run_analysis`, `frame_count` |
-| Structs/Enums    | `PascalCase`        | `MadVRFrame`, `TransferFunction` |
-| Constants        | `SCREAMING_SNAKE`   | `MAX_FRAME_SIZE`           |
-| Traits           | `PascalCase`        | `FrameProcessor`           |
-
-### Type Definitions
-
-- Define types in modules corresponding to their purpose
-- Use `derive` macros for standard traits: `#[derive(Debug, Clone, Parser)]`
-- Prefer structs with named fields over tuples for clarity
-
-### Error Handling
-
-- Use `anyhow::Result<T>` for application-level functions
-- Propagate errors with `?` operator
-- Add context with `.context()` or `.with_context()`
-- Bail early with `anyhow::bail!()` for explicit errors
-
-```rust
-fn load_config(path: &Path) -> Result<Config> {
-    let content = std::fs::read_to_string(path)
-        .context("Failed to read config file")?;
-    serde_json::from_str(&content)
-        .context("Failed to parse config as JSON")
-}
-```
-
-### Function Style
-
-- Use `fn` declarations (not arrow functions)
-- Closures for inline functional operations (`map`, `filter`)
-- Large orchestrator functions delegate to smaller helpers
-- Visibility: explicit `pub` or `pub(crate)` modifiers
-
-### Documentation
-
-- Use `///` for public API documentation
-- Use `//` for inline implementation notes
-- Use `// SAFETY:` to justify `unsafe` blocks
-- Section separators: `// --- Section Name ---`
-
-```rust
-/// Analyzes HDR10 frames and generates luminance histograms.
-///
-/// # Arguments
-/// * `input` - Path to the source video file
-/// * `config` - Analysis configuration options
-///
-/// # Returns
-/// Vector of frame measurements on success
-pub fn analyze_frames(input: &Path, config: &Config) -> Result<Vec<FrameData>> {
-    // Implementation
-}
-```
-
----
-
-## Project Structure
-
-```
-hdr-analyze/
-├── hdr_analyzer_mvp/       # Main analysis tool
-│   ├── src/
-│   │   ├── main.rs         # Entry point
-│   │   ├── cli.rs          # CLI argument parsing
-│   │   ├── pipeline.rs     # Orchestration logic
-│   │   └── analysis/       # Core analysis modules
-│   └── tests/              # Integration tests
-├── mkvdolby/               # MKV/DV metadata tool (CM v4.0)
-│   ├── src/
-│   │   ├── cli.rs          # CLI with --cm-version, --content-type
-│   │   ├── metadata.rs     # CmV40Config, L2/L9/L11 generation
-│   │   └── pipeline.rs     # Conversion orchestration
-├── verifier/               # Measurement validator
-├── coordination/           # Orchestration/memory bank
-├── tools/                  # Auxiliary scripts
-└── Cargo.toml              # Workspace root
-```
-
----
-
-## Key Dependencies
-
-| Crate         | Purpose                              |
-|---------------|--------------------------------------|
-| `clap`        | CLI argument parsing (v4, derive)    |
-| `anyhow`      | Application error handling           |
-| `thiserror`   | Library-level error types            |
-| `ffmpeg-next` | FFmpeg bindings for video I/O        |
-| `rayon`       | Parallel processing                  |
-| `indicatif`   | Terminal progress bars               |
-| `serde`       | Serialization/deserialization        |
-
----
+- `mkvdolby` integration tests are environment-dependent: they **skip** when `dovi_tool` is not in `PATH`, and when the sample media file is absent (`../tests/hdr-media/...mkv`). Do not assume all workspace tests are hermetic on a clean machine.
+- Tests/CLI integration use `assert_cmd` + `predicates`. `clippy.toml` allows `unwrap`/`expect`/`panic`/`print`/`dbg` in tests only.
 
-## Testing Guidelines
+## Lint/style policy in this repo (non-default)
 
-- **Unit tests**: Inside source modules with `#[cfg(test)]`
-- **Integration tests**: In `tests/` directory of each crate
-- Test code may use `unwrap()`, `expect()`, and `print!()` (configured in `clippy.toml`)
-- Use `assert_cmd` and `predicates` for CLI integration tests
+- Workspace lints in root `Cargo.toml`: clippy `all` allowed but `correctness` denied; `dbg_macro` denied; runs under `-D warnings` in CI.
+- `unsafe_op_in_unsafe_fn = "deny"`, but `unsafe_code` is **allowed**.
+- `clippy.toml` is tuned for this domain (higher complexity thresholds).
+- Imports: std → third-party → `crate::`, grouped with braces, absolute `crate::` paths internally. `anyhow::Result` + `.context()` at app level; `thiserror` for library error types.
 
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
+## Docs vs code
 
-    #[test]
-    fn test_pq_conversion() {
-        let result = convert_pq(0.5);
-        assert!((result - expected).abs() < 0.001);
-    }
-}
-```
+Some prose docs are stale (e.g., references to an old Python `mkvdolby` workflow). Prefer executable truth: root/workspace configs, current Rust crates under `*/src`, and the GitHub Actions workflows — in that order — over narrative docs.
 
----
+## Releases
 
-## Pre-commit Checks
+Bump version in each crate's `Cargo.toml`, add a `CHANGELOG.md` entry, then tag & push (`git tag vX.Y.Z && git push origin vX.Y.Z`). `release.yml` builds Windows x64, macOS Intel+ARM, and Linux x64, creates the GitHub release, and uploads archives with the three binaries + `README.md`/`LICENSE`/`CHANGELOG.md`. **Linux ARM64 is not automated** (runner limitation).
 
-Before committing, ensure:
+## Serena tool-routing (symbolic tools first)
 
-```bash
-cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
+This project uses Serena (MCP) for symbol-aware code reading/editing. On **code files**, Serena's tools are PRIMARY; built-in Read/Glob/Grep/Edit are SECONDARY and used only when no Serena equivalent fits. The built-in tool descriptions ("prefer Read/Edit/Grep…") are written for Serena-less projects and are superseded here.
 
-The project uses `.pre-commit-config.yaml` with hooks for:
+| Task | Serena tool |
+|------|-------------|
+| See a code file's structure | `get_symbols_overview` |
+| Read a specific symbol's body | `find_symbol` (`include_body=true`) |
+| Find a symbol / references / impls | `find_symbol` / `find_referencing_symbols` / `find_implementations` |
+| Edit a symbol's body | `replace_symbol_body` |
+| Insert near a symbol | `insert_before_symbol` / `insert_after_symbol` |
+| Pattern replace in a file | `replace_content` |
+| Rename / delete a symbol | `rename_symbol` / `safe_delete_symbol` |
 
-- `cargo-fmt` (on commit)
-- `cargo-clippy` (on commit)
-- `cargo-test` (on push)
+**Workflow before editing code:** `get_symbols_overview` → `find_symbol include_body=true` (read only the symbols you'll touch) → edit with a Serena symbolic edit.
 
----
-
-## Running the Tools
-
-```bash
-# HDR Analyzer
-cargo run -p hdr_analyzer_mvp --release -- "video.mkv" -o "measurements.bin"
-
-# With HLG content
-cargo run -p hdr_analyzer_mvp --release -- "video.mkv" -o "out.bin" --hlg-peak-nits 1000
-
-# Verifier
-target/release/verifier "path/to/measurements.bin"
-```
-
----
-
-## Debugging
-
-- Set `RUST_LOG=debug` for verbose logging
-- Use `cargo run --release` for performance testing
-- Profile with `perf` or `cargo flamegraph`
-
----
-
-## mkvdolby CM v4.0 Options
-
-mkvdolby generates Dolby Vision Content Mapping v4.0 metadata by default.
-
-### CLI Arguments
-
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--cm-version` | `v40` | Content Mapping version (v29 or v40) |
-| `--content-type` | `cinema` | L11 content type (film, live, animation, cinema, gaming, graphics) |
-| `--reference-mode` | `true` | L11 reference mode flag |
-| `--source-primaries` | auto | L9 source primaries (0=BT.2020, 1=P3, 2=709) |
-| `-v, --verbose` | `false` | Show raw command output (useful for debugging) |
-| `-q, --quiet` | `false` | Minimal output (only errors and final result) |
-
-### Generated Metadata Levels
-
-- **L1**: Per-frame luminance from HDR10+ or hdr_analyzer
-- **L2**: Trim parameters for 100/600/1000 nit target displays
-- **L6**: Static mastering display metadata (MaxCLL, MaxFALL)
-- **L9**: Source color primaries (auto-detected from MediaInfo)
-- **L11**: Content type and reference mode hints
-
-### Progress Indicators
-
-mkvdolby uses `indicatif` for user-friendly progress feedback:
-
-- **Spinners** with elapsed time for long-running operations (dovi_tool, mkvmerge, hdr10plus_tool)
-- **Success/failure indicators** (✓/✗) with timing information
-- **TTY detection**: Automatically disables spinners for non-interactive/CI environments
-- Use `--verbose` to see raw tool output for debugging
-
----
-
-## CI/CD & Releases
-
-This project uses **GitHub Actions** for continuous integration and automated releases.
-
-### Workflows
-
-| File | Trigger | Description |
-|------|---------|-------------|
-| `ci.yml` | Push to `main`/`fix-*` <br> PR to `main` | Runs lint, test, build, audit, and dependency checks |
-| `release.yml` | Tag `v*.*.*` | Builds all binaries, creates GitHub release, and uploads archives |
-
-### CI Checks (Mandatory for PRs)
-
-AI agents modifying code must ensure these checks pass:
-
-1. **Code Format:** `cargo fmt --all -- --check`
-2. **Clippy Lints:** `cargo clippy --workspace --all-targets -- -D warnings`
-3. **Tests:** `cargo test --workspace`
-    - *Note: `--locked` is removed from CI test/build commands to tolerate minor lockfile drifts, but `Cargo.lock` should still be kept up-to-date.*
-4. **Security:** `cargo audit`
-5. **Dependencies:** `cargo deny check` (Advisories, Licenses, Bans)
-    - *Note: `indicatif` advisory RUSTSEC-2025-0119 is ignored.*
-    - *Note: `WTFPL` license is explicitly allowed for `ffmpeg-next`.*
-
-### Creating a Release
-
-To trigger a release deployment:
-
-1. **Update Version:** Bump version in `Cargo.toml` for all crates.
-2. **Update Changelog:** Add entry to `CHANGELOG.md`.
-3. **Tag & Push:**
-
-    ```bash
-    git tag v1.X.X
-    git push origin v1.X.X
-    ```
-
-The `release.yml` workflow will automatically:
-
-- Build binaries for **Windows (x64)**, **macOS (Intel & ARM)**, and **Linux (x64)**.
-- Create a GitHub Release with the tag name.
-- Upload archives containing:
-  - `bin/hdr_analyzer_mvp`
-  - `bin/mkvdolby`
-  - `bin/verifier`
-  - `README.md`, `LICENSE`, `CHANGELOG.md`
-- Update release notes with build status and checksum instructions.
-
-**Note:** Linux ARM64 builds are **not** currently automated due to GitHub runner limitations (requires paid/self-hosted runners).
+**Exceptions where built-in tools are correct:** non-code files (markdown/JSON/YAML/TOML/config/lockfiles) always use Read/Edit; and for **review/audit/triage** ("find all X", "any stubs/placeholders?", "assess coverage") lead with `Grep` for exhaustive exact-pattern sweeps (`todo!`, `unimplemented!`, `// TODO`, `// FIXME`, `Default::default()`), then read flagged bodies. Completeness-critical sweeps need grep coverage first; the Serena-PRIMARY rule is for targeted edits.

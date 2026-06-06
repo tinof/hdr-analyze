@@ -2,11 +2,14 @@
 
 [![CI](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml/badge.svg)](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://github.com/rust-lang/rust)
+[![Rust](https://img.shields.io/badge/rust-stable-blue.svg)](https://github.com/rust-lang/rust)
 
 Convert any HDR10, HLG, or HDR10+ video to dynamic metadata — entirely free and open-source.
 
-HDR-Analyze reads raw 10-bit pixel data frame-by-frame, computes precise per-frame luminance measurements, and generates dynamic metadata (.bin) compatible with existing open-source tools like `dovi_tool`. The companion `mkvdolby` tool then packages the result into a final MKV with dynamic tone-mapping metadata.
+HDR-Analyze reads raw 10-bit pixel data frame-by-frame, computes precise per-frame luminance
+measurements, and generates dynamic metadata (`.bin`) compatible with existing open-source tools
+like `dovi_tool`. The companion `mkvdolby` tool then packages the result into a final MKV with
+dynamic tone-mapping metadata.
 
 **Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdolby → Dynamic HDR MKV`
 
@@ -14,137 +17,67 @@ For HDR10+ inputs, `mkvdolby` extracts the source HDR10+ metadata directly and p
 `dovi_tool`; it does not run `hdr_analyzer_mvp` unless HDR10+ metadata extraction fails and the
 workflow falls back to HDR10 analysis.
 
-## Project Structure
+## Documentation
 
-This is a Rust workspace containing three shipped binaries:
+- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — complete flag reference for all three tools.
+- **[docs/DOLBY_VISION.md](docs/DOLBY_VISION.md)** — HDR10+ peak mapping, CM v4.0 metadata, verification.
+- **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — analysis internals and research.
+- **[ROADMAP.md](ROADMAP.md)** · **[CHANGELOG.md](CHANGELOG.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**
 
-```
-hdr_project/
-├── Cargo.toml              # Workspace configuration
-├── README.md               # This file
-├── LICENSE                 # MIT License
-├── CHANGELOG.md            # Version history
-├── CONTRIBUTING.md         # Contribution guidelines
-├── hdr_analyzer_mvp/       # Main HDR analysis tool
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs         # Application entry point
-│       ├── pipeline.rs     # Main orchestration logic
-│       ├── analysis/       # Core analysis modules
-│       │   ├── mod.rs
-│       │   ├── frame.rs
-│       │   ├── scene.rs
-│       │   └── histogram.rs
-│       ├── optimizer.rs    # Dynamic target nits generation
-│       ├── ffmpeg_io.rs    # FFmpeg initialization and I/O
-│       ├── writer.rs       # .bin file writing
-│       ├── cli.rs          # CLI definition
-│       └── crop.rs         # Active area detection
-├── mkvdolby/               # Full conversion orchestrator
-│   ├── Cargo.toml
-│   └── src/
-└── verifier/               # Measurement file verification tool
-    ├── Cargo.toml
-    └── src/
-        └── main.rs
-```
+## Workspace Members
 
-### Workspace Members
+This is a Rust workspace with three shipped binaries:
 
-- `hdr_analyzer_mvp`: Main HDR analysis application that processes video files and generates compatible measurement files
-- `mkvdolby`: Native HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 conversion orchestrator
-- `verifier`: Utility tool for reading, validating, and inspecting `.bin` measurement files
+- **`hdr_analyzer_mvp`** — HDR analysis engine; processes video and writes madVR-compatible `.bin`
+  measurement files.
+- **`mkvdolby`** — native HDR10/HDR10+/HLG → Dolby Vision Profile 8.1 (CM v4.0) conversion orchestrator.
+- **`verifier`** — utility for reading, validating, and inspecting `.bin` measurement files.
 
 ## Key Features
 
-- Native video processing: Built with `ffmpeg-next` for direct access to high-bit-depth video data, enabling precise 10-bit luminance analysis.
-- Accurate per-frame analysis: Peak Brightness (MaxCLL) and Average Picture Level (APL) computed from 10-bit YUV420P10LE frames, with active-video crop detection to ignore black bars.
-- v5-compatible luminance histogram: 256-bin luminance histogram with SDR/HDR split (64 + 192) and mid-bin averaging, consistent with the v5 profile layout.
-- Native scene detection: Real-time histogram-distance based scene cut detection with configurable threshold.
-- Dynamic metadata optimizer (optional): Per-frame target nits generation using a 240-frame rolling average, 99th percentile highlight knee detection, and scene-aware heuristics.
-  - Scene-aware APL blending and per-scene smoothing resets to avoid cross-scene lag.
-  - Per-frame delta limiting for temporal stability of `target_nits`.
-  - Bidirectional EMA smoothing enabled by default (configurable via `--target-smoother` / `--smoother-*`).
-- Noise robustness: Advanced histogram smoothing and robust peak detection for grainy content.
-  - Histogram-based peak selection (99th/99.9th percentile) instead of direct max to reduce noise impact.
-  - Per-bin EMA smoothing with scene-aware resets to stabilize APL measurements.
-  - Optional temporal median filtering and pre-analysis denoising for extremely noisy content.
-- Native HLG workflow: Automatically detects ARIB STD-B67 transfers and converts to PQ histograms in-memory using the configurable `--hlg-peak-nits` (default 1000 nits).
-- Professional output: Writes compatible `.bin` measurement files using the MIT-licensed community library `madvr_parse`.
-- Cross-platform: CPU decoding on all platforms with optional CUDA attempt on NVIDIA (graceful fallback to software decoding everywhere else).
-- Performance Tuned: Optimized for software decoding on ARM64. Features smart frame sampling (`--sample-rate`) and analysis downscaling (`--downscale`) to boost throughput by 3-4x on CPU-limited systems.
-- Visual Progress Tracking: Real-time progress bar with ETA, frame count, and processing speed.
+- **Native video processing** via `ffmpeg-next` for direct, zero-copy access to high-bit-depth pixel
+  data — precise per-pixel 10-bit luminance analysis instead of parsing external tool logs.
+- **Accurate per-frame analysis**: MaxCLL and APL from 10-bit YUV420P10LE frames, with active-video
+  crop detection to ignore black bars (see [Known Limitations](#known-limitations)).
+- **v5/v6 luminance histograms**: 256-bin histogram with SDR/HDR split (64 + 192) and mid-bin averaging.
+- **Native scene detection**: histogram-distance-based cut detection with a configurable threshold.
+- **Dynamic metadata optimizer**: per-frame `target_nits` from a rolling average, 99th-percentile knee
+  detection, scene-aware blending/resets, and bidirectional EMA smoothing (on by default).
+- **Noise robustness**: percentile-based peaks (P99/P99.9), per-bin EMA smoothing, optional temporal
+  median filtering and pre-analysis denoising for grainy sources.
+- **Native HLG workflow**: auto-detects ARIB STD-B67 and converts to PQ histograms in-memory
+  (`--hlg-peak-nits`, default 1000).
+- **Dolby Vision CM v4.0** output by default (L1/L2/L6/L9/L11/L254) via `mkvdolby`.
+- **Cross-platform**: software decoding everywhere; optional CUDA attempt on NVIDIA with graceful
+  fallback. ARM64-tuned (NEON, `--sample-rate`/`--downscale` give 3–4× throughput on CPU-limited systems).
 
-Unlike wrapper tools that rely on parsing text logs from external binaries, HDR-Analyze inspects raw 10-bit pixel data directly in application memory. This zero-copy approach eliminates inter-process overhead and enables precise, per-pixel luminance operations that would be impossible with text-based analysis.
-
-### 10-bit luminance and PQ domain
-
-- Frames are converted/scaled to YUV420P10LE for consistent 10-bit luminance (Y-plane) access.
-- Histogram binning follows the v5 layout:
-  - SDR portion (bins 0–63) and HDR portion (bins 64–255)
-  - Mid-bin center values used for weighted average (APL) estimation
-  - Heuristic black-bar filtering on bin 0
-- Implementation detail:
-  - The active per-frame analysis path normalizes HDR10 limited-range codes (nominal 64–940) to [0,1] before mapping into the v5 histogram bins (this aligns well with practical HDR10 limited-range content).
-  - The average PQ is computed using the same mid-bin approach as consumers of v5 measurements. This ensures consistent values for downstream tooling.
-
-### Scene detection
-
-- Histogram distance metric (chi-squared-like, symmetric form) with a small epsilon for stability.
-- Default threshold: 0.3 (configurable via `--scene-threshold`).
-- Cut detection is performed during frame analysis and converted to scene ranges after processing.
-
-### Hardware acceleration support
-
-### Analyzer (Decoding)
-
-- CUDA: Attempts the `hevc_cuvid` decoder when `--hwaccel cuda` is specified (automatic fallback to software decoding if unavailable).
-- VAAPI / VideoToolbox: Currently log and use software decoding paths; proper device contexts are planned. The pipeline remains fully functional via software decoding.
-
-### Converter (Encoding via mkvdolby)
-
-- **macOS Apple Silicon**: Supports `hevc_videotoolbox` for accelerated HLG-to-PQ conversion. Use `--encoder videotoolbox` to enable.
-- **Other Platforms**: Defaults to `libx265` (software) for maximum compatibility and quality.
-
-### Throughput controls and ARM optimizations
-
-- **Frame Sampling**: Use `--sample-rate 3` (analyze 1 in 3 frames) to significantly reduce CPU load. Scaling and complex analysis are skipped for ignored frames.
-- **Downscale analysis**: Use `--downscale 2` (half) or `--downscale 4` (quarter) to speed up analysis with minimal impact on histogram/scene detection quality.
-- **Smart Skipping**: The pipeline intelligently skips scaling and cropping operations for frames that aren't selected for analysis.
-- **Faster scaling**: When scaling is needed, uses `FAST_BILINEAR` for analysis.
-- **Visual Feedback**: Progress bar and ETA calculation help track long-running jobs.
-- **Decoder threading**: Enables FFmpeg multi-threading (auto thread count) for better CPU utilization.
-- **Rust build tuning**: Workspace includes `.cargo/config.toml` with `-C target-cpu=native` to enable host-specific optimizations (NEON on ARM).
+See [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) for implementation details (PQ-domain
+histogram, scene detection, crop detection) and [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for
+hardware-acceleration and throughput options.
 
 ## Project Status
 
-This is a personal research project, shared as-is under the MIT license. Issues and pull requests are welcome, but there is no support SLA. Please do not expect production-level maintenance.
+This is a personal research project, shared as-is under the MIT license. Issues and pull requests are
+welcome, but there is no support SLA. Please do not expect production-level maintenance.
 
 ## Prerequisites
 
-- Rust toolchain: Install from <https://rustup.rs/>
-- FFmpeg development libraries: Required for compiling `ffmpeg-next`
+- **Rust toolchain**: install from <https://rustup.rs/> (the repo pins the stable channel via
+  `rust-toolchain.toml`).
+- **FFmpeg development libraries** (for compiling `ffmpeg-next`):
   - macOS: `brew install ffmpeg pkg-config`
   - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev pkg-config`
-  - Windows: Install FFmpeg dev libraries or use vcpkg
-- Build tools: C compiler and build tools (Xcode CLT on macOS, build-essential on Linux, MSVC on Windows)
-- External Tools (NOT included):
-  - `dovi_tool`: Required for final RPU generation and injection. Version 2.3.2 or newer is recommended because 2.3.2 fixes duplicated end-padding metadata in `inject-rpu`. Download from [quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool/releases) and place in your PATH.
-  - `hdr10plus_tool`: Required when processing HDR10+ inputs. Download from [quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool/releases) and place in your PATH.
-  - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): Required by `mkvdolby` for final MKV packaging. Install via your OS package manager (`brew install mkvtoolnix`, `apt install mkvtoolnix`, or download from the official site) and ensure it is in your PATH.
-
-## Automated Releases
-
-Binaries for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux** are automatically built and released on GitHub.
-Check the [Releases Page](https://github.com/tinof/hdr-analyze/releases) for the latest versions.
-Unix release archives also include `mkvdolby_hifi_workflow.sh`, the specialist
-comparison helper for sources that already contain Dolby Vision metadata.
+  - Windows: install FFmpeg dev libraries or use vcpkg
+- **Build tools**: C compiler / build tools (Xcode CLT on macOS, `build-essential` on Linux, MSVC on Windows).
+- **External tools (NOT included)** — install and place in your `PATH`:
+  - [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases): required for RPU generation/injection.
+    **2.3.2+ recommended** (fixes duplicated end-padding in `inject-rpu`).
+  - [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases): required for HDR10+ inputs.
+  - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): required by `mkvdolby` for final MKV packaging.
 
 ## Installation & Setup
 
-### 1. Build the Rust Tools
-
-Clone the repository and build the workspace. This compiles `hdr_analyzer_mvp`, `mkvdolby`, and `verifier`.
+Clone and build the workspace (compiles all three binaries):
 
 ```bash
 git clone https://github.com/tinof/hdr-analyze.git
@@ -152,406 +85,160 @@ cd hdr-analyze
 cargo build --release --workspace
 ```
 
-The compiled binaries will be located in `target/release/`.
-
-### 2. mkvdolby (Full Conversion Tool)
-
-`mkvdolby` is now a native Rust binary included in the workspace. It orchestrates the entire conversion process without requiring Python or pipx.
-
-To use it, simply build the workspace (as above). The binary will be at:
-`./target/release/mkvdolby`
-
-You can add it to your PATH or run it directly.
-
-### 3. Updating (After `git pull`)
-
-When you pull new changes from the repository, you **must** rebuild the Rust binaries to ensure they match the updated source code.
-
-```bash
-# 1. Pull changes
-git pull
-
-# 2. Rebuild Rust binaries (CRITICAL)
-cargo build --release --workspace
-```
-
-### Executable Locations
+Binaries land in `target/release/`:
 
 - Analyzer: `./target/release/hdr_analyzer_mvp`
-- Verifier: `./target/release/verifier`
 - Converter: `./target/release/mkvdolby`
+- Verifier: `./target/release/verifier`
 
-For a local Unix installation from a source checkout:
+After a `git pull`, **always rebuild** so the binaries match the source:
+
+```bash
+git pull
+cargo build --release --workspace   # CRITICAL
+```
+
+Optional local install from a source checkout:
 
 ```bash
 install -Dm755 target/release/hdr_analyzer_mvp "$HOME/.local/bin/hdr_analyzer_mvp"
-install -Dm755 target/release/mkvdolby "$HOME/.local/bin/mkvdolby"
-install -Dm755 target/release/verifier "$HOME/.local/bin/verifier"
+install -Dm755 target/release/mkvdolby        "$HOME/.local/bin/mkvdolby"
+install -Dm755 target/release/verifier        "$HOME/.local/bin/verifier"
 install -Dm755 scripts/mkvdolby_hifi_workflow.sh "$HOME/.local/bin/mkvdolby_hifi_workflow.sh"
 ```
 
 `mkvdolby_hifi_workflow.sh` is a specialist comparison helper for regenerating files that already
 contain Dolby Vision metadata. Use `mkvdolby` directly for HDR10+ sources.
 
+Prebuilt binaries for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux** are published on
+the [Releases page](https://github.com/tinof/hdr-analyze/releases).
+
 ## Usage
+
+The examples below cover the common paths. For every flag and default, see
+**[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)**.
 
 ### Analyzer
 
-Standard analysis (optimized by default):
-
 ```bash
-./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements.bin"
-```
+# Standard analysis (optimizer on by default)
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
 
-Disable optimizer:
+# v6 output with explicit target peak
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out_v6.bin" --madvr-version 6 --target-peak-nits 1000
 
-```bash
-./target/release/hdr_analyzer_mvp -i "path/to/video.mkv" -o "measurements_noopt.bin" --disable-optimizer
-```
+# Tune scene sensitivity / speed up analysis
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --scene-threshold 0.25 --downscale 2
 
-Version selection (v5 default; v6 for broader compatibility):
-
-```bash
-# Write v6 file, set target_peak_nits to 1000 (if omitted, defaults to computed MaxCLL)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements_v6.bin" --madvr-version 6 --target-peak-nits 1000
-```
-
-Scene detection sensitivity and controls:
-
-```bash
-# Increase/decrease sensitivity (default 0.3)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --scene-threshold 0.25
-
-# Enforce minimum scene length (default 24 frames) and optional smoothing (rolling mean over the diff signal)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --min-scene-length 24 --scene-smoothing 5
-
-# Disable crop detection to analyze full frame (diagnostics/validation)
+# Full-frame analysis (disable crop detection)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --no-crop
 ```
 
-Hardware acceleration (attempts CUDA; others fall back to software):
+→ Noise-robustness, optimizer, and HLG flags: [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#hdr_analyzer_mvp).
+
+### mkvdolby (conversion tool)
+
+Converts HDR10/HDR10+/HLG input to a Profile 8.1 MKV with CM v4.0 metadata.
+
+> **By default, `mkvdolby` deletes the source file after a successful conversion** (and removes temp
+> artifacts). Pass `--keep-source` to keep it.
 
 ```bash
-# NVIDIA GPUs on Windows/Linux (attempts hevc_cuvid)
-./target/release/hdr_analyzer_mvp --hwaccel cuda -i "video.mkv" -o "out.bin"
-
-# Linux VAAPI or macOS VideoToolbox currently log and fall back to software
-./target/release/hdr_analyzer_mvp --hwaccel vaapi -i "video.mkv" -o "out.bin"
-./target/release/hdr_analyzer_mvp --hwaccel videotoolbox -i "video.mkv" -o "out.bin"
+mkvdolby                                  # convert all .mkv files in the current directory
+mkvdolby "input.mkv"                      # convert a specific file
+mkvdolby "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
+mkvdolby "input.mkv" --analysis-quality accurate   # fast | balanced (default) | accurate
+mkvdolby "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
 ```
 
-Noise robustness for grainy content:
-
-```bash
-# Default behavior (histogram99 peak with EMA smoothing enabled)
-./target/release/hdr_analyzer_mvp -i "grainy_video.mkv" -o "out.bin"
-
-# Aggressive smoothing for very noisy content
-./target/release/hdr_analyzer_mvp -i "grainy_video.mkv" -o "out.bin" \
-  --hist-bin-ema-beta 0.05 --hist-temporal-median 3 --pre-denoise median3
-
-# Disable histogram smoothing for clean content
-./target/release/hdr_analyzer_mvp -i "clean_video.mkv" -o "out.bin" --hist-bin-ema-beta 0
-
-# Conservative profile with direct max (most responsive)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" \
-  --optimizer-profile conservative --peak-source max
-
-# Tweak target_nits smoothing (enabled by default)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --target-smoother off
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --smoother-alpha 0.1
-
-# Native HLG content handling (auto-detected, override peak if desired)
-./target/release/hdr_analyzer_mvp -i "hlg_video.mkv" -o "out.bin" --hlg-peak-nits 1200
-```
-
-Using cargo:
-
-```bash
-cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "measurements.bin" --madvr-version 6 --target-peak-nits 1000 --scene-threshold 0.3 --downscale 2
-```
-
-### mkvdolby (Conversion Tool)
-
-The `mkvdolby` tool orchestrates the entire conversion process from HDR10/HDR10+/HLG input to a Profile 8.1-compatible MKV with Content Mapping v4.0 metadata. Internally it calls `dovi_tool`, `mkvmerge`, and `hdr10plus_tool` for HDR10+ sources; these must be installed separately (see Prerequisites).
-
-```bash
-# Basic usage (converts all MKV files in current directory)
-mkvdolby
-
-# Convert specific file
-mkvdolby "input.mkv"
-
-# Automatic Cleanup (Default Behavior)
-# By default, mkvdolby deletes the source file after successful conversion.
-# Temporary extraction artifacts are also removed.
-
-# Keep the source file for A/B testing:
-mkvdolby "input.mkv" --keep-source
-
-# Additional flags
-mkvdolby --help
-
-# Hardware Acceleration
-mkvdolby "input.mkv" --hwaccel cuda
-
-# Hardware Encoding on macOS (Apple Silicon)
-# Speed up HLG -> PQ conversion significantly (~10x) using VideoToolbox
-mkvdolby "input.mkv" --encoder videotoolbox
-
-# Verbose mode: show raw command output (useful for debugging)
-mkvdolby "input.mkv" --verbose
-
-# Quiet mode: minimal output (only errors and final result)
-mkvdolby "input.mkv" --quiet
-
-# HDR10/HLG analysis quality: balanced is the default
-mkvdolby "input.mkv" --analysis-quality fast
-mkvdolby "input.mkv" --analysis-quality balanced
-mkvdolby "input.mkv" --analysis-quality accurate
-```
-
-#### HDR10+ Peak Mapping
-
-For HDR10+ input, `mkvdolby` forwards the selected peak source to
-`dovi_tool generate --hdr10plus-peak-source`:
-
-- `histogram` is the default and recommended balanced baseline.
-- `histogram99` uses the last HDR10+ histogram percentile, usually 99.98%, and is available
-  explicitly with `--boost` when a brighter mapping is desired.
-- `max-scl` uses the largest RGB MaxSCL component and is more sensitive to channel highlights
-  and outliers.
-- `max-scl-luminance` calculates luminance from MaxSCL components and can look dimmer.
-
-The standard neutral L2 compatibility trim targets remain `100,600,1000`. They are not a
-panel-calibration control: do not replace them with your TV's measured peak brightness. A Dolby
-Vision-capable display applies its own display mapping.
-
-For movie or episodic HDR10+ content on an LG OLED C9-class display, start with the defaults and
-preserve the source for A/B testing:
-
-```bash
-mkvdolby --keep-source --verify "input.mkv"
-```
-
-Use `--boost` only as an intentional brighter alternative after comparing the default output.
-When the selected HDR10+ peak source produces scene L1 peaks above three times the mastering
-display peak, `mkvdolby` warns and leaves the source metadata unchanged. This is advisory because
-real sources can contain valid outliers; `mkvdolby` never clamps peaks silently.
-For playback troubleshooting, start with the TV's Dolby Vision **Cinema** picture mode and enable
-**Ultra HD Deep Color** for the Shield HDMI input. Avoid using **Cinema Home** as the diagnostic
-baseline: it is brighter, but it can raise blacks in dark scenes. On Shield, enable Dolby Vision
-under **Settings > Device Preferences > Display & Sound > Dolby Vision**; if necessary, choose a
-custom display mode labelled **Dolby Vision Ready**.
-
-#### Progress Indicators
-
-mkvdolby provides visual feedback for all operations:
-
-- **Spinners** with elapsed time for long-running operations (dovi_tool, mkvmerge, hdr10plus_tool)
-- **Success/failure indicators** (✓/✗) with timing information
-- **TTY detection**: Automatically disables spinners for non-interactive/CI environments
-
-#### CM v4.0 Metadata Options (New)
-
-mkvdolby now generates Content Mapping v4.0 metadata by default. HDR10+ inputs derive L1 brightness metadata from the source HDR10+ scenes, while CM v4.0 adds L9/L11 metadata and `dovi_tool` CM v4 defaults alongside the CM v2.9-compatible L2/L6 blocks.
-
-```bash
-# Default: CM v4.0 with auto-detected settings
-mkvdolby "input.mkv"
-
-# Specify Dolby Vision IQ content type metadata when needed
-mkvdolby "input.mkv" --content-type movies # Preserve movie artistic intent
-mkvdolby "input.mkv" --content-type sport  # High-motion sports content
-
-# Use legacy CM v2.9 if needed
-mkvdolby "input.mkv" --cm-version v29
-
-# Override source primaries detection
-mkvdolby "input.mkv" --source-primaries 2  # 0=P3-D65, 1=BT.709, 2=BT.2020
-```
-
-**CM v4.0 metadata levels generated:**
-
-- **L1**: Scene min/mid/max luminance (from HDR10+ or hdr_analyzer)
-- **L2**: Neutral compatibility trim parameters for 100/600/1000 nit displays
-- **L6**: Static mastering display metadata
-- **L9**: Mastering-display color primaries (auto-detected)
-- **L11**: Dolby Vision IQ content type and reference mode
-- **L254**: Default CM v4.0 algorithm metadata (added by dovi_tool)
-
-`mkvdolby` does not synthesize L3 offsets or creative L8 trims. With `dovi_tool` 2.3.2, the
-generator adds its default L254 block; producing authored offsets or trims requires a separate
-workflow.
-
-#### Post-Mux Verification
-
-Pass `--verify` to validate the generated file before cleanup:
-
-```bash
-mkvdolby --keep-source --verify "input.mkv"
-```
-
-For HDR10/HLG sources with a measurements file, `mkvdolby` resolves the installed `verifier`
-from `PATH`. It then extracts the final RPU and validates structured `dovi_tool info --frame 0`
-JSON: Profile 8, ordered L1 values, sane L6 metadata, and required L9/L11/L254 blocks for CM v4.0.
-Missing source L6 fields or L9 primaries are reported when warned fallbacks are used.
+→ HDR10+ peak mapping, CM v4.0 metadata, and verification details:
+[docs/DOLBY_VISION.md](docs/DOLBY_VISION.md). Full flag list:
+[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#mkvdolby).
 
 ### Verifier
 
 ```bash
 ./target/release/verifier "measurements.bin"
-# or
-cargo run -p verifier -- "measurements.bin"
 ```
 
-Verifier reports:
+Reports version/flags, scene & frame stats, peak brightness and avg PQ, histogram integrity, and
+`target_nits` stats (if the optimizer was enabled).
 
-- File format (version, flags)
-- Scene/frame stats
-- Peak brightness and avg PQ
-- Histogram integrity checks
-- Target nits stats (if optimizer enabled)
-- Additional checks: FALL header coherence and flags vs. `target_nits` presence
+## Known Limitations
 
-## Command line arguments
-
-### Core Options
-
-- `-i, --input <PATH>`: Input HDR video file
-- `-o, --output <PATH>`: Output `.bin` measurement file
-- `--madvr-version <5|6>`: Output file version (default: 5)
-- `--hwaccel <TYPE>`: Hardware acceleration hint (`cuda`, `vaapi`, `videotoolbox`)
-- `--downscale <1|2|4>`: Downscale internal analysis resolution for speed (default: 1)
-- `--sample-rate <N>`: Analyze every Nth frame (1=all, 2=every 2nd, etc.). Skipped frames inherit previous measurements. High impact on performance.
-- `--no-crop`: Disable active-area crop detection (analyze full frame)
-
-### Scene Detection
-
-- `--scene-threshold <float>`: Scene cut threshold (default: 0.3)
-- `--min-scene-length <frames>`: Drop cuts closer than N frames (default: 24)
-- `--scene-smoothing <frames>`: Rolling window over scene-change metric (default: 5)
-
-### Optimizer
-
-- `--disable-optimizer`: Disable dynamic target nits generation (enabled by default)
-- `--optimizer-profile <conservative|balanced|aggressive>`: Optimizer behavior preset (default: balanced)
-- `--target-peak-nits <nits>`: Override header.target_peak_nits for v6 (default: computed MaxCLL)
-
-### Noise Robustness
-
-- `--peak-source <max|histogram99|histogram999>`: Peak brightness source (default: histogram99 for balanced/aggressive, max for conservative)
-  - `max`: Direct max from Y-plane (most responsive to noise)
-  - `histogram99`: 99th percentile from histogram (recommended, reduces noise impact)
-  - `histogram999`: 99.9th percentile from histogram (most conservative)
-- `--hist-bin-ema-beta <float>`: EMA smoothing for histogram bins, 0.0-1.0 (default: 0.1, lower = more smoothing, 0 = disabled)
-- `--hist-temporal-median <N>`: Temporal median filter window in frames (default: 0/off, 3 = recommended for aggressive smoothing)
-- `--pre-denoise <nlmeans|median3|off>`: Pre-analysis Y-plane denoising (default: off)
-  - `median3`: 3x3 median filter (good for grainy content)
-  - `nlmeans`: Non-local means denoising (reserved for future)
-
-### Performance & Diagnostics
-
-- `--analysis-threads <N>`: Override Rayon worker count for histogram analysis (default: logical cores)
-- `--profile-performance`: Print per-stage throughput metrics (decode vs. analysis) when finished
-
-Notes for v6 output:
-
-- Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently approximated from BT.2020
-  (`peak_pq_2020`) using 99% and 95% factors. More exact gamut-aware computation remains planned.
+- **Crop detection uses a single frame.** The active-area crop is detected **once**, on the first
+  frame selected for analysis, and reused for the entire stream. Early black frames, fade-ins,
+  full-screen studio logos, pre-roll, or variable-aspect-ratio content (e.g. intermittent IMAX
+  scenes) can therefore produce an incorrect crop. Use `--no-crop` to analyze the full frame.
+  Stream-level multi-frame probing (and later per-scene crop) is tracked in
+  [issue #3](https://github.com/tinof/hdr-analyze/issues/3).
+- **HLG/VAAPI/VideoToolbox decode** currently fall back to software decoding; proper device contexts
+  are planned (see [Roadmap](#roadmap)).
+- **v6 per-gamut peaks** (`peak_pq_dcip3`, `peak_pq_709`) are approximated from BT.2020; exact
+  gamut-aware computation is planned.
 
 ## Quick Start Validation
 
-1) Build:
-
 ```bash
 cargo build --release --workspace
-```
-
-1) Analyze (v5 and v6):
-
-```bash
 ./target/release/hdr_analyzer_mvp -i sample_hdr10.mkv -o measurements_v5.bin
-./target/release/hdr_analyzer_mvp -i sample_hdr10.mkv -o measurements_v6.bin --madvr-version 6 --target-peak-nits 1000
-```
-
-1) Verify:
-
-```bash
 ./target/release/verifier measurements_v5.bin
-./target/release/verifier measurements_v6.bin
 ```
 
-Expected:
-
-- Version: 5 or 6 (matches selection)
-- Flags: 2 (no optimizer) or 3 (optimizer enabled)
-- Histograms: 256 bins, sums ≈ 100
-- PQ values in [0,1]
-- Scenes valid and within frame range
-
-## Oracle Cloud ARM (Ampere) Readiness
-
-- Fully functional with software decoding (no CUDA on Ampere).
-- Rayon-backed histogram analysis saturates available cores; tune with `--analysis-threads` if you need to pin execution to available vCPUs.
-- Use `--profile-performance` to capture decode vs. analysis throughput when validating new instances.
-- Recommended packages (Ubuntu 22.04/24.04 arm64):
-
-  ```bash
-  sudo apt update
-  sudo apt install -y \
-    build-essential pkg-config clang lld \
-    libavformat-dev libavcodec-dev libavutil-dev \
-    libavfilter-dev libavdevice-dev libswscale-dev
-  ```
-
-  - `clang` + `lld` provide much faster linking, especially with LTO.
-- Build and run using the steps above. Performance is CPU-bound; for higher throughput, planned improvements include parallelizing histogram accumulation across rows/tiles.
-- Enabled optimizations: auto-threaded decode, skip-scaler when possible, fast scaling, host CPU tuning (`target-cpu=native`). Use `--downscale` for additional speedups. On Linux ARM64, the build uses the LLD linker when available.
-
-## Local Quality Gates (Recommended)
-
-- Pre-commit hooks (fmt, clippy):
-
-  ```bash
-  pipx install pre-commit  # or: pip install --user pre-commit
-  pre-commit install        # installs pre-commit hook (fmt, clippy)
-  pre-commit install --hook-type pre-push  # optional: quick tests on push
-  ```
-
-  Configuration lives in `.pre-commit-config.yaml`. Hooks run `cargo fmt --check` and `cargo clippy -D warnings` before commit.
-
-- Toolchain: `rust-toolchain.toml` selects stable Rust with clippy, rustfmt, and the configured
-  cross-compilation targets.
+Expected: version 5/6 as selected; flags 2 (no optimizer) or 3 (optimizer on); 256-bin histograms
+summing ≈ 100; PQ values in `[0,1]`; scenes valid and within frame range.
 
 ## Roadmap
 
-- Proper VAAPI/VideoToolbox device contexts and hardware frame transfer
-- SIMD optimizations for histogram calculations
+See **[ROADMAP.md](ROADMAP.md)**. Near-term highlights: proper VAAPI/VideoToolbox device contexts
+and hardware frame transfer, SIMD histogram optimizations, and more robust crop detection (issue #3).
+
+## Contributing & Quality Gates
+
+Contributions welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. Before committing, run the local
+gates (also enforced in CI):
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Optional pre-commit hooks (config in `.pre-commit-config.yaml`):
+
+```bash
+pipx install pre-commit            # or: pip install --user pre-commit
+pre-commit install                 # fmt + clippy on commit
+pre-commit install --hook-type pre-push   # quick tests on push
+```
 
 ## Acknowledgements
 
-- **quietvoid**: For creating `dovi_tool`, `hdr10plus_tool`, and the MIT-licensed `madvr_parse` library.
-- **The Doom9 Community**: For the collective reverse-engineering and documentation of HDR formats.
-- `ffmpeg-next`: Rust bindings for FFmpeg
-- `clap`, `anyhow`: CLI and error handling
+- **quietvoid** — for `dovi_tool`, `hdr10plus_tool`, and the MIT-licensed `madvr_parse` library.
+- **The Doom9 community** — for the collective reverse-engineering and documentation of HDR formats.
+- `ffmpeg-next`, `clap`, `anyhow` and the wider Rust ecosystem.
 
 ## License
 
-MIT License
+MIT License.
 
 ## What This Is NOT
 
-- Does not include, redistribute, or reverse-engineer any Dolby Laboratories proprietary code, lookup tables, CMv4.0 trims, or binary blobs.
+- Does not include, redistribute, or reverse-engineer any Dolby Laboratories proprietary code,
+  lookup tables, CM v4.0 trims, or binary blobs.
 - Does not bypass, circumvent, or interfere with any DRM or content-protection mechanism.
 - Not an official Dolby or HDR10+ Technologies product; no trademarks claimed.
-- The analyzer outputs generic per-frame luminance data. Final packaging into a playback-compatible stream is done by `dovi_tool` and `mkvmerge`, which the user installs independently.
+- The analyzer outputs generic per-frame luminance data. Final packaging into a playback-compatible
+  stream is done by `dovi_tool` and `mkvmerge`, which the user installs independently.
 
 ## Legal & Trademarks
 
-This software is a research project for video analysis and is not an official product of Dolby Laboratories.
+This software is a research project for video analysis and is not an official product of Dolby
+Laboratories.
 
 - **Dolby Vision** is a trademark of Dolby Laboratories.
 - **HDR10+** is a trademark of HDR10+ Technologies, LLC.
 
-This project is not affiliated with, endorsed by, or sponsored by Dolby Laboratories or HDR10+ Technologies, LLC. Reference to these standards is strictly for compatibility and interoperability purposes.
+This project is not affiliated with, endorsed by, or sponsored by Dolby Laboratories or HDR10+
+Technologies, LLC. Reference to these standards is strictly for compatibility and interoperability
+purposes.
