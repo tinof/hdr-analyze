@@ -4,6 +4,24 @@ This document provides a historical record of completed milestones, feature impl
 
 ---
 
+## [Unreleased]
+
+### Reliability & observability (mkvdolby)
+- Long file-producing steps (base-layer extract, RPU inject, mux, HLG→PQ encode) now show a
+  live **byte-progress bar with throughput and ETA** instead of a bare elapsed spinner, so a
+  slow-but-working step is distinguishable from a stalled one. Child output is streamed to the
+  step log during the run, surfacing tool warnings as they happen.
+- Added a **stall warning**: `--stall-timeout <SECS>` (default 300, `0` disables) flags when the
+  current step's output file stops growing — telling a hung tool apart from merely slow storage.
+- Added **automatic resume**: an interrupted conversion preserves its `mkvdolby_temp_*` directory,
+  and a re-run reuses every completed step (analysis, RPU, extracted base layer, …) via
+  `<artifact>.done` completion sentinels. `--no-resume` forces a clean re-run.
+- Added **graceful interrupt handling**: `SIGINT`/`SIGTERM`/`SIGHUP` (e.g. a dropped SSH session)
+  print a resume hint and exit without deleting partial work. Documented running long conversions
+  under `tmux`/`nohup`.
+
+---
+
 ## [0.2.0] - 2026-05-31
 
 Quality and observability release for native HDR10, HDR10+, and HLG to Dolby

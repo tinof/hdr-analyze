@@ -45,6 +45,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `dovi_tool` 2.3.2+ is recommended; its `inject-rpu` padding fix is relied on by the existing orchestration call.
 - With no input args, it recursively processes `.mkv` files from cwd, skipping `mkvdolby_temp_*` paths and files already ending `.DV.mkv`.
 - **Successful conversion deletes the source input by default**; pass `--keep-source` to prevent deletion.
+- **Robust to interruption:** extract/inject/mux/encode show a live byte-progress bar (throughput + ETA) and warn after `--stall-timeout` (default 300s, `0` disables) if the output file stops growing. An interrupted run (e.g. SSH `SIGHUP`) preserves `mkvdolby_temp_*` and prints a resume hint; a re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels (`resume.rs`). `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.
 - For HDR10 without found measurements, it auto-runs `hdr_analyzer_mvp`. `--analysis-quality` controls sampling (downscale/sample-rate): `fast` = half-res/every 3rd frame, `balanced` = half-res/every frame (default), `accurate` = full-res/every frame.
 - For HDR10+ input, L1 is derived from source HDR10+ metadata; panel peak is **not** passed as a `--trim-targets` override. HDR10+ scene peaks above 3× mastering-display peak produce advisory warnings only — **never add a silent clamp**.
 - `--verify` resolves tools from `PATH`, validates structured RPU frame JSON, and hard-fails malformed Profile 8 / L1 / L6 / CM v4.0 L9/L11/L254 metadata.

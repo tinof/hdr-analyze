@@ -132,6 +132,8 @@ mkvdolby "input.mkv"     # process a specific file
 |------|---------|-------------|
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
 | `--keep-source` | off | Keep the source file (by default it is **deleted** after success) |
+| `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps) |
+| `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables) — tells a stalled tool apart from merely slow storage |
 | `--verify` | off | After muxing, validate the result (see [DOLBY_VISION.md](DOLBY_VISION.md#post-mux-verification)) |
 | `-v, --verbose` | off | Show raw command output (debugging) |
 | `-q, --quiet` | off | Minimal output (errors and final result only) |
@@ -184,6 +186,27 @@ mkvdolby "input.mkv" --content-type sport      # high-motion content
 mkvdolby "input.mkv" --cm-version v29          # legacy CM v2.9
 mkvdolby "input.mkv" --source-primaries 0      # force P3-D65
 mkvdolby "input.mkv" --encoder videotoolbox    # fast HLG→PQ on Apple Silicon
+```
+
+### Resilience for long conversions
+
+A 4K remux conversion moves tens of gigabytes through several passes (extract base layer →
+inject RPU → mux), so on slow storage it can legitimately run for many minutes per step. To
+keep long runs safe and observable:
+
+- **Run under `tmux`/`screen`/`nohup`** so a dropped SSH or terminal session cannot kill it
+  mid-conversion (`SIGHUP`). On interrupt, `mkvdolby` preserves its `mkvdolby_temp_*` directory.
+- **Resume is automatic.** Re-running over the same input reuses every completed step (analysis,
+  RPU, extracted base layer, …) from the leftover temp dir — it does not redo hours of work.
+  Pass `--no-resume` to force a clean re-run.
+- **Progress is live.** Extract/inject/mux/encode show bytes written, throughput, and ETA, and
+  warn (after `--stall-timeout` seconds, default 300) if the output file stops growing — so a
+  genuinely stalled tool is distinguishable from slow-but-moving I/O.
+
+```bash
+tmux new -s dv "mkvdolby 'input.mkv' --keep-source --verify"   # survive disconnects
+mkvdolby "input.mkv" --no-resume        # ignore a leftover temp dir, start clean
+mkvdolby "input.mkv" --stall-timeout 0  # disable the stall warning
 ```
 
 ---

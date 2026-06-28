@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
-use crate::progress::{self, Spinner};
+use crate::progress::{self, ByteProgress, Spinner};
 
 /// Find a specific tool on PATH.
 pub fn find_tool(tool_name: &str) -> Option<PathBuf> {
@@ -118,6 +119,125 @@ pub fn run_command_with_spinner(cmd: &mut Command, log_path: &Path, message: &st
         let stderr_str = String::from_utf8_lossy(&output.stderr);
         let err_hint = stderr_str.lines().last().unwrap_or("check log for details");
         spinner.finish_error(Some(err_hint));
+        Ok(false)
+    }
+}
+
+/// Run a long, file-producing command with a byte-progress bar driven by the growth of
+/// `output_path`. The child's stdout+stderr are streamed to `log_path` live (so the log
+/// fills during the run, surfacing tool warnings), and a warning is shown if the output
+/// stops growing for `stall_secs` seconds (`0` disables the stall check).
+///
+/// This is the robust replacement for `run_command_with_spinner` on steps that move many
+/// gigabytes (extract / inject / mux / encode): the bytes + throughput + ETA readout makes
+/// a slow-but-working step distinguishable from a hung one.
+pub fn run_command_with_progress(
+    cmd: &mut Command,
+    log_path: &Path,
+    message: &str,
+    output_path: &Path,
+    expected_total: Option<u64>,
+    stall_secs: u64,
+) -> Result<bool> {
+    // Verbose mode: stream raw output to the terminal instead of drawing a bar.
+    if progress::is_verbose() {
+        let bar = ByteProgress::new(message, expected_total);
+        let result = run_command_live(cmd, log_path)?;
+        if result {
+            bar.finish_success();
+        } else {
+            bar.finish_error(Some("command failed"));
+        }
+        return Ok(result);
+    }
+
+    let log_file = File::create(log_path).context("Failed to create log file")?;
+    let mut log_writer = std::io::BufWriter::new(log_file);
+    writeln!(log_writer, "Running command: {:?}", cmd)?;
+    log_writer.flush()?;
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn().context("Failed to spawn command")?;
+
+    let stdout = child.stdout.take().expect("Failed to open stdout");
+    let stderr = child.stderr.take().expect("Failed to open stderr");
+
+    // Drain both pipes to the log on dedicated threads so the child never blocks on a full
+    // pipe buffer while we poll the output file.
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let tx_err = tx.clone();
+    let t_out = thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            let _ = tx.send(buf[..n].to_vec());
+        }
+    });
+    let t_err = thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            let _ = tx_err.send(buf[..n].to_vec());
+        }
+    });
+    let t_log = thread::spawn(move || {
+        for data in rx {
+            let s = String::from_utf8_lossy(&data);
+            let _ = log_writer.write_all(s.replace('\r', "\n").as_bytes());
+        }
+        let _ = log_writer.flush();
+    });
+
+    // Poll output-file growth and update the bar until the child exits.
+    let bar = ByteProgress::new(message, expected_total);
+    let poll = Duration::from_millis(500);
+    let mut last_size: u64 = 0;
+    let mut last_growth = Instant::now();
+    let mut warned = false;
+    let status = loop {
+        let size = std::fs::metadata(output_path).map(|m| m.len()).unwrap_or(0);
+        bar.set_bytes(size);
+        if size > last_size {
+            last_size = size;
+            last_growth = Instant::now();
+            if warned {
+                bar.set_stall(None);
+                warned = false;
+            }
+        } else if stall_secs > 0 {
+            let stalled = last_growth.elapsed();
+            if stalled.as_secs() >= stall_secs {
+                bar.set_stall(Some(stalled));
+                warned = true;
+            }
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        thread::sleep(poll);
+    };
+
+    // Final position update + drain the logging pipeline.
+    let final_size = std::fs::metadata(output_path)
+        .map(|m| m.len())
+        .unwrap_or(last_size);
+    bar.set_bytes(final_size);
+    let _ = t_out.join();
+    let _ = t_err.join();
+    let _ = t_log.join();
+
+    if status.success() {
+        bar.finish_success();
+        Ok(true)
+    } else {
+        bar.finish_error(Some("check log for details"));
         Ok(false)
     }
 }

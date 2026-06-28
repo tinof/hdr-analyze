@@ -132,49 +132,116 @@ impl Drop for Spinner {
     }
 }
 
-// --- Progress Bar ---
+// --- Byte Progress Bar ---
 
-/// A progress bar for operations with known total (e.g., frame processing)
-#[allow(dead_code)]
-pub struct Progress {
+/// A progress bar for long, file-producing steps (extract / inject / mux), driven by the
+/// growth of the output file. Shows bytes written, throughput, and ETA (when a total
+/// estimate is known) so a slow-but-moving step is visibly distinct from a stalled one.
+pub struct ByteProgress {
     bar: ProgressBar,
+    message: String,
+    total: Option<u64>,
+    /// True when a real (visible) bar is being drawn (TTY, non-verbose, non-quiet).
+    active: bool,
 }
 
-#[allow(dead_code)]
-impl Progress {
-    /// Create a new progress bar with the given total
-    pub fn new(total: u64, message: &str) -> Self {
-        let bar = if is_tty() && !is_verbose() && !is_quiet() {
-            let pb = ProgressBar::new(total);
+impl ByteProgress {
+    /// Create and start a byte progress bar. `total` is an estimate of the final output
+    /// size; pass `None` when it cannot be estimated (e.g. a re-encode).
+    pub fn new(message: &str, total: Option<u64>) -> Self {
+        let active = is_tty() && !is_verbose() && !is_quiet();
+        let bar = if active {
+            let (pb, template) = match total {
+                Some(t) => (
+                    ProgressBar::new(t.max(1)),
+                    "  {spinner:.cyan} {msg} [{bytes}/{total_bytes}] {binary_bytes_per_sec} ETA {eta} [{elapsed}]",
+                ),
+                None => (
+                    ProgressBar::new_spinner(),
+                    "  {spinner:.cyan} {msg} {bytes} {binary_bytes_per_sec} [{elapsed}]",
+                ),
+            };
             pb.set_style(
                 ProgressStyle::default_bar()
-                    .template("  {spinner:.cyan} {msg} [{bar:30.cyan/dim}] {pos}/{len} ({eta})")
-                    .expect("Invalid progress template")
-                    .progress_chars("━━─"),
+                    .template(template)
+                    .expect("Invalid byte-progress template")
+                    .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
             );
             pb.set_message(message.to_string());
-            pb.enable_steady_tick(Duration::from_millis(100));
+            pb.enable_steady_tick(Duration::from_millis(120));
             pb
         } else {
-            ProgressBar::hidden()
+            let pb = ProgressBar::hidden();
+            if !is_quiet() {
+                eprintln!("  {} {}...", "→", message);
+            }
+            pb
         };
 
-        Self { bar }
+        Self {
+            bar,
+            message: message.to_string(),
+            total,
+            active,
+        }
     }
 
-    /// Increment progress by 1
-    pub fn inc(&self) {
-        self.bar.inc(1);
-    }
-
-    /// Set absolute position
-    pub fn set_position(&self, pos: u64) {
+    /// Update the bytes-written position (capped at the known total).
+    pub fn set_bytes(&self, bytes: u64) {
+        let pos = match self.total {
+            Some(t) => bytes.min(t),
+            None => bytes,
+        };
         self.bar.set_position(pos);
     }
 
-    /// Finish successfully
-    pub fn finish(&self) {
-        self.bar.finish_and_clear();
+    /// Show (`Some`) or clear (`None`) a stall warning suffix on the bar message.
+    pub fn set_stall(&self, stalled_for: Option<Duration>) {
+        match stalled_for {
+            Some(d) => self.bar.set_message(format!(
+                "{}  \u{26a0} no progress for {}",
+                self.message,
+                format_duration(d)
+            )),
+            None => self.bar.set_message(self.message.clone()),
+        }
+    }
+
+    /// Finish with a success indicator.
+    pub fn finish_success(&self) {
+        let line = format!(
+            "{} {} [{}]",
+            "\u{2713}",
+            self.message,
+            format_duration(self.bar.elapsed())
+        );
+        if self.active {
+            self.bar.finish_with_message(line);
+        } else if !is_quiet() {
+            eprintln!("  {}", line);
+        }
+    }
+
+    /// Finish with a failure indicator.
+    pub fn finish_error(&self, err_msg: Option<&str>) {
+        let msg = match err_msg {
+            Some(e) => format!("{} - {}", self.message, e),
+            None => self.message.clone(),
+        };
+        if self.active {
+            self.bar
+                .finish_with_message(format!("{} {}", "\u{2717}", msg));
+        } else if !is_quiet() {
+            eprintln!("  {} {}", "\u{2717}", msg);
+        }
+    }
+}
+
+impl Drop for ByteProgress {
+    fn drop(&mut self) {
+        if !self.bar.is_finished() {
+            self.bar.finish_and_clear();
+        }
     }
 }
 

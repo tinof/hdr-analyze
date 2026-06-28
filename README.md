@@ -142,6 +142,10 @@ Converts HDR10/HDR10+/HLG input to a Profile 8.1 MKV with CM v4.0 metadata.
 
 > **By default, `mkvdolby` deletes the source file after a successful conversion** (and removes temp
 > artifacts). Pass `--keep-source` to keep it.
+>
+> An interrupted run (e.g. a dropped SSH session) keeps its `mkvdolby_temp_*` directory and prints a
+> resume hint — just re-run the same command to **resume** from the last completed step (`--no-resume`
+> forces a clean run). For long conversions, run under `tmux`/`nohup` so a disconnect can't kill them.
 
 ```bash
 mkvdolby                                  # convert all .mkv files in the current directory
@@ -149,6 +153,7 @@ mkvdolby "input.mkv"                      # convert a specific file
 mkvdolby "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
 mkvdolby "input.mkv" --analysis-quality accurate   # fast | balanced (default) | accurate
 mkvdolby "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
+mkvdolby "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean
 ```
 
 → HDR10+ peak mapping, CM v4.0 metadata, and verification details:

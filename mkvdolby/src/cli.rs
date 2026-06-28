@@ -86,6 +86,17 @@ pub struct Args {
     #[arg(long)]
     pub keep_source: bool,
 
+    /// Force a clean re-run: discard any leftover temp directory from an interrupted
+    /// conversion instead of resuming from it. By default, a leftover temp dir is reused so
+    /// completed steps (analysis, RPU, extracted base layer) are not redone.
+    #[arg(long)]
+    pub no_resume: bool,
+
+    /// Warn when the current step's output file stops growing for this many seconds
+    /// (0 disables). Helps tell a stalled tool apart from merely slow storage.
+    #[arg(long, default_value_t = 300)]
+    pub stall_timeout: u64,
+
     /// Hardware acceleration hint for analysis and encoding.
     #[arg(long, value_enum, default_value_t = HwAccel::None)]
     pub hwaccel: HwAccel,

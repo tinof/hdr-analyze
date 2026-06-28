@@ -11,6 +11,7 @@ mod external;
 mod metadata;
 mod pipeline;
 mod progress;
+mod resume;
 mod verify;
 
 use cli::Args;
@@ -133,6 +134,18 @@ fn main() -> anyhow::Result<()> {
     // Initialize progress module with verbosity settings
     progress::set_verbose(args.verbose);
     progress::set_quiet(args.quiet);
+
+    // Graceful interrupt: a dropped session (SIGHUP), SIGTERM, or Ctrl+C (SIGINT) prints a
+    // resume hint and exits. The temp directory is only cleaned on a successful conversion, so
+    // an interrupted run leaves its artifacts in place and the next invocation resumes from
+    // them (unless `--no-resume` is passed).
+    let _ = ctrlc::set_handler(|| {
+        eprintln!(
+            "\n{}",
+            "Interrupted — partial work preserved in mkvdolby_temp_*; re-run to resume.".yellow()
+        );
+        std::process::exit(130);
+    });
 
     // Check dependencies after parsing so `--help`/`--version` work without tools installed.
     if let Err(e) = external::check_dependencies() {

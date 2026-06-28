@@ -9,9 +9,10 @@ use colored::Colorize;
 use serde_json::Value;
 
 use crate::cli::{AnalysisQuality, Args, CmVersion, Encoder, HwAccel, PeakSource};
-use crate::external::{self, run_command_with_spinner};
+use crate::external::{self, run_command_with_progress, run_command_with_spinner};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
+use crate::resume;
 
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let input_path = Path::new(input_file);
@@ -25,7 +26,15 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let dir = input_path.parent().unwrap_or(Path::new("."));
     let output_file = dir.join(format!("{}.DV.mkv", stem));
 
-    if output_file.exists() {
+    let resume_enabled = !args.no_resume;
+    let temp_dir_name = format!("mkvdolby_temp_{}", stem);
+    let temp_dir = dir.join(&temp_dir_name);
+
+    // A leftover temp dir means a previous run for this file was interrupted. With resume
+    // enabled we reuse its completed steps; otherwise we discard it and start clean.
+    let resuming = resume_enabled && temp_dir.exists();
+
+    if output_file.exists() && !resuming {
         progress::print_warn(&format!(
             "Output file '{}' already exists. Skipping.",
             output_file.display()
@@ -46,10 +55,14 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     let file_start = Instant::now();
 
-    // Create temp directory
-    let temp_dir_name = format!("mkvdolby_temp_{}", stem);
-    let temp_dir = dir.join(&temp_dir_name);
+    // Create (or reset) the temp directory.
+    if temp_dir.exists() && !resuming {
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
     fs::create_dir_all(&temp_dir).context("Failed to create temp directory")?;
+    if resuming {
+        progress::print_info("Resuming from a previous run — completed steps will be reused.");
+    }
 
     // --- Step 1: Detect HDR format ---
     progress::print_step(1, 0, "Detecting HDR format...");
@@ -93,7 +106,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             total_steps,
             "Extracting HEVC stream for HDR10+ analysis...",
         );
-        match extract_hdr10plus_metadata(input_file, &temp_dir) {
+        match extract_hdr10plus_metadata(input_file, &temp_dir, resume_enabled, args.stall_timeout)
+        {
             Ok(Some(json_path)) => hdr10plus_json = Some(json_path),
             Ok(None) => {
                 progress::print_warn(
@@ -136,7 +150,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             // Convert HLG -> PQ for Base Layer
             current_step += 1;
             progress::print_step(current_step, total_steps, "Converting HLG to PQ...");
-            match convert_hlg_to_pq(input_file, &temp_dir, args) {
+            match convert_hlg_to_pq(input_file, &temp_dir, args, resume_enabled) {
                 Ok(path) => bl_source_file = path,
                 Err(_) => return Ok(false),
             }
@@ -261,6 +275,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         args.peak_source,
         hdr10plus_json.as_deref(),
         measurements_file.as_deref(),
+        resume_enabled,
     )?;
 
     if rpu_path.is_none() {
@@ -273,30 +288,39 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     progress::print_step(current_step, total_steps, "Extracting base layer...");
     let bl_hevc = temp_dir.join("BL.hevc");
 
-    let mut ffmpeg_cmd = Command::new("ffmpeg");
-    ffmpeg_cmd.args([
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-stats",
-        "-i",
-        bl_source_file.to_str().unwrap(),
-        "-map",
-        "0:v:0",
-        "-c:v",
-        "copy",
-        "-f",
-        "hevc",
-        "-y",
-        bl_hevc.to_str().unwrap(),
-    ]);
+    if resume_enabled && resume::is_complete(&bl_hevc) {
+        progress::print_info("Reusing extracted base layer from a previous run.");
+    } else {
+        let mut ffmpeg_cmd = Command::new("ffmpeg");
+        ffmpeg_cmd.args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-stats",
+            "-i",
+            bl_source_file.to_str().unwrap(),
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "copy",
+            "-f",
+            "hevc",
+            "-y",
+            bl_hevc.to_str().unwrap(),
+        ]);
 
-    if !run_command_with_spinner(
-        &mut ffmpeg_cmd,
-        &temp_dir.join("ffmpeg_extract_bl.log"),
-        "Extracting base layer HEVC stream",
-    )? {
-        return Ok(false);
+        let bl_total = fs::metadata(&bl_source_file).ok().map(|m| m.len());
+        if !run_command_with_progress(
+            &mut ffmpeg_cmd,
+            &temp_dir.join("ffmpeg_extract_bl.log"),
+            "Extracting base layer HEVC stream",
+            &bl_hevc,
+            bl_total,
+            args.stall_timeout,
+        )? {
+            return Ok(false);
+        }
+        resume::mark_done(&bl_hevc)?;
     }
 
     // --- Inject RPU ---
@@ -307,49 +331,73 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         "Injecting RPU into base layer...",
     );
     let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
-    let dovi_tool_path =
-        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let mut dovi_cmd = Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
 
-    dovi_cmd.args([
-        "inject-rpu",
-        "-i",
-        bl_hevc.to_str().unwrap(),
-        "--rpu-in",
-        rpu_path.to_str().unwrap(),
-        "-o",
-        bl_rpu_hevc.to_str().unwrap(),
-    ]);
+    if resume_enabled && resume::is_complete(&bl_rpu_hevc) {
+        progress::print_info("Reusing RPU-injected base layer from a previous run.");
+    } else {
+        let dovi_tool_path =
+            external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
+        let mut dovi_cmd =
+            Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
 
-    if !run_command_with_spinner(
-        &mut dovi_cmd,
-        &temp_dir.join("dovi_inject.log"),
-        "Injecting RPU into base layer",
-    )? {
-        return Ok(false);
+        dovi_cmd.args([
+            "inject-rpu",
+            "-i",
+            bl_hevc.to_str().unwrap(),
+            "--rpu-in",
+            rpu_path.to_str().unwrap(),
+            "-o",
+            bl_rpu_hevc.to_str().unwrap(),
+        ]);
+
+        let inject_total = fs::metadata(&bl_hevc).ok().map(|m| m.len());
+        if !run_command_with_progress(
+            &mut dovi_cmd,
+            &temp_dir.join("dovi_inject.log"),
+            "Injecting RPU into base layer",
+            &bl_rpu_hevc,
+            inject_total,
+            args.stall_timeout,
+        )? {
+            return Ok(false);
+        }
+        resume::mark_done(&bl_rpu_hevc)?;
     }
 
     // --- Mux ---
     current_step += 1;
     progress::print_step(current_step, total_steps, "Muxing final MKV...");
-    let mut mkvmerge_cmd = Command::new("mkvmerge");
-    mkvmerge_cmd.arg("-q").arg("-o").arg(&output_file);
-    if args.drop_tags {
-        mkvmerge_cmd.arg("--no-global-tags");
-    }
-    if args.drop_chapters {
-        mkvmerge_cmd.arg("--no-chapters");
-    }
+    // The mux sentinel lives inside the temp dir (the output file is outside it), so cleanup
+    // removes it and no stray marker is left beside the final `.DV.mkv`.
+    let mux_marker = temp_dir.join("mux.done");
 
-    mkvmerge_cmd.arg(&bl_rpu_hevc);
-    mkvmerge_cmd.arg("--no-video").arg(input_file);
+    if resume_enabled && output_file.exists() && mux_marker.exists() {
+        progress::print_info("Reusing muxed output from a previous run.");
+    } else {
+        let mut mkvmerge_cmd = Command::new("mkvmerge");
+        mkvmerge_cmd.arg("-q").arg("-o").arg(&output_file);
+        if args.drop_tags {
+            mkvmerge_cmd.arg("--no-global-tags");
+        }
+        if args.drop_chapters {
+            mkvmerge_cmd.arg("--no-chapters");
+        }
 
-    if !run_command_with_spinner(
-        &mut mkvmerge_cmd,
-        &temp_dir.join("mkvmerge.log"),
-        "Muxing final MKV",
-    )? {
-        return Ok(false);
+        mkvmerge_cmd.arg(&bl_rpu_hevc);
+        mkvmerge_cmd.arg("--no-video").arg(input_file);
+
+        let mux_total = fs::metadata(input_file).ok().map(|m| m.len());
+        if !run_command_with_progress(
+            &mut mkvmerge_cmd,
+            &temp_dir.join("mkvmerge.log"),
+            "Muxing final MKV",
+            &output_file,
+            mux_total,
+            args.stall_timeout,
+        )? {
+            return Ok(false);
+        }
+        let _ = fs::write(&mux_marker, b"");
     }
 
     // --- Optional verification ---
@@ -553,34 +601,52 @@ fn hdr10plus_peak_nits(scene: &Value, peak_source: PeakSource) -> Option<f64> {
     Some(tenths_of_a_nit / 10.0)
 }
 
-fn extract_hdr10plus_metadata(input: &str, temp_dir: &Path) -> Result<Option<PathBuf>> {
+fn extract_hdr10plus_metadata(
+    input: &str,
+    temp_dir: &Path,
+    resume: bool,
+    stall_secs: u64,
+) -> Result<Option<PathBuf>> {
     let hevc = temp_dir.join("video.hevc");
-    let mut cmd = Command::new("ffmpeg");
-    cmd.args([
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        input,
-        "-map",
-        "0:v:0",
-        "-c:v",
-        "copy",
-        "-f",
-        "hevc",
-        "-y",
-        hevc.to_str().unwrap(),
-    ]);
+    if resume && resume::is_complete(&hevc) {
+        progress::print_info("Reusing extracted HEVC stream from a previous run.");
+    } else {
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            input,
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "copy",
+            "-f",
+            "hevc",
+            "-y",
+            hevc.to_str().unwrap(),
+        ]);
 
-    if !run_command_with_spinner(
-        &mut cmd,
-        &temp_dir.join("ffmpeg_extract_hdr10p.log"),
-        "Extracting HEVC stream",
-    )? {
-        return Ok(None);
+        let total = fs::metadata(input).ok().map(|m| m.len());
+        if !run_command_with_progress(
+            &mut cmd,
+            &temp_dir.join("ffmpeg_extract_hdr10p.log"),
+            "Extracting HEVC stream",
+            &hevc,
+            total,
+            stall_secs,
+        )? {
+            return Ok(None);
+        }
+        resume::mark_done(&hevc)?;
     }
 
     let json_out = temp_dir.join("hdr10plus_metadata.json");
+    if resume && resume::is_complete(&json_out) {
+        progress::print_info("Reusing extracted HDR10+ metadata from a previous run.");
+        return Ok(Some(json_out));
+    }
     let mut tool = Command::new("hdr10plus_tool");
     tool.args([
         "extract",
@@ -597,13 +663,18 @@ fn extract_hdr10plus_metadata(input: &str, temp_dir: &Path) -> Result<Option<Pat
     )? && json_out.exists()
         && fs::metadata(&json_out)?.len() > 0
     {
+        resume::mark_done(&json_out)?;
         return Ok(Some(json_out));
     }
     Ok(None)
 }
 
-fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBuf> {
+fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args, resume: bool) -> Result<PathBuf> {
     let out_path = temp_dir.join("HLG_to_PQ.mkv");
+    if resume && resume::is_complete(&out_path) {
+        progress::print_info("Reusing HLG\u{2192}PQ base layer from a previous run.");
+        return Ok(out_path);
+    }
     let log_path = temp_dir.join("ffmpeg_hlg2pq.log");
 
     let static_meta = metadata::get_static_metadata(input);
@@ -719,9 +790,16 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args) -> Result<PathBu
 
     cmd.arg(out_path.to_str().unwrap());
 
-    if run_command_with_spinner(&mut cmd, &log_path, "Converting HLG to PQ (encoding)")?
-        && out_path.exists()
+    if run_command_with_progress(
+        &mut cmd,
+        &log_path,
+        "Converting HLG to PQ (encoding)",
+        &out_path,
+        None,
+        args.stall_timeout,
+    )? && out_path.exists()
     {
+        resume::mark_done(&out_path)?;
         return Ok(out_path);
     }
     anyhow::bail!("HLG to PQ conversion failed")
@@ -733,8 +811,13 @@ fn generate_rpu(
     peak_source: PeakSource,
     meta_file: Option<&Path>,
     meas_file: Option<&Path>,
+    resume: bool,
 ) -> Result<Option<PathBuf>> {
     let rpu_out = temp_dir.join("RPU.bin");
+    if resume && resume::is_complete(&rpu_out) {
+        progress::print_info("Reusing generated RPU from a previous run.");
+        return Ok(Some(rpu_out));
+    }
     let extra_json = temp_dir.join("extra.json");
     // Resolve tool path
     let dovi_tool_path =
@@ -765,6 +848,7 @@ fn generate_rpu(
 
     let log_path = temp_dir.join("dovi_gen.log");
     if run_command_with_spinner(&mut cmd, &log_path, "Generating Dolby Vision RPU")? {
+        resume::mark_done(&rpu_out)?;
         Ok(Some(rpu_out))
     } else {
         Ok(None)
