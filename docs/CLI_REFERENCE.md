@@ -79,8 +79,13 @@ hdr_analyzer_mvp "video.mkv"
 
 ### Notes for v6 output
 
-- Per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) are currently **approximated** from BT.2020
-  (`peak_pq_2020`) using 99% and 95% factors. More exact gamut-aware computation remains planned.
+- v6 adds per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) and a `target_peak_nits` header on top of v5.
+- The per-gamut peaks are currently **approximated** from BT.2020 (`peak_pq_2020`) using 99% and 95%
+  factors. They are a **madVR measurement-file** feature and are **not consumed by the Dolby Vision
+  conversion** — `mkvdolby` writes v5, and `dovi_tool` builds L1 from the BT.2020 peak + histogram. The
+  approximation therefore affects only a standalone v6 `.bin` used directly by madVR, not DV output.
+- Accurate per-gamut peaks will fall out of the planned luminance/max-RGB peak work
+  ([CM_ANALYZE_PARITY.md](CM_ANALYZE_PARITY.md#5-dependency-ordered-workstreams), WS1).
 
 ### Examples
 

@@ -102,7 +102,9 @@ Key facts:
 1. **Luma-only peak vs luminance / max-RGB.** Reading only Y′ misses highlights that are bright in a
    single channel (saturated reds/blues) and slightly mis-weights others. `cm_analyze` works in a
    luminance/ICtCp-like domain. Action: compute max-RGB (or an ICtCp **I**) in the PQ domain from the
-   decoded RGB, not Y′. This subsumes the existing "v6 gamut peaks → full RGB" roadmap item.
+   decoded RGB, not Y′. This subsumes the existing "v6 gamut peaks → full RGB" roadmap item — and the
+   same RGB decode yields real madVR-v6 per-gamut peaks (`peak_pq_dcip3`/`peak_pq_709`) as a by-product.
+   Note those v6 gamut peaks are a **madVR-only** feature and are not consumed by the DV RPU.
 2. **Quantized mid-bin avg vs true mean.** A 256-bin histogram + mid-bin centers + renormalization
    introduces a small, content-dependent bias in `avg_pq`. Action: accumulate a true mean of the
    PQ-encoded active-area pixels at full precision (the histogram can remain for distribution/min/peak).

@@ -64,6 +64,22 @@ We are **current** (2.3.1 even shipped "Corrected RPU generation from madVR file
 **`--canvas-width/--canvas-height`** to generate **L5 active area** (we leave L5 at defaults), and
 `--long-play-mode`.
 
+### 2.5 The v5/v6 madVR format & gamut peaks are orthogonal to DV
+
+A common misconception is that the "v6 per-gamut peak approximation" lowers DV conversion quality. It
+does not, for two independent reasons:
+
+1. **`mkvdolby` writes v5.** `run_hdr_analyzer` never passes `--madvr-version`, so the analyzer defaults
+   to v5 (`hdr_analyzer_mvp/src/cli.rs`). The v6 approximation in `hdr_analyzer_mvp/src/writer.rs`
+   (guarded by `madvr_version >= 6`) is **dead code on the DV path**.
+2. **DV L1 is a single luminance triplet** (min/avg/max in PQ) with no per-gamut concept. `dovi_tool
+   generate --madvr-file` builds L1 from `peak_pq_2020` + the histogram; the DCI-P3/709 peaks are a
+   **madVR playback** feature only.
+
+The real DV lever is the accuracy of `peak_pq_2020` itself (today **luma-only**) → robust
+luminance/max-RGB peak (**[WS1](CM_ANALYZE_PARITY.md#5-dependency-ordered-workstreams)**), which also
+yields correct per-gamut peaks as a by-product. So "full v6" is not a DV goal; accurate BT.2020 peak is.
+
 ---
 
 ## 3. Quality issues → root causes → fix
