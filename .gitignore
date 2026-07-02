@@ -102,3 +102,8 @@ claude-flow
 .osgrep
 upgrade-mkvdolby.sh
 RELEASE_STRATEGY.md
+
+# Internal working notes (not part of the public project)
+/tasks/
+/tmp/
+dev-handoff.md
