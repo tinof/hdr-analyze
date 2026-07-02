@@ -1,11 +1,11 @@
 # CM v4.0 Upgrade: Implementation Status
 
 **Updated**: 2026-05-31
-**Status**: Shipped in the native `mkvdolby` workflow
+**Status**: Shipped in the native `mkvdovi` workflow
 
 ## Summary
 
-`mkvdolby` generates Dolby Vision Profile 8.1 RPUs with Content Mapping v4.0 by
+`mkvdovi` generates Dolby Vision Profile 8.1 RPUs with Content Mapping v4.0 by
 default. The default workflow prioritizes honest source metadata, accurate L1
 generation, and display-side tone mapping:
 
@@ -38,13 +38,13 @@ brightness.
 
 ```bash
 # Default: CM v4.0, auto-detected source primaries, neutral L2 trims
-mkvdolby --keep-source --verify "input.mkv"
+mkvdovi --keep-source --verify "input.mkv"
 
 # Legacy CM v2.9 output
-mkvdolby --cm-version v29 "input.mkv"
+mkvdovi --cm-version v29 "input.mkv"
 
 # Explicit L9/L11 settings
-mkvdolby \
+mkvdovi \
   --source-primaries 0 \
   --content-type movies \
   --reference-mode false \
@@ -86,20 +86,20 @@ For HDR10+ sources, `--peak-source` is forwarded to
 | MaxFALL | `400.0` nits |
 
 L9 auto-detection prefers mastering-display primaries, then encoded container
-primaries. If neither is available, `mkvdolby` warns before falling back to
+primaries. If neither is available, `mkvdovi` warns before falling back to
 BT.2020. `generate_extra_json` rejects missing static metadata rather than
 silently applying a second fallback layer.
 
 ### HDR10+ Scene Peaks
 
-After HDR10+ extraction, `mkvdolby` evaluates the selected peak-source values
+After HDR10+ extraction, `mkvdovi` evaluates the selected peak-source values
 for scene first frames. It warns when a selected L1 peak exceeds three times the
 mastering-display peak and reports the highest selected peak. The warning is
 advisory because legitimate source metadata can contain outliers.
 
 ### Post-Mux Verification
 
-`mkvdolby --verify` resolves the installed `verifier` from `PATH` for available
+`mkvdovi --verify` resolves the installed `verifier` from `PATH` for available
 measurement files. It extracts the final RPU and parses structured
 `dovi_tool info --frame 0` JSON, hard-failing when:
 

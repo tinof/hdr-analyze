@@ -39,7 +39,7 @@ jobs:
             | Tool | Description |
             |------|-------------|
             | `hdr_analyzer_mvp` | HDR10/HLG frame analyzer and measurement generator |
-            | `mkvdolby` | HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 converter |
+            | `mkvdovi` | HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 converter |
             | `verifier` | madVR measurement file verification utility |
             
             ### 📦 Download
@@ -68,7 +68,7 @@ jobs:
             ### ⚙️ Prerequisites
             
             - **FFmpeg** must be installed and available in your system PATH
-            - **mkvdolby** also requires `mkvmerge`, `dovi_tool` 2.3.2 or newer,
+            - **mkvdovi** also requires `mkvmerge`, `dovi_tool` 2.3.2 or newer,
               and `hdr10plus_tool` when converting HDR10+ sources
             
             ### 🚀 Quick Start
@@ -78,7 +78,7 @@ jobs:
             ./hdr_analyzer_mvp -i input.mkv -o measurements.bin
             
             # Convert to Dolby Vision while preserving the source for A/B testing
-            ./mkvdolby --keep-source --verify input.mkv
+            ./mkvdovi --keep-source --verify input.mkv
             
             # Verify binary files
             ./verifier --help
@@ -204,9 +204,11 @@ jobs:
           
           # Copy all binaries
           cp "target/${{ matrix.target }}/release/hdr_analyzer_mvp" "$staging/bin/"
-          cp "target/${{ matrix.target }}/release/mkvdolby" "$staging/bin/"
+          cp "target/${{ matrix.target }}/release/mkvdovi" "$staging/bin/"
+          # Transitional alias after the v0.3.0 rename; remove in the next release.
+          cp "target/${{ matrix.target }}/release/mkvdovi" "$staging/bin/mkvdolby"
           cp "target/${{ matrix.target }}/release/verifier" "$staging/bin/"
-          cp scripts/mkvdolby_hifi_workflow.sh "$staging/bin/"
+          cp scripts/mkvdovi_hifi_workflow.sh "$staging/bin/"
           
           # Copy documentation
           cp README.md "$staging/" 2>/dev/null || echo "README not found"
@@ -228,7 +230,9 @@ jobs:
           
           # Copy all binaries
           cp "target/${{ matrix.target }}/release/hdr_analyzer_mvp.exe" "$staging/bin/"
-          cp "target/${{ matrix.target }}/release/mkvdolby.exe" "$staging/bin/"
+          cp "target/${{ matrix.target }}/release/mkvdovi.exe" "$staging/bin/"
+          # Transitional alias after the v0.3.0 rename; remove in the next release.
+          cp "target/${{ matrix.target }}/release/mkvdovi.exe" "$staging/bin/mkvdolby.exe"
           cp "target/${{ matrix.target }}/release/verifier.exe" "$staging/bin/"
           
           # Copy documentation
@@ -324,7 +328,7 @@ jobs:
 
             All builds completed successfully:
             - ✅ Cross-platform builds (Windows, macOS Intel, macOS ARM, Linux)
-            - ✅ All three tools built: \`hdr_analyzer_mvp\`, \`mkvdolby\`, \`verifier\`
+            - ✅ All three tools built: \`hdr_analyzer_mvp\`, \`mkvdovi\`, \`verifier\`
             - ✅ Test suite passed
             - ✅ Code quality checks (clippy, formatting)
             - ✅ Security audit passed
@@ -336,9 +340,9 @@ jobs:
             hdr-analyze-${tag_name}-<platform>/
             ├── bin/
             │   ├── hdr_analyzer_mvp
-            │   ├── mkvdolby
+            │   ├── mkvdovi
             │   ├── verifier
-            │   └── mkvdolby_hifi_workflow.sh (Linux/macOS)
+            │   └── mkvdovi_hifi_workflow.sh (Linux/macOS)
             ├── README.md
             ├── CHANGELOG.md
             └── LICENSE
@@ -349,7 +353,7 @@ jobs:
             After downloading, verify the binaries:
             \`\`\`bash
             ./bin/hdr_analyzer_mvp --help
-            ./bin/mkvdolby --help
+            ./bin/mkvdovi --help
             ./bin/verifier --help
             \`\`\`
             `;
@@ -380,7 +384,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 Included Tools" >> $GITHUB_STEP_SUMMARY
           echo "- \`hdr_analyzer_mvp\` - HDR10+ analyzer" >> $GITHUB_STEP_SUMMARY
-          echo "- \`mkvdolby\` - Dolby Vision processor" >> $GITHUB_STEP_SUMMARY
+          echo "- \`mkvdovi\` - Dolby Vision processor" >> $GITHUB_STEP_SUMMARY
           echo "- \`verifier\` - Binary verifier" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📥 **Download**: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY

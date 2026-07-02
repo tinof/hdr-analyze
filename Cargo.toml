@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "hdr_analyzer_mvp",
-    "mkvdolby",
+    "mkvdovi",
     "verifier",
 ]
 exclude = ["tools/compare_baseline"]

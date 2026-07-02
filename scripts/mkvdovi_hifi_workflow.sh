@@ -3,10 +3,10 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-High-fidelity mkvdolby workflow with post-run comparison.
+High-fidelity mkvdovi workflow with post-run comparison.
 
 Usage:
-  mkvdolby_hifi_workflow.sh [options] <input.mkv>
+  mkvdovi_hifi_workflow.sh [options] <input.mkv>
 
 Options:
   --repo-dir <path>           Repository root (default: script_dir/..)
@@ -17,14 +17,15 @@ Options:
 
 Environment overrides (optional):
   HDR_ANALYZER_BIN            Path to hdr_analyzer_mvp binary
-  MKVDOLBY_BIN                Path to mkvdolby binary
+  MKVDOVI_BIN                 Path to mkvdovi binary
+  MKVDOLBY_BIN                Deprecated alias for MKVDOVI_BIN (removed next release)
   VERIFIER_BIN                Path to verifier binary
 
 What this workflow does:
   1) Extracts original Dolby Vision RPU summary from the input MKV
   2) Generates high-fidelity measurements:
        --downscale 1 --sample-rate 1 --optimizer-profile <profile>
-  3) Runs mkvdolby with safe flags:
+  3) Runs mkvdovi with safe flags:
        --keep-source --verify --cm-version v40
   4) Extracts new Dolby Vision RPU summary from the output MKV
   5) Writes a comparison report next to the input file:
@@ -169,11 +170,12 @@ require_cmd mkvmerge
 require_cmd python3
 
 if ! command -v mediainfo >/dev/null 2>&1 && ! command -v ffprobe >/dev/null 2>&1; then
-    die "Either mediainfo or ffprobe must be installed for mkvdolby"
+    die "Either mediainfo or ffprobe must be installed for mkvdovi"
 fi
 
 HDR_ANALYZER_BIN="$(resolve_bin HDR_ANALYZER_BIN target/release/hdr_analyzer_mvp hdr_analyzer_mvp)"
-MKVDOLBY_BIN="$(resolve_bin MKVDOLBY_BIN target/release/mkvdolby mkvdolby)"
+MKVDOVI_BIN="${MKVDOVI_BIN:-${MKVDOLBY_BIN:-}}"   # honor deprecated alias one release
+MKVDOVI_BIN="$(resolve_bin MKVDOVI_BIN target/release/mkvdovi mkvdovi)"
 VERIFIER_BIN="$(resolve_bin VERIFIER_BIN target/release/verifier verifier)"
 
 INPUT_DIR="$(cd "$(dirname "$INPUT_FILE")" && pwd)"
@@ -184,7 +186,7 @@ INPUT_FILE="$INPUT_DIR/$INPUT_BASE"
 MEASUREMENTS_FILE="$INPUT_DIR/${INPUT_STEM}_measurements.bin"
 OUTPUT_FILE="$INPUT_DIR/${INPUT_STEM}.DV.mkv"
 REPORT_FILE="$INPUT_DIR/${INPUT_STEM}.DV.hifi.compare.txt"
-MKVDOLBY_INPUT="$INPUT_FILE"
+MKVDOVI_INPUT="$INPUT_FILE"
 
 if [[ -e "$OUTPUT_FILE" ]]; then
     if [[ "$FORCE" -eq 1 ]]; then
@@ -195,7 +197,7 @@ if [[ -e "$OUTPUT_FILE" ]]; then
     fi
 fi
 
-WORK_DIR="$(mktemp -d -t mkvdolby-hifi-XXXXXX)"
+WORK_DIR="$(mktemp -d -t mkvdovi-hifi-XXXXXX)"
 
 cleanup() {
     if [[ "$KEEP_TEMP" -eq 0 && -d "$WORK_DIR" ]]; then
@@ -205,7 +207,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "$INPUT_BASE" == *.DV.mkv ]]; then
-    die "Input filename ends with '.DV.mkv'; mkvdolby skips these paths. Copy/rename to a different .mkv filename and rerun."
+    die "Input filename ends with '.DV.mkv'; mkvdovi skips these paths. Copy/rename to a different .mkv filename and rerun."
 fi
 
 log "Input file:        $INPUT_FILE"
@@ -235,14 +237,14 @@ log "Step 2/5: Generating high-fidelity measurements"
 log "Step 3/5: Running verifier on high-fidelity measurements"
 "$VERIFIER_BIN" "$MEASUREMENTS_FILE" > "$WORK_DIR/new_measurements.verifier.txt"
 
-log "Step 4/5: Running mkvdolby with high-fidelity measurements"
-"$MKVDOLBY_BIN" \
+log "Step 4/5: Running mkvdovi with high-fidelity measurements"
+"$MKVDOVI_BIN" \
     --keep-source \
     --verify \
     --cm-version v40 \
-    "$MKVDOLBY_INPUT"
+    "$MKVDOVI_INPUT"
 
-[[ -f "$OUTPUT_FILE" ]] || die "mkvdolby did not produce expected output: $OUTPUT_FILE"
+[[ -f "$OUTPUT_FILE" ]] || die "mkvdovi did not produce expected output: $OUTPUT_FILE"
 
 log "Step 5/5: Probing newly created Dolby Vision metadata"
 collect_dv_probe "$OUTPUT_FILE" "new"
@@ -374,7 +376,7 @@ added_from_missing = sorted(missing_in_original & new_present)
 still_missing_in_new = sorted(set(tracked) - new_present)
 
 lines = []
-lines.append("mkvdolby High-Fidelity Regeneration Report")
+lines.append("mkvdovi High-Fidelity Regeneration Report")
 lines.append("=" * 42)
 lines.append("")
 lines.append(f"Input file:        {input_file}")

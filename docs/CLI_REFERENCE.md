@@ -82,7 +82,7 @@ hdr_analyzer_mvp "video.mkv"
 - v6 adds per-gamut peaks (`peak_pq_dcip3`, `peak_pq_709`) and a `target_peak_nits` header on top of v5.
 - The per-gamut peaks are currently **approximated** from BT.2020 (`peak_pq_2020`) using 99% and 95%
   factors. They are a **madVR measurement-file** feature and are **not consumed by the Dolby Vision
-  conversion** — `mkvdolby` writes v5, and `dovi_tool` builds L1 from the BT.2020 peak + histogram. The
+  conversion** — `mkvdovi` writes v5, and `dovi_tool` builds L1 from the BT.2020 peak + histogram. The
   approximation therefore affects only a standalone v6 `.bin` used directly by madVR, not DV output.
 - Accurate per-gamut peaks will fall out of the planned luminance/max-RGB peak work
   ([CM_ANALYZE_PARITY.md](CM_ANALYZE_PARITY.md#5-dependency-ordered-workstreams), WS1).
@@ -115,15 +115,15 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin" --downsca
 
 ---
 
-## `mkvdolby`
+## `mkvdovi`
 
 Orchestrates the full HDR10/HDR10+/HLG → Dolby Vision Profile 8.1 (CM v4.0) conversion. Internally
 calls `dovi_tool`, `mkvmerge`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately
 (see [README Prerequisites](../README.md#prerequisites)).
 
 ```bash
-mkvdolby                 # process all .mkv files recursively from the current directory
-mkvdolby "input.mkv"     # process a specific file
+mkvdovi                 # process all .mkv files recursively from the current directory
+mkvdovi "input.mkv"     # process a specific file
 ```
 
 ### General
@@ -180,12 +180,12 @@ See [DOLBY_VISION.md](DOLBY_VISION.md#hdr10-peak-mapping) for guidance on each s
 ### Examples
 
 ```bash
-mkvdolby "input.mkv" --keep-source             # keep source for A/B testing
-mkvdolby "input.mkv" --keep-source --verify    # recommended first run
-mkvdolby "input.mkv" --content-type sport      # high-motion content
-mkvdolby "input.mkv" --cm-version v29          # legacy CM v2.9
-mkvdolby "input.mkv" --source-primaries 0      # force P3-D65
-mkvdolby "input.mkv" --encoder videotoolbox    # fast HLG→PQ on Apple Silicon
+mkvdovi "input.mkv" --keep-source             # keep source for A/B testing
+mkvdovi "input.mkv" --keep-source --verify    # recommended first run
+mkvdovi "input.mkv" --content-type sport      # high-motion content
+mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9
+mkvdovi "input.mkv" --source-primaries 0      # force P3-D65
+mkvdovi "input.mkv" --encoder videotoolbox    # fast HLG→PQ on Apple Silicon
 ```
 
 ### Resilience for long conversions
@@ -195,7 +195,7 @@ inject RPU → mux), so on slow storage it can legitimately run for many minutes
 keep long runs safe and observable:
 
 - **Run under `tmux`/`screen`/`nohup`** so a dropped SSH or terminal session cannot kill it
-  mid-conversion (`SIGHUP`). On interrupt, `mkvdolby` preserves its `mkvdolby_temp_*` directory.
+  mid-conversion (`SIGHUP`). On interrupt, `mkvdovi` preserves its `mkvdovi_temp_*` directory.
 - **Resume is automatic.** Re-running over the same input reuses every completed step (analysis,
   RPU, extracted base layer, …) from the leftover temp dir — it does not redo hours of work.
   Pass `--no-resume` to force a clean re-run.
@@ -204,9 +204,9 @@ keep long runs safe and observable:
   genuinely stalled tool is distinguishable from slow-but-moving I/O.
 
 ```bash
-tmux new -s dv "mkvdolby 'input.mkv' --keep-source --verify"   # survive disconnects
-mkvdolby "input.mkv" --no-resume        # ignore a leftover temp dir, start clean
-mkvdolby "input.mkv" --stall-timeout 0  # disable the stall warning
+tmux new -s dv "mkvdovi 'input.mkv' --keep-source --verify"   # survive disconnects
+mkvdovi "input.mkv" --no-resume        # ignore a leftover temp dir, start clean
+mkvdovi "input.mkv" --stall-timeout 0  # disable the stall warning
 ```
 
 ---
@@ -234,7 +234,7 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
 - `vaapi` / `videotoolbox`: currently log and fall back to software decoding (proper device
   contexts are planned). The pipeline remains fully functional via software decoding everywhere.
 
-### Converter (encoding via mkvdolby)
+### Converter (encoding via mkvdovi)
 
 - **macOS Apple Silicon**: `--encoder videotoolbox` enables `hevc_videotoolbox` for accelerated
   HLG→PQ conversion.

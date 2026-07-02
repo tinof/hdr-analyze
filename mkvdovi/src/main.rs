@@ -95,9 +95,9 @@ fn collect_default_inputs() -> anyhow::Result<Vec<String>> {
         .filter_map(|e| e.ok())
         .filter(|e| {
             !e.path().components().any(|c| {
-                c.as_os_str()
-                    .to_string_lossy()
-                    .starts_with("mkvdolby_temp_")
+                let name = c.as_os_str().to_string_lossy();
+                // Old prefix kept one release for pre-rename temp dirs.
+                name.starts_with("mkvdovi_temp_") || name.starts_with("mkvdolby_temp_")
             })
         })
         .filter(|e| e.file_type().is_file() || e.file_type().is_symlink())
@@ -142,7 +142,7 @@ fn main() -> anyhow::Result<()> {
     let _ = ctrlc::set_handler(|| {
         eprintln!(
             "\n{}",
-            "Interrupted — partial work preserved in mkvdolby_temp_*; re-run to resume.".yellow()
+            "Interrupted — partial work preserved in mkvdovi_temp_*; re-run to resume.".yellow()
         );
         std::process::exit(130);
     });
@@ -193,7 +193,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if !progress::is_quiet() {
-        eprintln!("{} mkvdolby", "Starting".green().bold());
+        eprintln!("{} mkvdovi", "Starting".green().bold());
     }
 
     // Process files

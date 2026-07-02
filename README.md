@@ -8,12 +8,16 @@ Convert any HDR10, HLG, or HDR10+ video to dynamic metadata — entirely free an
 
 HDR-Analyze reads raw 10-bit pixel data frame-by-frame, computes precise per-frame luminance
 measurements, and generates dynamic metadata (`.bin`) compatible with existing open-source tools
-like `dovi_tool`. The companion `mkvdolby` tool then packages the result into a final MKV with
+like `dovi_tool`. The companion `mkvdovi` tool then packages the result into a final MKV with
 dynamic tone-mapping metadata.
 
-**Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdolby → Dynamic HDR MKV`
+**Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdovi → Dynamic HDR MKV`
 
-For HDR10+ inputs, `mkvdolby` extracts the source HDR10+ metadata directly and passes it to
+> **Renamed in v0.3.0:** the converter formerly called `mkvdolby` is now **`mkvdovi`**
+> (see [docs/PROVENANCE.md](docs/PROVENANCE.md) for why). For one release, archives ship a
+> transitional `mkvdolby` copy and leftover `mkvdolby_temp_*` directories still resume.
+
+For HDR10+ inputs, `mkvdovi` extracts the source HDR10+ metadata directly and passes it to
 `dovi_tool`; it does not run `hdr_analyzer_mvp` unless HDR10+ metadata extraction fails and the
 workflow falls back to HDR10 analysis.
 
@@ -22,6 +26,7 @@ workflow falls back to HDR10 analysis.
 - **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — complete flag reference for all three tools.
 - **[docs/DOLBY_VISION.md](docs/DOLBY_VISION.md)** — HDR10+ peak mapping, CM v4.0 metadata, verification.
 - **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — analysis internals and research.
+- **[docs/PROVENANCE.md](docs/PROVENANCE.md)** — clean-room statement: the public standards this is built from.
 - **[ROADMAP.md](ROADMAP.md)** · **[CHANGELOG.md](CHANGELOG.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**
 
 ## Workspace Members
@@ -30,7 +35,7 @@ This is a Rust workspace with three shipped binaries:
 
 - **`hdr_analyzer_mvp`** — HDR analysis engine; processes video and writes madVR-compatible `.bin`
   measurement files.
-- **`mkvdolby`** — native HDR10/HDR10+/HLG → Dolby Vision Profile 8.1 (CM v4.0) conversion orchestrator.
+- **`mkvdovi`** — native HDR10/HDR10+/HLG → Dolby Vision Profile 8.1 (CM v4.0) conversion orchestrator.
 - **`verifier`** — utility for reading, validating, and inspecting `.bin` measurement files.
 
 ## Key Features
@@ -47,7 +52,7 @@ This is a Rust workspace with three shipped binaries:
   median filtering and pre-analysis denoising for grainy sources.
 - **Native HLG workflow**: auto-detects ARIB STD-B67 and converts to PQ histograms in-memory
   (`--hlg-peak-nits`, default 1000).
-- **Dolby Vision CM v4.0** output by default (L1/L2/L6/L9/L11/L254) via `mkvdolby`.
+- **Dolby Vision CM v4.0** output by default (L1/L2/L6/L9/L11/L254) via `mkvdovi`.
 - **Cross-platform**: software decoding everywhere; optional CUDA attempt on NVIDIA with graceful
   fallback. ARM64-tuned (NEON, `--sample-rate`/`--downscale` give 3–4× throughput on CPU-limited systems).
 
@@ -73,7 +78,7 @@ welcome, but there is no support SLA. Please do not expect production-level main
   - [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases): required for RPU generation/injection.
     **2.3.2+ recommended** (fixes duplicated end-padding in `inject-rpu`).
   - [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases): required for HDR10+ inputs.
-  - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): required by `mkvdolby` for final MKV packaging.
+  - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): required by `mkvdovi` for final MKV packaging.
 
 ## Installation & Setup
 
@@ -88,7 +93,7 @@ cargo build --release --workspace
 Binaries land in `target/release/`:
 
 - Analyzer: `./target/release/hdr_analyzer_mvp`
-- Converter: `./target/release/mkvdolby`
+- Converter: `./target/release/mkvdovi`
 - Verifier: `./target/release/verifier`
 
 After a `git pull`, **always rebuild** so the binaries match the source:
@@ -102,13 +107,13 @@ Optional local install from a source checkout:
 
 ```bash
 install -Dm755 target/release/hdr_analyzer_mvp "$HOME/.local/bin/hdr_analyzer_mvp"
-install -Dm755 target/release/mkvdolby        "$HOME/.local/bin/mkvdolby"
+install -Dm755 target/release/mkvdovi        "$HOME/.local/bin/mkvdovi"
 install -Dm755 target/release/verifier        "$HOME/.local/bin/verifier"
-install -Dm755 scripts/mkvdolby_hifi_workflow.sh "$HOME/.local/bin/mkvdolby_hifi_workflow.sh"
+install -Dm755 scripts/mkvdovi_hifi_workflow.sh "$HOME/.local/bin/mkvdovi_hifi_workflow.sh"
 ```
 
-`mkvdolby_hifi_workflow.sh` is a specialist comparison helper for regenerating files that already
-contain Dolby Vision metadata. Use `mkvdolby` directly for HDR10+ sources.
+`mkvdovi_hifi_workflow.sh` is a specialist comparison helper for regenerating files that already
+contain Dolby Vision metadata. Use `mkvdovi` directly for HDR10+ sources.
 
 Prebuilt binaries for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux** are published on
 the [Releases page](https://github.com/tinof/hdr-analyze/releases).
@@ -136,29 +141,29 @@ The examples below cover the common paths. For every flag and default, see
 
 → Noise-robustness, optimizer, and HLG flags: [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#hdr_analyzer_mvp).
 
-### mkvdolby (conversion tool)
+### mkvdovi (conversion tool)
 
 Converts HDR10/HDR10+/HLG input to a Profile 8.1 MKV with CM v4.0 metadata.
 
-> **By default, `mkvdolby` deletes the source file after a successful conversion** (and removes temp
+> **By default, `mkvdovi` deletes the source file after a successful conversion** (and removes temp
 > artifacts). Pass `--keep-source` to keep it.
 >
-> An interrupted run (e.g. a dropped SSH session) keeps its `mkvdolby_temp_*` directory and prints a
+> An interrupted run (e.g. a dropped SSH session) keeps its `mkvdovi_temp_*` directory and prints a
 > resume hint — just re-run the same command to **resume** from the last completed step (`--no-resume`
 > forces a clean run). For long conversions, run under `tmux`/`nohup` so a disconnect can't kill them.
 
 ```bash
-mkvdolby                                  # convert all .mkv files in the current directory
-mkvdolby "input.mkv"                      # convert a specific file
-mkvdolby "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
-mkvdolby "input.mkv" --analysis-quality accurate   # fast | balanced (default) | accurate
-mkvdolby "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
-mkvdolby "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean
+mkvdovi                                  # convert all .mkv files in the current directory
+mkvdovi "input.mkv"                      # convert a specific file
+mkvdovi "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
+mkvdovi "input.mkv" --analysis-quality accurate   # fast | balanced (default) | accurate
+mkvdovi "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
+mkvdovi "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean
 ```
 
 → HDR10+ peak mapping, CM v4.0 metadata, and verification details:
 [docs/DOLBY_VISION.md](docs/DOLBY_VISION.md). Full flag list:
-[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#mkvdolby).
+[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#mkvdovi).
 
 ### Verifier
 
@@ -223,7 +228,8 @@ pre-commit install --hook-type pre-push   # quick tests on push
 ## Acknowledgements
 
 - **quietvoid** — for `dovi_tool`, `hdr10plus_tool`, and the MIT-licensed `madvr_parse` library.
-- **The Doom9 community** — for the collective reverse-engineering and documentation of HDR formats.
+- **The Doom9 and MakeMKV forum communities** — for the collective research and documentation of
+  HDR formats and Dolby Vision packaging that made an open implementation possible.
 - `ffmpeg-next`, `clap`, `anyhow` and the wider Rust ecosystem.
 
 ## License

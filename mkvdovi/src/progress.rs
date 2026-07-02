@@ -1,4 +1,4 @@
-//! Progress indicators for mkvdolby CLI
+//! Progress indicators for mkvdovi CLI
 //!
 //! Provides spinners and progress bars using indicatif, with automatic
 //! TTY detection and verbose mode support.

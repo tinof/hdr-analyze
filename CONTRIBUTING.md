@@ -85,16 +85,16 @@ cargo build --release
 
 While `cargo run` works, the workspace includes scripts and specialized workflows.
 
-#### 1. The `mkvdolby` Script
-The `mkvdolby` script provides an end-to-end workflow for processing video files.
+#### 1. The `mkvdovi` Script
+The `mkvdovi` script provides an end-to-end workflow for processing video files.
 
 -   **Standard Run**:
     ```bash
-    PYTHONPATH="mkvdolby/src" python -m mkvdolby.cli "<input_video>"
+    PYTHONPATH="mkvdovi/src" python -m mkvdovi.cli "<input_video>"
     ```
 -   **Run with Verification**:
     ```bash
-    PYTHONPATH="mkvdolby/src" python -m mkvdolby.cli "<input_video>" --verify
+    PYTHONPATH="mkvdovi/src" python -m mkvdovi.cli "<input_video>" --verify
     ```
 
 #### 2. Running the Analyzer Directly

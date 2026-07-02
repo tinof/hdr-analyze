@@ -34,7 +34,10 @@ fn test_version_flag() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("verifier 0.2.0"));
+        .stdout(predicate::str::contains(concat!(
+            "verifier ",
+            env!("CARGO_PKG_VERSION")
+        )));
 }
 
 #[test]

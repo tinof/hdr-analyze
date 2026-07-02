@@ -1,6 +1,6 @@
 # Dolby Vision: HDR10+ Peak Mapping & CM v4.0 Metadata
 
-How `mkvdolby` maps source brightness into Dolby Vision metadata, what it generates, and how to
+How `mkvdovi` maps source brightness into Dolby Vision metadata, what it generates, and how to
 verify the result. For the full flag list, see [CLI_REFERENCE.md](CLI_REFERENCE.md). For analysis
 internals, see [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md).
 
@@ -8,7 +8,7 @@ internals, see [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md).
 
 ## HDR10+ peak mapping
 
-For HDR10+ input, `mkvdolby` forwards the selected peak source to
+For HDR10+ input, `mkvdovi` forwards the selected peak source to
 `dovi_tool generate --hdr10plus-peak-source`:
 
 - **`histogram`** — default and recommended balanced baseline.
@@ -25,7 +25,7 @@ For movie or episodic HDR10+ content on an LG OLED C9-class display, start with 
 preserve the source for A/B testing:
 
 ```bash
-mkvdolby --keep-source --verify "input.mkv"
+mkvdovi --keep-source --verify "input.mkv"
 ```
 
 Use `--boost` only as an intentional brighter alternative after comparing the default output.
@@ -33,8 +33,8 @@ Use `--boost` only as an intentional brighter alternative after comparing the de
 ### Outlier handling (no silent clamping)
 
 When the selected HDR10+ peak source produces scene L1 peaks **above three times** the mastering
-display peak, `mkvdolby` warns and leaves the source metadata unchanged. This is advisory because
-real sources can contain valid outliers; `mkvdolby` never clamps peaks silently.
+display peak, `mkvdovi` warns and leaves the source metadata unchanged. This is advisory because
+real sources can contain valid outliers; `mkvdovi` never clamps peaks silently.
 
 ### Playback troubleshooting (Shield / LG OLED)
 
@@ -48,23 +48,23 @@ real sources can contain valid outliers; `mkvdolby` never clamps peaks silently.
 
 ## CM v4.0 metadata
 
-`mkvdolby` generates Content Mapping v4.0 metadata by default. HDR10+ inputs derive L1 brightness
+`mkvdovi` generates Content Mapping v4.0 metadata by default. HDR10+ inputs derive L1 brightness
 metadata from the source HDR10+ scenes; CM v4.0 adds L9/L11 metadata and `dovi_tool` CM v4 defaults
 alongside the CM v2.9-compatible L2/L6 blocks.
 
 ```bash
 # Default: CM v4.0 with auto-detected settings
-mkvdolby "input.mkv"
+mkvdovi "input.mkv"
 
 # Specify L11 content type
-mkvdolby "input.mkv" --content-type movies   # preserve movie artistic intent (default)
-mkvdolby "input.mkv" --content-type sport    # high-motion content
+mkvdovi "input.mkv" --content-type movies   # preserve movie artistic intent (default)
+mkvdovi "input.mkv" --content-type sport    # high-motion content
 
 # Legacy CM v2.9
-mkvdolby "input.mkv" --cm-version v29
+mkvdovi "input.mkv" --cm-version v29
 
 # Override auto-detected source primaries (0=P3-D65, 1=BT.709, 2=BT.2020)
-mkvdolby "input.mkv" --source-primaries 0
+mkvdovi "input.mkv" --source-primaries 0
 ```
 
 ### Metadata levels generated
@@ -78,7 +78,7 @@ mkvdolby "input.mkv" --source-primaries 0
 | **L11** | Content type and reference mode (default content type `movies`, reference mode `false`) |
 | **L254** | Default CM v4.0 algorithm metadata (added by `dovi_tool`) |
 
-`mkvdolby` does **not** synthesize L3 offsets or creative L8 trims. With `dovi_tool` 2.3.2 the
+`mkvdovi` does **not** synthesize L3 offsets or creative L8 trims. With `dovi_tool` 2.3.2 the
 generator adds its default L254 block; producing authored offsets or trims requires a separate
 workflow.
 
@@ -89,10 +89,10 @@ workflow.
 Pass `--verify` to validate the generated file before cleanup:
 
 ```bash
-mkvdolby --keep-source --verify "input.mkv"
+mkvdovi --keep-source --verify "input.mkv"
 ```
 
-For HDR10/HLG sources with a measurements file, `mkvdolby` resolves the installed `verifier` from
+For HDR10/HLG sources with a measurements file, `mkvdovi` resolves the installed `verifier` from
 `PATH`. It then extracts the final RPU and validates structured `dovi_tool info --frame 0` JSON:
 Profile 8, ordered L1 values, sane L6 metadata, and the required L9/L11/L254 blocks for CM v4.0.
 Missing source L6 fields or L9 primaries are reported when warned fallbacks are used.

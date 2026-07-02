@@ -4,8 +4,8 @@ use std::path::Path;
 use std::process::Command;
 
 #[allow(deprecated)]
-fn mkvdolby_cmd() -> Command {
-    Command::cargo_bin("mkvdolby").expect("Failed to find mkvdolby binary")
+fn mkvdovi_cmd() -> Command {
+    Command::cargo_bin("mkvdovi").expect("Failed to find mkvdovi binary")
 }
 
 fn have_dovi_tool() -> bool {
@@ -13,16 +13,16 @@ fn have_dovi_tool() -> bool {
 }
 
 #[test]
-fn test_mkvdolby_help() {
-    mkvdolby_cmd()
+fn test_mkvdovi_help() {
+    mkvdovi_cmd()
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("mkvdolby"));
+        .stdout(predicate::str::contains("mkvdovi"));
 }
 
 #[test]
-fn test_mkvdolby_execution_sample() {
+fn test_mkvdovi_execution_sample() {
     if !have_dovi_tool() {
         eprintln!("Skipping: dovi_tool not found in PATH");
         return;
@@ -34,7 +34,7 @@ fn test_mkvdolby_execution_sample() {
         return;
     }
 
-    mkvdolby_cmd()
+    mkvdovi_cmd()
         .arg(sample)
         .arg("--keep-source")
         .assert()

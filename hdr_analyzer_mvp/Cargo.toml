@@ -1,13 +1,13 @@
 [package]
 name = "hdr_analyzer_mvp"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["HDR-Analyze Contributors"]
 description = "Dynamic HDR metadata generator for Dolby Vision conversion - Advanced HDR10 video analysis tool with PQ-based histograms and intelligent optimization"
 license = "MIT"
-repository = "https://github.com/your-username/hdr-analyze"
-homepage = "https://github.com/your-username/hdr-analyze"
-documentation = "https://github.com/your-username/hdr-analyze/blob/main/README.md"
+repository = "https://github.com/tinof/hdr-analyze"
+homepage = "https://github.com/tinof/hdr-analyze"
+documentation = "https://github.com/tinof/hdr-analyze/blob/main/README.md"
 readme = "../README.md"
 keywords = ["hdr", "dolby-vision", "video", "analysis", "pq"]
 categories = ["multimedia::video", "command-line-utilities"]

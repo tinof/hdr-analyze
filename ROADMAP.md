@@ -42,8 +42,8 @@ rationale in [`docs/CONVERSION_QUALITY.md`](docs/CONVERSION_QUALITY.md). Externa
 Shipped and in validation:
 
 - **Three binaries released** for Linux, macOS (Intel + Apple Silicon), and Windows —
-  `hdr_analyzer_mvp`, `mkvdolby`, `verifier` (plus `mkvdolby_hifi_workflow.sh` on Unix).
-- **Dolby Vision CM v4.0** is the default `mkvdolby` output: L1 (from HDR10+ or `hdr_analyzer_mvp`),
+  `hdr_analyzer_mvp`, `mkvdovi`, `verifier` (plus `mkvdovi_hifi_workflow.sh` on Unix).
+- **Dolby Vision CM v4.0** is the default `mkvdovi` output: L1 (from HDR10+ or `hdr_analyzer_mvp`),
   neutral L2 compatibility trims, L6, L9 (auto-detected primaries), L11 (content type / reference mode),
   L254 (via `dovi_tool`).
 - **HDR10+ peak mapping** with corrected `--peak-source` defaults; advisory warnings (never silent
@@ -65,7 +65,7 @@ Practical improvements, independent of the parity workstreams below:
    ground-truth L1, `dovi_tool` smoke tests, and `tools/compare_baseline` wired into CI.
 2. **Crop detection robustness** (issue [#3](https://github.com/tinof/hdr-analyze/issues/3)): stream-level
    multi-frame probing instead of trusting the first analyzed frame; per-scene crop as a follow-up.
-3. **mkvdolby UX**: `--dry-run` (preview commands), `--keep-temp` / `--keep-logs` for debugging.
+3. **mkvdovi UX**: `--dry-run` (preview commands), `--keep-temp` / `--keep-logs` for debugging.
 4. **Hybrid scene metric**: finish `--scene-metric hybrid` (histogram + optical flow); currently a
    prototype that falls back to histogram-only.
 5. **Hardware decode contexts**: full VAAPI / VideoToolbox *decode* paths (encode via VideoToolbox already

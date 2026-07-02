@@ -6,14 +6,29 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
-### Reliability & observability (mkvdolby)
+### Renamed (breaking)
+- **The converter binary `mkvdolby` is now `mkvdovi`** (trademark hygiene: no product name
+  embeds the Dolby mark, matching community convention — cf. `dovi_tool`, `libdovi`).
+  Transitional support for exactly one release: release archives include a `mkvdolby` copy of
+  the binary, resume recognizes leftover `mkvdolby_temp_*` directories, and
+  `mkvdovi_hifi_workflow.sh` (renamed from `mkvdolby_hifi_workflow.sh`) still honors the
+  `MKVDOLBY_BIN` environment variable.
+
+### Legal & provenance
+- Added [`docs/PROVENANCE.md`](docs/PROVENANCE.md): clean-room statement, the public standards
+  every piece of domain knowledge derives from, the strict no-leaked-tools policy, and the
+  honest patent/trademark framing.
+- Fixed placeholder repository URLs in `hdr_analyzer_mvp`'s crate metadata; brought
+  `CITATION.cff` up to the current version.
+
+### Reliability & observability (mkvdovi)
 - Long file-producing steps (base-layer extract, RPU inject, mux, HLG→PQ encode) now show a
   live **byte-progress bar with throughput and ETA** instead of a bare elapsed spinner, so a
   slow-but-working step is distinguishable from a stalled one. Child output is streamed to the
   step log during the run, surfacing tool warnings as they happen.
 - Added a **stall warning**: `--stall-timeout <SECS>` (default 300, `0` disables) flags when the
   current step's output file stops growing — telling a hung tool apart from merely slow storage.
-- Added **automatic resume**: an interrupted conversion preserves its `mkvdolby_temp_*` directory,
+- Added **automatic resume**: an interrupted conversion preserves its `mkvdovi_temp_*` directory,
   and a re-run reuses every completed step (analysis, RPU, extracted base layer, …) via
   `<artifact>.done` completion sentinels. `--no-resume` forces a clean re-run.
 - Added **graceful interrupt handling**: `SIGINT`/`SIGTERM`/`SIGHUP` (e.g. a dropped SSH session)

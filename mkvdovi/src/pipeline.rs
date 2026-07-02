@@ -27,8 +27,16 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let output_file = dir.join(format!("{}.DV.mkv", stem));
 
     let resume_enabled = !args.no_resume;
-    let temp_dir_name = format!("mkvdolby_temp_{}", stem);
-    let temp_dir = dir.join(&temp_dir_name);
+    let temp_dir_name = format!("mkvdovi_temp_{}", stem);
+    let mut temp_dir = dir.join(&temp_dir_name);
+    // Pre-rename compat (mkvdolby -> mkvdovi in v0.3.0): resume from a leftover
+    // `mkvdolby_temp_*` directory when no new-style one exists. Remove after one release.
+    if resume_enabled && !temp_dir.exists() {
+        let legacy_temp_dir = dir.join(format!("mkvdolby_temp_{}", stem));
+        if legacy_temp_dir.exists() {
+            temp_dir = legacy_temp_dir;
+        }
+    }
 
     // A leftover temp dir means a previous run for this file was interrupted. With resume
     // enabled we reuse its completed steps; otherwise we discard it and start clean.

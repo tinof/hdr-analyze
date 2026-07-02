@@ -58,8 +58,8 @@ References are to files read directly from this repo.
 | Peak selection | `analysis/histogram.rs` (`select_peak_pq`) | `max` / `histogram99` / `histogram999` percentile peak |
 | Scene detection | `analysis/scene.rs` | chi-square histogram-distance cuts + min-scene-length |
 | Optimizer | `optimizer.rs` (`run_optimizer_pass`) | madVR **`target_nits`** (see note) |
-| DV metadata | `mkvdolby/src/metadata.rs` (`generate_extra_json`) | neutral L2, L6, L9, L11 |
-| RPU assembly | `mkvdolby/src/pipeline.rs` → `dovi_tool generate` | L1 derived from madVR measurements; L5 default; L254 added by `dovi_tool` |
+| DV metadata | `mkvdovi/src/metadata.rs` (`generate_extra_json`) | neutral L2, L6, L9, L11 |
+| RPU assembly | `mkvdovi/src/pipeline.rs` → `dovi_tool generate` | L1 derived from madVR measurements; L5 default; L254 added by `dovi_tool` |
 
 Key facts:
 

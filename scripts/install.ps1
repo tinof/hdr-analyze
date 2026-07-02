@@ -65,7 +65,7 @@ function Install-HdrAnalyze {
         }
 
         Write-Info "Installing to $InstallDir..."
-        foreach ($binary in @("hdr_analyzer_mvp.exe", "mkvdolby.exe", "verifier.exe")) {
+        foreach ($binary in @("hdr_analyzer_mvp.exe", "mkvdovi.exe", "verifier.exe")) {
             $srcPath = Join-Path $binDir $binary
             if (Test-Path $srcPath) {
                 Copy-Item -Path $srcPath -Destination $InstallDir -Force
@@ -96,7 +96,7 @@ function Install-HdrAnalyze {
 
     Write-Host "Verify installation:"
     Write-Host "  hdr_analyzer_mvp --help"
-    Write-Host "  mkvdolby --help"
+    Write-Host "  mkvdovi --help"
     Write-Host "  verifier --help"
     Write-Host ""
 }

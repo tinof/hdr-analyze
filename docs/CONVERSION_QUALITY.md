@@ -1,6 +1,6 @@
 # HDR / HDR10+ / HLG → Dolby Vision: Conversion Quality
 
-Findings and the improvement plan for perfecting `mkvdolby`'s conversion quality. Companion to
+Findings and the improvement plan for perfecting `mkvdovi`'s conversion quality. Companion to
 [CM_ANALYZE_PARITY.md](CM_ANALYZE_PARITY.md) (the analyzer-accuracy deep dive) and
 [cmv40_upgrade_implementation_plan.md](cmv40_upgrade_implementation_plan.md).
 
@@ -13,7 +13,7 @@ Findings and the improvement plan for perfecting `mkvdolby`'s conversion quality
 
 ## 1. How conversion works today
 
-Three paths in `mkvdolby/src/pipeline.rs`:
+Three paths in `mkvdovi/src/pipeline.rs`:
 
 - **HDR10** and **HDR10+**: the base layer is **copied untouched** (`ffmpeg -c:v copy`). The picture is
   never re-encoded, so conversion quality is **100% the RPU metadata + the display's mapping**. There is
@@ -29,7 +29,7 @@ added by `dovi_tool`.
 
 ## 2. Findings (answers to the review questions)
 
-### 2.1 Are bare-`mkvdolby` defaults quality-optimal?
+### 2.1 Are bare-`mkvdovi` defaults quality-optimal?
 
 Defaults: `cm v40`, `content-type movies`, `reference-mode false`, `peak-source histogram`,
 `optimizer-profile conservative`, `analysis-quality balanced`, neutral L2, source deleted on success.
@@ -44,10 +44,10 @@ They are **balanced/safe, not max-quality**:
 
 - The optimizer (`hdr_analyzer_mvp/src/optimizer.rs`: 240-frame rolling average + knee + per-profile
   clamps) is a madMeasureHDR-style dynamic optimizer and is **on by default**.
-- `mkvdolby` runs the analyzer with it on and then calls
+- `mkvdovi` runs the analyzer with it on and then calls
   `dovi_tool generate --madvr-file --use-custom-targets`, so the per-frame `target_nits` **flow into the
   RPU**. (Exact effect of `--use-custom-targets` on L1/L2/L8 is to be confirmed empirically — see P0.)
-- **There is no per-display target control in `mkvdolby`.** `--target-peak-nits` exists only in the
+- **There is no per-display target control in `mkvdovi`.** `--target-peak-nits` exists only in the
   analyzer and only sets a v6 header field; it does **not** drive the optimizer clamps. So the
   "type 680 and it optimizes for my display" workflow is **not wired up**. → added as opt-in `--target-nits`
   (P4).
@@ -69,7 +69,7 @@ We are **current** (2.3.1 even shipped "Corrected RPU generation from madVR file
 A common misconception is that the "v6 per-gamut peak approximation" lowers DV conversion quality. It
 does not, for two independent reasons:
 
-1. **`mkvdolby` writes v5.** `run_hdr_analyzer` never passes `--madvr-version`, so the analyzer defaults
+1. **`mkvdovi` writes v5.** `run_hdr_analyzer` never passes `--madvr-version`, so the analyzer defaults
    to v5 (`hdr_analyzer_mvp/src/cli.rs`). The v6 approximation in `hdr_analyzer_mvp/src/writer.rs`
    (guarded by `madvr_version >= 6`) is **dead code on the DV path**.
 2. **DV L1 is a single luminance triplet** (min/avg/max in PQ) with no per-gamut concept. `dovi_tool
@@ -111,18 +111,18 @@ For HDR10/HDR10+ the base layer is untouched, so every fix below is **metadata a
 Each item names goal · change locus · validation. P2/P3 are the conversion-side framing of parity
 workstreams [WS1/WS3](CM_ANALYZE_PARITY.md#5-dependency-ordered-workstreams).
 
-- **P0 — Verify empirically** *(gate)*: run `mkvdolby` on a sample, then `dovi_tool info` on the RPU to
+- **P0 — Verify empirically** *(gate)*: run `mkvdovi` on a sample, then `dovi_tool info` on the RPU to
   confirm exactly what we emit and what `--use-custom-targets` does to L1/L2/L8. (= parity WS0.)
 - **P1 — Source-honest default**: stop baking optimizer targets by default (drop `--use-custom-targets`
   and/or run the analyzer with `--disable-optimizer` in the default path — confirm mechanism in P0);
-  consider `analysis-quality accurate` as the quality-first default. `mkvdolby/src/pipeline.rs`
+  consider `analysis-quality accurate` as the quality-first default. `mkvdovi/src/pipeline.rs`
   (`run_hdr_analyzer`, `generate_rpu`).
 - **P2 — Robust L1 min + true-mean avg**: low-percentile min over the active area (noise-rejected),
   full-precision mean PQ. `hdr_analyzer_mvp/src/analysis/frame.rs`. Directly targets raised blacks.
 - **P3 — Emit L5 active area** from the detected crop (`Level5` in `extra.json` via
-  `mkvdolby/src/metadata.rs`, or `dovi_tool --canvas-*`). Fixes letterbox-polluted stats/levels.
+  `mkvdovi/src/metadata.rs`, or `dovi_tool --canvas-*`). Fixes letterbox-polluted stats/levels.
 - **P4 — `--target-nits` opt-in**: wire a user display peak into the optimizer (the 680-nits workflow);
-  active only in the non-default display-targeted path. `mkvdolby/src/cli.rs`, `optimizer.rs`.
+  active only in the non-default display-targeted path. `mkvdovi/src/cli.rs`, `optimizer.rs`.
 - **P5 — Robustness**: `hdr10plus_tool extract --skip-reorder` fallback on failure; HLG `master-display`
   primaries → BT.2020 (`convert_hlg_to_pq`); harden L9 detection (`detect_source_primaries`).
 - **P6 — Problematic-source detection** (cryptochrome-inspired): warn on missing/inconsistent source

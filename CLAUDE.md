@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo actually is
 
-- Rust workspace (`resolver = "2"`) with **three shipped binaries**: `hdr_analyzer_mvp` (HDR10 analysis → PQ histograms + DV L1 metadata), `mkvdolby` (MKV container + Dolby Vision metadata injection, CM v4.0), `verifier` (MadVR / RPU measurement validation).
+- Rust workspace (`resolver = "2"`) with **three shipped binaries**: `hdr_analyzer_mvp` (HDR10 analysis → PQ histograms + DV L1 metadata), `mkvdovi` (MKV container + Dolby Vision metadata injection, CM v4.0), `verifier` (MadVR / RPU measurement validation).
 - `tools/compare_baseline` is a separate utility crate, **excluded** from the workspace. Build/run it explicitly with `--manifest-path tools/compare_baseline/Cargo.toml`.
 - Release profile is tuned: `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = "abort"` — release builds are slow to link; expect it.
 
@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `cargo clippy --workspace --all-targets -- -D warnings`
   - `cargo test --workspace --verbose`
 - Build all release binaries: `cargo build --release --workspace`
-- Test one crate: `cargo test -p hdr_analyzer_mvp` (or `-p mkvdolby`, `-p verifier`)
+- Test one crate: `cargo test -p hdr_analyzer_mvp` (or `-p mkvdovi`, `-p verifier`)
 - Run a single test by name: `cargo test -p <crate> -- <test_name>`
 - Run one binary: `cargo run -p <crate> -- ...`
 
@@ -36,22 +36,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Real entrypoints and boundaries
 
 - `hdr_analyzer_mvp/src/main.rs`: CLI parse + validation; orchestrates via `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `writer.rs`.
-- `mkvdolby/src/main.rs`: file discovery/sorting + per-file orchestration via `pipeline::convert_file`. Key modules: `external.rs` (tool checks/invocation), `metadata.rs` (`CmV40Config`, L2/L9/L11 generation), `verify.rs`, `progress.rs`.
+- `mkvdovi/src/main.rs`: file discovery/sorting + per-file orchestration via `pipeline::convert_file`. Key modules: `external.rs` (tool checks/invocation), `metadata.rs` (`CmV40Config`, L2/L9/L11 generation), `verify.rs`, `progress.rs`.
 - `verifier/src/main.rs`: standalone measurement-validator CLI.
 
-## mkvdolby operational gotchas (easy to miss)
+## mkvdovi operational gotchas (easy to miss)
 
 - **Checks external tools at runtime** (`external::check_dependencies`): requires `ffmpeg`, `mkvmerge`, `dovi_tool`, and either `mediainfo` or `ffprobe`. HDR10+ processing additionally invokes `hdr10plus_tool` — keep it in `PATH` for HDR10+ inputs.
 - `dovi_tool` 2.3.2+ is recommended; its `inject-rpu` padding fix is relied on by the existing orchestration call.
-- With no input args, it recursively processes `.mkv` files from cwd, skipping `mkvdolby_temp_*` paths and files already ending `.DV.mkv`.
+- With no input args, it recursively processes `.mkv` files from cwd, skipping `mkvdovi_temp_*` paths and files already ending `.DV.mkv`.
 - **Successful conversion deletes the source input by default**; pass `--keep-source` to prevent deletion.
-- **Robust to interruption:** extract/inject/mux/encode show a live byte-progress bar (throughput + ETA) and warn after `--stall-timeout` (default 300s, `0` disables) if the output file stops growing. An interrupted run (e.g. SSH `SIGHUP`) preserves `mkvdolby_temp_*` and prints a resume hint; a re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels (`resume.rs`). `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.
+- **Robust to interruption:** extract/inject/mux/encode show a live byte-progress bar (throughput + ETA) and warn after `--stall-timeout` (default 300s, `0` disables) if the output file stops growing. An interrupted run (e.g. SSH `SIGHUP`) preserves `mkvdovi_temp_*` and prints a resume hint; a re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels (`resume.rs`). `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.
 - For HDR10 without found measurements, it auto-runs `hdr_analyzer_mvp`. `--analysis-quality` controls sampling (downscale/sample-rate): `fast` = half-res/every 3rd frame, `balanced` = half-res/every frame (default), `accurate` = full-res/every frame.
 - For HDR10+ input, L1 is derived from source HDR10+ metadata; panel peak is **not** passed as a `--trim-targets` override. HDR10+ scene peaks above 3× mastering-display peak produce advisory warnings only — **never add a silent clamp**.
 - `--verify` resolves tools from `PATH`, validates structured RPU frame JSON, and hard-fails malformed Profile 8 / L1 / L6 / CM v4.0 L9/L11/L254 metadata.
-- `scripts/mkvdolby_hifi_workflow.sh` is a specialist comparison helper for inputs that **already** contain DV metadata. Use `mkvdolby` directly for HDR10+ sources.
+- `scripts/mkvdovi_hifi_workflow.sh` is a specialist comparison helper for inputs that **already** contain DV metadata. Use `mkvdovi` directly for HDR10+ sources.
 
-### Generated DV metadata levels (mkvdolby, CM v4.0 by default)
+### Generated DV metadata levels (mkvdovi, CM v4.0 by default)
 
 - **L1** per-frame luminance (from HDR10+ or hdr_analyzer) · **L2** trims for 100/600/1000-nit targets · **L6** static mastering metadata (MaxCLL/MaxFALL) · **L9** source primaries (auto-detected) · **L11** content type + reference mode.
 - Defaults: `--cm-version v40` (or `v29`); `--content-type movies` (default — valid: `default`, `movies`, `game`, `sport`, `user-generated-content`; `cinema`/`film` alias `movies`, `gaming` aliases `game`); `--reference-mode false`; `--source-primaries` auto (`0=P3-D65, 1=BT.709, 2=BT.2020`). `-v/--verbose` shows raw tool output; `-q/--quiet` minimal.
@@ -59,7 +59,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Testing quirks
 
-- `mkvdolby` integration tests are environment-dependent: they **skip** when `dovi_tool` is not in `PATH`, and when the sample media file is absent (`../tests/hdr-media/...mkv`). Do not assume all workspace tests are hermetic on a clean machine.
+- `mkvdovi` integration tests are environment-dependent: they **skip** when `dovi_tool` is not in `PATH`, and when the sample media file is absent (`../tests/hdr-media/...mkv`). Do not assume all workspace tests are hermetic on a clean machine.
 - Tests/CLI integration use `assert_cmd` + `predicates`. `clippy.toml` allows `unwrap`/`expect`/`panic`/`print`/`dbg` in tests only.
 
 ## Lint/style policy in this repo (non-default)
@@ -71,7 +71,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Docs vs code
 
-Some prose docs are stale (e.g., references to an old Python `mkvdolby` workflow). Prefer executable truth: root/workspace configs, current Rust crates under `*/src`, and the GitHub Actions workflows — in that order — over narrative docs.
+Some prose docs are stale (e.g., references to an old Python `mkvdovi` workflow). Prefer executable truth: root/workspace configs, current Rust crates under `*/src`, and the GitHub Actions workflows — in that order — over narrative docs.
 
 ## Releases
 
