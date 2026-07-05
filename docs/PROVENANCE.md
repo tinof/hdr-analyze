@@ -10,13 +10,24 @@ statement are.
 - **No Dolby Laboratories proprietary code, SDKs, lookup tables, tone curves, or binary
   blobs** — enforced by review; the repository is auditable, and `cargo deny` gates dependency
   licenses in CI.
-- **No leaked or informally circulated Dolby tools.** In particular, this project does not
-  use, invoke, or compare against the leaked `cm_analyze` binary or any other Dolby
-  professional tooling, and it never will. Validation targets are the RPUs of *retail Dolby
-  Vision releases* (observable, shipped metadata) and synthetic test patterns — never the
-  output of unlicensed Dolby software.
+- **No leaked or unlicensed Dolby tools, ever.** This project does not use, invoke, or
+  compare against leaked or informally circulated copies of Dolby professional tooling
+  (such as the `cm_analyze` binary circulating in forums). Validation targets are the RPUs
+  of *retail Dolby Vision releases* (observable, shipped metadata), synthetic test patterns
+  with mathematically known values, and — strictly for scoring output accuracy — a **licensed**
+  copy of the Dolby Vision Professional Tools (see the validation boundary below).
 - **No reverse engineering of Dolby binaries.** Behavioral reference is limited to public
   specs and the observable input/output of open-source tools.
+
+## Validation boundary for licensed Dolby tools
+
+The maintainer holds a licensed copy of the Dolby Vision Professional Tools. Its role in this
+project is bounded and one-directional: its output may be used to *score* this project's
+measurements (published as accuracy numbers in `docs/VALIDATION.md`), and for nothing else.
+No Dolby tool output is used to derive, fit, or tune any algorithm or constant in this
+codebase; the implementation remains built from the public standards listed below, and every
+implementation decision must be traceable to them. Licensed Dolby software and its
+documentation are never redistributed through this repository.
 
 ## Public sources everything is built from
 
