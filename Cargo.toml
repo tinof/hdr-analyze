@@ -5,7 +5,7 @@ members = [
     "mkvdovi",
     "verifier",
 ]
-exclude = ["tools/compare_baseline"]
+exclude = ["tools/compare_baseline", "tools/l1_diff"]
 
 [profile.release]
 lto = "fat"

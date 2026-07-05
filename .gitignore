@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+tools/*/target/
 Cargo.lock
 
 # IDE files
@@ -107,3 +108,7 @@ RELEASE_STRATEGY.md
 /tasks/
 /tmp/
 dev-handoff.md
+
+# Licensed Dolby documentation and third-party reference docs - never commit
+docs/dolby_vision_professional_tools_user_manual*.pdf
+docs/dovi_tool_readme.md
