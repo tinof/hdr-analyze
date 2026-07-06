@@ -11,6 +11,13 @@ This is the single source of truth for active `hdr-analyze` work. Completed chan
 Status meanings: **Open** has not shipped; **Partial** has useful pieces in place but does not meet
 the stated outcome; **Core complete** meets the original gate but retains named follow-up work.
 
+## Current status (v0.3.0)
+
+The v0.3.0 release shipped the `mkvdolby` → `mkvdovi` rename (one-release compat), published measured
+accuracy in [`docs/VALIDATION.md`](docs/VALIDATION.md), and made PQ direct peaks default to BT.2020 NCL
+max-RGB. Against the parity workstreams below, **WS0 (validation foundation) is core complete** and the
+**WS1 max-RGB peak has shipped**. Full shipped history lives in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Conversion quality
 
 The current priority is accurate HDR10 / HDR10+ / HLG → Dolby Vision conversion. The intended default
@@ -59,4 +66,4 @@ The detailed gap table and validation method live in
 - No `cm_analyze` parity claim without reproducible measurements.
 
 During the `0.x` series, minor releases may include breaking changes under the project's documented
-semantic-versioning policy.
+[semantic-versioning](https://semver.org/) policy.
