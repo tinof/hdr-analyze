@@ -1,7 +1,18 @@
-use anyhow::{Context, Result};
-use ffmpeg_next as ffmpeg;
-use ffmpeg_next::{codec, format, media, util::color};
 use std::fmt;
+
+use anyhow::{anyhow, Context, Result};
+use ffmpeg_next as ffmpeg;
+use ffmpeg_next::{
+    codec, format, frame, media, software,
+    util::{color, mathematics::rescale},
+    Rescale,
+};
+
+use crate::crop::{
+    detect_crop, is_frame_usable_for_crop, vote_crop_candidates, CropVote, CROP_EDGE_TOLERANCE,
+};
+
+const MAX_DECODED_FRAMES_PER_PROBE: usize = 120;
 
 /// Video transfer function reported by FFmpeg metadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +50,162 @@ pub struct VideoInfo {
     pub height: u32,
     pub total_frames: Option<u32>,
     pub transfer_function: TransferFunction,
+}
+
+fn spread_probe_timestamps(start: i64, duration: i64, count: u32) -> Vec<i64> {
+    if count == 0 || duration <= 0 {
+        return Vec::new();
+    }
+    if count == 1 {
+        return vec![start.saturating_add(duration / 2)];
+    }
+
+    let intervals = i128::from(count - 1);
+    (0..count)
+        .map(|index| {
+            let numerator = 15 * intervals + 70 * i128::from(index);
+            let offset = i128::from(duration) * numerator / (100 * intervals);
+            start.saturating_add(offset as i64)
+        })
+        .collect()
+}
+
+/// Probe crop candidates in a separate seekable input context.
+///
+/// The returned rectangle uses the same YUV420P10LE/downscaled geometry as the main analysis pass,
+/// so it can be committed before that pass contributes any measurements.
+pub fn probe_crop(input_path: &str, probe_count: u32, downscale: u32) -> Result<CropVote> {
+    let mut input_context =
+        format::input(input_path).context("failed to open an independent crop probe input")?;
+    let video_stream = input_context
+        .streams()
+        .best(media::Type::Video)
+        .context("no video stream found for crop probing")?;
+
+    let stream_index = video_stream.index();
+    let time_base = video_stream.time_base();
+    let stream_start = match video_stream.start_time() {
+        ffmpeg::ffi::AV_NOPTS_VALUE => 0,
+        start => start,
+    };
+    let stream_duration = video_stream.duration();
+    let decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
+        .context("failed to create crop probe decoder context")?;
+
+    let duration = if stream_duration != ffmpeg::ffi::AV_NOPTS_VALUE && stream_duration > 0 {
+        stream_duration
+    } else {
+        let container_duration = input_context.duration();
+        if container_duration <= 0 {
+            return Err(anyhow!("input duration is unavailable"));
+        }
+        container_duration.rescale(rescale::TIME_BASE, time_base)
+    };
+
+    let targets = spread_probe_timestamps(stream_start, duration, probe_count);
+    if targets.is_empty() {
+        return Err(anyhow!("no crop probe timestamps could be generated"));
+    }
+
+    let mut decoder = decoder_context
+        .decoder()
+        .video()
+        .context("failed to open crop probe decoder")?;
+    let target_w = if downscale > 1 {
+        (decoder.width() / downscale).max(2) & !1
+    } else {
+        decoder.width()
+    };
+    let target_h = if downscale > 1 {
+        (decoder.height() / downscale).max(2) & !1
+    } else {
+        decoder.height()
+    };
+    let need_scaler = decoder.format() != format::Pixel::YUV420P10LE || downscale > 1;
+    let mut scaler = if need_scaler {
+        Some(
+            software::scaling::Context::get(
+                decoder.format(),
+                decoder.width(),
+                decoder.height(),
+                format::Pixel::YUV420P10LE,
+                target_w,
+                target_h,
+                software::scaling::Flags::FAST_BILINEAR,
+            )
+            .context("failed to create crop probe scaling context")?,
+        )
+    } else {
+        None
+    };
+
+    let mut candidates = Vec::with_capacity(targets.len());
+    let mut seek_failures = 0usize;
+
+    for target in targets {
+        let seek_timestamp = target.rescale(time_base, rescale::TIME_BASE);
+        if input_context
+            .seek(seek_timestamp, ..seek_timestamp)
+            .is_err()
+        {
+            seek_failures += 1;
+            continue;
+        }
+        decoder.flush();
+
+        let mut decoded_frame = frame::Video::empty();
+        let mut scaled_frame = frame::Video::empty();
+        let mut decoded_after_target = 0usize;
+        let mut candidate = None;
+
+        'packets: for (stream, packet) in input_context.packets() {
+            if stream.index() != stream_index {
+                continue;
+            }
+
+            decoder
+                .send_packet(&packet)
+                .context("failed to send crop probe packet to decoder")?;
+
+            while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                if decoded_frame
+                    .timestamp()
+                    .is_some_and(|timestamp| timestamp < target)
+                {
+                    continue;
+                }
+
+                decoded_after_target += 1;
+                let analysis_frame = if let Some(ref mut scaler) = scaler {
+                    scaler
+                        .run(&decoded_frame, &mut scaled_frame)
+                        .context("failed to scale crop probe frame")?;
+                    &scaled_frame
+                } else {
+                    &decoded_frame
+                };
+
+                if is_frame_usable_for_crop(analysis_frame) {
+                    candidate = Some(detect_crop(analysis_frame));
+                    break 'packets;
+                }
+                if decoded_after_target >= MAX_DECODED_FRAMES_PER_PROBE {
+                    break 'packets;
+                }
+            }
+        }
+
+        if let Some(candidate) = candidate {
+            candidates.push(candidate);
+        }
+    }
+
+    vote_crop_candidates(&candidates, CROP_EDGE_TOLERANCE).ok_or_else(|| {
+        anyhow!(
+            "crop probing found no usable frames ({} seek failures)",
+            seek_failures
+        )
+    })
 }
 
 /// Native video information extraction using ffmpeg-next.
@@ -143,6 +310,24 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
     };
 
     Ok((info, input_context))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spread_probe_timestamps;
+
+    #[test]
+    fn probe_timestamps_span_the_middle_seventy_percent() {
+        assert_eq!(
+            spread_probe_timestamps(1_000, 10_000, 7),
+            vec![2_500, 3_666, 4_833, 6_000, 7_166, 8_333, 9_500]
+        );
+    }
+
+    #[test]
+    fn one_probe_targets_the_midpoint() {
+        assert_eq!(spread_probe_timestamps(200, 1_000, 1), vec![700]);
+    }
 }
 
 /// Set up hardware-accelerated decoder based on the specified acceleration type.

@@ -253,3 +253,75 @@ fn saturated_peak_matches_constructed_max_rgb_and_luma() {
         }
     }
 }
+
+#[test]
+fn crop_probe_ignores_black_and_full_frame_lead_in() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let clip = dir.path().join("crop_lead_in.mkv");
+    let encode = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=160x90:r=24:d=0.5",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=gray:s=160x90:r=24:d=0.5",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=white:s=160x66:r=24:d=7",
+            "-filter_complex",
+            "[0:v]format=yuv420p10le[b];[1:v]format=yuv420p10le[l];[2:v]pad=160:90:0:12:black,format=yuv420p10le[m];[b][l][m]concat=n=3:v=1:a=0[out]",
+            "-map",
+            "[out]",
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            "-g",
+            "1",
+        ])
+        .arg(&clip)
+        .status()
+        .expect("encode crop fixture");
+    assert!(encode.success(), "ffmpeg crop fixture encode failed");
+
+    let run = |label: &str, extra_args: &[&str]| {
+        let output_path = dir.path().join(format!("{label}.bin"));
+        let output = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+            .arg(&clip)
+            .arg("-o")
+            .arg(output_path)
+            .args(["--disable-optimizer", "--hist-bin-ema-beta", "0"])
+            .args(extra_args)
+            .output()
+            .expect("run analyzer on crop fixture");
+        assert!(
+            output.status.success(),
+            "analyzer {label} run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("analyzer output is UTF-8")
+    };
+
+    let probed = run("probed", &[]);
+    assert!(probed.contains("Committed active video area: 160x66 at offset (0, 12)"));
+
+    let fallback = run("fallback", &["--crop-probes", "0"]);
+    assert!(fallback.contains("Fallback active video area: 160x90 at offset (0, 0)"));
+
+    let no_crop = run("no_crop", &["--no-crop"]);
+    assert!(no_crop.contains("Crop disabled: using full frame 160x90"));
+    assert!(!no_crop.contains("Probing active video area"));
+}

@@ -6,7 +6,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
-_No changes yet._
+### Changed (behavioral)
+- **Active-area crop detection now uses a multi-frame probe.** `hdr_analyzer_mvp` samples
+  `--crop-probes <N>` frames (default 7) across the middle 70% of seekable inputs, rejects
+  black/low-signal frames, and commits a tolerance-clustered conservative crop before analysis.
+  `--crop-probes 0` selects the hardened in-stream fallback; `--no-crop` remains unchanged.
+- Scene cuts now provide reporting-only crop-stability telemetry. Variable-active-area titles use
+  the union of observed probe modes so full-frame picture is not cut; per-scene crop application
+  remains a follow-up to preserve measurement continuity.
 
 ---
 
