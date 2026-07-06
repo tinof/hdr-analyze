@@ -85,7 +85,7 @@ pub struct Cli {
     pub optimizer_profile: String,
 
     /// Peak brightness source: max (direct max), histogram99 (99th percentile), histogram999 (99.9th percentile)
-    /// Default: histogram99 for balanced/aggressive profiles, max for conservative
+    /// Default: max in max-rgb domain; in luma, histogram99 for balanced/aggressive and max for conservative
     #[arg(long)]
     pub peak_source: Option<String>,
 

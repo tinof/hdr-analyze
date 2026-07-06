@@ -213,25 +213,30 @@ fn saturated_peak_matches_constructed_max_rgb_and_luma() {
     );
     let tolerance = 0.25 / 4095.0;
 
-    for (domain, expected) in [("max-rgb", expected_max_rgb), ("luma", expected_luma)] {
-        let bin = dir.path().join(format!("saturated_{domain}.bin"));
-        let status = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+    for (label, domain, expected) in [
+        ("default", None, expected_max_rgb),
+        ("max-rgb", Some("max-rgb"), expected_max_rgb),
+        ("luma", Some("luma"), expected_luma),
+    ] {
+        let bin = dir.path().join(format!("saturated_{label}.bin"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"));
+        command
             .arg(&clip)
             .arg("-o")
             .arg(&bin)
-            .args([
-                "--peak-source",
-                "max",
-                "--peak-domain",
-                domain,
-                "--disable-optimizer",
-                "--no-crop",
-            ])
+            .args(["--disable-optimizer", "--no-crop"]);
+        if let Some(domain) = domain {
+            command.args(["--peak-source", "max", "--peak-domain", domain]);
+        }
+        let status = command
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .status()
             .expect("run analyzer");
-        assert!(status.success(), "analyzer failed for {domain} domain");
+        assert!(
+            status.success(),
+            "analyzer failed for {label} configuration"
+        );
 
         let data = std::fs::read(&bin).expect("read measurements");
         let measurements =
@@ -241,7 +246,7 @@ fn saturated_peak_matches_constructed_max_rgb_and_luma() {
             let err = (frame.peak_pq_2020 - expected).abs();
             assert!(
                 err < tolerance,
-                "{domain} frame {i}: peak_pq {} != constructed {} (|err| {err})",
+                "{label} frame {i}: peak_pq {} != constructed {} (|err| {err})",
                 frame.peak_pq_2020,
                 expected
             );

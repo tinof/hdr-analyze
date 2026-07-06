@@ -94,7 +94,7 @@ pub fn run(
 
     // Apply histogram smoothing with scene-aware EMA reset (if enabled)
     if cli.hist_bin_ema_beta > 0.0 || cli.hist_temporal_median > 0 {
-        apply_histogram_smoothing_pass(&scenes, &mut frames, cli)?;
+        apply_histogram_smoothing_pass(&scenes, &mut frames, cli, peak_domain)?;
     }
 
     precompute_scene_stats(&mut scenes, &frames);
@@ -550,6 +550,7 @@ fn apply_histogram_smoothing_pass(
     scenes: &[MadVRScene],
     frames: &mut [MadVRFrame],
     cli: &Cli,
+    peak_domain: PeakDomain,
 ) -> Result<()> {
     println!(
         "Applying histogram smoothing (EMA beta={}, temporal median window={})...",
@@ -559,11 +560,16 @@ fn apply_histogram_smoothing_pass(
     let ema_beta = cli.hist_bin_ema_beta;
     let temporal_window = cli.hist_temporal_median;
 
-    // Determine peak source (default to histogram99 for balanced/aggressive, max for conservative)
+    // A max-RGB domain defaults to its direct measurement. Histogram sources
+    // remain available as explicit Y-based noise-robustness choices. The legacy
+    // profile-dependent default applies only to the luma domain.
     let peak_source = cli.peak_source.as_deref().unwrap_or_else(|| {
-        match cli.optimizer_profile.to_lowercase().as_str() {
-            "conservative" => "max",
-            _ => "histogram99", // balanced and aggressive default to histogram99
+        if peak_domain == PeakDomain::MaxRgb
+            || cli.optimizer_profile.eq_ignore_ascii_case("conservative")
+        {
+            "max"
+        } else {
+            "histogram99"
         }
     });
 

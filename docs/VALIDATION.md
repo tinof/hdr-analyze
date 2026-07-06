@@ -56,8 +56,9 @@ and the gap is purely definitional:
 
 **Consequence:** Y′ is exact *as a luma measurement* but is not the same quantity as DV L1 max.
 PQ direct peaks therefore now default to max-RGB; `--peak-domain luma` retains Y′ for diagnostics
-and compatibility. Histogram/APL quantities remain Y-based. HLG forces luma until per-channel
-scene-to-display conversion is implemented.
+and compatibility. The implicit peak source is direct `max` in max-RGB domain, including under the
+balanced/aggressive profiles; explicit histogram peak sources and APL remain Y-based. HLG forces
+luma until per-channel scene-to-display conversion is implemented.
 
 ### 3. cm_analyze on the identical base layer (full 2908 frames, 34 shots)
 
@@ -106,6 +107,11 @@ and are intentionally excluded from a BL accuracy claim.
 The small constant positive bias is chroma-upsampling tolerance (the implementation uses nearest-
 neighbor 4:2:0→4:4:4; the cm_analyze input path used spline resampling). The production result
 matches the independent NumPy preview and reduces the prior −750.2-code Y-luma bias to +12.8 codes.
+
+A post-review default-path check used the first 24 BL frames with no `--peak-domain` or
+`--peak-source` override, the default balanced optimizer profile, and default histogram smoothing.
+The pipeline reported `Peak source: max` and scored +14.9 codes on every frame against cm_analyze.
+The saturated synthetic integration test exercises this same default path in CI.
 
 ### 5. Known limitations surfaced by this study
 

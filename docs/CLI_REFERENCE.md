@@ -55,7 +55,7 @@ hdr_analyzer_mvp "video.mkv"
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--peak-domain <max-rgb\|luma>` | `max-rgb` (PQ), `luma` (HLG) | Domain used for direct peak measurement. HLG forces luma because per-channel scene-to-display conversion is not implemented |
-| `--peak-source <max\|histogram99\|histogram999>` | `histogram99` (balanced/aggressive), `max` (conservative) | Per-frame peak brightness source |
+| `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source |
 | `--header-peak-source <max\|histogram99\|histogram999>` | — | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
 | `--hist-bin-ema-beta <0.0–1.0>` | `0.1` | EMA smoothing for histogram bins (lower = more smoothing, 0 = disabled) |
 | `--hist-temporal-median <N>` | `0` | Temporal median filter window in frames (3 = good for aggressive smoothing) |
@@ -67,6 +67,7 @@ hdr_analyzer_mvp "video.mkv"
 - `histogram999`: 99.9th percentile (most conservative).
 
 Histogram percentiles and APL remain Y-based in both domains, preserving madVR histogram semantics.
+An explicit histogram peak source therefore opts out of max-RGB peak selection.
 
 ### HLG
 
