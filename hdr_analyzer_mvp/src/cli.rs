@@ -1,4 +1,12 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum PeakDomain {
+    /// Maximum of the decoded BT.2020 R', G', and B' PQ signals.
+    MaxRgb,
+    /// Y' (luma) PQ signal.
+    Luma,
+}
 
 // --- Command Line Interface ---
 #[derive(Parser)]
@@ -80,6 +88,11 @@ pub struct Cli {
     /// Default: histogram99 for balanced/aggressive profiles, max for conservative
     #[arg(long)]
     pub peak_source: Option<String>,
+
+    /// Domain used by direct peak measurement: max-rgb or luma.
+    /// Defaults to max-rgb for PQ/unspecified input; HLG always uses luma.
+    #[arg(long, value_enum)]
+    pub peak_domain: Option<PeakDomain>,
 
     /// EMA smoothing beta for histogram bins (0.0-1.0). Lower = more smoothing. 0 disables. Default: 0.1
     #[arg(long, default_value_t = 0.1)]

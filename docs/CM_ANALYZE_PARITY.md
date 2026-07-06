@@ -63,8 +63,8 @@ References are to files read directly from this repo.
 
 Key facts:
 
-- **L1 max** is computed from the **Y′ (luma) plane only** and selected via a percentile of the 256-bin
-  histogram. It is a *luma* statistic, not a *luminance* / max-RGB statistic.
+- **L1 max** uses a BT.2020 NCL **max-RGB direct peak** by default for PQ input; the legacy Y′ peak is
+  available through `--peak-domain luma`. Histogram-percentile peak sources remain Y-based.
 - **L1 avg** is a **mid-bin weighted mean over 256 bins**, with a bin-0 black-bar heuristic and a
   renormalization step (`frame.rs`). It is quantized and not a true full-precision mean.
 - **There is no robust L1 `min`.** `dovi_tool generate` derives a min from the madVR histogram, whose
@@ -84,7 +84,7 @@ Key facts:
 
 | Level | `cm_analyze` | hdr-analyze today | Gap | Parity action | Risk |
 |-------|--------------|-------------------|-----|---------------|------|
-| **L1 max** | max luminance (image) in PQ over active area | max of Y′ luma, percentile-selected | luma ≠ luminance; max-RGB highlights under/over-stated | compute luminance / max-RGB peak (WS1) | med |
+| **L1 max** | max luminance (image) in PQ over active area | BT.2020 NCL max-RGB direct peak for PQ; optional Y′/percentile peak | nearest-neighbor chroma differs slightly from Dolby's resampler | max-RGB complete; target-gamut/HLG follow-ups | low |
 | **L1 avg** | mean PQ of active area | mid-bin weighted mean (256-bin, quantized) | quantization + heuristic bias | true full-precision mean PQ (WS1) | low |
 | **L1 min** | min luminance in PQ over active area | none (dovi_tool infers from histogram) | letterbox/noise contamination | robust low-percentile min over active area (WS1) | med |
 | **L4** | temporal filtering / shot anchoring | none (optimizer smooths `target_nits` only) | per-frame L1 jitter | shot-anchored L1 + optional L4 (WS2) | med |
@@ -99,12 +99,11 @@ Key facts:
 
 ## 4. Accuracy deep-dives (the L1-fidelity gaps that matter)
 
-1. **Luma-only peak vs luminance / max-RGB.** Reading only Y′ misses highlights that are bright in a
-   single channel (saturated reds/blues) and slightly mis-weights others. `cm_analyze` works in a
-   luminance/ICtCp-like domain. Action: compute max-RGB (or an ICtCp **I**) in the PQ domain from the
-   decoded RGB, not Y′. This subsumes the existing "v6 gamut peaks → full RGB" roadmap item — and the
-   same RGB decode yields real madVR-v6 per-gamut peaks (`peak_pq_dcip3`/`peak_pq_709`) as a by-product.
-   Note those v6 gamut peaks are a **madVR-only** feature and are not consumed by the DV RPU.
+1. **Max-RGB peak (completed for PQ).** The analyzer now decodes limited-range BT.2020 NCL and tracks
+   the maximum R′/G′/B′ PQ signal alongside Y′. This closes the large saturated-highlight gap; the
+   measured nearest-neighbor chroma tolerance against `cm_analyze` is recorded in `VALIDATION.md`.
+   Real madVR-v6 per-gamut peaks (`peak_pq_dcip3`/`peak_pq_709`) and per-channel HLG conversion remain
+   follow-ups. The v6 fields are a **madVR-only** feature and are not consumed by the DV RPU.
 2. **Quantized mid-bin avg vs true mean.** A 256-bin histogram + mid-bin centers + renormalization
    introduces a small, content-dependent bias in `avg_pq`. Action: accumulate a true mean of the
    PQ-encoded active-area pixels at full precision (the histogram can remain for distribution/min/peak).
@@ -135,8 +134,10 @@ WS0 can measure it.
 ### WS1 — L1 accuracy
 
 - **Goal:** close the per-frame L1 gap (§4.1–§4.4).
-- **Approach:** robust min (low-percentile, active-area), true full-precision mean avg, luminance/max-RGB
-  peak, and active-area correctness (consume multi-frame crop, issue #3).
+- **Status:** PQ max-RGB direct peak complete and scored; robust min, true full-precision mean,
+  active-area correctness, v6 per-gamut peaks, and HLG max-RGB remain.
+- **Approach:** robust min (low-percentile, active-area), true full-precision mean avg, target-gamut
+  transforms, and active-area correctness (consume multi-frame crop, issue #3).
 - **Gate:** WS0 shows reduced min/avg/max error vs the reference corpus, no regressions on test patterns.
 
 ### WS2 — Shot model & temporal stability

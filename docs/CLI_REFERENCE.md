@@ -54,15 +54,19 @@ hdr_analyzer_mvp "video.mkv"
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--peak-domain <max-rgb\|luma>` | `max-rgb` (PQ), `luma` (HLG) | Domain used for direct peak measurement. HLG forces luma because per-channel scene-to-display conversion is not implemented |
 | `--peak-source <max\|histogram99\|histogram999>` | `histogram99` (balanced/aggressive), `max` (conservative) | Per-frame peak brightness source |
 | `--header-peak-source <max\|histogram99\|histogram999>` | — | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
 | `--hist-bin-ema-beta <0.0–1.0>` | `0.1` | EMA smoothing for histogram bins (lower = more smoothing, 0 = disabled) |
 | `--hist-temporal-median <N>` | `0` | Temporal median filter window in frames (3 = good for aggressive smoothing) |
 | `--pre-denoise <nlmeans\|median3\|off>` | `off` | Pre-analysis Y-plane denoising (`median3` good for grain; `nlmeans` reserved) |
 
-- `max`: direct max from the Y-plane (most responsive to noise).
+- `max`: direct max from `--peak-domain` (most responsive to noise). For PQ, `max-rgb` decodes
+  limited-range BT.2020 NCL and takes the maximum R′/G′/B′ PQ signal; `luma` retains the legacy Y′ peak.
 - `histogram99`: 99th percentile (recommended, reduces noise impact).
 - `histogram999`: 99.9th percentile (most conservative).
+
+Histogram percentiles and APL remain Y-based in both domains, preserving madVR histogram semantics.
 
 ### HLG
 
@@ -84,8 +88,8 @@ hdr_analyzer_mvp "video.mkv"
   factors. They are a **madVR measurement-file** feature and are **not consumed by the Dolby Vision
   conversion** — `mkvdovi` writes v5, and `dovi_tool` builds L1 from the BT.2020 peak + histogram. The
   approximation therefore affects only a standalone v6 `.bin` used directly by madVR, not DV output.
-- Accurate per-gamut peaks will fall out of the planned luminance/max-RGB peak work
-  ([CM_ANALYZE_PARITY.md](CM_ANALYZE_PARITY.md#5-dependency-ordered-workstreams), WS1).
+- Accurate per-gamut peaks are still a follow-up. The max-RGB decode machinery now exists, but v6
+  output continues to use the approximations above until target-gamut transforms are implemented.
 
 ### Examples
 
@@ -102,6 +106,9 @@ hdr_analyzer_mvp -i "clean.mkv" -o "out.bin" --hist-bin-ema-beta 0
 
 # Conservative profile with direct max (most responsive)
 hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --optimizer-profile conservative --peak-source max
+
+# Retain the legacy direct Y-luma peak for PQ input
+hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --peak-source max --peak-domain luma
 
 # Native HLG, override assumed peak
 hdr_analyzer_mvp -i "hlg.mkv" -o "out.bin" --hlg-peak-nits 1200

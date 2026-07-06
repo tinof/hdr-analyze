@@ -76,9 +76,10 @@ does not, for two independent reasons:
    generate --madvr-file` builds L1 from `peak_pq_2020` + the histogram; the DCI-P3/709 peaks are a
    **madVR playback** feature only.
 
-The real DV lever is the accuracy of `peak_pq_2020` itself (today **luma-only**) → robust
-luminance/max-RGB peak (**[WS1](CM_ANALYZE_PARITY.md#5-dependency-ordered-workstreams)**), which also
-yields correct per-gamut peaks as a by-product. So "full v6" is not a DV goal; accurate BT.2020 peak is.
+The real DV lever is the accuracy of `peak_pq_2020` itself. PQ input now defaults to a BT.2020
+max-RGB direct peak (`--peak-domain luma` retains the legacy measurement), while histogram-derived
+peaks remain Y-based. True v6 target-gamut transforms are a separate follow-up. So "full v6" is not
+a DV goal; accurate BT.2020 peak is.
 
 ---
 

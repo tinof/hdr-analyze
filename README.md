@@ -187,8 +187,8 @@ Reports version/flags, scene & frame stats, peak brightness and avg PQ, histogra
 - **v6 per-gamut peaks** (`peak_pq_dcip3`, `peak_pq_709`) are approximated from BT.2020. These are a
   **madVR measurement-file** feature only and are **not used by the Dolby Vision conversion** (which
   uses the v5 file plus the BT.2020 peak and histogram), so the approximation does not affect DV output;
-  it matters only for a standalone v6 `.bin` consumed by madVR. Accurate per-gamut peaks fall out of the
-  planned luminance/max-RGB peak work (see [Roadmap](#roadmap)).
+  it matters only for a standalone v6 `.bin` consumed by madVR. PQ max-RGB peak measurement is now
+  implemented; accurate target-gamut transforms remain a follow-up (see [Roadmap](#roadmap)).
 
 ## Quick Start Validation
 

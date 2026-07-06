@@ -4,8 +4,7 @@
 //! are 12-bit codes (0..4095), e.g. extracted from `dovi_tool export -d all=rpu.json`.
 //!
 //! Definitional caveats (reported, never silently corrected):
-//! 1. Our peak is the brightest Y (luma); DV L1 max is max-RGB derived (MaxSCL).
-//!    Expect a systematic underread on saturated highlights.
+//! 1. Direct peaks may be max-RGB or Y-luma (`--peak-domain`); DV L1 max is max-RGB derived.
 //! 2. For Profile 7 FEL sources, reference L1 describes the composed BL+EL picture,
 //!    while measurements taken on the BL alone see a 10-bit subset of that signal.
 
@@ -150,8 +149,8 @@ fn main() -> Result<()> {
         args.reference.display(),
         reference.len()
     );
-    println!("\nCaveats: (1) ours = Y-luma peak, reference = max-RGB (MaxSCL) -> expected");
-    println!("underread on saturated highlights; (2) for P7 FEL sources the reference");
+    println!("\nCaveats: (1) compare DV L1 max against max-RGB direct-peak output;");
+    println!("Y-luma output underreads saturated highlights; (2) for P7 FEL sources the reference");
     println!("describes the composed BL+EL picture while ours sees the BL only.");
 
     if ours.frames.len() != reference.len() {

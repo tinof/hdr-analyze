@@ -32,9 +32,14 @@ const W: usize = 320;
 const H: usize = 180;
 const FRAMES: usize = 48;
 
-/// Encode a solid-luma yuv420p10le clip (limited range, PQ-tagged) losslessly.
-fn encode_clip(dir: &std::path::Path, y_code: u16) -> std::path::PathBuf {
-    let out = dir.join(format!("pq_{y_code}.mkv"));
+/// Encode a solid-color yuv420p10le clip (limited range, PQ-tagged) losslessly.
+fn encode_clip(
+    dir: &std::path::Path,
+    y_code: u16,
+    cb_code: u16,
+    cr_code: u16,
+) -> std::path::PathBuf {
+    let out = dir.join(format!("pq_{y_code}_{cb_code}_{cr_code}.mkv"));
     let mut child = Command::new("ffmpeg")
         .args([
             "-hide_banner",
@@ -49,6 +54,14 @@ fn encode_clip(dir: &std::path::Path, y_code: u16) -> std::path::PathBuf {
             &format!("{W}x{H}"),
             "-framerate",
             "24",
+            "-color_primaries",
+            "bt2020",
+            "-color_trc",
+            "smpte2084",
+            "-colorspace",
+            "bt2020nc",
+            "-color_range",
+            "tv",
             "-i",
             "-",
             "-c:v",
@@ -72,8 +85,11 @@ fn encode_clip(dir: &std::path::Path, y_code: u16) -> std::path::PathBuf {
     for _ in 0..(W * H) {
         frame.extend_from_slice(&y_code.to_le_bytes());
     }
-    for _ in 0..(W * H / 2) {
-        frame.extend_from_slice(&512u16.to_le_bytes());
+    for _ in 0..(W * H / 4) {
+        frame.extend_from_slice(&cb_code.to_le_bytes());
+    }
+    for _ in 0..(W * H / 4) {
+        frame.extend_from_slice(&cr_code.to_le_bytes());
     }
     {
         let stdin = child.stdin.as_mut().expect("ffmpeg stdin");
@@ -101,7 +117,7 @@ fn peak_matches_constructed_value() {
         let y_code = (pq * 876.0 + 64.0).round() as u16;
         let expected_pq = f64::from(y_code - 64) / 876.0;
 
-        let clip = encode_clip(dir.path(), y_code);
+        let clip = encode_clip(dir.path(), y_code, 512, 512);
         let bin = dir.path().join(format!("m_{target_nits}.bin"));
 
         let status = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
@@ -133,6 +149,101 @@ fn peak_matches_constructed_value() {
                 "{target_nits} nits clip, frame {i}: peak_pq {} != constructed {} (|err| {err})",
                 f.peak_pq_2020,
                 expected_pq
+            );
+        }
+    }
+}
+
+#[test]
+fn saturated_peak_matches_constructed_max_rgb_and_luma() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    // Construct a saturated non-linear BT.2020 RGB signal, then invert the
+    // BT.2020 NCL matrix into limited-range 10-bit YCbCr codes.
+    let (red, green, blue) = (0.62_f64, 0.18_f64, 0.08_f64);
+    let y = 0.2627 * red + 0.6780 * green + 0.0593 * blue;
+    let cb = (blue - y) / 1.8814;
+    let cr = (red - y) / 1.4746;
+    let y_code = (y * 876.0 + 64.0).round() as u16;
+    let cb_code = (cb * 896.0 + 512.0).round() as u16;
+    let cr_code = (cr * 896.0 + 512.0).round() as u16;
+
+    // Ground truth is reconstructed from the quantized codes actually encoded,
+    // so the assertion measures analyzer error rather than fixture rounding.
+    let quantized_y = (f64::from(y_code) - 64.0) / 876.0;
+    let quantized_cb = (f64::from(cb_code) - 512.0) / 896.0;
+    let quantized_cr = (f64::from(cr_code) - 512.0) / 896.0;
+    let quantized_red = quantized_y + 1.4746 * quantized_cr;
+    let quantized_blue = quantized_y + 1.8814 * quantized_cb;
+    let quantized_green = (quantized_y - 0.2627 * quantized_red - 0.0593 * quantized_blue) / 0.6780;
+    let expected_max_rgb = quantized_red
+        .max(quantized_green)
+        .max(quantized_blue)
+        .clamp(0.0, 1.0);
+    let expected_luma = quantized_y.clamp(0.0, 1.0);
+    assert!(expected_max_rgb > expected_luma);
+
+    let clip = encode_clip(dir.path(), y_code, cb_code, cr_code);
+    let decoded = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(&clip)
+        .args([
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "yuv420p10le",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .output()
+        .expect("decode synthetic clip");
+    let read_code = |offset: usize| {
+        u16::from_le_bytes([decoded.stdout[offset], decoded.stdout[offset + 1]]) & 0x03ff
+    };
+    assert_eq!(
+        (read_code(0), read_code(W * H * 2), read_code(W * H * 5 / 2)),
+        (y_code, cb_code, cr_code),
+        "FFV1 must preserve the constructed YCbCr codes"
+    );
+    let tolerance = 0.25 / 4095.0;
+
+    for (domain, expected) in [("max-rgb", expected_max_rgb), ("luma", expected_luma)] {
+        let bin = dir.path().join(format!("saturated_{domain}.bin"));
+        let status = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+            .arg(&clip)
+            .arg("-o")
+            .arg(&bin)
+            .args([
+                "--peak-source",
+                "max",
+                "--peak-domain",
+                domain,
+                "--disable-optimizer",
+                "--no-crop",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .status()
+            .expect("run analyzer");
+        assert!(status.success(), "analyzer failed for {domain} domain");
+
+        let data = std::fs::read(&bin).expect("read measurements");
+        let measurements =
+            madvr_parse::MadVRMeasurements::parse_measurements(&data).expect("parse measurements");
+        assert_eq!(measurements.frames.len(), FRAMES);
+        for (i, frame) in measurements.frames.iter().enumerate() {
+            let err = (frame.peak_pq_2020 - expected).abs();
+            assert!(
+                err < tolerance,
+                "{domain} frame {i}: peak_pq {} != constructed {} (|err| {err})",
+                frame.peak_pq_2020,
+                expected
             );
         }
     }

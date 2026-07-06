@@ -5,6 +5,7 @@ use rayon::prelude::*;
 
 use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq};
 use crate::analysis::hlg::hlg_signal_to_nits;
+use crate::cli::PeakDomain;
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
 
@@ -71,10 +72,15 @@ pub fn analyze_native_frame_cropped(
     denoise_mode: &str,
     transfer_function: TransferFunction,
     hlg_peak_nits: f64,
+    peak_domain: PeakDomain,
 ) -> Result<MadVRFrame> {
     // Y plane data
     let y_plane_data_raw = frame.data(0);
     let y_stride = frame.stride(0);
+    let u_plane_data = frame.data(1);
+    let v_plane_data = frame.data(2);
+    let u_stride = frame.stride(1);
+    let v_stride = frame.stride(2);
 
     // Apply denoising if requested
     let y_plane_data_denoised;
@@ -94,67 +100,100 @@ pub fn analyze_native_frame_cropped(
     let y_start = crop_rect.y as usize;
     let x_end = x_start + crop_rect.width as usize;
     let y_end = y_start + crop_rect.height as usize;
+    let cx_start = x_start / 2;
+    let cy_start = y_start / 2;
+    let cx_end = x_end.div_ceil(2);
+    let cy_end = y_end.div_ceil(2);
 
-    // Parallel accumulation across rows using per-thread histograms + reduction
-    let (hist_bins, max_pq) = (y_start..y_end)
+    // Parallel accumulation across 4:2:0 chroma rows. Each chroma sample covers a
+    // 2x2 luma block, matching nearest-neighbor chroma upsampling.
+    let (hist_bins, max_luma_pq, max_rgb_pq) = (cy_start..cy_end)
         .into_par_iter()
-        .map(|y| {
+        .map(|cy| {
             let mut local_hist = [0f64; 256];
-            let mut local_max = 0.0f64;
+            let mut local_max_luma = 0.0f64;
+            let mut local_max_rgb = 0.0f64;
 
-            let row_start = y.saturating_mul(y_stride);
-            let base = row_start + x_start.saturating_mul(2);
-            if base < y_plane_data.len() {
-                let want_len = (x_end - x_start).saturating_mul(2);
-                let max_len = y_plane_data.len() - base;
-                let len = want_len.min(max_len) & !1; // even number of bytes
-                if len >= 2 {
-                    let row = &y_plane_data[base..base + len];
-                    for px in row.chunks_exact(2) {
-                        // Read 10-bit limited-range code (0..1023 in 16-bit container)
-                        let code10 = u16::from_le_bytes([px[0], px[1]]) & 0x03FF;
+            for cx in cx_start..cx_end {
+                let u_offset = cy.saturating_mul(u_stride) + cx.saturating_mul(2);
+                let v_offset = cy.saturating_mul(v_stride) + cx.saturating_mul(2);
+                if u_offset + 1 >= u_plane_data.len() || v_offset + 1 >= v_plane_data.len() {
+                    continue;
+                }
 
-                        // Normalize to limited-range [64,940] -> [0,1]
-                        let code_i = code10 as i32;
-                        let norm = ((code_i - 64) as f64 / 876.0).clamp(0.0, 1.0);
+                let cb_code =
+                    u16::from_le_bytes([u_plane_data[u_offset], u_plane_data[u_offset + 1]])
+                        & 0x03FF;
+                let cr_code =
+                    u16::from_le_bytes([v_plane_data[v_offset], v_plane_data[v_offset + 1]])
+                        & 0x03FF;
+                let cb = (f64::from(cb_code) - 512.0) / 896.0;
+                let cr = (f64::from(cr_code) - 512.0) / 896.0;
 
-                        let pq = match transfer_function {
+                for y in [cy * 2, cy * 2 + 1] {
+                    if y < y_start || y >= y_end {
+                        continue;
+                    }
+                    for x in [cx * 2, cx * 2 + 1] {
+                        if x < x_start || x >= x_end {
+                            continue;
+                        }
+
+                        let y_offset = y.saturating_mul(y_stride) + x.saturating_mul(2);
+                        if y_offset + 1 >= y_plane_data.len() {
+                            continue;
+                        }
+                        let y_code = u16::from_le_bytes([
+                            y_plane_data[y_offset],
+                            y_plane_data[y_offset + 1],
+                        ]) & 0x03FF;
+                        let y_signal = (f64::from(y_code) - 64.0) / 876.0;
+                        let luma_pq = match transfer_function {
                             TransferFunction::Hlg => {
-                                let nits = hlg_signal_to_nits(norm, hlg_peak_nits);
+                                let nits =
+                                    hlg_signal_to_nits(y_signal.clamp(0.0, 1.0), hlg_peak_nits);
                                 nits_to_pq(nits)
                             }
-                            _ => norm, // PQ/Unknown fall back to normalized PQ proxy
+                            _ => y_signal,
                         }
                         .clamp(0.0, 1.0);
-                        if pq > local_max {
-                            local_max = pq;
-                        }
+                        local_max_luma = local_max_luma.max(luma_pq);
 
-                        // Map to madVR v5 bins
-                        let bin = if pq < sdr_peak_pq {
-                            (pq / sdr_step).floor() as usize
+                        let red = y_signal + 1.4746 * cr;
+                        let blue = y_signal + 1.8814 * cb;
+                        let green = (y_signal - 0.2627 * red - 0.0593 * blue) / 0.6780;
+                        let rgb_peak = red.max(green).max(blue).clamp(0.0, 1.0);
+                        local_max_rgb = local_max_rgb.max(rgb_peak);
+
+                        // Histogram and APL retain their existing Y-based semantics.
+                        let bin = if luma_pq < sdr_peak_pq {
+                            (luma_pq / sdr_step).floor() as usize
                         } else {
-                            64 + ((pq - sdr_peak_pq) / hdr_step).floor() as usize
+                            64 + ((luma_pq - sdr_peak_pq) / hdr_step).floor() as usize
                         };
                         local_hist[bin.min(255)] += 1.0;
                     }
                 }
             }
 
-            (local_hist, local_max)
+            (local_hist, local_max_luma, local_max_rgb)
         })
         .reduce(
-            || ([0f64; 256], 0.0f64),
-            |mut acc, (local_hist, local_max)| {
+            || ([0f64; 256], 0.0f64, 0.0f64),
+            |mut acc, (local_hist, local_max_luma, local_max_rgb)| {
                 for (acc_bin, local_bin) in acc.0.iter_mut().zip(local_hist.iter()) {
                     *acc_bin += *local_bin;
                 }
-                if local_max > acc.1 {
-                    acc.1 = local_max;
-                }
+                acc.1 = acc.1.max(local_max_luma);
+                acc.2 = acc.2.max(local_max_rgb);
                 acc
             },
         );
+
+    let max_pq = match peak_domain {
+        PeakDomain::MaxRgb => max_rgb_pq,
+        PeakDomain::Luma => max_luma_pq,
+    };
 
     let mut histogram: Vec<f64> = hist_bins.to_vec();
 

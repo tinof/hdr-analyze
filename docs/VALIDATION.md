@@ -9,7 +9,8 @@ outruns its evidence. Reproduction commands are at the bottom.
 Three independent ground truths, in increasing order of authority:
 
 1. **Synthetic (mathematical truth).** Lossless FFV1 PQ clips whose peak is known by
-   construction (solid 10-bit codes for 100 / 1000 / 4000 nits). Automated as
+   construction (solid 10-bit codes for 100 / 1000 / 4000 nits plus a saturated BT.2020
+   color with independently constructed max-RGB and luma peaks). Automated as
    `hdr_analyzer_mvp/tests/synthetic_accuracy.rs`; runs in CI wherever ffmpeg exists.
 2. **Embedded retail-style L1.** The community FEL test asset
    (`FEL TEST ST DL P7 CMV4.0 4000nits`, 2908 frames / 34 shots, mastered 4000 nits) carries
@@ -26,13 +27,15 @@ Comparison harness: `tools/l1_diff` (per-frame deltas in 12-bit PQ codes and nit
 
 ## Results
 
-### 1. Synthetic truth — peak is exact
+### 1. Synthetic truth — both peak domains are exact
 
 | Constructed peak | Measured error |
 |---|---|
 | 100 nits | < 0.25 of one 12-bit PQ code |
 | 1000 nits | < 0.25 of one 12-bit PQ code |
 | 4000 nits | < 0.25 of one 12-bit PQ code |
+| Saturated BT.2020 max-RGB | < 0.25 of one 12-bit PQ code |
+| Same color, Y-luma domain | < 0.25 of one 12-bit PQ code |
 
 The analyzer reproduces mathematically known peaks to within the measurement format's own
 quantization (observed error ≈ 0.03 code). Pixel reading, PQ math, and file writing are exact.
@@ -51,10 +54,10 @@ and the gap is purely definitional:
 | Independent NumPy max-RGB of raw BL pixels | 2096 (chroma-upsampling tolerance) |
 | **hdr_analyzer_mvp (Y-luma peak)** | **1332** |
 
-**Consequence:** our current Y-based peak is exact *as a luma measurement* but is not the same
-quantity as DV L1 max. On saturated content the difference is large. Max-RGB peak measurement
-is therefore promoted from "planned" to **required** (roadmap WS1); until it ships, peak
-comparisons against DV L1 must expect underread on saturated highlights.
+**Consequence:** Y′ is exact *as a luma measurement* but is not the same quantity as DV L1 max.
+PQ direct peaks therefore now default to max-RGB; `--peak-domain luma` retains Y′ for diagnostics
+and compatibility. Histogram/APL quantities remain Y-based. HLG forces luma until per-channel
+scene-to-display conversion is implemented.
 
 ### 3. cm_analyze on the identical base layer (full 2908 frames, 34 shots)
 
@@ -67,7 +70,7 @@ codes**. On the remaining 240 frames the embedded L1 says 4095 while the BL stil
 2081 — direct quantification of the FEL caveat in §5: those peaks exist only in the
 enhancement layer, and *no* BL-only analyzer (Dolby's included) can see them.
 
-**Our Y-luma peak vs cm_analyze on identical pixels (per-frame, `tools/l1_diff`):**
+**Pre-WS1 Y-luma baseline vs cm_analyze on identical pixels (per-frame, `tools/l1_diff`):**
 
 | Metric (ours − cm_analyze, 12-bit PQ codes) | Peak (max_pq) | Average (avg_pq) |
 |---|---|---|
@@ -85,19 +88,24 @@ waits for WS1 true-mean plus letterbox handling (§5).
 Scene cuts: ours matched 1/34 against the reference shot list — the near-static-content
 limitation already recorded in §5.
 
-### 4. Max-RGB preview (planned WS1 measurement vs cm_analyze)
+### 4. Implemented max-RGB peak vs cm_analyze
 
-The per-frame NumPy max-RGB of the full BL, scored against cm_analyze on all 2908 frames:
+The production Rust max-RGB path was run over the full BL with `--peak-source max
+--peak-domain max-rgb` and scored against cm_analyze on all 2908 frames:
 
-| Metric (preview − cm_analyze, 12-bit PQ codes) | Value |
+| Metric (hdr_analyzer_mvp − cm_analyze, 12-bit PQ codes) | Value |
 |---|---|
 | signed bias | +12.8 |
-| \|error\| median / p95 / max | 12.8 / 14.9 / 22.1 |
+| \|error\| median / p95 / max | 12.8 / 14.9 / 22.0 |
+| worst per-frame difference | 5.5 nits |
 
-The small constant positive bias is chroma-upsampling tolerance (the preview uses nearest-
-neighbor 4:2:0→4:4:4; the cm_analyze input path used spline resampling). **This is the number
-that justifies WS1:** a max-RGB peak implementation reproduces Dolby L1 max within ~tens of
-codes on content where the Y-luma peak underreads by ~750.
+The same result holds against embedded L1 on the 2668 BL-limited frames because cm_analyze and
+embedded L1 are bit-identical there. The remaining 240 embedded-L1 frames describe EL-only peaks
+and are intentionally excluded from a BL accuracy claim.
+
+The small constant positive bias is chroma-upsampling tolerance (the implementation uses nearest-
+neighbor 4:2:0→4:4:4; the cm_analyze input path used spline resampling). The production result
+matches the independent NumPy preview and reduces the prior −750.2-code Y-luma bias to +12.8 codes.
 
 ### 5. Known limitations surfaced by this study
 
@@ -124,7 +132,8 @@ dovi_tool demux fel.hevc                                             # -> BL.hev
 # our measurement (pure-measurement mode)
 mkvmerge -o BL.mkv BL.hevc
 hdr_analyzer_mvp BL.mkv -o BL_measurements.bin \
-  --peak-source max --header-peak-source max --disable-optimizer --no-crop
+  --peak-source max --header-peak-source max --peak-domain max-rgb \
+  --disable-optimizer --no-crop
 
 # comparison
 cargo run --release --manifest-path tools/l1_diff/Cargo.toml -- \

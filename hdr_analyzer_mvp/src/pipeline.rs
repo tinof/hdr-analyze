@@ -29,7 +29,7 @@ use crate::analysis::histogram::{
 use crate::analysis::scene::{
     calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed,
 };
-use crate::cli::Cli;
+use crate::cli::{Cli, PeakDomain};
 use crate::crop::CropRect;
 use crate::ffmpeg_io::{setup_hardware_decoder, TransferFunction, VideoInfo};
 use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
@@ -48,6 +48,18 @@ pub fn run(
     video_info: &VideoInfo,
     mut input_context: format::context::Input,
 ) -> Result<()> {
+    let peak_domain = match video_info.transfer_function {
+        TransferFunction::Hlg => {
+            if cli.peak_domain == Some(PeakDomain::MaxRgb) {
+                eprintln!("Warning: --peak-domain max-rgb is not supported for HLG; using luma.");
+            }
+            PeakDomain::Luma
+        }
+        TransferFunction::Pq | TransferFunction::Unknown => {
+            cli.peak_domain.unwrap_or(PeakDomain::MaxRgb)
+        }
+    };
+
     match video_info.transfer_function {
         TransferFunction::Hlg => {
             println!(
@@ -63,12 +75,20 @@ pub fn run(
         TransferFunction::Pq => {}
     }
 
+    println!(
+        "Direct peak domain: {}",
+        match peak_domain {
+            PeakDomain::MaxRgb => "max-rgb",
+            PeakDomain::Luma => "luma",
+        }
+    );
+
     if cli.scene_metric.to_lowercase() == "hybrid" {
         println!("Scene metric: hybrid (prototype, using histogram-only for now)");
     }
 
     let (mut scenes, mut frames) =
-        run_native_analysis_pipeline(cli, video_info, &mut input_context)?;
+        run_native_analysis_pipeline(cli, video_info, &mut input_context, peak_domain)?;
 
     fix_scene_end_frames(&mut scenes, frames.len());
 
@@ -152,6 +172,7 @@ fn run_native_analysis_pipeline(
     cli: &Cli,
     video_info: &VideoInfo,
     input_context: &mut format::context::Input,
+    peak_domain: PeakDomain,
 ) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>)> {
     println!("Starting native analysis pipeline...");
     let width = video_info.width;
@@ -325,6 +346,7 @@ fn run_native_analysis_pipeline(
                         &cli.pre_denoise,
                         transfer_function,
                         cli.hlg_peak_nits,
+                        peak_domain,
                     )?;
                     if let Some(start) = analysis_start {
                         analysis_duration += start.elapsed();
@@ -419,6 +441,7 @@ fn run_native_analysis_pipeline(
                 &cli.pre_denoise,
                 transfer_function,
                 cli.hlg_peak_nits,
+                peak_domain,
             )?;
             if let Some(start) = analysis_start {
                 analysis_duration += start.elapsed();

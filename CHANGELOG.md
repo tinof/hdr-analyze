@@ -21,6 +21,14 @@ This document provides a historical record of completed milestones, feature impl
 - Fixed placeholder repository URLs in `hdr_analyzer_mvp`'s crate metadata; brought
   `CITATION.cff` up to the current version.
 
+### Changed (behavioral)
+- **PQ direct peaks now default to max-RGB.** `hdr_analyzer_mvp` decodes limited-range BT.2020 NCL
+  R′G′B′ and stores the maximum channel in `peak_pq_2020`; pass `--peak-domain luma` for the legacy
+  Y′ peak. HLG continues to use luma. Synthetic and `cm_analyze` scoring are documented in
+  [`docs/VALIDATION.md` §2](docs/VALIDATION.md#2-the-definitional-gap-y-luma-peak-vs-max-rgb-maxscl).
+- madVR v6 DCI-P3/BT.709 peaks remain approximated; true per-gamut transforms and HLG max-RGB are
+  follow-ups enabled by the new RGB measurement path.
+
 ### Reliability & observability (mkvdovi)
 - Long file-producing steps (base-layer extract, RPU inject, mux, HLG→PQ encode) now show a
   live **byte-progress bar with throughput and ETA** instead of a bare elapsed spinner, so a
