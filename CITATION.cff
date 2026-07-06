@@ -7,7 +7,7 @@ authors:
 title: "HDR-Analyze: Dynamic HDR Metadata Generator for Dolby Vision"
 version: 0.3.0
 # doi: 10.5281/zenodo.1234  # Optional: Get a DOI via Zenodo/GitHub integration
-date-released: 2026-01-23
+date-released: 2026-07-06
 url: "https://github.com/tinof/hdr-analyze"
 preferred-citation:
   type: software
@@ -15,7 +15,7 @@ preferred-citation:
   - family-names: "Fotiou"
     given-names: "Konstantinos"
   title: "HDR-Analyze: Dynamic HDR Metadata Generator for Dolby Vision"
-  year: 2025
+  year: 2026
 keywords:
   - hdr
   - dolby-vision

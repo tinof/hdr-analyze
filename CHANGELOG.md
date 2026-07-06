@@ -6,6 +6,12 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+_No changes yet._
+
+---
+
+## [0.3.0] - 2026-07-06
+
 ### Renamed (breaking)
 - **The converter binary `mkvdolby` is now `mkvdovi`** (trademark hygiene: no product name
   embeds the Dolby mark, matching community convention — cf. `dovi_tool`, `libdovi`).

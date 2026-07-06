@@ -86,11 +86,17 @@ jobs:
             
             ### 📝 What's New
             
-            - Balanced-by-default HDR analysis quality presets
-            - Explicit warnings for metadata fallbacks and suspicious HDR10+ scene peaks
-            - Structured post-mux Dolby Vision RPU verification
+            - **Breaking rename:** `mkvdolby` is now `mkvdovi`; this release includes a transitional
+              `mkvdolby` alias and recognizes existing resume directories.
+            - **Measured PQ max-RGB peaks:** direct PQ peaks now default to BT.2020 NCL max-RGB,
+              validated against synthetic truth and Dolby's `cm_analyze`; use
+              `--peak-domain luma` for the legacy Y-luma measurement.
+            - **Resilient long conversions:** live byte progress, stall warnings, graceful
+              interruption, and automatic resume from completed artifacts.
+            - **Published validation and provenance:** reproducible accuracy tables and an explicit
+              clean-room boundary for licensed-tool comparisons.
 
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for detailed changes.
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for detailed changes.
             
             ### 🆘 Support
             
