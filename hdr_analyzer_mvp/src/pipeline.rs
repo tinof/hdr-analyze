@@ -46,14 +46,16 @@ struct CropStabilityMonitor {
     checked_scenes: usize,
     matching_scenes: usize,
     full_frame_scenes: usize,
+    skipped_scenes: usize,
 }
 
 impl CropStabilityMonitor {
     fn new() -> Self {
         Self {
-            checked_scenes: 1,
-            matching_scenes: 1,
+            checked_scenes: 0,
+            matching_scenes: 0,
             full_frame_scenes: 0,
+            skipped_scenes: 0,
         }
     }
 
@@ -75,21 +77,75 @@ impl CropStabilityMonitor {
         }
     }
 
+    fn record_skipped(&mut self) {
+        self.skipped_scenes += 1;
+    }
+
     fn report(&self) {
+        if self.checked_scenes == 0 {
+            println!("Crop stability: no usable scene cuts were sampled.");
+            return;
+        }
         let stability = self.matching_scenes as f64 * 100.0 / self.checked_scenes as f64;
         let other_scenes = self.checked_scenes - self.matching_scenes - self.full_frame_scenes;
         println!(
-            "Crop stability: {:.0}% of {} sampled scenes matched the committed crop; {} appeared full-frame; {} used another active area.",
+            "Crop stability: {:.0}% of {} sampled scene cuts matched the committed crop; {} appeared full-frame; {} used another active area; {} skipped (low signal).",
             stability,
             self.checked_scenes,
             self.full_frame_scenes,
-            other_scenes
+            other_scenes,
+            self.skipped_scenes
         );
         if self.matching_scenes != self.checked_scenes {
             println!(
                 "Variable active area detected; measurements use one conservative stream-level crop. Per-scene crop application is not enabled."
             );
         }
+    }
+}
+
+/// Resolve the crop for the current frame, committing a hardened in-stream fallback
+/// on the first usable frame when no probe-committed crop exists yet.
+fn resolve_crop_rect(
+    crop_rect_opt: &mut Option<CropRect>,
+    crop_monitor: &mut Option<CropStabilityMonitor>,
+    analysis_frame: &frame::Video,
+) -> CropRect {
+    match *crop_rect_opt {
+        Some(rect) => rect,
+        None if is_frame_usable_for_crop(analysis_frame) => {
+            let rect = detect_crop(analysis_frame);
+            println!(
+                "\nFallback active video area: {}x{} at offset ({}, {})",
+                rect.width, rect.height, rect.x, rect.y
+            );
+            *crop_rect_opt = Some(rect);
+            *crop_monitor = Some(CropStabilityMonitor::new());
+            rect
+        }
+        None => CropRect::full(analysis_frame.width(), analysis_frame.height()),
+    }
+}
+
+/// Sample crop stability at an accepted scene cut. Cuts landing on black/low-signal
+/// frames are counted as skipped instead of polluting the variable-AR telemetry.
+fn sample_scene_cut_crop(
+    crop_monitor: &mut Option<CropStabilityMonitor>,
+    committed: CropRect,
+    analysis_frame: &frame::Video,
+) {
+    let Some(monitor) = crop_monitor else {
+        return;
+    };
+    if is_frame_usable_for_crop(analysis_frame) {
+        monitor.record(
+            committed,
+            detect_crop(analysis_frame),
+            analysis_frame.width(),
+            analysis_frame.height(),
+        );
+    } else {
+        monitor.record_skipped();
     }
 }
 
@@ -431,20 +487,8 @@ fn run_native_analysis_pipeline(
                         &decoded_frame
                     };
 
-                    let rect = match crop_rect_opt {
-                        Some(rect) => rect,
-                        None if is_frame_usable_for_crop(analysis_frame) => {
-                            let rect = detect_crop(analysis_frame);
-                            println!(
-                                "\nFallback active video area: {}x{} at offset ({}, {})",
-                                rect.width, rect.height, rect.x, rect.y
-                            );
-                            crop_rect_opt = Some(rect);
-                            crop_monitor = Some(CropStabilityMonitor::new());
-                            rect
-                        }
-                        None => CropRect::full(analysis_frame.width(), analysis_frame.height()),
-                    };
+                    let rect =
+                        resolve_crop_rect(&mut crop_rect_opt, &mut crop_monitor, analysis_frame);
 
                     let analysis_start = if cli.profile_performance {
                         Some(Instant::now())
@@ -485,14 +529,7 @@ fn run_native_analysis_pipeline(
                         {
                             scene_cuts.push(frame_count);
                             last_cut_frame = frame_count;
-                            if let Some(ref mut monitor) = crop_monitor {
-                                monitor.record(
-                                    rect,
-                                    detect_crop(analysis_frame),
-                                    analysis_frame.width(),
-                                    analysis_frame.height(),
-                                );
-                            }
+                            sample_scene_cut_crop(&mut crop_monitor, rect, analysis_frame);
                         }
                     }
                     previous_histogram = Some(frame_result.lum_histogram.clone());
@@ -530,20 +567,7 @@ fn run_native_analysis_pipeline(
                 &decoded_frame
             };
 
-            let rect = match crop_rect_opt {
-                Some(rect) => rect,
-                None if is_frame_usable_for_crop(analysis_frame) => {
-                    let rect = detect_crop(analysis_frame);
-                    println!(
-                        "\nFallback active video area: {}x{} at offset ({}, {})",
-                        rect.width, rect.height, rect.x, rect.y
-                    );
-                    crop_rect_opt = Some(rect);
-                    crop_monitor = Some(CropStabilityMonitor::new());
-                    rect
-                }
-                None => CropRect::full(analysis_frame.width(), analysis_frame.height()),
-            };
+            let rect = resolve_crop_rect(&mut crop_rect_opt, &mut crop_monitor, analysis_frame);
 
             let analysis_start = if cli.profile_performance {
                 Some(Instant::now())
@@ -581,14 +605,7 @@ fn run_native_analysis_pipeline(
                 {
                     scene_cuts.push(frame_count);
                     last_cut_frame = frame_count;
-                    if let Some(ref mut monitor) = crop_monitor {
-                        monitor.record(
-                            rect,
-                            detect_crop(analysis_frame),
-                            analysis_frame.width(),
-                            analysis_frame.height(),
-                        );
-                    }
+                    sample_scene_cut_crop(&mut crop_monitor, rect, analysis_frame);
                 }
             }
             previous_histogram = Some(frame_result.lum_histogram.clone());
