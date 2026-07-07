@@ -13,7 +13,8 @@ fn test_help_flag() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("HDR"));
+        .stdout(predicate::str::contains("HDR"))
+        .stdout(predicate::str::contains("--crop-probes"));
 }
 
 #[test]

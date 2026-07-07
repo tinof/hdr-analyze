@@ -68,6 +68,10 @@ pub struct Cli {
     #[arg(long)]
     pub no_crop: bool,
 
+    /// Number of seek-based active-area probes (0 uses in-stream fallback detection).
+    #[arg(long, default_value_t = 7)]
+    pub crop_probes: u32,
+
     /// Disable dynamic optimizer (enabled by default).
     #[arg(long)]
     pub disable_optimizer: bool,
