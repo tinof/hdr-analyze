@@ -57,3 +57,14 @@ fn test_invalid_downscale_value() {
         .assert()
         .failure();
 }
+
+#[test]
+fn test_invalid_min_percentile() {
+    analyzer_cmd()
+        .args(["--min-percentile", "100.1", "input.mkv"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--min-percentile must be between 0 and 100",
+        ));
+}

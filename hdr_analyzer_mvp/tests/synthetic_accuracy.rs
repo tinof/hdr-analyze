@@ -32,14 +32,16 @@ const W: usize = 320;
 const H: usize = 180;
 const FRAMES: usize = 48;
 
-/// Encode a solid-color yuv420p10le clip (limited range, PQ-tagged) losslessly.
-fn encode_clip(
+/// Encode arbitrary limited-range luma samples with constant chroma as lossless yuv420p10le.
+fn encode_y_plane_clip(
     dir: &std::path::Path,
-    y_code: u16,
+    label: &str,
+    y_plane: &[u16],
     cb_code: u16,
     cr_code: u16,
 ) -> std::path::PathBuf {
-    let out = dir.join(format!("pq_{y_code}_{cb_code}_{cr_code}.mkv"));
+    assert_eq!(y_plane.len(), W * H);
+    let out = dir.join(format!("{label}.mkv"));
     let mut child = Command::new("ffmpeg")
         .args([
             "-hide_banner",
@@ -82,7 +84,7 @@ fn encode_clip(
         .expect("spawn ffmpeg");
 
     let mut frame = Vec::with_capacity(W * H * 3);
-    for _ in 0..(W * H) {
+    for y_code in y_plane {
         frame.extend_from_slice(&y_code.to_le_bytes());
     }
     for _ in 0..(W * H / 4) {
@@ -100,6 +102,38 @@ fn encode_clip(
     let status = child.wait().expect("wait ffmpeg");
     assert!(status.success(), "ffmpeg encode failed");
     out
+}
+
+/// Encode a solid-color yuv420p10le clip (limited range, PQ-tagged) losslessly.
+fn encode_clip(
+    dir: &std::path::Path,
+    y_code: u16,
+    cb_code: u16,
+    cr_code: u16,
+) -> std::path::PathBuf {
+    encode_y_plane_clip(
+        dir,
+        &format!("pq_{y_code}_{cb_code}_{cr_code}"),
+        &vec![y_code; W * H],
+        cb_code,
+        cr_code,
+    )
+}
+
+fn sidecar_path(bin: &std::path::Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}.l1.json", bin.display()))
+}
+
+fn sidecar_frame_codes(bin: &std::path::Path, field: &str) -> Vec<u16> {
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(sidecar_path(bin)).expect("read L1 sidecar"))
+            .expect("parse L1 sidecar");
+    sidecar["frames"][field]
+        .as_array()
+        .expect("sidecar frame array")
+        .iter()
+        .map(|value| value.as_u64().expect("12-bit PQ code") as u16)
+        .collect()
 }
 
 #[test]
@@ -138,17 +172,23 @@ fn peak_matches_constructed_value() {
         let m =
             madvr_parse::MadVRMeasurements::parse_measurements(&data).expect("parse measurements");
         assert_eq!(m.frames.len(), FRAMES);
+        let avg_codes = sidecar_frame_codes(&bin, "avg_luma_pq_12bit");
+        let expected_avg_code = (expected_pq * 4095.0).round() as u16;
 
         // Quarter of one 12-bit PQ code: admits the measurement format's internal
         // quantization while still failing on any real pixel-level deviation.
         let tolerance = 0.25 / 4095.0;
         for (i, f) in m.frames.iter().enumerate() {
-            let err = (f.peak_pq_2020 - expected_pq).abs();
+            let peak_err = (f.peak_pq_2020 - expected_pq).abs();
             assert!(
-                err < tolerance,
-                "{target_nits} nits clip, frame {i}: peak_pq {} != constructed {} (|err| {err})",
+                peak_err < tolerance,
+                "{target_nits} nits clip, frame {i}: peak_pq {} != constructed {} (|err| {peak_err})",
                 f.peak_pq_2020,
                 expected_pq
+            );
+            assert_eq!(
+                avg_codes[i], expected_avg_code,
+                "{target_nits} nits clip, frame {i}: sidecar mean must match constructed PQ"
             );
         }
     }
@@ -324,4 +364,78 @@ fn crop_probe_ignores_black_and_full_frame_lead_in() {
     let no_crop = run("no_crop", &["--no-crop"]);
     assert!(no_crop.contains("Crop disabled: using full frame 160x90"));
     assert!(!no_crop.contains("Probing active video area"));
+}
+
+#[test]
+fn raised_black_minimum_preserves_floor_and_rejects_sparse_dark_noise() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let floor_pq = nits_to_pq(0.05);
+    let floor_code = (floor_pq * 876.0 + 64.0).round() as u16;
+    let quantized_floor_pq = f64::from(floor_code - 64) / 876.0;
+    let fine_floor_pq = (quantized_floor_pq * 1023.0).round() / 1023.0;
+    let expected_floor_12bit = (fine_floor_pq * 4095.0).round() as u16;
+
+    let clean = encode_clip(dir.path(), floor_code, 512, 512);
+    let clean_bin = dir.path().join("raised_black.bin");
+    let clean_status = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+        .arg(&clean)
+        .arg("-o")
+        .arg(&clean_bin)
+        .args(["--disable-optimizer", "--no-crop"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("run raised-black analyzer");
+    assert!(clean_status.success());
+    assert!(
+        sidecar_frame_codes(&clean_bin, "min_pq_12bit")
+            .iter()
+            .all(|code| *code == expected_floor_12bit),
+        "uniform raised black must remain visible"
+    );
+
+    let mut noisy_y = vec![floor_code; W * H];
+    noisy_y[W / 2] = 64;
+    let noisy = encode_y_plane_clip(dir.path(), "raised_black_dark_speckle", &noisy_y, 512, 512);
+
+    let robust_bin = dir.path().join("raised_black_robust.bin");
+    let robust_status = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+        .arg(&noisy)
+        .arg("-o")
+        .arg(&robust_bin)
+        .args(["--disable-optimizer", "--no-crop"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("run robust-min analyzer");
+    assert!(robust_status.success());
+    assert!(
+        sidecar_frame_codes(&robust_bin, "min_pq_12bit")
+            .iter()
+            .all(|code| *code == expected_floor_12bit),
+        "default P0.1 minimum must reject a single dark speckle"
+    );
+
+    let absolute_bin = dir.path().join("raised_black_absolute.bin");
+    let absolute_status = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+        .arg(&noisy)
+        .arg("-o")
+        .arg(&absolute_bin)
+        .args(["--disable-optimizer", "--no-crop", "--min-percentile", "0"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("run absolute-min analyzer");
+    assert!(absolute_status.success());
+    assert!(
+        sidecar_frame_codes(&absolute_bin, "min_pq_12bit")
+            .iter()
+            .all(|code| *code == 0),
+        "absolute minimum must expose the dark speckle"
+    );
 }

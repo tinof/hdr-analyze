@@ -8,6 +8,84 @@ use crate::analysis::hlg::hlg_signal_to_nits;
 use crate::cli::PeakDomain;
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
+use crate::l1_sidecar::FrameL1Measurement;
+
+pub struct AnalyzedFrame {
+    pub frame: MadVRFrame,
+    pub l1: FrameL1Measurement,
+}
+
+fn mean_or_zero(sum: f64, count: u64) -> f64 {
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
+}
+
+pub(crate) fn low_percentile_pq(histogram: &[u64], percentile: f64) -> f64 {
+    let total: u64 = histogram.iter().sum();
+    if total == 0 || histogram.len() < 2 {
+        return 0.0;
+    }
+
+    let ignored_pixels = ((percentile.clamp(0.0, 100.0) / 100.0) * total as f64).floor() as u64;
+    let mut cumulative = 0u64;
+    for (bin, count) in histogram.iter().enumerate() {
+        cumulative += count;
+        if cumulative > ignored_pixels {
+            return bin as f64 / (histogram.len() - 1) as f64;
+        }
+    }
+
+    histogram
+        .iter()
+        .rposition(|count| *count > 0)
+        .map_or(0.0, |bin| bin as f64 / (histogram.len() - 1) as f64)
+}
+
+struct FrameAccumulator {
+    hist_bins: [f64; 256],
+    min_hist_bins: Box<[u64; 1024]>,
+    max_luma_pq: f64,
+    max_rgb_pq: f64,
+    sum_luma_pq: f64,
+    sum_max_rgb_pq: f64,
+    pixel_count: u64,
+}
+
+impl FrameAccumulator {
+    fn new() -> Self {
+        Self {
+            hist_bins: [0.0; 256],
+            min_hist_bins: Box::new([0; 1024]),
+            max_luma_pq: 0.0,
+            max_rgb_pq: 0.0,
+            sum_luma_pq: 0.0,
+            sum_max_rgb_pq: 0.0,
+            pixel_count: 0,
+        }
+    }
+
+    fn merge(mut self, other: Self) -> Self {
+        for (bin, other_bin) in self.hist_bins.iter_mut().zip(other.hist_bins) {
+            *bin += other_bin;
+        }
+        for (bin, other_bin) in self
+            .min_hist_bins
+            .iter_mut()
+            .zip(other.min_hist_bins.iter())
+        {
+            *bin += *other_bin;
+        }
+        self.max_luma_pq = self.max_luma_pq.max(other.max_luma_pq);
+        self.max_rgb_pq = self.max_rgb_pq.max(other.max_rgb_pq);
+        self.sum_luma_pq += other.sum_luma_pq;
+        self.sum_max_rgb_pq += other.sum_max_rgb_pq;
+        self.pixel_count += other.pixel_count;
+        self
+    }
+}
 
 /// Apply 3x3 median filter to Y-plane data (in-place on a cloned buffer).
 ///
@@ -73,7 +151,8 @@ pub fn analyze_native_frame_cropped(
     transfer_function: TransferFunction,
     hlg_peak_nits: f64,
     peak_domain: PeakDomain,
-) -> Result<MadVRFrame> {
+    min_percentile: f64,
+) -> Result<AnalyzedFrame> {
     // Y plane data
     let y_plane_data_raw = frame.data(0);
     let y_stride = frame.stride(0);
@@ -105,15 +184,12 @@ pub fn analyze_native_frame_cropped(
     let cx_end = x_end.div_ceil(2);
     let cy_end = y_end.div_ceil(2);
 
-    // Parallel accumulation across 4:2:0 chroma rows. Each chroma sample covers a
-    // 2x2 luma block, matching nearest-neighbor chroma upsampling.
-    let (hist_bins, max_luma_pq, max_rgb_pq) = (cy_start..cy_end)
+    // Parallel accumulation across 4:2:0 chroma rows. Rayon creates one
+    // accumulator per fold partition, so the fine histogram is reused across
+    // many rows instead of being allocated once per row.
+    let accumulator = (cy_start..cy_end)
         .into_par_iter()
-        .map(|cy| {
-            let mut local_hist = [0f64; 256];
-            let mut local_max_luma = 0.0f64;
-            let mut local_max_rgb = 0.0f64;
-
+        .fold(FrameAccumulator::new, |mut accumulator, cy| {
             for cx in cx_start..cx_end {
                 let u_offset = cy.saturating_mul(u_stride) + cx.saturating_mul(2);
                 let v_offset = cy.saturating_mul(v_stride) + cx.saturating_mul(2);
@@ -157,88 +233,77 @@ pub fn analyze_native_frame_cropped(
                             _ => y_signal,
                         }
                         .clamp(0.0, 1.0);
-                        local_max_luma = local_max_luma.max(luma_pq);
+                        accumulator.max_luma_pq = accumulator.max_luma_pq.max(luma_pq);
 
                         let red = y_signal + 1.4746 * cr;
                         let blue = y_signal + 1.8814 * cb;
                         let green = (y_signal - 0.2627 * red - 0.0593 * blue) / 0.6780;
                         let rgb_peak = red.max(green).max(blue).clamp(0.0, 1.0);
-                        local_max_rgb = local_max_rgb.max(rgb_peak);
+                        let max_rgb_pq = match transfer_function {
+                            TransferFunction::Hlg => luma_pq,
+                            _ => rgb_peak,
+                        };
+                        accumulator.max_rgb_pq = accumulator.max_rgb_pq.max(max_rgb_pq);
+                        accumulator.sum_luma_pq += luma_pq;
+                        accumulator.sum_max_rgb_pq += max_rgb_pq;
+                        accumulator.pixel_count += 1;
 
-                        // Histogram and APL retain their existing Y-based semantics.
+                        let min_pq = match peak_domain {
+                            PeakDomain::MaxRgb => max_rgb_pq,
+                            PeakDomain::Luma => luma_pq,
+                        };
+                        let min_bin = (min_pq * 1023.0).round() as usize;
+                        accumulator.min_hist_bins[min_bin.min(1023)] += 1;
+
+                        // Histogram retains its existing Y-based semantics.
                         let bin = if luma_pq < sdr_peak_pq {
                             (luma_pq / sdr_step).floor() as usize
                         } else {
                             64 + ((luma_pq - sdr_peak_pq) / hdr_step).floor() as usize
                         };
-                        local_hist[bin.min(255)] += 1.0;
+                        accumulator.hist_bins[bin.min(255)] += 1.0;
                     }
                 }
             }
 
-            (local_hist, local_max_luma, local_max_rgb)
+            accumulator
         })
-        .reduce(
-            || ([0f64; 256], 0.0f64, 0.0f64),
-            |mut acc, (local_hist, local_max_luma, local_max_rgb)| {
-                for (acc_bin, local_bin) in acc.0.iter_mut().zip(local_hist.iter()) {
-                    *acc_bin += *local_bin;
-                }
-                acc.1 = acc.1.max(local_max_luma);
-                acc.2 = acc.2.max(local_max_rgb);
-                acc
-            },
-        );
+        .reduce(FrameAccumulator::new, FrameAccumulator::merge);
 
     let max_pq = match peak_domain {
-        PeakDomain::MaxRgb => max_rgb_pq,
-        PeakDomain::Luma => max_luma_pq,
+        PeakDomain::MaxRgb => accumulator.max_rgb_pq,
+        PeakDomain::Luma => accumulator.max_luma_pq,
     };
 
-    let mut histogram: Vec<f64> = hist_bins.to_vec();
+    let mut histogram: Vec<f64> = accumulator.hist_bins.to_vec();
 
     // Normalize histogram to percentages (sum ~ 100.0)
-    let total_pixels = (crop_rect.width as f64) * (crop_rect.height as f64);
-    if total_pixels > 0.0 {
+    if accumulator.pixel_count > 0 {
         for v in &mut histogram {
-            *v = (*v / total_pixels) * 100.0;
+            *v = (*v / accumulator.pixel_count as f64) * 100.0;
         }
     }
 
-    // Compute avg_pq using mid-bin method similar to madvr_parse
-    let sdr_mid = sdr_step + (sdr_step / 2.0);
-    let hdr_mid = hdr_step + (hdr_step / 2.0);
-
-    let mut avg_pq = 0.0f64;
-    for (i, percent) in histogram.iter().enumerate() {
-        // Filter potential black bars at bin 0 per madvr_parse heuristic
-        if i == 0 && *percent > 2.0 && *percent < 30.0 {
-            continue;
-        }
-        let pq_value = if i <= 64 {
-            (i as f64) * sdr_mid
-        } else {
-            sdr_peak_pq + (((i - 63) as f64) * hdr_mid)
-        };
-        avg_pq += pq_value * (*percent / 100.0);
-    }
-    // Adjust based on sum of histogram bars
-    let percent_sum: f64 = histogram.iter().sum();
-    if percent_sum > 0.0 {
-        avg_pq = (avg_pq * (100.0 / percent_sum)).min(1.0);
-    }
-    avg_pq = avg_pq.min(1.0);
+    let avg_pq = mean_or_zero(accumulator.sum_luma_pq, accumulator.pixel_count).min(1.0);
+    let avg_max_rgb_pq = mean_or_zero(accumulator.sum_max_rgb_pq, accumulator.pixel_count).min(1.0);
+    let min_pq = low_percentile_pq(accumulator.min_hist_bins.as_ref(), min_percentile);
 
     // Compute hue histogram from chroma planes
     let hue_histogram = compute_hue_histogram(frame, crop_rect);
 
-    Ok(MadVRFrame {
-        peak_pq_2020: max_pq,
-        avg_pq,
-        lum_histogram: histogram,
-        hue_histogram: Some(hue_histogram),
-        target_nits: None,
-        ..Default::default()
+    Ok(AnalyzedFrame {
+        frame: MadVRFrame {
+            peak_pq_2020: max_pq,
+            avg_pq,
+            lum_histogram: histogram,
+            hue_histogram: Some(hue_histogram),
+            target_nits: None,
+            ..Default::default()
+        },
+        l1: FrameL1Measurement {
+            min_pq,
+            avg_max_rgb_pq,
+        },
     })
 }
 
@@ -257,17 +322,17 @@ pub fn analyze_native_frame_cropped(
 /// `Result<MadVRFrame>` - Analyzed frame data with accurate PQ values and histogram
 #[allow(dead_code)]
 pub fn analyze_native_frame(frame: &frame::Video, width: u32, height: u32) -> Result<MadVRFrame> {
-    let pixel_count = (width * height) as usize;
-
     // Get Y-plane data (luminance) from the 10-bit frame
     let y_plane_data = frame.data(0); // Y plane
     let y_stride = frame.stride(0);
 
-    let (hist_bins, max_luma_10bit) = (0..height)
+    let (hist_bins, max_luma_10bit, sum_luma_pq, processed_pixels) = (0..height)
         .into_par_iter()
         .map(|y| {
             let mut local_hist = [0f64; 256];
             let mut local_max = 0u16;
+            let mut local_sum = 0.0f64;
+            let mut local_count = 0u64;
 
             let row_start = (y as usize).saturating_mul(y_stride);
             let row_bytes = width as usize * 2;
@@ -287,6 +352,8 @@ pub fn analyze_native_frame(frame: &frame::Video, width: u32, height: u32) -> Re
                         // **CORRECT LUMINANCE MAPPING**: 10-bit luma directly corresponds to PQ curve
                         // Normalize 10-bit value to PQ range (0.0-1.0)
                         let pq_value = luma_10bit as f64 / 1023.0;
+                        local_sum += pq_value;
+                        local_count += 1;
 
                         // Map PQ value to histogram bin (0-255)
                         let bin_index = (pq_value * 255.0).round() as usize;
@@ -295,17 +362,19 @@ pub fn analyze_native_frame(frame: &frame::Video, width: u32, height: u32) -> Re
                 }
             }
 
-            (local_hist, local_max)
+            (local_hist, local_max, local_sum, local_count)
         })
         .reduce(
-            || ([0f64; 256], 0u16),
-            |mut acc, (local_hist, local_max)| {
-                for (acc_bin, local_bin) in acc.0.iter_mut().zip(local_hist.iter()) {
+            || ([0f64; 256], 0u16, 0.0f64, 0u64),
+            |mut acc, local| {
+                for (acc_bin, local_bin) in acc.0.iter_mut().zip(local.0.iter()) {
                     *acc_bin += *local_bin;
                 }
-                if local_max > acc.1 {
-                    acc.1 = local_max;
+                if local.1 > acc.1 {
+                    acc.1 = local.1;
                 }
+                acc.2 += local.2;
+                acc.3 += local.3;
                 acc
             },
         );
@@ -313,18 +382,16 @@ pub fn analyze_native_frame(frame: &frame::Video, width: u32, height: u32) -> Re
     let mut histogram: Vec<f64> = hist_bins.to_vec();
 
     // Normalize histogram so sum equals 100.0
-    let total_pixels = pixel_count as f64;
-    if total_pixels > 0.0 {
+    if processed_pixels > 0 {
         for bin in &mut histogram {
-            *bin = (*bin / total_pixels) * 100.0;
+            *bin = (*bin / processed_pixels as f64) * 100.0;
         }
     }
 
     // Calculate peak PQ from the brightest 10-bit luma value
     let peak_pq = max_luma_10bit as f64 / 1023.0;
 
-    // Calculate average PQ from the histogram
-    let avg_pq = crate::analysis::histogram::calculate_avg_pq_from_histogram(&histogram);
+    let avg_pq = mean_or_zero(sum_luma_pq, processed_pixels);
 
     // Compute hue histogram from chroma planes (full frame, no crop)
     let full_frame_crop = CropRect {
@@ -343,4 +410,26 @@ pub fn analyze_native_frame(frame: &frame::Video, width: u32, height: u32) -> Re
         target_nits: None, // Will be set by optimizer if enabled
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_precision_mean_uses_sum_and_count() {
+        assert_eq!(mean_or_zero(1.5, 3), 0.5);
+        assert_eq!(mean_or_zero(123.0, 0), 0.0);
+    }
+
+    #[test]
+    fn low_percentile_rejects_only_the_configured_dark_tail() {
+        let mut histogram = [0u64; 1024];
+        histogram[2] = 1;
+        histogram[51] = 999;
+
+        assert_eq!(low_percentile_pq(&histogram, 0.0), 2.0 / 1023.0);
+        assert_eq!(low_percentile_pq(&histogram, 0.1), 51.0 / 1023.0);
+        assert_eq!(low_percentile_pq(&[0; 1024], 0.1), 0.0);
+    }
 }

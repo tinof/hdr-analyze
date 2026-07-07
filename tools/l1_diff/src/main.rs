@@ -11,8 +11,10 @@
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use madvr_parse::MadVRMeasurements;
+use serde::Deserialize;
+use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const ST2084_Y_MAX: f64 = 10000.0;
 const ST2084_M1: f64 = 2610.0 / 16384.0;
@@ -42,6 +44,10 @@ struct Args {
     #[arg(long)]
     reference: PathBuf,
 
+    /// Analyzer L1 JSON sidecar. Defaults to <ours>.l1.json.
+    #[arg(long)]
+    sidecar: Option<PathBuf>,
+
     /// Optional reference scene-cut list (one start frame per line, dovi_tool `scenes` export)
     #[arg(long)]
     scenes: Option<PathBuf>,
@@ -53,8 +59,49 @@ struct Args {
 
 struct RefL1 {
     frame: usize,
+    min_pq: u16,
     max_pq: u16,
     avg_pq: u16,
+}
+
+#[derive(Deserialize)]
+struct L1Sidecar {
+    version: u32,
+    min_percentile: f64,
+    frames: SidecarFrames,
+}
+
+#[derive(Deserialize)]
+struct SidecarFrames {
+    min_pq_12bit: Vec<u16>,
+    avg_luma_pq_12bit: Vec<u16>,
+    avg_max_rgb_pq_12bit: Vec<u16>,
+}
+
+fn default_sidecar_path(ours: &Path) -> PathBuf {
+    let mut path: OsString = ours.as_os_str().to_owned();
+    path.push(".l1.json");
+    PathBuf::from(path)
+}
+
+fn read_sidecar(path: &Path, required: bool) -> Result<Option<L1Sidecar>> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading sidecar {}", path.display()));
+        }
+    };
+    let sidecar: L1Sidecar = serde_json::from_reader(file)
+        .with_context(|| format!("parsing sidecar {}", path.display()))?;
+    if sidecar.version != 1 {
+        bail!(
+            "unsupported L1 sidecar version {} in {}",
+            sidecar.version,
+            path.display()
+        );
+    }
+    Ok(Some(sidecar))
 }
 
 fn parse_reference(path: &PathBuf) -> Result<Vec<RefL1>> {
@@ -78,6 +125,7 @@ fn parse_reference(path: &PathBuf) -> Result<Vec<RefL1>> {
         }
         rows.push(RefL1 {
             frame: cols[0].trim().parse().context("frame column")?,
+            min_pq: cols[1].trim().parse().context("min_pq column")?,
             max_pq: cols[2].trim().parse().context("max_pq column")?,
             avg_pq: cols[3].trim().parse().context("avg_pq column")?,
         });
@@ -136,6 +184,12 @@ fn main() -> Result<()> {
     let data = fs::read(&args.ours).with_context(|| format!("reading {}", args.ours.display()))?;
     let ours = MadVRMeasurements::parse_measurements(&data)
         .map_err(|e| anyhow::anyhow!("parsing {}: {e}", args.ours.display()))?;
+    let sidecar_required = args.sidecar.is_some();
+    let sidecar_path = args
+        .sidecar
+        .clone()
+        .unwrap_or_else(|| default_sidecar_path(&args.ours));
+    let sidecar = read_sidecar(&sidecar_path, sidecar_required)?;
     let reference = parse_reference(&args.reference)?;
 
     println!("=== l1_diff: analyzer output vs reference DV L1 ===");
@@ -144,6 +198,18 @@ fn main() -> Result<()> {
         args.ours.display(),
         ours.frames.len()
     );
+    if let Some(sidecar) = &sidecar {
+        println!("sidecar:   {}", sidecar_path.display());
+        println!(
+            "minimum:   P{} (configured lower percentile)",
+            sidecar.min_percentile
+        );
+    } else {
+        println!(
+            "sidecar:   not found ({}); using legacy .bin average fallback",
+            sidecar_path.display()
+        );
+    }
     println!(
         "reference: {} ({} frames)",
         args.reference.display(),
@@ -160,6 +226,31 @@ fn main() -> Result<()> {
             reference.len()
         );
     }
+    if let Some(sidecar) = &sidecar {
+        for (name, count) in [
+            ("min", sidecar.frames.min_pq_12bit.len()),
+            ("luma average", sidecar.frames.avg_luma_pq_12bit.len()),
+            ("max-RGB average", sidecar.frames.avg_max_rgb_pq_12bit.len()),
+        ] {
+            if count != reference.len() {
+                bail!(
+                    "{name} sidecar frame count mismatch: sidecar {count} vs reference {}",
+                    reference.len()
+                );
+            }
+        }
+
+        let ref_min: Vec<f64> = reference.iter().map(|row| row.min_pq as f64).collect();
+        let our_min: Vec<f64> = sidecar
+            .frames
+            .min_pq_12bit
+            .iter()
+            .map(|code| f64::from(*code))
+            .collect();
+        print_metric("Minimum (robust active-area min_pq)", &ref_min, &our_min);
+    } else {
+        println!("Minimum: unavailable without an L1 sidecar.");
+    }
 
     let ref_max: Vec<f64> = reference.iter().map(|r| r.max_pq as f64).collect();
     let our_max: Vec<f64> = ours
@@ -170,8 +261,30 @@ fn main() -> Result<()> {
     print_metric("Peak (L1 max_pq)", &ref_max, &our_max);
 
     let ref_avg: Vec<f64> = reference.iter().map(|r| r.avg_pq as f64).collect();
-    let our_avg: Vec<f64> = ours.frames.iter().map(|f| f.avg_pq * 4095.0).collect();
-    print_metric("Average (L1 avg_pq)", &ref_avg, &our_avg);
+    if let Some(sidecar) = &sidecar {
+        let our_avg_luma: Vec<f64> = sidecar
+            .frames
+            .avg_luma_pq_12bit
+            .iter()
+            .map(|code| f64::from(*code))
+            .collect();
+        print_metric("Average (Y-luma mean)", &ref_avg, &our_avg_luma);
+        let our_avg_max_rgb: Vec<f64> = sidecar
+            .frames
+            .avg_max_rgb_pq_12bit
+            .iter()
+            .map(|code| f64::from(*code))
+            .collect();
+        print_metric("Average (max-RGB mean)", &ref_avg, &our_avg_max_rgb);
+    } else {
+        let our_avg: Vec<f64> = ours
+            .frames
+            .iter()
+            .map(|frame| frame.avg_pq * 4095.0)
+            .collect();
+        print_metric("Average (legacy embedded .bin avg_pq)", &ref_avg, &our_avg);
+        println!("Max-RGB average: unavailable without an L1 sidecar.");
+    }
 
     if let Some(scenes_path) = &args.scenes {
         let text = fs::read_to_string(scenes_path)
@@ -197,17 +310,40 @@ fn main() -> Result<()> {
     }
 
     if let Some(csv_path) = &args.csv {
-        let mut out = String::from("frame,ref_max_pq,our_max_pq,ref_avg_pq,our_avg_pq\n");
-        for (r, f) in reference.iter().zip(&ours.frames) {
-            out.push_str(&format!(
-                "{},{},{:.1},{},{:.1}\n",
-                r.frame,
-                r.max_pq,
-                f.peak_pq_2020 * 4095.0,
-                r.avg_pq,
-                f.avg_pq * 4095.0
-            ));
-        }
+        let out = if let Some(sidecar) = &sidecar {
+            let mut out = String::from(
+                "frame,ref_min_pq,our_min_pq,ref_max_pq,our_max_pq,ref_avg_pq,our_avg_luma_pq,our_avg_max_rgb_pq\n",
+            );
+            for (index, (reference_frame, our_frame)) in
+                reference.iter().zip(&ours.frames).enumerate()
+            {
+                out.push_str(&format!(
+                    "{},{},{},{},{:.1},{},{},{}\n",
+                    reference_frame.frame,
+                    reference_frame.min_pq,
+                    sidecar.frames.min_pq_12bit[index],
+                    reference_frame.max_pq,
+                    our_frame.peak_pq_2020 * 4095.0,
+                    reference_frame.avg_pq,
+                    sidecar.frames.avg_luma_pq_12bit[index],
+                    sidecar.frames.avg_max_rgb_pq_12bit[index],
+                ));
+            }
+            out
+        } else {
+            let mut out = String::from("frame,ref_max_pq,our_max_pq,ref_avg_pq,our_avg_pq\n");
+            for (reference_frame, our_frame) in reference.iter().zip(&ours.frames) {
+                out.push_str(&format!(
+                    "{},{},{:.1},{},{:.1}\n",
+                    reference_frame.frame,
+                    reference_frame.max_pq,
+                    our_frame.peak_pq_2020 * 4095.0,
+                    reference_frame.avg_pq,
+                    our_frame.avg_pq * 4095.0,
+                ));
+            }
+            out
+        };
         fs::write(csv_path, out).with_context(|| format!("writing {}", csv_path.display()))?;
         println!("\nPer-frame deltas written to {}", csv_path.display());
     }
