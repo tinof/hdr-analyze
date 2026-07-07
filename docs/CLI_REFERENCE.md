@@ -10,7 +10,8 @@ All defaults below are taken directly from `--help`; run `<binary> --help` to co
 
 ## `hdr_analyzer_mvp`
 
-Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file.
+Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file plus an
+analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics.
 
 ```bash
 hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
@@ -28,14 +29,15 @@ hdr_analyzer_mvp "video.mkv"
 | `--hwaccel <TYPE>` | — | GPU hint: `cuda`, `vaapi`, `videotoolbox` (see [Hardware acceleration](#hardware-acceleration)) |
 | `--downscale <1\|2\|4>` | `1` | Downscale internal analysis resolution for speed (1=full, 2=half, 4=quarter) |
 | `--sample-rate <N>` | `1` | Analyze every Nth frame. Skipped frames inherit the previous frame's measurements. High performance impact |
-| `--no-crop` | off | Disable active-area crop detection (analyze full frame). See [Known Limitations](../README.md#known-limitations) |
+| `--crop-probes <N>` | `7` | Seek-based active-area probes across the middle 70% of the input; `0` uses hardened in-stream fallback detection |
+| `--no-crop` | off | Disable crop probing/detection and analyze the full frame |
 
 ### Scene detection
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--scene-threshold <float>` | `0.3` | Scene-cut distance threshold |
-| `--scene-metric <hist\|hybrid>` | `hist` | `hist` = histogram distance; `hybrid` = prototype histogram + flow fusion |
+| `--scene-metric <hist\|hybrid>` | `hist` | `hist` = histogram distance; `hybrid` is a prototype that currently falls back to the same histogram metric |
 | `--min-scene-length <frames>` | `24` | Drop cuts closer than N frames |
 | `--scene-smoothing <frames>` | `5` | Rolling window over the scene-change metric (0 disables) |
 
@@ -60,6 +62,7 @@ hdr_analyzer_mvp "video.mkv"
 | `--hist-bin-ema-beta <0.0–1.0>` | `0.1` | EMA smoothing for histogram bins (lower = more smoothing, 0 = disabled) |
 | `--hist-temporal-median <N>` | `0` | Temporal median filter window in frames (3 = good for aggressive smoothing) |
 | `--pre-denoise <nlmeans\|median3\|off>` | `off` | Pre-analysis Y-plane denoising (`median3` good for grain; `nlmeans` reserved) |
+| `--min-percentile <0–100>` | `0.1` | Lower percentile used for the noise-rejected active-area minimum, in percent; `0` selects the absolute minimum |
 
 - `max`: direct max from `--peak-domain` (most responsive to noise). For PQ, `max-rgb` decodes
   limited-range BT.2020 NCL and takes the maximum R′/G′/B′ PQ signal; `luma` retains the legacy Y′ peak.
@@ -68,6 +71,13 @@ hdr_analyzer_mvp "video.mkv"
 
 Histogram percentiles and APL remain Y-based in both domains, preserving madVR histogram semantics.
 An explicit histogram peak source therefore opts out of max-RGB peak selection.
+
+The analyzer computes the average directly from active-area pixels rather than reconstructing it
+from 256 histogram bins. The JSON sidecar records per-frame robust minimum, Y-luma mean, and
+max-RGB mean as 12-bit PQ codes, plus scene aggregates and the crop/denoise settings. Both average
+domains receive the same configured EMA/temporal smoothing with per-scene resets; the spatially
+noise-rejected minimum is not temporally smoothed. The sidecar is measurement and validation output;
+its minimum is not currently inserted into generated RPUs.
 
 ### HLG
 
@@ -105,6 +115,9 @@ hdr_analyzer_mvp -i "grainy.mkv" -o "out.bin" \
 # Disable histogram smoothing for clean content
 hdr_analyzer_mvp -i "clean.mkv" -o "out.bin" --hist-bin-ema-beta 0
 
+# Use the absolute active-area minimum instead of the default noise-rejected P0.1
+hdr_analyzer_mvp -i "clean.mkv" -o "out.bin" --min-percentile 0
+
 # Conservative profile with direct max (most responsive)
 hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --optimizer-profile conservative --peak-source max
 
@@ -114,7 +127,10 @@ hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --peak-source max --peak-domain lum
 # Native HLG, override assumed peak
 hdr_analyzer_mvp -i "hlg.mkv" -o "out.bin" --hlg-peak-nits 1200
 
-# Disable crop detection (full-frame diagnostics)
+# Disable seek-based probing and use the first usable in-stream crop
+hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --crop-probes 0
+
+# Disable crop detection entirely (full-frame diagnostics)
 hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --no-crop
 
 # Via cargo

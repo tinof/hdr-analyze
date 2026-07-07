@@ -27,7 +27,7 @@ Comparison harness: `tools/l1_diff` (per-frame deltas in 12-bit PQ codes and nit
 
 ## Results
 
-### 1. Synthetic truth — both peak domains are exact
+### 1. Synthetic truth — peaks, mean, and robust minimum
 
 | Constructed peak | Measured error |
 |---|---|
@@ -36,6 +36,10 @@ Comparison harness: `tools/l1_diff` (per-frame deltas in 12-bit PQ codes and nit
 | 4000 nits | < 0.25 of one 12-bit PQ code |
 | Saturated BT.2020 max-RGB | < 0.25 of one 12-bit PQ code |
 | Same color, Y-luma domain | < 0.25 of one 12-bit PQ code |
+| Solid-gray Y mean | exact after 12-bit sidecar quantization |
+| Uniform 0.05-nit raised-black minimum | exact after 10-bit/fine-histogram quantization |
+| Raised black + one dark speckle, P0.1 | raised floor preserved |
+| Same pattern, P0 absolute minimum | dark speckle exposed as code 0 |
 
 The analyzer reproduces mathematically known peaks to within the measurement format's own
 quantization (observed error ≈ 0.03 code). Pixel reading, PQ math, and file writing are exact.
@@ -113,7 +117,26 @@ A post-review default-path check used the first 24 BL frames with no `--peak-dom
 The pipeline reported `Peak source: max` and scored +14.9 codes on every frame against cm_analyze.
 The saturated synthetic integration test exercises this same default path in CI.
 
-### 5. Known limitations surfaced by this study
+### 5. P2 sidecar comparison against embedded L1
+
+The updated analyzer was run over all 2908 base-layer frames with the reproduction flags below, and
+the extended `l1_diff` read `<output>.l1.json`. Against the asset's embedded, shot-authored FEL L1:
+
+| Metric (ours − embedded L1, 12-bit PQ codes) | Bias | \|error\| median / p95 / max |
+|---|---:|---:|
+| Robust P0.1 minimum | +901.5 | 1057.0 / 1925.0 / 1925.0 |
+| True Y-luma mean | −119.6 | 35.0 / 1818.0 / 1818.0 |
+
+These numbers validate frame alignment and exercise all new scorer paths; they are not a parity
+claim. The reference describes the composed BL+EL image and changing L5 active areas, while this run
+measures the full uncropped base layer. In particular, its minimum and tail errors are expected to be
+large. The Y-mean median error is 35 codes on this embedded reference, but Dolby L1 mid is not asserted
+to be either arithmetic-mean domain. A fresh identical-pixel `cm_analyze` export is still needed for
+a controlled before/after average-error delta. The max-RGB row from the initial P2 run is intentionally
+omitted because it predated symmetric temporal smoothing of both average domains and has not been
+rerun on the full corpus.
+
+### 6. Known limitations surfaced by this study
 
 - **Scene detection on near-static content:** the FEL asset's BL is nearly constant in luma
   (the signal lives in the enhancement layer); the histogram-distance metric found 1 of 34

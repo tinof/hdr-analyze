@@ -24,17 +24,19 @@ workflow falls back to HDR10 analysis.
 ## Documentation
 
 - **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — complete flag reference for all three tools.
-- **[docs/DOLBY_VISION.md](docs/DOLBY_VISION.md)** — HDR10+ peak mapping, CM v4.0 metadata, verification.
+- **[docs/DOLBY_VISION.md](docs/DOLBY_VISION.md)** — current conversion paths, HDR10+ mapping, CM v4.0 metadata, and verification.
+- **[docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md)** — analyzer accuracy gaps and validation design.
 - **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — analysis internals and research.
 - **[docs/PROVENANCE.md](docs/PROVENANCE.md)** — clean-room statement: the public standards this is built from.
-- **[ROADMAP.md](ROADMAP.md)** · **[CHANGELOG.md](CHANGELOG.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**
+- **[ROADMAP.md](ROADMAP.md)** — canonical status and active work.
+- **[CHANGELOG.md](CHANGELOG.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**
 
 ## Workspace Members
 
 This is a Rust workspace with three shipped binaries:
 
 - **`hdr_analyzer_mvp`** — HDR analysis engine; processes video and writes madVR-compatible `.bin`
-  measurement files.
+  measurement files plus explicit `.l1.json` measurement sidecars.
 - **`mkvdovi`** — native HDR10/HDR10+/HLG → Dolby Vision Profile 8.1 (CM v4.0) conversion orchestrator.
 - **`verifier`** — utility for reading, validating, and inspecting `.bin` measurement files.
 
@@ -42,9 +44,10 @@ This is a Rust workspace with three shipped binaries:
 
 - **Native video processing** via `ffmpeg-next` for direct, zero-copy access to high-bit-depth pixel
   data — precise per-pixel 10-bit luminance analysis instead of parsing external tool logs.
-- **Accurate per-frame analysis**: MaxCLL and APL from 10-bit YUV420P10LE frames, with active-video
-  crop detection to ignore black bars (see [Known Limitations](#known-limitations)).
-- **v5/v6 luminance histograms**: 256-bin histogram with SDR/HDR split (64 + 192) and mid-bin averaging.
+- **Accurate per-frame analysis**: MaxCLL and APL from 10-bit YUV420P10LE frames, with multi-position
+  active-video crop probing to ignore black bars.
+- **True L1 statistics plus v5/v6 histograms**: full-precision per-pixel Y/max-RGB means, a
+  noise-rejected active-area minimum, and the compatible 256-bin SDR/HDR histogram (64 + 192).
 - **Native scene detection**: histogram-distance-based cut detection with a configurable threshold.
 - **Dynamic metadata optimizer**: per-frame `target_nits` from a rolling average, 99th-percentile knee
   detection, scene-aware blending/resets, and bidirectional EMA smoothing (on by default).
@@ -176,12 +179,11 @@ Reports version/flags, scene & frame stats, peak brightness and avg PQ, histogra
 
 ## Known Limitations
 
-- **Crop detection uses a single frame.** The active-area crop is detected **once**, on the first
-  frame selected for analysis, and reused for the entire stream. Early black frames, fade-ins,
-  full-screen studio logos, pre-roll, or variable-aspect-ratio content (e.g. intermittent IMAX
-  scenes) can therefore produce an incorrect crop. Use `--no-crop` to analyze the full frame.
-  Stream-level multi-frame probing (and later per-scene crop) is tracked in
-  [issue #3](https://github.com/tinof/hdr-analyze/issues/3).
+- **Variable-aspect-ratio analysis uses one conservative crop.** Seven seek-based probes reject
+  black/low-signal frames and commit a stable active area before analysis. When multiple aspect-ratio
+  modes are observed, their union preserves all picture; scene cuts report crop changes but do not
+  apply a new crop per scene. Use `--crop-probes 0` for in-stream fallback detection or `--no-crop`
+  for full-frame diagnostics. L5 active-area metadata is not emitted yet.
 - **HLG/VAAPI/VideoToolbox decode** currently fall back to software decoding; proper device contexts
   are planned (see [Roadmap](#roadmap)).
 - **v6 per-gamut peaks** (`peak_pq_dcip3`, `peak_pq_709`) are approximated from BT.2020. These are a
@@ -203,8 +205,9 @@ summing ≈ 100; PQ values in `[0,1]`; scenes valid and within frame range.
 
 ## Roadmap
 
-See **[ROADMAP.md](ROADMAP.md)**. Near-term highlights: proper VAAPI/VideoToolbox device contexts
-and hardware frame transfer, SIMD histogram optimizations, and more robust crop detection (issue #3).
+See **[ROADMAP.md](ROADMAP.md)**. Near-term work includes source-honest Dolby Vision generation,
+robust L1 min/average measurements, L5 emission, numerical CI regression gates, hybrid scene
+detection, and proper VAAPI/VideoToolbox device contexts.
 
 ## Contributing & Quality Gates
 
