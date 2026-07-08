@@ -42,7 +42,7 @@ The detailed gap table and validation method live in
 | ID | Status | Work |
 |----|--------|------|
 | **WS0** | **Core complete** | `tools/l1_diff`, synthetic ground-truth tests, embedded-L1 comparison, and licensed `cm_analyze` scoring have shipped. Grow the corpus and add an automated `l1_diff` regression gate; the utility is currently excluded from workspace CI. |
-| **WS1** | **Partial** | P2 measurement core is complete. Remaining delivery/accuracy work is measured-minimum RPU wiring, validation-driven average-domain selection, true target-gamut peaks, and HLG max-RGB. |
+| **WS1** | **Partial** | P2 measurement core is complete. Remaining delivery/accuracy work is measured-minimum RPU wiring, validation-driven average-domain selection, a grain-robust max-RGB peak estimator (real-content validation measured direct max +74…+93 codes hot vs `cm_analyze` v2; [VALIDATION.md §7](docs/VALIDATION.md)), true target-gamut peaks, and HLG max-RGB. |
 | **WS2** | **Open** | Add per-shot L1 aggregation and an optional L4-style temporal filter/shot anchor. Promote hybrid scene detection only after it beats histogram-only against reference boundaries. |
 | **WS3** | **Open** | Emit and validate L5 active-area metadata (P3). |
 | **WS4** | **Open; experimental** | Derive optional L2/L8 trims from an open tone-mapping baseline such as ITU-R BT.2390. Neutral trims remain the default unless blinded A/B testing demonstrates an improvement. |

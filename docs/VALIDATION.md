@@ -1,6 +1,6 @@
 # Validation Report — Base-Layer Measurement Accuracy
 
-**Analyzer version:** hdr_analyzer_mvp 0.3.0 · **Date:** 2026-07-06 · **Rule:** accuracy is
+**Analyzer version:** hdr_analyzer_mvp 0.3.0 · **Date:** 2026-07-06 (§1–§6), 2026-07-08 (§7) · **Rule:** accuracy is
 *measured, never asserted*. This report exists so that no accuracy claim in this project ever
 outruns its evidence. Reproduction commands are at the bottom.
 
@@ -112,6 +112,11 @@ The small constant positive bias is chroma-upsampling tolerance (the implementat
 neighbor 4:2:0→4:4:4; the cm_analyze input path used spline resampling). The production result
 matches the independent NumPy preview and reduces the prior −750.2-code Y-luma bias to +12.8 codes.
 
+> **Attribution superseded by §7.** The 2026-07-08 reconstruction-envelope ablation showed
+> neighbor- and spline-prepped inputs produce *identical* cm_analyze peaks; the filter choice was
+> never the cause. The residual offset comes from the YCbCr→RGB conversion/rounding path and is
+> bounded at ~10 codes.
+
 A post-review default-path check used the first 24 BL frames with no `--peak-domain` or
 `--peak-source` override, the default balanced optimizer profile, and default histogram smoothing.
 The pipeline reported `Peak source: max` and scored +14.9 codes on every frame against cm_analyze.
@@ -149,6 +154,80 @@ rerun on the full corpus.
 - **avg_pq comparisons need letterbox handling** (this asset carries varying L5 offsets up to
   320 rows); peak is unaffected by black bars, averages are not.
 
+### 7. Real-content validation: native 4:2:0 ingest, two titles (2026-07-08)
+
+Second cm_analyze round on real content, with the external resampling step removed entirely:
+cm_analyze ingested the **untouched 4:2:0 base layer** as raw yuv (layout tags embedded in the
+filename, e.g. `name_3840x2160_u10_420p_le_lsb16.yuv`, with `--source-format` carrying only
+`"ycbcr_bt2020 video pq bt2020"` — cm_analyze rejects raw-layout tags inside `--source-format`
+itself). Mastering display ID 21 (BT.2020/D65/ST.2084, 0.0001–1000 nits), CUDA, all frames.
+
+Two titles, 20:00–22:00 cuts, scored per shot with `l1_diff --per-shot`:
+
+- **Title A** — UHD Blu-ray remux, DV Profile 7 **MEL** (composed picture = BL, so the embedded
+  Dolby-authored L1 is a full-coverage BL reference); heavy film grain; L5 letterbox 120/120;
+  2855 frames / 15 shots.
+- **Title B** — 2160p web-service encode with authored HDR10+ (used to validate mkvdovi's
+  HDR10+→DV L1 derivation); 2825 frames / 11 shots.
+
+**Finding 1 — cm_analyze's default (CM v4) L1 is not a raw measurement.** Its per-shot peak has
+an exact floor at PQ(100 nits) = code 2081 (4 of 15 Title A shots and 4 of 11 Title B shots report
+exactly 2081.0 while `--analysis-version 2` on the same pixels reads 1537–2541), and its "avg" is
+an anchored near-constant (codes 1228/1286 across every Title A shot), not a mean. The Title A embedded
+L1 was authored with the v2.9-style algorithm: embedded vs cm v2 agrees to **+16.5 codes** bias
+(median 20) while embedded vs default v4 differs by +198.0 (max 480). Measurement-style scoring
+must therefore use `--analysis-version 2`; v4 output is a mapping-oriented product.
+
+**Finding 2 — per-shot peak scores** (12-bit PQ codes, ours − reference):
+
+| Comparison | bias | median \|err\| | p95 | max |
+|---|---:|---:|---:|---:|
+| Title A ours max-RGB vs cm v2 (like-for-like) | **+92.6** | 67.8 | 205.6 | 205.6 |
+| Title A ours max-RGB vs cm v4 (floor-affected) | +274.1 | 289.6 | 613.4 | 613.4 |
+| Title A ours Y-luma vs cm v2 (two canceling errors) | +21.9 | 16.6 | 90.4 | 90.4 |
+| Title A embedded (v2.9-authored) vs cm v2 | +16.5 | 20.0 | 134.0 | 134.0 |
+| Title B ours max-RGB vs cm v2 | **+74.4** | 63.6 | 170.6 | 170.6 |
+| **Title B mkvdovi HDR10+→L1 vs cm v4** | **+5.1** | **1.0** | 17.0 | 17.0 |
+
+The Title B row is the round's cleanest result: **mkvdovi's HDR10+-derived L1 is essentially
+identical to Dolby's own v4 analyzer per shot** (median 1 code, max 17), including the v4 floor
+behavior.
+
+**Finding 3 — the chroma-reconstruction envelope is ~10 codes and filter-independent.** On the
+first four Title A shots (508 frames), cm_analyze was run three ways on the same pixels:
+
+| shot (frames) | native 4:2:0 | neighbor-prep TIFF | spline-prep TIFF |
+|---|---:|---:|---:|
+| 0–28 | 2330 | 2321 | 2321 |
+| 29–90 | 2798 | 2787 | 2787 |
+| 91–146 | 2081 | 2081 | 2081 |
+| 147–507 | 2426 | 2416 | 2416 |
+
+Neighbor and spline are *identical* — the peak-determining pixels are not chroma-edge-sensitive —
+and both sit 9–11 codes below native-420. The offset comes from the YCbCr→RGB conversion/rounding
+path, not from upsampling-filter choice. Consequence: the nearest-neighbor chroma sharing in
+`analysis/frame.rs` stays; spline/bilinear alternatives are closed as immaterial, and prep
+artifacts cannot explain the grain gap below.
+
+**Finding 4 — the grain watch item is confirmed and quantified.** Against the like-for-like cm v2
+measurement on identical BL pixels, our direct max reads **+92.6 codes hot on heavy-grain Title A**
+(up to +206/shot, 377 nits worst) and **+74.4 on the milder Title B** (up to +171) — an order of
+magnitude above the ~10-code prep envelope. Dolby's peak — even in its v2 measurement form —
+rejects isolated grain spikes that a raw maximum keeps. Closing this requires a robust peak
+estimator in the max-RGB domain (percentile/small-area filtering); that is a deliberate design
+decision tracked in the roadmap, not something to slip into a default silently.
+
+**Supporting results.** Minimum: 0.0-code error per shot everywhere; running cm with
+`--letterbox 0 0 120 120` moves the min comparison vs embedded from −2.8 to +0.1 codes — L5
+exclusion fully explains the min story. Averages: our max-RGB true mean matches cm v2's per-shot
+average within **+9.5 codes** (median 8.7, max 17.3) — direct evidence for the WS1 average-domain
+decision — while all comparisons against cm v4's anchored "avg" are definitional, not errors.
+Scene detection: on Title A, ours matched 13 of 14 authored cuts (±1 frame) while emitting 24 cuts
+total — high recall with some over-segmentation on real content, unlike the near-static FEL
+asset's 1/34 under-detection. Caveat for the record: the
+Title B stream signals a non-default chroma siting; both cm runs used cm's default siting.
+The env-gated `real_content_consistency` integration test passed against a 15-second Title A cut.
+
 ## Reproduction
 
 ```bash
@@ -170,4 +249,22 @@ cargo run --release --manifest-path tools/l1_diff/Cargo.toml -- \
 
 # synthetic truth
 cargo test -p hdr_analyzer_mvp --test synthetic_accuracy
+
+# real-content round (§7) — sample prep on the analysis host
+mkvmerge -o sample.mkv --no-audio --no-subtitles --split parts:00:20:00-00:22:00 SOURCE.mkv
+ffmpeg -i sample.mkv -c:v copy -bsf:v hevc_mp4toannexb sample.hevc
+dovi_tool demux -i sample.hevc --bl-out BL.hevc --el-out EL.hevc   # P7 input
+dovi_tool extract-rpu -i sample.hevc -o rpu.bin
+dovi_tool export -i rpu.bin -d all=rpu.json -d scenes=scenes.txt   # embedded L1 + shotlist
+hdr10plus_tool extract -i sample.hevc -o hdr10plus.json            # HDR10+ input
+
+# real-content round (§7) — cm_analyze on the untouched 4:2:0 BL (x86-64 + CUDA host)
+ffmpeg -i BL.hevc -f rawvideo -pix_fmt yuv420p10le bl_3840x2160_u10_420p_le_lsb16.yuv
+./cm_analyze -s shotlist.txt -m 21 -r 24000/1001 --analysis-version 2 \
+  --source-format "ycbcr_bt2020 video pq bt2020" \
+  bl_3840x2160_u10_420p_le_lsb16.yuv out.xml
+
+# per-shot scoring
+cargo run --release --manifest-path tools/l1_diff/Cargo.toml -- \
+  --ours BL_measurements.bin --reference cm_l1.csv --per-shot shotlist.txt
 ```

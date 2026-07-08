@@ -62,8 +62,8 @@ Key facts:
 
 | Level | Current state | Remaining gap | Roadmap |
 |-------|---------------|---------------|---------|
-| **L1 max** | PQ max-RGB direct peak measured and scored; optional Y′/percentile sources | Chroma resampling difference, target-gamut transforms, and HLG max-RGB | P2 / WS1 |
-| **L1 avg** | True Y-luma mean delivered through scene measurements; Y and max-RGB means also recorded in the sidecar | Decide from validation whether the RPU average domain should change | WS1 |
+| **L1 max** | PQ max-RGB direct peak measured and scored; optional Y′/percentile sources | Grain-robust peak estimator (direct max reads +74…+93 codes hot vs cm v2 on grainy real content); target-gamut transforms; HLG max-RGB. Chroma resampling is closed — measured envelope ~10 codes, filter-independent | P2 / WS1 |
+| **L1 avg** | True Y-luma mean delivered through scene measurements; Y and max-RGB means also recorded in the sidecar | Decide from validation whether the RPU average domain should change — real-content evidence: our max-RGB mean matches cm v2's shot average within ~10 codes, while cm v4's "avg" is an anchored constant | WS1 |
 | **L1 min** | Noise-rejected active-area minimum measured and emitted in the sidecar | Wire measured minimum into the RPU without conflicting with custom-target frame edits | WS1 / P0 |
 | **L4** | None; optimizer smooths madVR `target_nits` only | Shot-anchored L1 and optional temporal filtering | WS2 |
 | **L5** | `dovi_tool` default | Emit offsets from the committed crop and validate variable-AR policy | P3 / WS3 |
@@ -78,9 +78,24 @@ Key facts:
 ### Max-RGB peak
 
 The analyzer decodes limited-range BT.2020 NCL and tracks the maximum R′/G′/B′ PQ signal alongside
-Y′. This closed the large saturated-highlight definition gap. Against the identical demuxed base layer,
-the published run measured a +12.8-code median difference from `cm_analyze`; nearest-neighbor 4:2:0
-chroma sharing versus spline resampling is the leading explanation. See [VALIDATION.md](VALIDATION.md).
+Y′. This closed the large saturated-highlight definition gap.
+
+Real-content validation (2026-07-08, [VALIDATION.md](VALIDATION.md) §7) settled the input-preparation
+question and reframed the remaining gap:
+
+- **Chroma reconstruction is not a material error source.** cm_analyze ingests raw 4:2:0 directly;
+  neighbor- and spline-prepped 4:4:4 inputs produce *identical* cm peaks, both within ~10 codes of
+  native-4:2:0 ingest. The earlier attribution of the +12.8-code FEL-asset bias to
+  nearest-neighbor-vs-spline resampling was wrong; the offset lives in the YCbCr→RGB
+  conversion/rounding path and nearest-neighbor chroma sharing stays.
+- **cm_analyze's default (CM v4) L1 is not a raw measurement**: its peak has an exact floor at
+  PQ(100 nits) = code 2081 and its average is anchored. Measurement-style comparisons must use
+  `--analysis-version 2`, which matches Dolby-authored embedded L1 to ~+16 codes.
+- **The open gap is grain robustness.** Against cm v2 on identical BL pixels, our direct max reads
+  +92.6 codes hot on heavy-grain content and +74.4 on milder content — Dolby's peak rejects
+  isolated grain spikes that a raw maximum keeps. A robust max-RGB peak estimator
+  (percentile/small-area filtering in the max-RGB domain) is the follow-up, as an explicit,
+  validated design decision rather than a silent default change.
 
 The v6 `peak_pq_dcip3` and `peak_pq_709` fields remain approximations. They are madVR-only fields and
 are not consumed by the Dolby Vision v5 conversion path.
