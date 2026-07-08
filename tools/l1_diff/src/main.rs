@@ -14,6 +14,7 @@ use madvr_parse::MadVRMeasurements;
 use serde::Deserialize;
 use std::ffi::OsString;
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 const ST2084_Y_MAX: f64 = 10000.0;
@@ -51,6 +52,12 @@ struct Args {
     /// Optional reference scene-cut list (one start frame per line, dovi_tool `scenes` export)
     #[arg(long)]
     scenes: Option<PathBuf>,
+
+    /// Optional shotlist for per-shot aggregation: one 0-based shot-start frame per line,
+    /// optionally ending with a sentinel line equal to the total frame count. Both series are
+    /// aggregated per shot (peak = max, average = mean, minimum = min) before scoring.
+    #[arg(long, value_name = "SHOTLIST")]
+    per_shot: Option<PathBuf>,
 
     /// Optional per-frame delta dump as CSV
     #[arg(long)]
@@ -140,6 +147,84 @@ struct Stats {
     max: f64,
 }
 
+/// How a per-frame series collapses to one value per shot.
+#[derive(Clone, Copy)]
+enum ShotAggregate {
+    Min,
+    Max,
+    Mean,
+}
+
+/// Parse shotlist text into per-shot frame ranges covering `frame_count` frames.
+///
+/// Lines are 0-based shot-start frames, strictly increasing, starting at 0; a trailing
+/// line equal to `frame_count` (dovi_tool scene-export sentinel) is accepted and dropped.
+fn parse_shotlist_text(text: &str, frame_count: usize) -> Result<Vec<Range<usize>>> {
+    let mut starts = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let start: usize = line
+            .parse()
+            .with_context(|| format!("shotlist line {}: expected a frame number", i + 1))?;
+        starts.push(start);
+    }
+    if starts.last() == Some(&frame_count) {
+        starts.pop();
+    }
+    if starts.is_empty() {
+        bail!("shotlist contains no shot starts");
+    }
+    if starts[0] != 0 {
+        bail!(
+            "shotlist must start at frame 0 (first start is {})",
+            starts[0]
+        );
+    }
+    for pair in starts.windows(2) {
+        if pair[1] <= pair[0] {
+            bail!(
+                "shotlist starts must be strictly increasing ({} followed by {})",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+    let last = starts[starts.len() - 1];
+    if last >= frame_count {
+        bail!("shotlist start {last} is outside the {frame_count}-frame sequence");
+    }
+    let mut ranges = Vec::with_capacity(starts.len());
+    for (index, &start) in starts.iter().enumerate() {
+        let end = starts.get(index + 1).copied().unwrap_or(frame_count);
+        ranges.push(start..end);
+    }
+    Ok(ranges)
+}
+
+fn parse_shotlist(path: &Path, frame_count: usize) -> Result<Vec<Range<usize>>> {
+    let text =
+        fs::read_to_string(path).with_context(|| format!("reading shotlist {}", path.display()))?;
+    parse_shotlist_text(&text, frame_count)
+        .with_context(|| format!("validating shotlist {}", path.display()))
+}
+
+fn aggregate_shots(series: &[f64], shots: &[Range<usize>], mode: ShotAggregate) -> Vec<f64> {
+    shots
+        .iter()
+        .map(|range| {
+            let window = &series[range.clone()];
+            match mode {
+                ShotAggregate::Min => window.iter().copied().fold(f64::INFINITY, f64::min),
+                ShotAggregate::Max => window.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                ShotAggregate::Mean => window.iter().sum::<f64>() / window.len() as f64,
+            }
+        })
+        .collect()
+}
+
 /// Percentile/summary stats over signed deltas, computed on absolute values.
 fn stats(deltas: &[f64]) -> Stats {
     let mut abs: Vec<f64> = deltas.iter().map(|d| d.abs()).collect();
@@ -155,7 +240,7 @@ fn stats(deltas: &[f64]) -> Stats {
     }
 }
 
-fn print_metric(name: &str, ref_codes: &[f64], our_codes: &[f64]) {
+fn print_metric(name: &str, ref_codes: &[f64], our_codes: &[f64], unit: &str) {
     let signed: Vec<f64> = ref_codes
         .iter()
         .zip(our_codes)
@@ -175,7 +260,30 @@ fn print_metric(name: &str, ref_codes: &[f64], our_codes: &[f64]) {
         "  |error|: mean {:.1} / median {:.1} / p95 {:.1} / max {:.1}",
         s.mean, s.median, s.p95, s.max
     );
-    println!("  worst per-frame difference in nits: {worst_nits:.1}");
+    println!("  worst per-{unit} difference in nits: {worst_nits:.1}");
+}
+
+/// Score one metric, per-frame by default or per-shot when a shotlist is given.
+fn score(
+    name: &str,
+    ref_codes: &[f64],
+    our_codes: &[f64],
+    shots: Option<&[Range<usize>]>,
+    mode: ShotAggregate,
+) {
+    match shots {
+        Some(shots) => {
+            let ref_shots = aggregate_shots(ref_codes, shots, mode);
+            let our_shots = aggregate_shots(our_codes, shots, mode);
+            print_metric(
+                &format!("{name} — per-shot ({} shots)", shots.len()),
+                &ref_shots,
+                &our_shots,
+                "shot",
+            );
+        }
+        None => print_metric(name, ref_codes, our_codes, "frame"),
+    }
 }
 
 fn main() -> Result<()> {
@@ -226,6 +334,13 @@ fn main() -> Result<()> {
             reference.len()
         );
     }
+
+    let shots = match &args.per_shot {
+        Some(path) => Some(parse_shotlist(path, reference.len())?),
+        None => None,
+    };
+    let shots = shots.as_deref();
+
     if let Some(sidecar) = &sidecar {
         for (name, count) in [
             ("min", sidecar.frames.min_pq_12bit.len()),
@@ -247,7 +362,13 @@ fn main() -> Result<()> {
             .iter()
             .map(|code| f64::from(*code))
             .collect();
-        print_metric("Minimum (robust active-area min_pq)", &ref_min, &our_min);
+        score(
+            "Minimum (robust active-area min_pq)",
+            &ref_min,
+            &our_min,
+            shots,
+            ShotAggregate::Min,
+        );
     } else {
         println!("Minimum: unavailable without an L1 sidecar.");
     }
@@ -258,7 +379,13 @@ fn main() -> Result<()> {
         .iter()
         .map(|f| f.peak_pq_2020 * 4095.0)
         .collect();
-    print_metric("Peak (L1 max_pq)", &ref_max, &our_max);
+    score(
+        "Peak (L1 max_pq)",
+        &ref_max,
+        &our_max,
+        shots,
+        ShotAggregate::Max,
+    );
 
     let ref_avg: Vec<f64> = reference.iter().map(|r| r.avg_pq as f64).collect();
     if let Some(sidecar) = &sidecar {
@@ -268,21 +395,39 @@ fn main() -> Result<()> {
             .iter()
             .map(|code| f64::from(*code))
             .collect();
-        print_metric("Average (Y-luma mean)", &ref_avg, &our_avg_luma);
+        score(
+            "Average (Y-luma mean)",
+            &ref_avg,
+            &our_avg_luma,
+            shots,
+            ShotAggregate::Mean,
+        );
         let our_avg_max_rgb: Vec<f64> = sidecar
             .frames
             .avg_max_rgb_pq_12bit
             .iter()
             .map(|code| f64::from(*code))
             .collect();
-        print_metric("Average (max-RGB mean)", &ref_avg, &our_avg_max_rgb);
+        score(
+            "Average (max-RGB mean)",
+            &ref_avg,
+            &our_avg_max_rgb,
+            shots,
+            ShotAggregate::Mean,
+        );
     } else {
         let our_avg: Vec<f64> = ours
             .frames
             .iter()
             .map(|frame| frame.avg_pq * 4095.0)
             .collect();
-        print_metric("Average (legacy embedded .bin avg_pq)", &ref_avg, &our_avg);
+        score(
+            "Average (legacy embedded .bin avg_pq)",
+            &ref_avg,
+            &our_avg,
+            shots,
+            ShotAggregate::Mean,
+        );
         println!("Max-RGB average: unavailable without an L1 sidecar.");
     }
 
@@ -349,4 +494,78 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shotlist_builds_ranges_and_drops_sentinel() {
+        let ranges = parse_shotlist_text("0\n10\n25\n40\n", 40).unwrap();
+        assert_eq!(ranges, vec![0..10, 10..25, 25..40]);
+    }
+
+    #[test]
+    fn shotlist_last_shot_extends_to_frame_count_without_sentinel() {
+        let ranges = parse_shotlist_text("0\n10\n25\n", 40).unwrap();
+        assert_eq!(ranges, vec![0..10, 10..25, 25..40]);
+    }
+
+    #[test]
+    fn shotlist_rejects_non_increasing_starts() {
+        let error = parse_shotlist_text("0\n10\n10\n", 40).unwrap_err();
+        assert!(error.to_string().contains("strictly increasing"));
+    }
+
+    #[test]
+    fn shotlist_rejects_out_of_range_start() {
+        let error = parse_shotlist_text("0\n50\n", 40).unwrap_err();
+        assert!(error.to_string().contains("outside"));
+    }
+
+    #[test]
+    fn shotlist_rejects_nonzero_first_start() {
+        let error = parse_shotlist_text("5\n10\n", 40).unwrap_err();
+        assert!(error.to_string().contains("start at frame 0"));
+    }
+
+    #[test]
+    fn shotlist_rejects_empty_input() {
+        assert!(parse_shotlist_text("\n\n", 40).is_err());
+    }
+
+    #[test]
+    fn aggregation_applies_min_max_mean_per_shot() {
+        let series = [1.0, 5.0, 3.0, 8.0, 2.0, 4.0];
+        let shots = vec![0..3, 3..6];
+        assert_eq!(
+            aggregate_shots(&series, &shots, ShotAggregate::Max),
+            vec![5.0, 8.0]
+        );
+        assert_eq!(
+            aggregate_shots(&series, &shots, ShotAggregate::Min),
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            aggregate_shots(&series, &shots, ShotAggregate::Mean),
+            vec![3.0, 14.0 / 3.0]
+        );
+    }
+
+    #[test]
+    fn aggregation_is_exact_for_per_shot_expanded_reference() {
+        // A per-frame series expanded from per-shot XML is constant within each shot;
+        // max and mean must both recover the original per-shot value exactly.
+        let expanded = [7.0, 7.0, 7.0, 2.0, 2.0];
+        let shots = vec![0..3, 3..5];
+        assert_eq!(
+            aggregate_shots(&expanded, &shots, ShotAggregate::Max),
+            vec![7.0, 2.0]
+        );
+        assert_eq!(
+            aggregate_shots(&expanded, &shots, ShotAggregate::Mean),
+            vec![7.0, 2.0]
+        );
+    }
 }
