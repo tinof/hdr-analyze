@@ -110,6 +110,10 @@ pub struct Cli {
     #[arg(long, default_value = "off")]
     pub pre_denoise: String,
 
+    /// Low percentile used for the noise-rejected active-area minimum (percent). 0 uses the absolute minimum.
+    #[arg(long, default_value_t = 0.1)]
+    pub min_percentile: f64,
+
     /// Target_nits smoother type: off or ema (default: ema)
     #[arg(long, default_value = "ema")]
     pub target_smoother: String,

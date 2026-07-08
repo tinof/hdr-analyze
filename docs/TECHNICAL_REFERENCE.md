@@ -95,31 +95,39 @@ the front page concise.
 - Frames are converted/scaled to **YUV420P10LE** for consistent 10-bit luminance (Y-plane) access.
 - Histogram binning follows the v5 layout:
     -   SDR portion (bins 0–63) and HDR portion (bins 64–255).
-    -   Mid-bin center values are used for the weighted average (APL) estimation.
-    -   Heuristic black-bar filtering on bin 0.
+    -   The histogram is retained for distribution, scene detection, and madVR compatibility.
 - The active per-frame analysis path normalizes HDR10 limited-range codes (nominal 64–940) to
   `[0,1]` before mapping into the v5 histogram bins (aligns with practical HDR10 limited-range
   content).
-- The average PQ is computed using the same mid-bin approach as consumers of v5 measurements,
-  ensuring consistent values for downstream tooling.
+- Y-luma and max-RGB PQ sums plus the processed-pixel count are accumulated at full precision in the
+  same Rayon reduction as the histogram. The Y average feeds scene statistics and MaxFALL; both
+  domains receive identical scene-aware smoothing and are recorded in the L1 sidecar.
+- A separate 1024-bin code-level histogram produces the active-area lower-percentile minimum after
+  denoising. P0.1 is the default and P0 is the absolute-minimum diagnostic mode.
+- Rayon fold accumulators reuse each fine histogram across a worker partition rather than allocating
+  one histogram per chroma row.
 
 ### 4.2. Scene detection
 
 - Histogram distance metric (chi-squared-like, symmetric form) with a small epsilon for stability.
 - Default threshold `0.3` (configurable via `--scene-threshold`).
 - Cut detection runs during frame analysis and is converted to scene ranges after processing.
-- A prototype `--scene-metric hybrid` fuses histogram distance with optical-flow cues.
+- `--scene-metric hybrid` is a prototype that currently falls back to histogram distance; optical
+  flow fusion remains roadmap work.
 
-### 4.3. Active-area crop detection (current behavior & limitation)
+### 4.3. Active-area crop detection
 
-- `detect_crop` (`hdr_analyzer_mvp/src/crop.rs`) scans the 10-bit Y-plane of a frame for
-  rows/columns with ≥10% non-black samples (sampled every 10 px), rounding the result to even
-  coordinates/dimensions for chroma safety.
-- **Limitation:** crop is detected **once**, on the first frame selected for analysis, and reused
-  for the entire stream (`pipeline.rs`, guarded by `if crop_rect_opt.is_none()`). Early black
-  frames, fades, studio logos, or variable-aspect-ratio (e.g. IMAX) content can therefore yield a
-  wrong crop. Use `--no-crop` to analyze the full frame. Multi-frame / per-scene crop probing is
-  tracked in [issue #3](https://github.com/tinof/hdr-analyze/issues/3).
+- `detect_crop` (`hdr_analyzer_mvp/src/crop.rs`) scans a 10-bit Y-plane for rows/columns with
+  ≥10% non-black samples (sampled every 10 px), rounding to even coordinates/dimensions for chroma
+  safety.
+- By default, a separate decoder probes seven timestamps across 15%–85% of a seekable input,
+  rejects black/low-signal frames, clusters candidates with a two-pixel edge tolerance, and commits
+  the modal crop before the main analysis pass.
+- Multiple observed aspect-ratio modes use their conservative union so picture is not cut. Accepted
+  scene cuts provide reporting-only stability telemetry; per-scene crop application remains a
+  follow-up because it can introduce measurement discontinuities.
+- `--crop-probes 0` uses hardened in-stream fallback detection, while `--no-crop` analyzes the
+  full frame.
 
 ### 4.4. Direct pixel access
 

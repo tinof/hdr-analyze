@@ -7,6 +7,19 @@ This document provides a historical record of completed milestones, feature impl
 ## [Unreleased]
 
 ### Changed (behavioral)
+
+- **L1 average now uses a true per-pixel PQ mean.** The frame analyzer accumulates full-precision
+  Y-luma and max-RGB means in its parallel pixel pass; scene-aware smoothing operates directly on the
+  measured Y mean instead of reconstructing it from 256 histogram bin centers.
+- **Added explicit noise-rejected L1 minimum measurements.** `--min-percentile <percent>` defaults to
+  P0.1 and `0` selects the absolute minimum. Every analyzer run writes `<output>.l1.json` with the
+  crop/denoise configuration plus per-frame and per-scene 12-bit PQ min/avg/max measurements.
+- `tools/l1_diff` now reads the sidecar and scores minimum plus Y-luma and max-RGB average domains
+  against reference L1 CSV data. Historical `.bin` files without sidecars retain peak and embedded
+  average scoring; minimum and max-RGB average are reported unavailable. The sidecar minimum is
+  measurement-only and is not wired into RPU generation yet.
+- Y-luma and max-RGB means now receive identical temporal smoothing before sidecar serialization.
+  Fine minimum histograms are reused per Rayon fold partition instead of allocated per chroma row.
 - **Active-area crop detection now uses a multi-frame probe.** `hdr_analyzer_mvp` samples
   `--crop-probes <N>` frames (default 7) across the middle 70% of seekable inputs, rejects
   black/low-signal frames, and commits a tolerance-clustered conservative crop before analysis.

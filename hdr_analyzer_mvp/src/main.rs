@@ -6,6 +6,7 @@ mod crop;
 mod analysis;
 mod cli;
 mod ffmpeg_io;
+mod l1_sidecar;
 mod optimizer;
 mod pipeline;
 mod writer;
@@ -46,6 +47,12 @@ fn main() -> Result<()> {
 
     if cli.hlg_peak_nits <= 0.0 {
         return Err(anyhow::anyhow!("--hlg-peak-nits must be greater than 0"));
+    }
+
+    if !(0.0..=100.0).contains(&cli.min_percentile) {
+        return Err(anyhow::anyhow!(
+            "--min-percentile must be between 0 and 100"
+        ));
     }
 
     println!(

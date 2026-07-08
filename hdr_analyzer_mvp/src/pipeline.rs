@@ -32,6 +32,7 @@ use crate::analysis::scene::{
 use crate::cli::{Cli, PeakDomain};
 use crate::crop::{detect_crop, is_frame_usable_for_crop, CropRect, CROP_EDGE_TOLERANCE};
 use crate::ffmpeg_io::{probe_crop, setup_hardware_decoder, TransferFunction, VideoInfo};
+use crate::l1_sidecar::{write_l1_sidecar, FrameL1Measurement};
 use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
 use crate::writer::write_measurement_file;
 
@@ -250,7 +251,7 @@ pub fn run(
         }
     };
 
-    let (mut scenes, mut frames) = run_native_analysis_pipeline(
+    let (mut scenes, mut frames, mut l1_measurements, crop) = run_native_analysis_pipeline(
         cli,
         video_info,
         &mut input_context,
@@ -261,9 +262,15 @@ pub fn run(
 
     fix_scene_end_frames(&mut scenes, frames.len());
 
-    // Apply histogram smoothing with scene-aware EMA reset (if enabled)
+    // Apply histogram and both full-precision-average smoothing series with scene-aware resets.
     if cli.hist_bin_ema_beta > 0.0 || cli.hist_temporal_median > 0 {
-        apply_histogram_smoothing_pass(&scenes, &mut frames, cli, peak_domain)?;
+        apply_histogram_smoothing_pass(
+            &scenes,
+            &mut frames,
+            &mut l1_measurements,
+            cli,
+            peak_domain,
+        )?;
     }
 
     precompute_scene_stats(&mut scenes, &frames);
@@ -325,6 +332,17 @@ pub fn run(
         cli.target_peak_nits,
         cli.header_peak_source.as_deref(),
     )?;
+    let sidecar_path = write_l1_sidecar(
+        std::path::Path::new(&output_path),
+        &scenes,
+        &frames,
+        &l1_measurements,
+        cli.min_percentile,
+        &cli.pre_denoise,
+        peak_domain,
+        crop,
+    )?;
+    println!("Wrote L1 measurement sidecar: {}", sidecar_path.display());
 
     Ok(())
 }
@@ -344,7 +362,12 @@ fn run_native_analysis_pipeline(
     peak_domain: PeakDomain,
     downscale: u32,
     initial_crop: Option<CropRect>,
-) -> Result<(Vec<MadVRScene>, Vec<MadVRFrame>)> {
+) -> Result<(
+    Vec<MadVRScene>,
+    Vec<MadVRFrame>,
+    Vec<FrameL1Measurement>,
+    CropRect,
+)> {
     println!("Starting native analysis pipeline...");
     let width = video_info.width;
     let height = video_info.height;
@@ -416,6 +439,7 @@ fn run_native_analysis_pipeline(
         .map(|_| CropStabilityMonitor::new());
 
     let mut frames = Vec::new();
+    let mut l1_measurements = Vec::new();
     let mut scene_cuts = Vec::new();
     let mut previous_histogram: Option<Vec<f64>> = None;
     let smoothing_window = cli.scene_smoothing as usize;
@@ -427,6 +451,7 @@ fn run_native_analysis_pipeline(
     // Frame sampling configuration
     let sample_rate = cli.sample_rate.max(1);
     let mut last_analyzed_frame: Option<MadVRFrame> = None;
+    let mut last_l1_measurement: Option<FrameL1Measurement> = None;
 
     let start_time = Instant::now();
 
@@ -478,7 +503,7 @@ fn run_native_analysis_pipeline(
                 let should_analyze =
                     frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
 
-                let analyzed_frame = if should_analyze {
+                let (analyzed_frame, l1_measurement) = if should_analyze {
                     let analysis_frame = if let Some(ref mut sc) = scaler {
                         sc.run(&decoded_frame, &mut scaled_frame)
                             .context("Failed to scale frame")?;
@@ -504,6 +529,7 @@ fn run_native_analysis_pipeline(
                         transfer_function,
                         cli.hlg_peak_nits,
                         peak_domain,
+                        cli.min_percentile,
                     )?;
                     if let Some(start) = analysis_start {
                         analysis_duration += start.elapsed();
@@ -512,7 +538,7 @@ fn run_native_analysis_pipeline(
                     // Scene detection on analyzed frames
                     if let Some(ref prev_hist) = previous_histogram {
                         let raw_diff =
-                            compute_scene_diff(cli, &frame_result.lum_histogram, prev_hist);
+                            compute_scene_diff(cli, &frame_result.frame.lum_histogram, prev_hist);
                         let diff_for_threshold = if smoothing_window > 0 {
                             diff_window.push_back(raw_diff);
                             if diff_window.len() > smoothing_window {
@@ -532,15 +558,20 @@ fn run_native_analysis_pipeline(
                             sample_scene_cut_crop(&mut crop_monitor, rect, analysis_frame);
                         }
                     }
-                    previous_histogram = Some(frame_result.lum_histogram.clone());
-                    last_analyzed_frame = Some(copy_frame(&frame_result));
-                    frame_result
+                    previous_histogram = Some(frame_result.frame.lum_histogram.clone());
+                    last_analyzed_frame = Some(copy_frame(&frame_result.frame));
+                    last_l1_measurement = Some(frame_result.l1);
+                    (frame_result.frame, frame_result.l1)
                 } else {
                     // Use cached frame data for skipped frames
-                    copy_frame(last_analyzed_frame.as_ref().unwrap())
+                    (
+                        copy_frame(last_analyzed_frame.as_ref().unwrap()),
+                        last_l1_measurement.unwrap(),
+                    )
                 };
 
                 frames.push(analyzed_frame);
+                l1_measurements.push(l1_measurement);
                 frame_count += 1;
 
                 // Update progress display
@@ -558,7 +589,7 @@ fn run_native_analysis_pipeline(
         // Determine if we should analyze this frame or use cached data
         let should_analyze = frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
 
-        let analyzed_frame = if should_analyze {
+        let (analyzed_frame, l1_measurement) = if should_analyze {
             let analysis_frame = if let Some(ref mut sc) = scaler {
                 sc.run(&decoded_frame, &mut scaled_frame)
                     .context("Failed to scale final frame")?;
@@ -583,13 +614,15 @@ fn run_native_analysis_pipeline(
                 transfer_function,
                 cli.hlg_peak_nits,
                 peak_domain,
+                cli.min_percentile,
             )?;
             if let Some(start) = analysis_start {
                 analysis_duration += start.elapsed();
             }
 
             if let Some(ref prev_hist) = previous_histogram {
-                let raw_diff = compute_scene_diff(cli, &frame_result.lum_histogram, prev_hist);
+                let raw_diff =
+                    compute_scene_diff(cli, &frame_result.frame.lum_histogram, prev_hist);
                 let diff_for_threshold = if smoothing_window > 0 {
                     diff_window.push_back(raw_diff);
                     if diff_window.len() > smoothing_window {
@@ -608,14 +641,19 @@ fn run_native_analysis_pipeline(
                     sample_scene_cut_crop(&mut crop_monitor, rect, analysis_frame);
                 }
             }
-            previous_histogram = Some(frame_result.lum_histogram.clone());
-            last_analyzed_frame = Some(copy_frame(&frame_result));
-            frame_result
+            previous_histogram = Some(frame_result.frame.lum_histogram.clone());
+            last_analyzed_frame = Some(copy_frame(&frame_result.frame));
+            last_l1_measurement = Some(frame_result.l1);
+            (frame_result.frame, frame_result.l1)
         } else {
-            copy_frame(last_analyzed_frame.as_ref().unwrap())
+            (
+                copy_frame(last_analyzed_frame.as_ref().unwrap()),
+                last_l1_measurement.unwrap(),
+            )
         };
 
         frames.push(analyzed_frame);
+        l1_measurements.push(l1_measurement);
         frame_count += 1;
         pb.set_position(frame_count as u64);
     }
@@ -662,7 +700,8 @@ fn run_native_analysis_pipeline(
         );
     }
 
-    Ok((scenes, frames))
+    let crop = crop_rect_opt.unwrap_or_else(|| CropRect::full(target_w, target_h));
+    Ok((scenes, frames, l1_measurements, crop))
 }
 
 fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {
@@ -692,12 +731,51 @@ fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {
     }
 }
 
+fn smooth_average(
+    current: f64,
+    ema_state: &mut Option<f64>,
+    history: &mut VecDeque<f64>,
+    ema_beta: f64,
+    temporal_window: usize,
+) -> f64 {
+    let mut smoothed = if ema_beta > 0.0 {
+        let value = ema_state.map_or(current, |previous| {
+            ema_beta * current + (1.0 - ema_beta) * previous
+        });
+        *ema_state = Some(value);
+        value
+    } else {
+        current
+    };
+
+    if temporal_window > 0 {
+        history.push_back(smoothed);
+        if history.len() > temporal_window {
+            history.pop_front();
+        }
+        let mut values: Vec<f64> = history.iter().copied().collect();
+        values.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+        smoothed = values[values.len() / 2];
+    }
+
+    smoothed
+}
+
 fn apply_histogram_smoothing_pass(
     scenes: &[MadVRScene],
     frames: &mut [MadVRFrame],
+    l1_measurements: &mut [FrameL1Measurement],
     cli: &Cli,
     peak_domain: PeakDomain,
 ) -> Result<()> {
+    if frames.len() != l1_measurements.len() {
+        anyhow::bail!(
+            "L1 smoothing frame count mismatch: {} frames, {} measurements",
+            frames.len(),
+            l1_measurements.len()
+        );
+    }
+
     println!(
         "Applying histogram smoothing (EMA beta={}, temporal median window={})...",
         cli.hist_bin_ema_beta, cli.hist_temporal_median
@@ -719,7 +797,7 @@ fn apply_histogram_smoothing_pass(
         }
     });
 
-    // Process each scene independently to reset EMA at scene boundaries
+    // Process each scene independently to reset all smoothing state at boundaries.
     for scene in scenes {
         let start_idx = scene.start as usize;
         let end_idx = ((scene.end + 1) as usize).min(frames.len());
@@ -728,20 +806,25 @@ fn apply_histogram_smoothing_pass(
             continue;
         }
 
-        // Reset EMA state at scene boundary
         let mut ema_state = vec![0.0; 256];
         let mut temporal_history: VecDeque<Vec<f64>> = VecDeque::with_capacity(temporal_window);
+        let mut luma_avg_ema_state: Option<f64> = None;
+        let mut max_rgb_avg_ema_state: Option<f64> = None;
+        let mut luma_avg_history: VecDeque<f64> = VecDeque::with_capacity(temporal_window);
+        let mut max_rgb_avg_history: VecDeque<f64> = VecDeque::with_capacity(temporal_window);
 
-        for frame in frames.iter_mut().take(end_idx).skip(start_idx) {
-            // Store original peak for reference
+        for (frame, l1_measurement) in frames[start_idx..end_idx]
+            .iter_mut()
+            .zip(l1_measurements[start_idx..end_idx].iter_mut())
+        {
             let direct_max_pq = frame.peak_pq_2020;
+            let direct_luma_avg_pq = frame.avg_pq;
+            let direct_max_rgb_avg_pq = l1_measurement.avg_max_rgb_pq;
 
-            // Apply EMA smoothing
             if ema_beta > 0.0 {
                 apply_histogram_ema(&mut frame.lum_histogram, &mut ema_state, ema_beta);
             }
 
-            // Apply temporal median if enabled
             if temporal_window > 0 && !temporal_history.is_empty() {
                 apply_histogram_temporal_median(
                     &mut frame.lum_histogram,
@@ -749,7 +832,6 @@ fn apply_histogram_smoothing_pass(
                 );
             }
 
-            // Update temporal history (keep last N-1 frames)
             if temporal_window > 0 {
                 temporal_history.push_back(frame.lum_histogram.clone());
                 if temporal_history.len() >= temporal_window {
@@ -757,40 +839,29 @@ fn apply_histogram_smoothing_pass(
                 }
             }
 
-            // Recompute peak based on peak_source
             frame.peak_pq_2020 = select_peak_pq(&frame.lum_histogram, direct_max_pq, peak_source);
 
-            // Recompute avg_pq from smoothed histogram using v5 semantics
-            let sdr_peak_pq = crate::analysis::histogram::nits_to_pq(100.0);
-            let sdr_step = sdr_peak_pq / 64.0;
-            let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
-            let sdr_mid = sdr_step + (sdr_step / 2.0);
-            let hdr_mid = hdr_step + (hdr_step / 2.0);
-
-            let mut avg_pq = 0.0f64;
-            for (i, percent) in frame.lum_histogram.iter().enumerate() {
-                // Filter potential black bars at bin 0 per madvr_parse heuristic
-                if i == 0 && *percent > 2.0 && *percent < 30.0 {
-                    continue;
-                }
-                let pq_value = if i <= 64 {
-                    (i as f64) * sdr_mid
-                } else {
-                    sdr_peak_pq + (((i - 63) as f64) * hdr_mid)
-                };
-                avg_pq += pq_value * (*percent / 100.0);
-            }
-            // Adjust based on sum of histogram bars
-            let percent_sum: f64 = frame.lum_histogram.iter().sum();
-            if percent_sum > 0.0 {
-                avg_pq = (avg_pq * (100.0 / percent_sum)).min(1.0);
-            }
-            frame.avg_pq = avg_pq.min(1.0);
+            // Smooth both true per-pixel average domains identically. The first
+            // frame of every scene initializes each EMA without zero-state bias.
+            frame.avg_pq = smooth_average(
+                direct_luma_avg_pq,
+                &mut luma_avg_ema_state,
+                &mut luma_avg_history,
+                ema_beta,
+                temporal_window,
+            );
+            l1_measurement.avg_max_rgb_pq = smooth_average(
+                direct_max_rgb_avg_pq,
+                &mut max_rgb_avg_ema_state,
+                &mut max_rgb_avg_history,
+                ema_beta,
+                temporal_window,
+            );
         }
     }
 
     println!(
-        "Histogram smoothing completed. Peak source: {}",
+        "Histogram and average smoothing completed. Peak source: {}",
         peak_source
     );
     Ok(())
@@ -815,5 +886,31 @@ fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
                 .fold(0.0f64, f64::max);
             scene.peak_nits = crate::analysis::histogram::pq_to_nits(max_peak_pq) as u32;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn average_smoothing_is_identical_across_domains() {
+        let mut luma_ema = None;
+        let mut max_rgb_ema = None;
+        let mut luma_history = VecDeque::new();
+        let mut max_rgb_history = VecDeque::new();
+
+        for value in [0.1, 0.4, 0.2, 0.8] {
+            let luma = smooth_average(value, &mut luma_ema, &mut luma_history, 0.1, 3);
+            let max_rgb = smooth_average(value, &mut max_rgb_ema, &mut max_rgb_history, 0.1, 3);
+            assert_eq!(luma, max_rgb);
+        }
+    }
+
+    #[test]
+    fn average_smoothing_has_no_scene_initialization_bias() {
+        let mut ema = None;
+        let mut history = VecDeque::new();
+        assert_eq!(smooth_average(0.75, &mut ema, &mut history, 0.1, 3), 0.75);
     }
 }
