@@ -9,6 +9,7 @@ use crate::cli::{Args, CmVersion, Encoder, HwAccel, PeakSource};
 use crate::external::{self, run_command_live, run_command_with_spinner};
 use crate::fel_composite;
 use crate::metadata::{self, HdrFormat};
+use crate::rpu_check::{self, Level5Offsets};
 
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let input_path = Path::new(input_file);
@@ -45,9 +46,43 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     // Determine format
     let mut hdr_type = metadata::check_hdr_format(input_file);
+    let original_hdr_type = hdr_type;
     let mut measurements_file: Option<PathBuf> = None;
     let mut hdr10plus_json: Option<PathBuf> = None;
     let mut bl_source_file = PathBuf::from(input_file);
+    let mut level5_offsets: Option<Level5Offsets> = None;
+
+    if matches!(
+        hdr_type,
+        HdrFormat::DolbyVisionMel | HdrFormat::DolbyVisionFel | HdrFormat::DolbyVisionP8
+    ) {
+        match rpu_check::sample_rpu_windows(input_file, &temp_dir) {
+            Ok(sample) => {
+                level5_offsets = sample.level5;
+                let windows_sampled = sample.windows_sampled;
+                if let Ok(report) =
+                    rpu_check::analyze_rpus(sample.l1_frames, sample.mastering_peak_pq)
+                {
+                    if let Some(detail) = rpu_check::warning_summary(&report) {
+                        println!(
+                            "{}",
+                            format!(
+                                "DV metadata looks unreliable ({}); consider --mdfix. (sampled {} windows; run `inspect` for a full check)",
+                                detail, windows_sampled
+                            )
+                            .yellow()
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                println!(
+                    "{}",
+                    format!("Warning: failed to inspect source RPU: {}", e).yellow()
+                );
+            }
+        }
+    }
 
     // Pre-handle HDR10+ to allow fallback to HDR10Unsupported if metadata is missing
     if hdr_type == HdrFormat::Hdr10Plus {
@@ -70,6 +105,53 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         HdrFormat::Hdr10Plus => {
             // Metadata already extracted above
         }
+        HdrFormat::DolbyVisionMel => {
+            println!("{}", "Dolby Vision Profile 7 MEL detected.".cyan().bold());
+
+            if !args.mdfix {
+                let success = convert_mel_to_profile81(input_file, &temp_dir, &output_file, args)?;
+                if success {
+                    if args.verify {
+                        println!("{}", "Running post-mux verification (--verify)...".green());
+                        let ok = crate::verify::verify_post_mux(
+                            input_file,
+                            &output_file,
+                            None,
+                            &temp_dir,
+                        );
+                        if !ok {
+                            println!("{}", "Inconsistencies detected during verification.".red());
+                            return Ok(false);
+                        }
+                    }
+                    finish_success(input_file, &output_file, &temp_dir, args, original_hdr_type)?;
+                }
+                return Ok(success);
+            }
+
+            println!(
+                "{}",
+                "Rebuilding MEL metadata from fresh base-layer measurements (--mdfix)...".green()
+            );
+            let raw_hevc = temp_dir.join("DV_raw.hevc");
+            extract_video_hevc(
+                input_file,
+                &raw_hevc,
+                &temp_dir,
+                "Extracting Dolby Vision HEVC",
+            )?;
+            let clean_bl = remove_dolby_vision_metadata(&raw_hevc, &temp_dir)?;
+            bl_source_file = clean_bl.clone();
+
+            let mut extra_args = Vec::new();
+            add_optimizer_args(&mut extra_args, args);
+            measurements_file =
+                run_hdr_analyzer(clean_bl.to_str().unwrap(), &temp_dir, &extra_args, args)?;
+            if measurements_file.is_none() {
+                return Ok(false);
+            }
+            hdr_type = HdrFormat::Hdr10WithMeasurements;
+        }
         HdrFormat::DolbyVisionFel => {
             // Profile 7 FEL: composite BL+EL, then treat as HDR10 for RPU generation
             println!("{}", "Dolby Vision Profile 7 FEL detected!".cyan().bold());
@@ -91,6 +173,40 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             }
 
             // Override hdr_type for RPU generation (treat as HDR10 with measurements)
+            hdr_type = HdrFormat::Hdr10WithMeasurements;
+        }
+        HdrFormat::DolbyVisionP8 => {
+            if !args.mdfix {
+                println!(
+                    "{}",
+                    "Dolby Vision Profile 8 detected; already Profile 8, skipping (run inspect / --mdfix to rebuild metadata)."
+                        .yellow()
+                );
+                return Ok(false);
+            }
+
+            println!(
+                "{}",
+                "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix)..."
+                    .green()
+            );
+            let raw_hevc = temp_dir.join("DV_raw.hevc");
+            extract_video_hevc(
+                input_file,
+                &raw_hevc,
+                &temp_dir,
+                "Extracting Profile 8 HEVC",
+            )?;
+            let clean_bl = remove_dolby_vision_metadata(&raw_hevc, &temp_dir)?;
+            bl_source_file = clean_bl.clone();
+
+            let mut extra_args = Vec::new();
+            add_optimizer_args(&mut extra_args, args);
+            measurements_file =
+                run_hdr_analyzer(clean_bl.to_str().unwrap(), &temp_dir, &extra_args, args)?;
+            if measurements_file.is_none() {
+                return Ok(false);
+            }
             hdr_type = HdrFormat::Hdr10WithMeasurements;
         }
         HdrFormat::Hlg => {
@@ -222,6 +338,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         &static_meta,
         &final_trims,
         cm_v40_config.as_ref(),
+        level5_offsets,
     )?;
 
     // Generate RPU
@@ -238,77 +355,17 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
     let rpu_path = rpu_path.unwrap();
 
-    // Extract BL (if needed, or copy)
-    // Actually we need to extract HEVC bitstream to INJECT RPU
     let bl_hevc = temp_dir.join("BL.hevc");
-
-    // Run ffmpeg to extract HEVC
-    let mut ffmpeg_cmd = Command::new("ffmpeg");
-    ffmpeg_cmd.args([
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-stats",
-        "-i",
+    extract_video_hevc(
         bl_source_file.to_str().unwrap(),
-        "-map",
-        "0:v:0",
-        "-c:v",
-        "copy",
-        "-f",
-        "hevc",
-        "-y",
-        bl_hevc.to_str().unwrap(),
-    ]);
-
-    println!("{}", "Extracting BL to HEVC...".green());
-    if !run_command_live(&mut ffmpeg_cmd, &temp_dir.join("ffmpeg_extract_bl.log"))? {
-        return Ok(false);
-    }
+        &bl_hevc,
+        &temp_dir,
+        "Extracting BL to HEVC",
+    )?;
 
     // Inject RPU
-    let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
-    // Resolve tool path
-    let dovi_tool_path =
-        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let mut dovi_cmd = Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
-
-    dovi_cmd.args([
-        "inject-rpu",
-        "-i",
-        bl_hevc.to_str().unwrap(),
-        "--rpu-in",
-        rpu_path.to_str().unwrap(),
-        "-o",
-        bl_rpu_hevc.to_str().unwrap(),
-    ]);
-
-    if !run_command_with_spinner(
-        &mut dovi_cmd,
-        &temp_dir.join("dovi_inject.log"),
-        "Injecting RPU into base layer",
-    )? {
-        return Ok(false);
-    }
-
-    // Mux
-    let mut mkvmerge_cmd = Command::new("mkvmerge");
-    mkvmerge_cmd.arg("-q").arg("-o").arg(&output_file);
-    if args.drop_tags {
-        mkvmerge_cmd.arg("--no-global-tags");
-    }
-    if args.drop_chapters {
-        mkvmerge_cmd.arg("--no-chapters");
-    }
-
-    mkvmerge_cmd.arg(&bl_rpu_hevc);
-    mkvmerge_cmd.arg("--no-video").arg(input_file);
-
-    if !run_command_with_spinner(
-        &mut mkvmerge_cmd,
-        &temp_dir.join("mkvmerge.log"),
-        "Muxing final MKV",
-    )? {
+    let bl_rpu_hevc = inject_rpu(&bl_hevc, &rpu_path, &temp_dir)?;
+    if !mux_hevc_with_original(input_file, &bl_rpu_hevc, &output_file, &temp_dir, args)? {
         return Ok(false);
     }
 
@@ -328,12 +385,184 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
     }
 
-    // Cleanup temp directory
-    println!("{}", "Cleaning up temp files...".green());
-    let _ = fs::remove_dir_all(&temp_dir);
+    finish_success(input_file, &output_file, &temp_dir, args, original_hdr_type)?;
+    Ok(true)
+}
 
-    // Delete source file unless --keep-source is set
-    if !args.keep_source {
+fn add_optimizer_args(args_vec: &mut Vec<String>, args: &Args) {
+    args_vec.push("--optimizer-profile".to_string());
+    args_vec.push(args.optimizer_profile.to_string());
+}
+
+fn dovi_tool_command() -> Command {
+    let dovi_tool_path =
+        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
+    Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path))
+}
+
+fn extract_video_hevc(input: &str, output: &Path, temp_dir: &Path, message: &str) -> Result<()> {
+    let mut ffmpeg_cmd = Command::new("ffmpeg");
+    ffmpeg_cmd.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-stats",
+        "-i",
+        input,
+        "-map",
+        "0:v:0",
+        "-c:v",
+        "copy",
+        "-bsf:v",
+        "hevc_mp4toannexb",
+        "-f",
+        "hevc",
+        "-y",
+        output.to_str().unwrap(),
+    ]);
+
+    println!("{}", format!("{}...", message).green());
+    if run_command_live(&mut ffmpeg_cmd, &temp_dir.join("ffmpeg_extract_hevc.log"))?
+        && output.exists()
+    {
+        Ok(())
+    } else {
+        anyhow::bail!("Failed to extract HEVC bitstream")
+    }
+}
+
+fn remove_dolby_vision_metadata(input_hevc: &Path, temp_dir: &Path) -> Result<PathBuf> {
+    let clean_bl = temp_dir.join("BL_clean.hevc");
+    let mut cmd = dovi_tool_command();
+    cmd.args([
+        "remove",
+        "-i",
+        input_hevc.to_str().unwrap(),
+        "-o",
+        clean_bl.to_str().unwrap(),
+    ]);
+
+    if run_command_with_spinner(
+        &mut cmd,
+        &temp_dir.join("dovi_remove.log"),
+        "Removing existing Dolby Vision metadata",
+    )? && clean_bl.exists()
+    {
+        Ok(clean_bl)
+    } else {
+        anyhow::bail!("Failed to remove Dolby Vision metadata from base layer")
+    }
+}
+
+fn convert_mel_to_profile81(
+    input_file: &str,
+    temp_dir: &Path,
+    output_file: &Path,
+    args: &Args,
+) -> Result<bool> {
+    let raw_hevc = temp_dir.join("DV_raw.hevc");
+    let converted_hevc = temp_dir.join("P81_discard.hevc");
+
+    extract_video_hevc(
+        input_file,
+        &raw_hevc,
+        temp_dir,
+        "Extracting Profile 7 MEL HEVC",
+    )?;
+
+    let mut cmd = dovi_tool_command();
+    cmd.args([
+        "-m",
+        "2",
+        "convert",
+        "--discard",
+        "-i",
+        raw_hevc.to_str().unwrap(),
+        "-o",
+        converted_hevc.to_str().unwrap(),
+    ]);
+
+    if !run_command_with_spinner(
+        &mut cmd,
+        &temp_dir.join("dovi_convert_discard.log"),
+        "Converting MEL RPU to Profile 8.1 and discarding EL",
+    )? {
+        return Ok(false);
+    }
+
+    mux_hevc_with_original(input_file, &converted_hevc, output_file, temp_dir, args)
+}
+
+fn inject_rpu(bl_hevc: &Path, rpu_path: &Path, temp_dir: &Path) -> Result<PathBuf> {
+    let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
+    let mut dovi_cmd = dovi_tool_command();
+
+    dovi_cmd.args([
+        "inject-rpu",
+        "-i",
+        bl_hevc.to_str().unwrap(),
+        "--rpu-in",
+        rpu_path.to_str().unwrap(),
+        "-o",
+        bl_rpu_hevc.to_str().unwrap(),
+    ]);
+
+    if run_command_with_spinner(
+        &mut dovi_cmd,
+        &temp_dir.join("dovi_inject.log"),
+        "Injecting RPU into base layer",
+    )? && bl_rpu_hevc.exists()
+    {
+        Ok(bl_rpu_hevc)
+    } else {
+        anyhow::bail!("Failed to inject RPU into base layer")
+    }
+}
+
+fn mux_hevc_with_original(
+    input_file: &str,
+    hevc_file: &Path,
+    output_file: &Path,
+    temp_dir: &Path,
+    args: &Args,
+) -> Result<bool> {
+    let mut mkvmerge_cmd = Command::new("mkvmerge");
+    mkvmerge_cmd.arg("-q").arg("-o").arg(output_file);
+    if args.drop_tags {
+        mkvmerge_cmd.arg("--no-global-tags");
+    }
+    if args.drop_chapters {
+        mkvmerge_cmd.arg("--no-chapters");
+    }
+
+    mkvmerge_cmd.arg(hevc_file);
+    mkvmerge_cmd.arg("--no-video").arg(input_file);
+
+    run_command_with_spinner(
+        &mut mkvmerge_cmd,
+        &temp_dir.join("mkvmerge.log"),
+        "Muxing final MKV",
+    )
+}
+
+fn finish_success(
+    input_file: &str,
+    output_file: &Path,
+    temp_dir: &Path,
+    args: &Args,
+    original_hdr_type: HdrFormat,
+) -> Result<()> {
+    println!("{}", "Cleaning up temp files...".green());
+    let _ = fs::remove_dir_all(temp_dir);
+
+    if should_keep_source(args, original_hdr_type) {
+        if !args.keep_source {
+            println!(
+                "{}",
+                "Keeping source file (Dolby Vision/--mdfix safety default).".yellow()
+            );
+        }
+    } else {
         println!(
             "{}",
             format!("Deleting source file: {}", input_file).yellow()
@@ -352,12 +581,18 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             .green()
             .bold()
     );
-    Ok(true)
+    Ok(())
 }
 
-fn add_optimizer_args(args_vec: &mut Vec<String>, args: &Args) {
-    args_vec.push("--optimizer-profile".to_string());
-    args_vec.push(args.optimizer_profile.to_string());
+fn should_keep_source(args: &Args, original_hdr_type: HdrFormat) -> bool {
+    args.keep_source || args.mdfix || is_dolby_vision(original_hdr_type)
+}
+
+fn is_dolby_vision(hdr_type: HdrFormat) -> bool {
+    matches!(
+        hdr_type,
+        HdrFormat::DolbyVisionMel | HdrFormat::DolbyVisionFel | HdrFormat::DolbyVisionP8
+    )
 }
 
 fn run_hdr_analyzer(

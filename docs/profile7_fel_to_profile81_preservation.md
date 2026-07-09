@@ -258,6 +258,27 @@ pixel-baked fallback vs FEL reference
 
 ---
 
+## 7. 2026-07-09 MEL/FEL Detection Findings
+
+Profile 7 detection must not treat every `dvhe.07` stream as FEL. A Profile 7 MEL carries an empty enhancement layer, so it should use a metadata-only path: discard the empty EL, convert the RPU to Profile 8.1, and remux. Running the FEL compositor on MEL inputs is unnecessary work and can obscure the simpler repair option.
+
+A deep-inspection pass on a 4K UHD Blu-ray remux TV episode showed a separate metadata failure mode: the source RPU's declared L1 peaks clipped at the mastering ceiling while measured base-layer luminance reached materially higher peaks. On DV-honoring playback chains, that mismatch can produce a visibly dim picture because the player trusts the understated RPU.
+
+| Signal | Observed pattern |
+| --- | --- |
+| Declared L1 peak ceiling | Hard-clipped near the mastering peak |
+| Measured base-layer peak | Reached roughly 2.4x the declared ceiling |
+| Affected scenes | Most scenes above the declared ceiling |
+| Worst scene mismatch | Declared low peak vs measured peak above 2000 nits |
+| Practical fix for MEL | Rebuild RPU from measurements and remux, no re-encode |
+
+This reinforces two requirements for the preservation branch:
+
+- Classify Profile 7 MEL vs FEL from RPU NLQ data, not from `dvhe.07` alone.
+- Offer a metadata-rebuild path for MEL and Profile 8 sources where the original RPU looks unreliable, while keeping original L5/L6 context and discarding original L2 trims.
+
+---
+
 ## References
 
 - [Dolby Vision UHD Blu-ray Authoring Workflow Guide](https://professional.dolby.com/siteassets/pdfs/dolby_vision_uhd_bluray_authoring_workflow.pdf)

@@ -7,6 +7,7 @@ mod fel_composite;
 mod metadata;
 mod pipeline;
 mod progress;
+mod rpu_check;
 mod verify;
 
 use cli::{Args, SubCmd};
@@ -17,6 +18,9 @@ fn main() -> anyhow::Result<()> {
     // Dispatch subcommands first (before dependency checks that require full toolchain)
     if let Some(subcmd) = &args.subcmd {
         match subcmd {
+            SubCmd::Inspect(inspect_args) => {
+                return rpu_check::inspect_file(&inspect_args.input);
+            }
             SubCmd::CompositePipe(pipe_args) => {
                 return fel_composite::run_composite_pipe(pipe_args);
             }

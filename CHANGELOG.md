@@ -4,6 +4,21 @@ This document provides a historical record of completed milestones, feature impl
 
 ---
 
+## Unreleased
+
+### Added
+
+- Added Dolby Vision metadata repair tooling in `mkvdolby`:
+  - `mkvdolby inspect <file>` extracts and inspects the RPU for suspicious L1 patterns such as ceiling-clipped, static, or degenerate metadata.
+  - `--mdfix` rebuilds Profile 7 MEL and Profile 8 metadata from fresh base-layer measurements, preserving source L5 active-area metadata when present.
+  - Profile 7 MEL inputs now use a fast metadata-only Profile 8.1 conversion path by default.
+  - Added a quiet RPU-sniff fallback so malformed container DV signaling does not silently fall through to HDR10 conversion.
+  - The automatic pre-conversion RPU check samples multiple short windows spread across the runtime instead of only the first frames, so dark openings do not mask suspicious metadata.
+  - Dolby Vision inputs and `--mdfix` runs now keep the source file by default.
+  - `inspect`/`composite-pipe` subcommands now take precedence over the greedy input list.
+
+---
+
 ## [0.2.0] - 2026-02-13
 
 ### Major Feature: Dolby Vision Profile 7 FEL Conversion

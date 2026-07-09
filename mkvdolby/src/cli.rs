@@ -2,10 +2,19 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum SubCmd {
+    /// Inspect Dolby Vision RPU metadata and report suspicious L1 patterns.
+    Inspect(InspectArgs),
+
     /// Output raw NLQ-composited frames to stdout (for piping to an encoder).
     /// Only runs BL+EL compositing — no encoding, no muxing.
     #[command(name = "composite-pipe")]
     CompositePipe(CompositePipeArgs),
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct InspectArgs {
+    /// Input Dolby Vision file to inspect.
+    pub input: String,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -40,7 +49,13 @@ pub struct CompositePipeArgs {
 }
 
 #[derive(Parser, Debug, Clone)]
-#[command(author, version, about = "A tool to convert HDR10/HDR10+ files to Dolby Vision.", long_about = None)]
+#[command(
+    author,
+    version,
+    about = "A tool to convert HDR10/HDR10+ files to Dolby Vision.",
+    long_about = None,
+    subcommand_precedence_over_arg = true
+)]
 pub struct Args {
     /// Subcommand (e.g., composite-pipe). If omitted, runs the default convert pipeline.
     #[command(subcommand)]
@@ -108,6 +123,10 @@ pub struct Args {
     #[arg(long)]
     pub verify: bool,
 
+    /// Rebuild unreliable Dolby Vision metadata from fresh base-layer measurements.
+    #[arg(long)]
+    pub mdfix: bool,
+
     /// Enable a brighter Dolby Vision mapping preset for HDR10+ sources.
     /// If --peak-source is set to 'max-scl-luminance' or 'histogram', this switches it to 'histogram99'.
     #[arg(short, long)]
@@ -156,6 +175,52 @@ pub struct Args {
     /// Quiet mode: minimal output (only errors and final result).
     #[arg(short, long)]
     pub quiet: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn inspect_subcommand_precedes_input_vec() {
+        let args = Args::try_parse_from(["mkvdolby", "inspect", "movie.mkv"]).unwrap();
+
+        match args.subcmd {
+            Some(SubCmd::Inspect(inspect_args)) => assert_eq!(inspect_args.input, "movie.mkv"),
+            other => panic!("expected inspect subcommand, got {other:?}"),
+        }
+        assert!(args.input.is_empty());
+    }
+
+    #[test]
+    fn composite_pipe_subcommand_precedes_input_vec() {
+        let args = Args::try_parse_from([
+            "mkvdolby",
+            "composite-pipe",
+            "--bl",
+            "BL.hevc",
+            "--el",
+            "EL.hevc",
+            "--rpu",
+            "RPU.bin",
+            "-w",
+            "3840",
+            "-H",
+            "2160",
+        ])
+        .unwrap();
+
+        match args.subcmd {
+            Some(SubCmd::CompositePipe(pipe_args)) => {
+                assert_eq!(pipe_args.bl, "BL.hevc");
+                assert_eq!(pipe_args.el, "EL.hevc");
+                assert_eq!(pipe_args.rpu, "RPU.bin");
+            }
+            other => panic!("expected composite-pipe subcommand, got {other:?}"),
+        }
+        assert!(args.input.is_empty());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

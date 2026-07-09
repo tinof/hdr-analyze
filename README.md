@@ -256,9 +256,10 @@ mkvdolby
 # Convert specific file
 mkvdolby "input.mkv"
 
-# Automatic Cleanup (Default Behavior)
-# By default, mkvdolby deletes the source file and intermediate artifacts (.measurements, Details.txt)
-# after a successful conversion to save space.
+# Automatic Cleanup
+# For non-DV conversions, mkvdolby deletes the source file and intermediate artifacts
+# after a successful conversion to save space. Dolby Vision inputs and --mdfix keep
+# the source file by default as a metadata-safety guard.
 
 # To keep the source file and all intermediate files:
 mkvdolby "input.mkv" --keep-source
@@ -287,6 +288,25 @@ mkvdolby "input.mkv" --quiet
 - **Streaming Pipeline**: Pipes composited frames directly to the encoder, eliminating multi-TB intermediate files.
 - **Smart Resolution**: Automatically detects if EL needs upscaling to match BL.
 - **Metadata**: Preserves mastering display primaries and injects HDR10 SEI metadata (best-effort for hardware encoders).
+
+#### Fixing Misaligned DV Metadata
+
+Some Dolby Vision Profile 7 MEL and Profile 8 sources carry unreliable L1 metadata, which can make DV-honoring playback look too dim. `mkvdolby` can inspect the source RPU and, when requested, rebuild metadata from measured base-layer luminance without re-encoding the video.
+
+```bash
+# Inspect the source RPU only
+mkvdolby inspect "input.mkv"
+
+# Rebuild DV metadata from fresh measurements and remux
+mkvdolby "input.mkv" --mdfix
+```
+
+- Profile 7 MEL without `--mdfix`: fast Profile 8.1 conversion using `dovi_tool -m 2 convert --discard`, preserving the original RPU values while dropping the empty EL.
+- Profile 7 MEL with `--mdfix`: strips the original DV metadata, analyzes the base layer, generates a fresh CM v4.0 Profile 8.1 RPU, and remuxes.
+- Profile 8 without `--mdfix`: skipped as already Profile 8; use `inspect` or `--mdfix` when the metadata looks suspicious.
+- Dolby Vision inputs and all `--mdfix` runs keep the source file by default.
+- During conversion, DV sources get an automatic pre-flight RPU check that samples several short windows spread across the runtime (so dark openings such as studio logos do not mask suspicious metadata). `mkvdolby inspect` reads the full RPU and is the authoritative check.
+- `inspect` currently reports RPU-only heuristics. Treat it as a weak signal; reliable mismatch detection needs the planned measurement-vs-RPU comparison.
 
 #### Progress Indicators
 
