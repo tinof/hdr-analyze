@@ -15,6 +15,7 @@ const DIFF_VALUE_BANDS: usize = 16;
 const DIFF_BINS: usize = 64;
 const MIN_GRAIN_SAMPLES: u64 = 500;
 const ROBUST_FLOOR_PERCENTILE: f64 = 99.99;
+const ROBUST_FLOOR_Z: f64 = 3.719_016_485_455_709;
 const SIGMA_EXACTNESS_GATE: f64 = 0.25 / 4095.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -121,15 +122,26 @@ pub(crate) fn sigma_from_diff_hist(
     let peak_band = (pq_code(high_percentile_pq(pq_hist, 99.5)) >> 8).min(DIFF_VALUE_BANDS - 1);
 
     for band in (0..=peak_band).rev() {
-        let sample_count: u64 = diff_hist[band].iter().map(|count| u64::from(*count)).sum();
+        // Pair differences are assigned by the brighter endpoint. Merge the
+        // adjacent lower band so a plateau close to a 256-code boundary does
+        // not condition away half of its symmetric grain distribution.
+        let lower_band = band.saturating_sub(1);
+        let sample_count: u64 = diff_hist[lower_band..=band]
+            .iter()
+            .flat_map(|histogram| histogram.iter())
+            .map(|count| u64::from(*count))
+            .sum();
         if sample_count < MIN_GRAIN_SAMPLES {
             continue;
         }
 
         let median_rank = sample_count.div_ceil(2);
         let mut cumulative = 0u64;
-        for (difference, count) in diff_hist[band].iter().enumerate() {
-            cumulative += u64::from(*count);
+        for difference in 0..DIFF_BINS {
+            cumulative += diff_hist[lower_band..=band]
+                .iter()
+                .map(|histogram| u64::from(histogram[difference]))
+                .sum::<u64>();
             if cumulative >= median_rank {
                 let sigma_codes = difference as f64 / (std::f64::consts::SQRT_2 * 0.6745);
                 return sigma_codes / (PQ_HIST_BINS - 1) as f64;
@@ -154,23 +166,66 @@ fn expected_gaussian_max(sample_count: u64) -> f64 {
     leading - (log_n.ln() + (4.0 * std::f64::consts::PI).ln()) / (2.0 * leading)
 }
 
+fn normal_survival(z: f64) -> f64 {
+    // Abramowitz-Stegun 7.1.26, expressed as a stable upper-tail
+    // approximation for the modest positive z used by the two-sigma window.
+    let z = z.max(0.0);
+    let t = 1.0 / (1.0 + 0.231_641_9 * z);
+    let polynomial = t
+        * (0.319_381_530
+            + t * (-0.356_563_782
+                + t * (1.781_477_937 + t * (-1.821_255_978 + t * 1.330_274_429))));
+    polynomial * (-0.5 * z * z).exp() / (2.0 * std::f64::consts::PI).sqrt()
+}
+
+fn inferred_support_count(tail_count: u64, total_count: u64) -> u64 {
+    if tail_count <= 1 {
+        return tail_count;
+    }
+
+    let predicted_tail = |support: u64| {
+        let threshold_z = (expected_gaussian_max(support) - 2.0).max(0.0);
+        support as f64 * normal_survival(threshold_z)
+    };
+    let mut low = tail_count.max(2);
+    let mut high = total_count.max(low);
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if predicted_tail(mid) < tail_count as f64 {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    low
+}
+
 /// Correct a raw extreme only when measurable grain exists.
 ///
-/// The constants are intentionally calibration-scoped: the two-sigma tail window, four-sigma cap,
-/// 500-sample band floor, and P99.99 content floor are validated against deterministic synthetic
-/// clean-peak ground truth. Reference CSVs are reserved for the final one-shot score only.
+/// The constants are intentionally calibration-scoped. The two-sigma tail window
+/// provides enough observations to infer the size of the underlying bright
+/// support, rather than incorrectly treating the truncated tail itself as that
+/// support. The four-sigma cap bounds the correction for unusual distributions.
+/// P99.99 remains a content guard, but is shifted down by the Gaussian quantile
+/// implied by the measured sigma; an unadjusted percentile would retain about
+/// 3.72 sigma of bias on a uniformly grainy plateau. The 500-sample band floor
+/// and quarter-code exactness gate prevent correction without measurable grain.
+/// Reference CSVs are reserved for the final one-shot score only.
 pub(crate) fn robust_peak_pq(pq_hist: &[u64], raw_max_pq: f64, sigma_pq: f64) -> f64 {
     if sigma_pq < SIGMA_EXACTNESS_GATE {
         return raw_max_pq;
     }
 
-    let n_eff = effective_tail_count(pq_hist, raw_max_pq, sigma_pq);
-    if n_eff <= 1 {
+    let tail_count = effective_tail_count(pq_hist, raw_max_pq, sigma_pq);
+    if tail_count <= 1 {
         return raw_max_pq;
     }
 
-    let correction = (sigma_pq * expected_gaussian_max(n_eff)).min(4.0 * sigma_pq);
-    let content_floor = high_percentile_pq(pq_hist, ROBUST_FLOOR_PERCENTILE);
+    let total_count = pq_hist.iter().sum();
+    let support_count = inferred_support_count(tail_count, total_count);
+    let correction = (sigma_pq * expected_gaussian_max(support_count)).min(4.0 * sigma_pq);
+    let percentile = high_percentile_pq(pq_hist, ROBUST_FLOOR_PERCENTILE);
+    let content_floor = (percentile - ROBUST_FLOOR_Z * sigma_pq).max(0.0);
     (raw_max_pq - correction).clamp(content_floor.min(raw_max_pq), raw_max_pq)
 }
 
@@ -649,7 +704,9 @@ mod peak_estimator_tests {
         let raw = 3520.0 / 4095.0;
         let corrected = robust_peak_pq(&plateau, raw, sigma);
         assert!(corrected < raw);
-        assert!(corrected >= high_percentile_pq(&plateau, ROBUST_FLOOR_PERCENTILE));
+        let noise_adjusted_floor =
+            high_percentile_pq(&plateau, ROBUST_FLOOR_PERCENTILE) - ROBUST_FLOOR_Z * sigma;
+        assert!(corrected >= noise_adjusted_floor);
 
         let mut spike = [0u64; PQ_HIST_BINS];
         spike[3500] = 10_000;
@@ -658,13 +715,24 @@ mod peak_estimator_tests {
     }
 
     #[test]
-    fn robust_peak_respects_content_floor() {
+    fn robust_peak_respects_noise_adjusted_content_floor() {
         let sigma = 20.0 / 4095.0;
         let mut histogram = [0u64; PQ_HIST_BINS];
         histogram[3000] = 1_000_000;
         histogram[3010..=3100].fill(10);
         let raw = 3100.0 / 4095.0;
-        let floor = high_percentile_pq(&histogram, ROBUST_FLOOR_PERCENTILE);
+        let floor =
+            high_percentile_pq(&histogram, ROBUST_FLOOR_PERCENTILE) - ROBUST_FLOOR_Z * sigma;
         assert!(robust_peak_pq(&histogram, raw, sigma) >= floor);
+    }
+
+    #[test]
+    fn support_inference_recovers_population_from_truncated_tail() {
+        let support = 57_600;
+        let tail = (support as f64
+            * normal_survival((expected_gaussian_max(support) - 2.0).max(0.0)))
+        .round() as u64;
+        let inferred = inferred_support_count(tail, support);
+        assert!((inferred as f64 - support as f64).abs() / (support as f64) < 0.01);
     }
 }
