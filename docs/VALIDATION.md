@@ -40,9 +40,15 @@ Comparison harness: `tools/l1_diff` (per-frame deltas in 12-bit PQ codes and nit
 | Uniform 0.05-nit raised-black minimum | exact after 10-bit/fine-histogram quantization |
 | Raised black + one dark speckle, P0.1 | raised floor preserved |
 | Same pattern, P0 absolute minimum | dark speckle exposed as code 0 |
+| 1000-nit plateau + additive Gaussian grain, σ10 = 1/2/4/8 | robust peak within ±(2 + 0.5σ12) codes; raw max exceeds truth by >2σ12 |
+| Same plateau with chroma grain | robust peak remains within the predeclared synthetic tolerance |
+| Same plateau with multiplicative-linear grain | robust peak remains within the predeclared synthetic tolerance |
+| Clean 1000-nit plateau, robust estimator | < 0.25 of one 12-bit PQ code |
 
 The analyzer reproduces mathematically known peaks to within the measurement format's own
 quantization (observed error ≈ 0.03 code). Pixel reading, PQ math, and file writing are exact.
+The grain fixtures use deterministic xorshift64* plus Box–Muller sampling and never clip their
+10-bit tails. Calibration used only these constructed truths; no reference CSV was consulted.
 
 ### 2. The definitional gap: Y-luma peak vs max-RGB (MaxSCL)
 
@@ -217,6 +223,28 @@ rejects isolated grain spikes that a raw maximum keeps. Closing this requires a 
 estimator in the max-RGB domain (percentile/small-area filtering); that is a deliberate design
 decision tracked in the roadmap, not something to slip into a default silently.
 
+**Finding 5 — the first grain-robust estimator is useful but did not pass the default-change gate.**
+A deterministic synthetic sweep calibrated a cross-quad difference histogram, Gaussian extreme-value
+correction, and noise-adjusted content floor. Before any reference contact, frame-stat dumps showed
+the expected separation: Title A median σ/correction was 14.7/22.0 codes (correction p95 79.5);
+Title B was 5.2/12.6 (p95 50.3), with clean/mild shots clustering near σ 3–5.
+
+The single predeclared cm-v2 comparison then produced:
+
+| Comparison | raw-max bias | robust bias | robust median \|err\| | robust p95 / max |
+|---|---:|---:|---:|---:|
+| Title A, 15 shots | +92.6 | **+80.4** | 65.3 | 205.6 / 205.6 |
+| Title B, 11 shots | +74.4 | **+66.4** | 63.6 | 170.6 / 170.6 |
+
+This is an improvement, but it misses the required clean-shot ±10–40-code envelope. Diagnostics made
+the limitation explicit: 15.9%/9.0% of frames retained the raw peak because only one pixel occupied
+the two-sigma extreme tail, and per-shot fold-max can select such a frame. The isolated-highlight
+guard is intentional—blindly suppressing a real one-pixel specular would be a different semantic
+choice—so the implementation remains opt-in via `--peak-estimator robust` and the default remains
+`max`. No constants were changed after viewing the reference results, and the reference CSVs were
+not reopened. A future spatial-support or shot-aggregation experiment needs its own synthetic design
+and fresh validation round.
+
 **Supporting results.** Minimum: 0.0-code error per shot everywhere; running cm with
 `--letterbox 0 0 120 120` moves the min comparison vs embedded from −2.8 to +0.1 codes — L5
 exclusion fully explains the min story. Averages: our max-RGB true mean matches cm v2's per-shot
@@ -241,6 +269,7 @@ dovi_tool demux fel.hevc                                             # -> BL.hev
 mkvmerge -o BL.mkv BL.hevc
 hdr_analyzer_mvp BL.mkv -o BL_measurements.bin \
   --peak-source max --header-peak-source max --peak-domain max-rgb \
+  --peak-estimator robust --dump-frame-stats frame_stats.csv \
   --disable-optimizer --no-crop
 
 # comparison

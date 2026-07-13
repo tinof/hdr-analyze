@@ -8,6 +8,17 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed (behavioral)
 
+- **Added opt-in grain-robust max-RGB peak estimation.** `--peak-estimator
+  <max|percentile|robust>` selects the direct maximum (still the default), a configurable fine
+  percentile, or a synthetic-calibrated Gaussian extreme-value correction. `--peak-percentile`
+  defaults to P99.99, and `--dump-frame-stats <PATH>` writes selected/raw/percentile/robust peak,
+  measured sigma, correction, and effective-tail diagnostics. Deterministic additive-luma, chroma,
+  and multiplicative-linear grain fixtures cover σ10 1/2/4/8 plus exact σ=0 behavior. The first
+  two-title cm-v2 gate reduced per-shot bias but missed its acceptance envelope, so robust mode did
+  not replace the default; see `docs/VALIDATION.md` §7 Finding 5.
+- The shared fine PQ histogram now has 4096 bins, improving active-area minimum quantization from
+  the former 10-bit grid while also supporting peak-estimator diagnostics. Sidecar version 1 gains
+  additive `peak_estimator` and `peak_percentile` metadata.
 - **L1 average now uses a true per-pixel PQ mean.** The frame analyzer accumulates full-precision
   Y-luma and max-RGB means in its parallel pixel pass; scene-aware smoothing operates directly on the
   measured Y mean instead of reconstructing it from 256 histogram bin centers.

@@ -29,8 +29,8 @@ trims are a separate, higher-risk tone-mapping problem.
 
 | Stage | Implementation | Current output |
 |-------|----------------|----------------|
-| Per-frame analysis | `hdr_analyzer_mvp/src/analysis/frame.rs` | Direct peak, true Y/max-RGB means, robust 1024-bin minimum, 256-bin luma histogram, 31-bin hue histogram |
-| Peak selection | `analysis/histogram.rs` | Direct max or Y-based P99/P99.9 peak |
+| Per-frame analysis | `hdr_analyzer_mvp/src/analysis/frame.rs` | Direct/percentile/grain-robust peak, true Y/max-RGB means, robust 4096-bin minimum, 256-bin luma histogram, 31-bin hue histogram |
+| Peak selection | `analysis/frame.rs`, `analysis/histogram.rs` | Direct `max` (default), opt-in fine-histogram percentile or grain-robust max-RGB, or Y-based P99/P99.9 peak |
 | Active area | `crop.rs`, `ffmpeg_io.rs`, `pipeline.rs` | Multi-position crop probe with low-signal rejection, tolerance clustering, and conservative variable-AR union |
 | Scene detection | `analysis/scene.rs` | Histogram-distance cuts and minimum scene length |
 | Optimizer | `optimizer.rs` | madVR `target_nits`; this is not itself a Dolby metadata level |
@@ -40,10 +40,13 @@ trims are a separate, higher-risk tone-mapping problem.
 Key facts:
 
 - PQ direct peaks default to limited-range BT.2020 NCL **max-RGB**. `--peak-domain luma` retains the
-  legacy Y′ peak; HLG remains luma-based. Histogram percentile sources and APL remain Y-based.
+  legacy Y′ peak; HLG remains luma-based. `--peak-estimator robust` enables the synthetic-calibrated
+  grain correction; `max` remains the estimator default because the first real-content acceptance
+  round did not reach the predeclared parity envelope. Histogram percentile sources and APL remain
+  Y-based.
 - `avg_pq` is a full-precision per-pixel Y-luma mean over the active area. The sidecar also records a
   measured max-RGB mean so validation can compare domains without changing the RPU definition.
-- The analyzer measures a robust active-area minimum from a 1024-bin code-level histogram after
+- The analyzer measures a robust active-area minimum from a 4096-bin fine-PQ histogram after
   selected denoising. It defaults to P0.1; `--min-percentile 0` selects the absolute minimum.
 - `madvr_parse::MadVRFrame` has no minimum field, and `dovi_tool` hardcodes `min_pq = 0` for madVR
   generator input; it does **not** infer L1 minimum from the histogram. The measured minimum is
@@ -62,7 +65,7 @@ Key facts:
 
 | Level | Current state | Remaining gap | Roadmap |
 |-------|---------------|---------------|---------|
-| **L1 max** | PQ max-RGB direct peak measured and scored; optional Y′/percentile sources | Grain-robust peak estimator (direct max reads +74…+93 codes hot vs cm v2 on grainy real content); target-gamut transforms; HLG max-RGB. Chroma resampling is closed — measured envelope ~10 codes, filter-independent | P2 / WS1 |
+| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias only +92.6→+80.4 and +74.4→+66.4 codes; isolated-tail frames selected by fold-max remain the open gap. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms; HLG max-RGB | P2 / WS1 |
 | **L1 avg** | True Y-luma mean delivered through scene measurements; Y and max-RGB means also recorded in the sidecar | Decide from validation whether the RPU average domain should change — real-content evidence: our max-RGB mean matches cm v2's shot average within ~10 codes, while cm v4's "avg" is an anchored constant | WS1 |
 | **L1 min** | Noise-rejected active-area minimum measured and emitted in the sidecar | Wire measured minimum into the RPU without conflicting with custom-target frame edits | WS1 / P0 |
 | **L4** | None; optimizer smooths madVR `target_nits` only | Shot-anchored L1 and optional temporal filtering | WS2 |
@@ -92,10 +95,13 @@ question and reframed the remaining gap:
   PQ(100 nits) = code 2081 and its average is anchored. Measurement-style comparisons must use
   `--analysis-version 2`, which matches Dolby-authored embedded L1 to ~+16 codes.
 - **The open gap is grain robustness.** Against cm v2 on identical BL pixels, our direct max reads
-  +92.6 codes hot on heavy-grain content and +74.4 on milder content — Dolby's peak rejects
-  isolated grain spikes that a raw maximum keeps. A robust max-RGB peak estimator
-  (percentile/small-area filtering in the max-RGB domain) is the follow-up, as an explicit,
-  validated design decision rather than a silent default change.
+  +92.6 codes hot on heavy-grain content and +74.4 on milder content. The first robust estimator
+  combines a 4096-bin max-RGB histogram, cross-quad noise estimate, inferred Gaussian support, and
+  noise-adjusted content floor. It passes deterministic additive-luma, chroma, and
+  multiplicative-linear grain truth, but the one-shot real-content gate improved bias only to
+  +80.4/+66.4 codes. Frames with a single extreme-tail pixel intentionally retain the raw peak, and
+  per-shot fold-max can select them. Robust mode is therefore explicit opt-in, not the default;
+  spatial-support handling requires a separate validated design.
 
 The v6 `peak_pq_dcip3` and `peak_pq_709` fields remain approximations. They are madVR-only fields and
 are not consumed by the Dolby Vision v5 conversion path.
