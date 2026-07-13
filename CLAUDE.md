@@ -36,20 +36,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Real entrypoints and boundaries
 
 - `hdr_analyzer_mvp/src/main.rs`: CLI parse + validation; orchestrates via `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `writer.rs`.
-- `mkvdovi/src/main.rs`: file discovery/sorting + per-file orchestration via `pipeline::convert_file`. Key modules: `external.rs` (tool checks/invocation), `metadata.rs` (`CmV40Config`, L2/L9/L11 generation), `verify.rs`, `progress.rs`.
+- `mkvdovi/src/main.rs`: file discovery/sorting + early `inspect`/`composite-pipe` dispatch + per-file orchestration via `pipeline::convert_file`. Key modules: `fel_composite.rs` (Profile 7 BL+EL processing), `rpu_check.rs` (MEL/FEL/P8 classification and RPU diagnostics), `external.rs` (tool checks/invocation), `metadata.rs` (`CmV40Config`, L2/L5/L9/L11 generation), `verify.rs`, `progress.rs`.
 - `verifier/src/main.rs`: standalone measurement-validator CLI.
 
 ## mkvdovi operational gotchas (easy to miss)
 
 - **Checks external tools at runtime** (`external::check_dependencies`): requires `ffmpeg`, `mkvmerge`, `dovi_tool`, and either `mediainfo` or `ffprobe`. HDR10+ processing additionally invokes `hdr10plus_tool` — keep it in `PATH` for HDR10+ inputs.
 - `dovi_tool` 2.3.2+ is recommended; its `inject-rpu` padding fix is relied on by the existing orchestration call.
-- With no input args, it recursively processes `.mkv` files from cwd, skipping `mkvdovi_temp_*` paths and files already ending `.DV.mkv`.
+- With no input args, it recursively processes `.mkv` files from cwd, skipping `mkvdovi_temp_*`/legacy `mkvdolby_temp_*` paths and files already ending `.DV.mkv`. Explicit `--mdfix` allows a DV input and writes a distinct `*.mdfix.DV.mkv` candidate.
 - **Successful conversion deletes the source input by default**; pass `--keep-source` to prevent deletion.
 - **Robust to interruption:** extract/inject/mux/encode show a live byte-progress bar (throughput + ETA) and warn after `--stall-timeout` (default 300s, `0` disables) if the output file stops growing. An interrupted run (e.g. SSH `SIGHUP`) preserves `mkvdovi_temp_*` and prints a resume hint; a re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels (`resume.rs`). `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.
 - For HDR10 without found measurements, it auto-runs `hdr_analyzer_mvp`. `--analysis-quality` controls sampling (downscale/sample-rate): `fast` = half-res/every 3rd frame, `balanced` = half-res/every frame (default), `accurate` = full-res/every frame.
 - For HDR10+ input, L1 is derived from source HDR10+ metadata; panel peak is **not** passed as a `--trim-targets` override. HDR10+ scene peaks above 3× mastering-display peak produce advisory warnings only — **never add a silent clamp**.
 - `--verify` resolves tools from `PATH`, validates structured RPU frame JSON, and hard-fails malformed Profile 8 / L1 / L6 / CM v4.0 L9/L11/L254 metadata.
 - `scripts/mkvdovi_hifi_workflow.sh` is a specialist comparison helper for inputs that **already** contain DV metadata. Use `mkvdovi` directly for HDR10+ sources.
+- `inspect` and `composite-pipe` dispatch before dependency checks. Keep `composite-pipe` stdout raw-frame-only; diagnostics belong on stderr.
+- Profile 7 MEL uses a fast metadata-only discard path unless `--mdfix` is requested. Profile 7 FEL composites BL+EL and re-encodes; MEL/Profile 8 `--mdfix` rebuilds metadata from a clean base layer. All DV/repair inputs keep their source by default.
 
 ### Generated DV metadata levels (mkvdovi, CM v4.0 by default)
 

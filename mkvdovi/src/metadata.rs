@@ -2,11 +2,12 @@ use anyhow::{Context, Result};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::external;
+use crate::rpu_check::{self, Level5Offsets, RpuFormatKind};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum HdrFormat {
@@ -14,6 +15,9 @@ pub enum HdrFormat {
     Hdr10WithMeasurements,
     Hdr10Unsupported,
     Hlg,
+    DolbyVisionMel,
+    DolbyVisionFel,
+    DolbyVisionP8,
     Unsupported,
 }
 
@@ -25,6 +29,9 @@ impl HdrFormat {
             HdrFormat::Hdr10WithMeasurements => "HDR10 (with measurements)",
             HdrFormat::Hdr10Unsupported => "HDR10 (no measurements)",
             HdrFormat::Hlg => "HLG",
+            HdrFormat::DolbyVisionMel => "Dolby Vision Profile 7 MEL",
+            HdrFormat::DolbyVisionFel => "Dolby Vision Profile 7 FEL",
+            HdrFormat::DolbyVisionP8 => "Dolby Vision Profile 8",
             HdrFormat::Unsupported => "Unsupported",
         }
     }
@@ -139,6 +146,43 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
         append_mediainfo_video_hints(&json, &mut mi_hints);
     }
 
+    // Check for Dolby Vision Profile 7 FEL (dual layer)
+    // MediaInfo shows "dvhe.07" or "Dolby Vision, Version 1.0, Profile 7"
+    let mi_dv_text = match Command::new("mediainfo")
+        .args([
+            "--Inform=Video;%HDR_Format%/%HDR_Format_Profile%/%HDR_Format_Level%",
+            input_file,
+        ])
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => String::new(),
+    };
+
+    // Detect Dolby Vision before generic HDR10/PQ fallback.
+    let mi_codec = match Command::new("mediainfo")
+        .args(["--Inform=Video;%CodecID%", input_file])
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => String::new(),
+    };
+    let dv_probe = format!("{} / {} / {}", mi_hints, mi_dv_text, mi_codec).to_lowercase();
+
+    if dv_probe.contains("dvhe") || dv_probe.contains("dolby vision") {
+        if dv_probe.contains("dvhe.08") || dv_probe.contains("profile 8") {
+            return HdrFormat::DolbyVisionP8;
+        }
+
+        if dv_probe.contains("dvhe.07") || dv_probe.contains("profile 7") {
+            return probe_profile7_kind(input_file).unwrap_or(HdrFormat::DolbyVisionFel);
+        }
+    }
+
+    if let Some(dv_format) = sniff_dolby_vision_rpu(input_file) {
+        return dv_format;
+    }
+
     let measurements = find_measurements_file(path).is_some();
 
     if let Some(format) = classify_hdr_hints(&mi_hints, measurements) {
@@ -222,6 +266,47 @@ fn classify_hdr_hints(hints: &str, measurements: bool) -> Option<HdrFormat> {
     None
 }
 
+fn probe_profile7_kind(input_file: &str) -> Option<HdrFormat> {
+    let mut temp_dir = std::env::temp_dir();
+    temp_dir.push(format!("mkvdovi_dv_probe_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).ok()?;
+
+    let result = rpu_check::extract_rpu_sample(input_file, &temp_dir)
+        .ok()
+        .and_then(|rpu| rpu_check::classify_rpu_format(&rpu).ok())
+        .map(hdr_format_from_rpu);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+    result
+}
+
+fn sniff_dolby_vision_rpu(input_file: &str) -> Option<HdrFormat> {
+    let mut temp_dir = std::env::temp_dir();
+    temp_dir.push(format!("mkvdovi_dv_sniff_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).ok()?;
+    let rpu_path = temp_dir.join("sniff_RPU.bin");
+
+    let result = if rpu_check::try_extract_rpu_quiet(input_file, &rpu_path, Some(60)) {
+        rpu_check::classify_rpu_format(&rpu_path)
+            .ok()
+            .map(hdr_format_from_rpu)
+    } else {
+        None
+    };
+
+    let _ = fs::remove_dir_all(&temp_dir);
+    result
+}
+
+fn hdr_format_from_rpu(kind: RpuFormatKind) -> HdrFormat {
+    match kind {
+        RpuFormatKind::Profile7Mel => HdrFormat::DolbyVisionMel,
+        RpuFormatKind::Profile7Fel => HdrFormat::DolbyVisionFel,
+        RpuFormatKind::Profile8 => HdrFormat::DolbyVisionP8,
+        RpuFormatKind::OtherDolbyVision => HdrFormat::Unsupported,
+    }
+}
+
 pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
     let mut meta: HashMap<String, f64> = HashMap::new();
 
@@ -251,6 +336,25 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
                             if let Ok(v) = caps[1].parse::<f64>() {
                                 meta.insert("min_dml".to_string(), v);
                             }
+                        }
+                    }
+
+                    // Parse MasteringDisplay_ColorPrimaries
+                    if let Some(mdcp) = track
+                        .get("MasteringDisplay_ColorPrimaries")
+                        .and_then(|s| s.as_str())
+                    {
+                        if let Some((gx, gy, bx, by, rx, ry, wpx, wpy)) =
+                            parse_mastering_display_color_primaries(mdcp)
+                        {
+                            meta.insert("md_gx".to_string(), gx as f64);
+                            meta.insert("md_gy".to_string(), gy as f64);
+                            meta.insert("md_bx".to_string(), bx as f64);
+                            meta.insert("md_by".to_string(), by as f64);
+                            meta.insert("md_rx".to_string(), rx as f64);
+                            meta.insert("md_ry".to_string(), ry as f64);
+                            meta.insert("md_wpx".to_string(), wpx as f64);
+                            meta.insert("md_wpy".to_string(), wpy as f64);
                         }
                     }
                     // MaxCLL
@@ -287,7 +391,7 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
 
     // Details.txt override (MaxCLL/MaxFALL only; mastering display comes from container metadata)
     if let Some(details_path) = find_details_file(Path::new(input_file)) {
-        if let Ok(content) = std::fs::read_to_string(details_path) {
+        if let Ok(content) = fs::read_to_string(details_path) {
             let re_cll = Regex::new(r"(?i)MaxCLL\s*:\s*([0-9.,]+)").unwrap();
             let re_fall = Regex::new(r"(?i)MaxFALL\s*:\s*([0-9.,]+)").unwrap();
 
@@ -334,6 +438,47 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
     }
 
     meta
+}
+
+fn parse_mastering_display_color_primaries(
+    mdcp: &str,
+) -> Option<(u32, u32, u32, u32, u32, u32, u32, u32)> {
+    fn parse_xy(mdcp: &str, label: &str) -> Option<(f64, f64)> {
+        // Accept both:
+        // - G(x=0.1700, y=0.7970)
+        // - G(0.1700,0.7970)
+        let re = Regex::new(&format!(
+            r"{}\(\s*(?:x=)?([0-9]*\.?[0-9]+)\s*,\s*(?:y=)?([0-9]*\.?[0-9]+)\s*\)",
+            regex::escape(label)
+        ))
+        .ok()?;
+
+        let caps = re.captures(mdcp)?;
+        let x = caps.get(1)?.as_str().parse::<f64>().ok()?;
+        let y = caps.get(2)?.as_str().parse::<f64>().ok()?;
+        Some((x, y))
+    }
+
+    fn to_int(v: f64) -> u32 {
+        let scaled = (v * 50000.0).round();
+        scaled.clamp(0.0, 50000.0) as u32
+    }
+
+    let (gx, gy) = parse_xy(mdcp, "G")?;
+    let (bx, by) = parse_xy(mdcp, "B")?;
+    let (rx, ry) = parse_xy(mdcp, "R")?;
+    let (wpx, wpy) = parse_xy(mdcp, "WP")?;
+
+    Some((
+        to_int(gx),
+        to_int(gy),
+        to_int(bx),
+        to_int(by),
+        to_int(rx),
+        to_int(ry),
+        to_int(wpx),
+        to_int(wpy),
+    ))
 }
 
 /// Detect source mastering-display primaries from MediaInfo.
@@ -399,6 +544,7 @@ pub fn generate_extra_json(
     metadata: &HashMap<String, f64>,
     trim_targets: &[u32],
     cm_v40_config: Option<&CmV40Config>,
+    level5_offsets: Option<Level5Offsets>,
 ) -> Result<()> {
     let required = |key| {
         metadata
@@ -420,6 +566,15 @@ pub fn generate_extra_json(
             "max_frame_average_light_level": max_fall as u32,
         }
     });
+
+    if let Some(offsets) = level5_offsets {
+        json_content["level5"] = json!({
+            "active_area_left_offset": offsets.left,
+            "active_area_right_offset": offsets.right,
+            "active_area_top_offset": offsets.top,
+            "active_area_bottom_offset": offsets.bottom,
+        });
+    }
 
     // Add CM v4.0 specific configuration
     if let Some(cfg) = cm_v40_config {
@@ -609,7 +764,14 @@ mod tests {
             reference_mode: false,
         };
 
-        generate_extra_json(output.path(), &metadata, &[100, 600, 1000], Some(&config)).unwrap();
+        generate_extra_json(
+            output.path(),
+            &metadata,
+            &[100, 600, 1000],
+            Some(&config),
+            None,
+        )
+        .unwrap();
 
         let json: Value = serde_json::from_reader(File::open(output.path()).unwrap()).unwrap();
         let blocks = json["default_metadata_blocks"].as_array().unwrap();
@@ -624,7 +786,7 @@ mod tests {
         let output = tempfile::NamedTempFile::new().unwrap();
         let metadata = HashMap::new();
 
-        let error = generate_extra_json(output.path(), &metadata, &[], None).unwrap_err();
+        let error = generate_extra_json(output.path(), &metadata, &[], None, None).unwrap_err();
 
         assert!(error.to_string().contains("min_dml"));
     }
