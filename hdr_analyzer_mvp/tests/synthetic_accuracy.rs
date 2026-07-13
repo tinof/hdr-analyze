@@ -377,7 +377,7 @@ fn raised_black_minimum_preserves_floor_and_rejects_sparse_dark_noise() {
     let floor_pq = nits_to_pq(0.05);
     let floor_code = (floor_pq * 876.0 + 64.0).round() as u16;
     let quantized_floor_pq = f64::from(floor_code - 64) / 876.0;
-    let fine_floor_pq = (quantized_floor_pq * 1023.0).round() / 1023.0;
+    let fine_floor_pq = (quantized_floor_pq * 4095.0).round() / 4095.0;
     let expected_floor_12bit = (fine_floor_pq * 4095.0).round() as u16;
 
     let clean = encode_clip(dir.path(), floor_code, 512, 512);

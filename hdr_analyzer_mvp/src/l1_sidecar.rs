@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use madvr_parse::{MadVRFrame, MadVRScene};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::PeakDomain;
+use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
 pub const L1_SIDECAR_VERSION: u32 = 1;
@@ -23,6 +23,8 @@ pub struct L1Sidecar {
     pub min_percentile: f64,
     pub denoise_mode: String,
     pub peak_domain: String,
+    pub peak_estimator: String,
+    pub peak_percentile: f64,
     pub crop: CropMetadata,
     pub scenes: Vec<SceneL1Metadata>,
     pub frames: FrameL1Metadata,
@@ -67,6 +69,8 @@ pub fn write_l1_sidecar(
     min_percentile: f64,
     denoise_mode: &str,
     peak_domain: PeakDomain,
+    peak_estimator: PeakEstimator,
+    peak_percentile: f64,
     crop: CropRect,
 ) -> Result<PathBuf> {
     if frames.len() != measurements.len() {
@@ -90,6 +94,13 @@ pub fn write_l1_sidecar(
             PeakDomain::Luma => "luma",
         }
         .to_owned(),
+        peak_estimator: match peak_estimator {
+            PeakEstimator::Max => "max",
+            PeakEstimator::Percentile => "percentile",
+            PeakEstimator::Robust => "robust",
+        }
+        .to_owned(),
+        peak_percentile,
         crop: CropMetadata {
             x: crop.x,
             y: crop.y,

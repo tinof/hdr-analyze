@@ -1,4 +1,7 @@
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -22,14 +25,14 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use ffmpeg_next::{codec, format, frame, software};
 
-use crate::analysis::frame::analyze_native_frame_cropped;
+use crate::analysis::frame::{analyze_native_frame_cropped, FrameAnalysisOptions, FramePeakStats};
 use crate::analysis::histogram::{
     apply_histogram_ema, apply_histogram_temporal_median, select_peak_pq,
 };
 use crate::analysis::scene::{
     calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed,
 };
-use crate::cli::{Cli, PeakDomain};
+use crate::cli::{Cli, PeakDomain, PeakEstimator};
 use crate::crop::{detect_crop, is_frame_usable_for_crop, CropRect, CROP_EDGE_TOLERANCE};
 use crate::ffmpeg_io::{probe_crop, setup_hardware_decoder, TransferFunction, VideoInfo};
 use crate::l1_sidecar::{write_l1_sidecar, FrameL1Measurement};
@@ -41,6 +44,41 @@ pub fn format_duration(duration: Duration) -> String {
     let minutes = total_seconds / 60;
     let seconds = total_seconds % 60;
     format!("{:02}:{:02}", minutes, seconds)
+}
+
+fn peak_estimator_name(estimator: PeakEstimator) -> &'static str {
+    match estimator {
+        PeakEstimator::Max => "max",
+        PeakEstimator::Percentile => "percentile",
+        PeakEstimator::Robust => "robust",
+    }
+}
+
+fn write_frame_stats_csv(path: &Path, stats: &[FramePeakStats]) -> Result<()> {
+    let file = File::create(path)
+        .with_context(|| format!("Failed to create frame-stats CSV {}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    writeln!(
+        writer,
+        "frame,selected_pq,raw_max_pq,percentile_pq,robust_pq,sigma_pq,correction_pq,n_eff"
+    )?;
+
+    for (frame_index, stat) in stats.iter().enumerate() {
+        writeln!(
+            writer,
+            "{frame_index},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},{}",
+            stat.selected_peak_pq,
+            stat.raw_max_pq,
+            stat.percentile_pq,
+            stat.robust_pq,
+            stat.sigma_pq,
+            stat.correction_pq,
+            stat.n_eff
+        )?;
+    }
+    writer
+        .flush()
+        .with_context(|| format!("Failed to write frame-stats CSV {}", path.display()))
 }
 
 struct CropStabilityMonitor {
@@ -203,6 +241,15 @@ pub fn run(
             PeakDomain::Luma => "luma",
         }
     );
+    println!(
+        "Peak estimator: {}{}",
+        peak_estimator_name(cli.peak_estimator),
+        if cli.peak_estimator == PeakEstimator::Percentile {
+            format!(" (P{})", cli.peak_percentile)
+        } else {
+            String::new()
+        }
+    );
 
     if cli.scene_metric.to_lowercase() == "hybrid" {
         println!("Scene metric: hybrid (prototype, using histogram-only for now)");
@@ -251,14 +298,28 @@ pub fn run(
         }
     };
 
-    let (mut scenes, mut frames, mut l1_measurements, crop) = run_native_analysis_pipeline(
-        cli,
-        video_info,
-        &mut input_context,
-        peak_domain,
-        downscale,
-        initial_crop,
-    )?;
+    let (mut scenes, mut frames, mut l1_measurements, frame_peak_stats, crop) =
+        run_native_analysis_pipeline(
+            cli,
+            video_info,
+            &mut input_context,
+            downscale,
+            initial_crop,
+            &FrameAnalysisOptions {
+                denoise_mode: &cli.pre_denoise,
+                transfer_function: video_info.transfer_function,
+                hlg_peak_nits: cli.hlg_peak_nits,
+                peak_domain,
+                min_percentile: cli.min_percentile,
+                peak_estimator: cli.peak_estimator,
+                peak_percentile: cli.peak_percentile,
+            },
+        )?;
+
+    if let Some(path) = &cli.dump_frame_stats {
+        write_frame_stats_csv(path, &frame_peak_stats)?;
+        println!("Wrote frame peak statistics: {}", path.display());
+    }
 
     fix_scene_end_frames(&mut scenes, frames.len());
 
@@ -308,7 +369,7 @@ pub fn run(
     let output_path = match &cli.output {
         Some(path) => path.clone(),
         None => {
-            let input_path_obj = std::path::Path::new(
+            let input_path_obj = Path::new(
                 cli.input_positional
                     .as_ref()
                     .unwrap_or(cli.input_flag.as_ref().unwrap()),
@@ -333,13 +394,15 @@ pub fn run(
         cli.header_peak_source.as_deref(),
     )?;
     let sidecar_path = write_l1_sidecar(
-        std::path::Path::new(&output_path),
+        Path::new(&output_path),
         &scenes,
         &frames,
         &l1_measurements,
         cli.min_percentile,
         &cli.pre_denoise,
         peak_domain,
+        cli.peak_estimator,
+        cli.peak_percentile,
         crop,
     )?;
     println!("Wrote L1 measurement sidecar: {}", sidecar_path.display());
@@ -359,20 +422,18 @@ fn run_native_analysis_pipeline(
     cli: &Cli,
     video_info: &VideoInfo,
     input_context: &mut format::context::Input,
-    peak_domain: PeakDomain,
     downscale: u32,
     initial_crop: Option<CropRect>,
+    analysis_options: &FrameAnalysisOptions<'_>,
 ) -> Result<(
     Vec<MadVRScene>,
     Vec<MadVRFrame>,
     Vec<FrameL1Measurement>,
+    Vec<FramePeakStats>,
     CropRect,
 )> {
     println!("Starting native analysis pipeline...");
-    let width = video_info.width;
-    let height = video_info.height;
     let total_frames = video_info.total_frames;
-    let transfer_function = video_info.transfer_function;
 
     let video_stream = input_context
         .streams()
@@ -440,6 +501,7 @@ fn run_native_analysis_pipeline(
 
     let mut frames = Vec::new();
     let mut l1_measurements = Vec::new();
+    let mut frame_peak_stats = Vec::new();
     let mut scene_cuts = Vec::new();
     let mut previous_histogram: Option<Vec<f64>> = None;
     let smoothing_window = cli.scene_smoothing as usize;
@@ -452,6 +514,7 @@ fn run_native_analysis_pipeline(
     let sample_rate = cli.sample_rate.max(1);
     let mut last_analyzed_frame: Option<MadVRFrame> = None;
     let mut last_l1_measurement: Option<FrameL1Measurement> = None;
+    let mut last_peak_stats: Option<FramePeakStats> = None;
 
     let start_time = Instant::now();
 
@@ -503,7 +566,7 @@ fn run_native_analysis_pipeline(
                 let should_analyze =
                     frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
 
-                let (analyzed_frame, l1_measurement) = if should_analyze {
+                let (analyzed_frame, l1_measurement, peak_stats) = if should_analyze {
                     let analysis_frame = if let Some(ref mut sc) = scaler {
                         sc.run(&decoded_frame, &mut scaled_frame)
                             .context("Failed to scale frame")?;
@@ -520,17 +583,8 @@ fn run_native_analysis_pipeline(
                     } else {
                         None
                     };
-                    let frame_result = analyze_native_frame_cropped(
-                        analysis_frame,
-                        width,
-                        height,
-                        &rect,
-                        &cli.pre_denoise,
-                        transfer_function,
-                        cli.hlg_peak_nits,
-                        peak_domain,
-                        cli.min_percentile,
-                    )?;
+                    let frame_result =
+                        analyze_native_frame_cropped(analysis_frame, &rect, analysis_options)?;
                     if let Some(start) = analysis_start {
                         analysis_duration += start.elapsed();
                     }
@@ -561,17 +615,20 @@ fn run_native_analysis_pipeline(
                     previous_histogram = Some(frame_result.frame.lum_histogram.clone());
                     last_analyzed_frame = Some(copy_frame(&frame_result.frame));
                     last_l1_measurement = Some(frame_result.l1);
-                    (frame_result.frame, frame_result.l1)
+                    last_peak_stats = Some(frame_result.peak_stats);
+                    (frame_result.frame, frame_result.l1, frame_result.peak_stats)
                 } else {
                     // Use cached frame data for skipped frames
                     (
                         copy_frame(last_analyzed_frame.as_ref().unwrap()),
                         last_l1_measurement.unwrap(),
+                        last_peak_stats.unwrap(),
                     )
                 };
 
                 frames.push(analyzed_frame);
                 l1_measurements.push(l1_measurement);
+                frame_peak_stats.push(peak_stats);
                 frame_count += 1;
 
                 // Update progress display
@@ -589,7 +646,7 @@ fn run_native_analysis_pipeline(
         // Determine if we should analyze this frame or use cached data
         let should_analyze = frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
 
-        let (analyzed_frame, l1_measurement) = if should_analyze {
+        let (analyzed_frame, l1_measurement, peak_stats) = if should_analyze {
             let analysis_frame = if let Some(ref mut sc) = scaler {
                 sc.run(&decoded_frame, &mut scaled_frame)
                     .context("Failed to scale final frame")?;
@@ -605,17 +662,8 @@ fn run_native_analysis_pipeline(
             } else {
                 None
             };
-            let frame_result = analyze_native_frame_cropped(
-                analysis_frame,
-                width,
-                height,
-                &rect,
-                &cli.pre_denoise,
-                transfer_function,
-                cli.hlg_peak_nits,
-                peak_domain,
-                cli.min_percentile,
-            )?;
+            let frame_result =
+                analyze_native_frame_cropped(analysis_frame, &rect, analysis_options)?;
             if let Some(start) = analysis_start {
                 analysis_duration += start.elapsed();
             }
@@ -644,16 +692,19 @@ fn run_native_analysis_pipeline(
             previous_histogram = Some(frame_result.frame.lum_histogram.clone());
             last_analyzed_frame = Some(copy_frame(&frame_result.frame));
             last_l1_measurement = Some(frame_result.l1);
-            (frame_result.frame, frame_result.l1)
+            last_peak_stats = Some(frame_result.peak_stats);
+            (frame_result.frame, frame_result.l1, frame_result.peak_stats)
         } else {
             (
                 copy_frame(last_analyzed_frame.as_ref().unwrap()),
                 last_l1_measurement.unwrap(),
+                last_peak_stats.unwrap(),
             )
         };
 
         frames.push(analyzed_frame);
         l1_measurements.push(l1_measurement);
+        frame_peak_stats.push(peak_stats);
         frame_count += 1;
         pb.set_position(frame_count as u64);
     }
@@ -701,7 +752,7 @@ fn run_native_analysis_pipeline(
     }
 
     let crop = crop_rect_opt.unwrap_or_else(|| CropRect::full(target_w, target_h));
-    Ok((scenes, frames, l1_measurements, crop))
+    Ok((scenes, frames, l1_measurements, frame_peak_stats, crop))
 }
 
 fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {

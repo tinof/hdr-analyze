@@ -55,6 +55,12 @@ fn main() -> Result<()> {
         ));
     }
 
+    if !(0.0..=100.0).contains(&cli.peak_percentile) {
+        return Err(anyhow::anyhow!(
+            "--peak-percentile must be between 0 and 100"
+        ));
+    }
+
     println!(
         "HDR Analyzer MVP (Native Pipeline) - Starting analysis of: {}",
         input_path

@@ -14,7 +14,10 @@ fn test_help_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("HDR"))
-        .stdout(predicate::str::contains("--crop-probes"));
+        .stdout(predicate::str::contains("--crop-probes"))
+        .stdout(predicate::str::contains("--peak-estimator"))
+        .stdout(predicate::str::contains("--peak-percentile"))
+        .stdout(predicate::str::contains("--dump-frame-stats"));
 }
 
 #[test]
@@ -67,4 +70,24 @@ fn test_invalid_min_percentile() {
         .stderr(predicate::str::contains(
             "--min-percentile must be between 0 and 100",
         ));
+}
+
+#[test]
+fn test_invalid_peak_percentile() {
+    analyzer_cmd()
+        .args(["--peak-percentile", "100.1", "input.mkv"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--peak-percentile must be between 0 and 100",
+        ));
+}
+
+#[test]
+fn test_invalid_peak_estimator() {
+    analyzer_cmd()
+        .args(["--peak-estimator", "unknown", "input.mkv"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
 }
