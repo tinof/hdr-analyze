@@ -56,6 +56,11 @@ This is a Rust workspace with three shipped binaries:
 - **Native HLG workflow**: auto-detects ARIB STD-B67 and converts to PQ histograms in-memory
   (`--hlg-peak-nits`, default 1000).
 - **Dolby Vision CM v4.0** output by default (L1/L2/L6/L9/L11/L254) via `mkvdovi`.
+- **Profile 7 FEL preservation**: composites BL+EL polynomial/MMR reshaping and NLQ residuals,
+  then emits a Profile 8.1-compatible base layer; local and Modal encoding backends are supported.
+- **Dolby Vision metadata repair**: `mkvdovi inspect` audits RPU L1 patterns, while `--mdfix`
+  rebuilds Profile 7 MEL/Profile 8 metadata from fresh base-layer measurements without re-encoding
+  the picture. Dolby Vision and repair inputs keep their source by default.
 - **Cross-platform**: software decoding everywhere; optional CUDA attempt on NVIDIA with graceful
   fallback. ARM64-tuned (NEON, `--sample-rate`/`--downscale` give 3–4× throughput on CPU-limited systems).
 
@@ -146,10 +151,10 @@ The examples below cover the common paths. For every flag and default, see
 
 ### mkvdovi (conversion tool)
 
-Converts HDR10/HDR10+/HLG input to a Profile 8.1 MKV with CM v4.0 metadata.
+Converts HDR10/HDR10+/HLG/Profile 7 input to a Profile 8.1 MKV with CM v4.0 metadata.
 
-> **By default, `mkvdovi` deletes the source file after a successful conversion** (and removes temp
-> artifacts). Pass `--keep-source` to keep it.
+> For non-DV conversions, `mkvdovi` deletes the source file after success unless `--keep-source` is
+> passed. Dolby Vision inputs and all `--mdfix` runs keep the source as a metadata-safety default.
 >
 > An interrupted run (e.g. a dropped SSH session) keeps its `mkvdovi_temp_*` directory and prints a
 > resume hint — just re-run the same command to **resume** from the last completed step (`--no-resume`
@@ -162,7 +167,16 @@ mkvdovi "input.mkv" --keep-source --verify   # recommended first run (A/B safe, 
 mkvdovi "input.mkv" --analysis-quality accurate   # fast | balanced (default) | accurate
 mkvdovi "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
 mkvdovi "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean
+mkvdovi inspect "input.mkv"                       # full RPU metadata inspection
+mkvdovi "input.DV.mkv" --mdfix                    # rebuild DV metadata; writes *.mdfix.DV.mkv
+mkvdovi "profile7-fel.mkv" --fel-crf 16 --fel-preset slow
 ```
+
+Profile 7 MEL takes a fast metadata-only path by default. Profile 7 FEL is composited and re-encoded
+before new Profile 8.1 metadata is generated. `--mdfix` strips the old RPU from MEL/Profile 8 video,
+analyzes the clean base layer, and remuxes a fresh RPU while preserving sampled L5 active-area
+offsets when available. See [the FEL preservation design](docs/profile7_fel_to_profile81_preservation.md)
+and [developer handoff](docs/profile7_fel_developer_handoff.md).
 
 → HDR10+ peak mapping, CM v4.0 metadata, and verification details:
 [docs/DOLBY_VISION.md](docs/DOLBY_VISION.md). Full flag list:

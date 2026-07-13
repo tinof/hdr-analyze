@@ -6,6 +6,19 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Added
+
+- Added Profile 7 FEL to Profile 8.1 conversion in `mkvdovi`: BL+EL compositing applies polynomial
+  luma reshaping, MMR chroma reshaping, and NLQ LinearDeadzone residuals before local or Modal-backed
+  HEVC re-encoding and fresh RPU generation.
+- Added `mkvdovi inspect <file>` for full RPU L1 diagnostics and automatic multi-window preflight
+  warnings during Dolby Vision conversion.
+- Added `--mdfix` for Profile 7 MEL and Profile 8 inputs. It removes the existing RPU, measures the
+  clean base layer, preserves sampled L5 offsets when available, and writes a distinct
+  `*.mdfix.DV.mkv` candidate without re-encoding the picture.
+- Profile 7 MEL now has a fast `dovi_tool -m 2 convert --discard` path when metadata rebuilding is
+  not requested; Profile 8 inputs are skipped unless inspected or repaired.
+
 ### Changed (behavioral)
 
 - **L1 average now uses a true per-pixel PQ mean.** The frame analyzer accumulates full-precision
@@ -27,6 +40,9 @@ This document provides a historical record of completed milestones, feature impl
 - Scene cuts now provide reporting-only crop-stability telemetry. Variable-active-area titles use
   the union of observed probe modes so full-frame picture is not cut; per-scene crop application
   remains a follow-up to preserve measurement continuity.
+- Dolby Vision inputs and all `--mdfix` runs keep their source by default. New FEL/repair artifacts
+  use the v0.3 resume sentinels and live progress reporting; the legacy `mkvdolby_temp_*` resume
+  compatibility remains intact for one release.
 
 ---
 

@@ -8,13 +8,15 @@ use walkdir::WalkDir;
 
 mod cli;
 mod external;
+mod fel_composite;
 mod metadata;
 mod pipeline;
 mod progress;
 mod resume;
+mod rpu_check;
 mod verify;
 
-use cli::Args;
+use cli::{Args, SubCmd};
 
 fn natural_segment_cmp(a: &str, b: &str) -> Ordering {
     let mut ia = 0usize;
@@ -131,6 +133,18 @@ fn collect_default_inputs() -> anyhow::Result<Vec<String>> {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    // Dispatch subcommands first (before dependency checks that require full toolchain)
+    if let Some(subcmd) = &args.subcmd {
+        match subcmd {
+            SubCmd::Inspect(inspect_args) => {
+                return rpu_check::inspect_file(&inspect_args.input);
+            }
+            SubCmd::CompositePipe(pipe_args) => {
+                return fel_composite::run_composite_pipe(pipe_args);
+            }
+        }
+    }
+
     // Initialize progress module with verbosity settings
     progress::set_verbose(args.verbose);
     progress::set_quiet(args.quiet);
@@ -211,7 +225,7 @@ fn main() -> anyhow::Result<()> {
     let actionable_files: Vec<String> = files
         .into_iter()
         .filter(|f| {
-            if f.ends_with(".DV.mkv") {
+            if f.ends_with(".DV.mkv") && !final_args.mdfix {
                 if !progress::is_quiet() {
                     eprintln!("{}", format!("Skipping already converted: {}", f).yellow());
                 }

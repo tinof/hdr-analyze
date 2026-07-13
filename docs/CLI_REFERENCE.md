@@ -141,7 +141,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin" --downsca
 
 ## `mkvdovi`
 
-Orchestrates the full HDR10/HDR10+/HLG → Dolby Vision Profile 8.1 (CM v4.0) conversion. Internally
+Orchestrates the full HDR10/HDR10+/HLG/Profile 7 → Dolby Vision Profile 8.1 (CM v4.0) conversion. Internally
 calls `dovi_tool`, `mkvmerge`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately
 (see [README Prerequisites](../README.md#prerequisites)).
 
@@ -155,7 +155,8 @@ mkvdovi "input.mkv"     # process a specific file
 | Flag | Default | Description |
 |------|---------|-------------|
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
-| `--keep-source` | off | Keep the source file (by default it is **deleted** after success) |
+| `--keep-source` | off | Keep a non-DV source (DV inputs and `--mdfix` runs are always kept by default) |
+| `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv` |
 | `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables) — tells a stalled tool apart from merely slow storage |
 | `--verify` | off | After muxing, validate the result (see [DOLBY_VISION.md](DOLBY_VISION.md#post-mux-verification)) |
@@ -201,6 +202,21 @@ See [DOLBY_VISION.md](DOLBY_VISION.md#hdr10-peak-mapping) for guidance on each s
 | `--hlg-preset <preset>` | `medium` | x265 preset for HLG→PQ |
 | `--hlg-peak-nits <nits>` | `1000` | Nominal HLG peak luminance (cd/m²) |
 
+### Profile 7 FEL encode tuning
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--fel-crf <N>` | `18` | Local x265 CRF or Modal/NVENC quality parameter |
+| `--fel-preset <preset>` | `medium` | Local x265 preset |
+| `--fel-encoder <local\|modal>` | `local` | Encode the composited BL+EL result locally or offload it to Modal |
+
+### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `mkvdovi inspect <INPUT>` | Extract the complete RPU and report suspicious/static/clipped L1 patterns |
+| `mkvdovi composite-pipe --bl <HEVC> --el <HEVC> --rpu <BIN> -w <PX> -H <PX>` | Write raw NLQ-composited frames to stdout for an encoder pipe; dispatched before global dependency checks |
+
 ### Examples
 
 ```bash
@@ -210,6 +226,9 @@ mkvdovi "input.mkv" --content-type sport      # high-motion content
 mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9
 mkvdovi "input.mkv" --source-primaries 0      # force P3-D65
 mkvdovi "input.mkv" --encoder videotoolbox    # fast HLG→PQ on Apple Silicon
+mkvdovi inspect "input.DV.mkv"                 # inspect source RPU metadata
+mkvdovi "input.DV.mkv" --mdfix                 # write input.mdfix.DV.mkv
+mkvdovi "profile7-fel.mkv" --fel-crf 16        # composite FEL locally
 ```
 
 ### Resilience for long conversions
