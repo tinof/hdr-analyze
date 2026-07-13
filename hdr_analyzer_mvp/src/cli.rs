@@ -1,4 +1,17 @@
+use std::path::PathBuf;
+
 use clap::{Parser, ValueEnum};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum PeakEstimator {
+    /// Use the highest measured peak-domain pixel.
+    #[default]
+    Max,
+    /// Use the configured high percentile of peak-domain pixels.
+    Percentile,
+    /// Apply the grain-adaptive extreme-value correction.
+    Robust,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum PeakDomain {
@@ -97,6 +110,18 @@ pub struct Cli {
     /// Defaults to max-rgb for PQ/unspecified input; HLG always uses luma.
     #[arg(long, value_enum)]
     pub peak_domain: Option<PeakDomain>,
+
+    /// Peak-domain estimator. Distinct from --peak-source, which selects from the luma histogram.
+    #[arg(long, value_enum, default_value = "max")]
+    pub peak_estimator: PeakEstimator,
+
+    /// High percentile used when --peak-estimator percentile is selected.
+    #[arg(long, default_value_t = 99.99)]
+    pub peak_percentile: f64,
+
+    /// Write per-frame peak-estimator diagnostics as CSV.
+    #[arg(long, value_name = "PATH")]
+    pub dump_frame_stats: Option<PathBuf>,
 
     /// EMA smoothing beta for histogram bins (0.0-1.0). Lower = more smoothing. 0 disables. Default: 0.1
     #[arg(long, default_value_t = 0.1)]

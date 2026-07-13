@@ -58,6 +58,8 @@ hdr_analyzer_mvp "video.mkv"
 |------|---------|-------------|
 | `--peak-domain <max-rgb\|luma>` | `max-rgb` (PQ), `luma` (HLG) | Domain used for direct peak measurement. HLG forces luma because per-channel scene-to-display conversion is not implemented |
 | `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source |
+| `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or synthetic-calibrated grain correction |
+| `--peak-percentile <0–100>` | `99.99` | Fine 4096-bin percentile used by `--peak-estimator percentile` |
 | `--header-peak-source <max\|histogram99\|histogram999>` | — | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
 | `--hist-bin-ema-beta <0.0–1.0>` | `0.1` | EMA smoothing for histogram bins (lower = more smoothing, 0 = disabled) |
 | `--hist-temporal-median <N>` | `0` | Temporal median filter window in frames (3 = good for aggressive smoothing) |
@@ -68,6 +70,12 @@ hdr_analyzer_mvp "video.mkv"
   limited-range BT.2020 NCL and takes the maximum R′/G′/B′ PQ signal; `luma` retains the legacy Y′ peak.
 - `histogram99`: 99th percentile (recommended, reduces noise impact).
 - `histogram999`: 99.9th percentile (most conservative).
+
+`--peak-source` selects the existing madVR/Y-histogram path; `--peak-estimator` controls how the
+direct max-RGB or luma peak itself is measured. Robust mode estimates PQ-domain grain from
+cross-chroma-quad differences and corrects Gaussian extremes while retaining isolated highlights.
+It passes deterministic synthetic truth but remains opt-in because its first two-title real-content
+gate did not justify changing the default.
 
 Histogram percentiles and APL remain Y-based in both domains, preserving madVR histogram semantics.
 An explicit histogram peak source therefore opts out of max-RGB peak selection.
@@ -91,6 +99,7 @@ its minimum is not currently inserted into generated RPUs.
 |------|---------|-------------|
 | `--analysis-threads <N>` | logical cores | Override Rayon worker count for histogram analysis |
 | `--profile-performance` | off | Print per-stage throughput (decode vs. analysis) when finished |
+| `--dump-frame-stats <PATH>` | — | Write sample-rate-aligned CSV with selected/raw/percentile/robust peaks, sigma, correction, and effective-tail count |
 
 ### Notes for v6 output
 
@@ -111,6 +120,14 @@ hdr_analyzer_mvp -i "video.mkv" -o "out_v6.bin" --madvr-version 6 --target-peak-
 # Aggressive smoothing for very noisy / grainy content
 hdr_analyzer_mvp -i "grainy.mkv" -o "out.bin" \
   --hist-bin-ema-beta 0.05 --hist-temporal-median 3 --pre-denoise median3
+
+# Opt into the max-RGB grain estimator and capture its per-frame decisions
+hdr_analyzer_mvp -i "grainy.mkv" -o "robust.bin" \
+  --peak-source max --peak-estimator robust --dump-frame-stats frame_stats.csv
+
+# Select a fine-histogram direct peak instead
+hdr_analyzer_mvp -i "grainy.mkv" -o "p9999.bin" \
+  --peak-source max --peak-estimator percentile --peak-percentile 99.99
 
 # Disable histogram smoothing for clean content
 hdr_analyzer_mvp -i "clean.mkv" -o "out.bin" --hist-bin-ema-beta 0

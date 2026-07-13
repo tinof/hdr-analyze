@@ -51,8 +51,9 @@ This is a Rust workspace with three shipped binaries:
 - **Native scene detection**: histogram-distance-based cut detection with a configurable threshold.
 - **Dynamic metadata optimizer**: per-frame `target_nits` from a rolling average, 99th-percentile knee
   detection, scene-aware blending/resets, and bidirectional EMA smoothing (on by default).
-- **Noise robustness**: percentile-based peaks (P99/P99.9), per-bin EMA smoothing, optional temporal
-  median filtering and pre-analysis denoising for grainy sources.
+- **Noise robustness**: opt-in max-RGB percentile and synthetic-calibrated grain-robust peak
+  estimators, per-bin EMA smoothing, optional temporal median filtering and pre-analysis denoising.
+  Direct `max` remains the estimator default pending a successful real-content parity gate.
 - **Native HLG workflow**: auto-detects ARIB STD-B67 and converts to PQ histograms in-memory
   (`--hlg-peak-nits`, default 1000).
 - **Dolby Vision CM v4.0** output by default (L1/L2/L6/L9/L11/L254) via `mkvdovi`.
@@ -145,6 +146,10 @@ The examples below cover the common paths. For every flag and default, see
 
 # Full-frame analysis (disable crop detection)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --no-crop
+
+# Opt into grain-robust max-RGB peaks and save per-frame diagnostics
+./target/release/hdr_analyzer_mvp -i "grainy.mkv" -o "out.bin" \
+  --peak-estimator robust --dump-frame-stats "frame_stats.csv"
 ```
 
 → Noise-robustness, optimizer, and HLG flags: [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#hdr_analyzer_mvp).
