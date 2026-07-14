@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use regex::Regex;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -539,12 +540,47 @@ fn primary_index_from_label(primaries: &str) -> Option<u8> {
     }
 }
 
+/// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
+#[derive(Debug, Deserialize)]
+pub struct L1Sidecar {
+    pub version: u32,
+    pub scenes: Vec<L1SidecarScene>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct L1SidecarScene {
+    pub start: u64,
+    pub end: u64,
+    pub min_pq_12bit: u16,
+    /// Retained for sidecar-schema completeness; the RPU average uses the max-RGB mean
+    /// (validated against cm v2 shot averages), not the Y-luma mean.
+    #[allow(dead_code)]
+    pub avg_luma_pq_12bit: u16,
+    pub avg_max_rgb_pq_12bit: u16,
+    pub max_pq_12bit: u16,
+}
+
+/// Load the L1 sidecar written next to a madVR measurements file, if present and valid.
+/// Returns `None` when the sidecar is missing, unreadable, or an unsupported version, so
+/// callers can fall back to legacy madVR-file generation.
+pub fn load_l1_sidecar(measurements_file: &Path) -> Option<L1Sidecar> {
+    let mut sidecar_path = measurements_file.as_os_str().to_owned();
+    sidecar_path.push(".l1.json");
+    let file = File::open(Path::new(&sidecar_path)).ok()?;
+    let sidecar: L1Sidecar = serde_json::from_reader(file).ok()?;
+    if sidecar.version != 1 || sidecar.scenes.is_empty() {
+        return None;
+    }
+    Some(sidecar)
+}
+
 pub fn generate_extra_json(
     output_path: &Path,
     metadata: &HashMap<String, f64>,
     trim_targets: &[u32],
     cm_v40_config: Option<&CmV40Config>,
     level5_offsets: Option<Level5Offsets>,
+    l1_sidecar: Option<&L1Sidecar>,
 ) -> Result<()> {
     let required = |key| {
         metadata
@@ -619,6 +655,39 @@ pub fn generate_extra_json(
         }));
 
         json_content["default_metadata_blocks"] = json!(default_blocks);
+    }
+
+    // Source-honest per-scene L1 from the analyzer sidecar. Explicit shots carry the
+    // measured min/avg/max; `l1_avg_pq_cm_version: V29` selects the lower spec floor for
+    // `avg_pq` (819 vs the CM v4.0 anchor 1229) so CM v2.9-only displays receive the true
+    // scene average instead of a placeholder. dovi_tool still clamps to spec limits.
+    if let Some(sidecar) = l1_sidecar {
+        let length = sidecar
+            .scenes
+            .iter()
+            .map(|scene| scene.end + 1)
+            .max()
+            .unwrap_or(0);
+        let shots: Vec<Value> = sidecar
+            .scenes
+            .iter()
+            .map(|scene| {
+                json!({
+                    "start": scene.start,
+                    "duration": scene.end - scene.start + 1,
+                    "metadata_blocks": [{
+                        "Level1": {
+                            "min_pq": scene.min_pq_12bit,
+                            "max_pq": scene.max_pq_12bit,
+                            "avg_pq": scene.avg_max_rgb_pq_12bit,
+                        }
+                    }],
+                })
+            })
+            .collect();
+        json_content["length"] = json!(length);
+        json_content["l1_avg_pq_cm_version"] = json!("V29");
+        json_content["shots"] = json!(shots);
     }
 
     let file = File::create(output_path)?;
@@ -770,6 +839,7 @@ mod tests {
             &[100, 600, 1000],
             Some(&config),
             None,
+            None,
         )
         .unwrap();
 
@@ -786,9 +856,57 @@ mod tests {
         let output = tempfile::NamedTempFile::new().unwrap();
         let metadata = HashMap::new();
 
-        let error = generate_extra_json(output.path(), &metadata, &[], None, None).unwrap_err();
+        let error =
+            generate_extra_json(output.path(), &metadata, &[], None, None, None).unwrap_err();
 
         assert!(error.to_string().contains("min_dml"));
+    }
+
+    #[test]
+    fn l1_sidecar_scenes_become_source_honest_shots() {
+        let output = tempfile::NamedTempFile::new().unwrap();
+        let metadata = HashMap::from([
+            ("min_dml".to_string(), 0.0001),
+            ("max_dml".to_string(), 1000.0),
+            ("max_cll".to_string(), 997.0),
+            ("max_fall".to_string(), 91.0),
+        ]);
+        let sidecar = L1Sidecar {
+            version: 1,
+            scenes: vec![
+                L1SidecarScene {
+                    start: 0,
+                    end: 213,
+                    min_pq_12bit: 0,
+                    avg_luma_pq_12bit: 592,
+                    avg_max_rgb_pq_12bit: 614,
+                    max_pq_12bit: 2437,
+                },
+                L1SidecarScene {
+                    start: 214,
+                    end: 333,
+                    min_pq_12bit: 1,
+                    avg_luma_pq_12bit: 441,
+                    avg_max_rgb_pq_12bit: 462,
+                    max_pq_12bit: 3416,
+                },
+            ],
+        };
+
+        generate_extra_json(output.path(), &metadata, &[], None, None, Some(&sidecar)).unwrap();
+
+        let json: Value = serde_json::from_reader(File::open(output.path()).unwrap()).unwrap();
+        assert_eq!(json["length"], 334);
+        assert_eq!(json["l1_avg_pq_cm_version"], "V29");
+        let shots = json["shots"].as_array().unwrap();
+        assert_eq!(shots.len(), 2);
+        assert_eq!(shots[0]["start"], 0);
+        assert_eq!(shots[0]["duration"], 214);
+        let l1 = &shots[0]["metadata_blocks"][0]["Level1"];
+        assert_eq!(l1["min_pq"], 0);
+        assert_eq!(l1["avg_pq"], 614);
+        assert_eq!(l1["max_pq"], 2437);
+        assert_eq!(shots[1]["metadata_blocks"][0]["Level1"]["avg_pq"], 462);
     }
 
     #[test]

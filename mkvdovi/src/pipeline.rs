@@ -404,12 +404,29 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
+    // Prefer source-honest per-scene L1 from the analyzer sidecar when it exists. Without it,
+    // dovi_tool's madVR path fills L1 avg with a fixed placeholder and (with custom targets)
+    // replaces L1 max with optimizer targets.
+    let l1_sidecar = measurements_file
+        .as_deref()
+        .and_then(metadata::load_l1_sidecar);
+    if l1_sidecar.is_some() {
+        progress::print_info(
+            "Using measured L1 sidecar: source-honest per-scene min/avg/max in the RPU.",
+        );
+    } else if measurements_file.is_some() {
+        progress::print_warn(
+            "No L1 sidecar next to the measurements file; falling back to legacy madVR-file generation.",
+        );
+    }
+
     metadata::generate_extra_json(
         &extra_json_path,
         &static_meta,
         &final_trims,
         cm_v40_config.as_ref(),
         level5_offsets,
+        l1_sidecar.as_ref(),
     )?;
     progress::print_info("Configuration written.");
 
@@ -422,6 +439,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         args.peak_source,
         hdr10plus_json.as_deref(),
         measurements_file.as_deref(),
+        l1_sidecar.is_some(),
         resume_enabled,
     )?;
 
@@ -855,7 +873,16 @@ fn run_hdr_analyzer(
 ) -> Result<Option<PathBuf>> {
     let tool_name = "hdr_analyzer_mvp";
     let mut exe = PathBuf::from(tool_name);
-    if Path::new("target/release/hdr_analyzer_mvp").exists() {
+    // Prefer the analyzer shipped next to this mkvdovi binary so a stale PATH install
+    // (e.g. an old version without the L1 sidecar) is never silently picked up.
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(sibling) = current_exe.parent().map(|dir| dir.join(tool_name)) {
+            if sibling.exists() {
+                exe = sibling;
+            }
+        }
+    }
+    if exe == Path::new(tool_name) && Path::new("target/release/hdr_analyzer_mvp").exists() {
         exe = Path::new("target/release/hdr_analyzer_mvp").to_path_buf();
     }
 
@@ -1202,6 +1229,7 @@ fn generate_rpu(
     peak_source: PeakSource,
     meta_file: Option<&Path>,
     meas_file: Option<&Path>,
+    embedded_l1_shots: bool,
     resume: bool,
 ) -> Result<Option<PathBuf>> {
     let rpu_out = temp_dir.join("RPU.bin");
@@ -1231,8 +1259,12 @@ fn generate_rpu(
                 .arg(peak_source.to_string());
         }
         HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
-            cmd.arg("--madvr-file").arg(meas_file.unwrap());
-            cmd.arg("--use-custom-targets");
+            // With embedded shots, the config already carries measured per-scene L1;
+            // passing --madvr-file would override it (madVR-derived L1 wins in dovi_tool).
+            if !embedded_l1_shots {
+                cmd.arg("--madvr-file").arg(meas_file.unwrap());
+                cmd.arg("--use-custom-targets");
+            }
         }
         _ => return Ok(None),
     }
