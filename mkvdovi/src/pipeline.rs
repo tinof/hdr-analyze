@@ -200,16 +200,13 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             progress::print_info(
                 "Rebuilding Profile 7 MEL metadata from fresh base-layer measurements (--mdfix).",
             );
-            let raw_hevc = temp_dir.join("DV_raw.hevc");
-            extract_video_hevc(
+            let clean_bl = extract_clean_base_layer(
                 input_file,
-                &raw_hevc,
                 &temp_dir,
                 "Extracting Dolby Vision HEVC stream",
                 resume_enabled,
                 args.stall_timeout,
             )?;
-            let clean_bl = remove_dolby_vision_metadata(&raw_hevc, &temp_dir, resume_enabled)?;
             bl_source_file = clean_bl.clone();
 
             let mut extra_args = Vec::new();
@@ -252,16 +249,13 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             progress::print_info(
                 "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
             );
-            let raw_hevc = temp_dir.join("DV_raw.hevc");
-            extract_video_hevc(
+            let clean_bl = extract_clean_base_layer(
                 input_file,
-                &raw_hevc,
                 &temp_dir,
                 "Extracting Profile 8 HEVC stream",
                 resume_enabled,
                 args.stall_timeout,
             )?;
-            let clean_bl = remove_dolby_vision_metadata(&raw_hevc, &temp_dir, resume_enabled)?;
             bl_source_file = clean_bl.clone();
 
             let mut extra_args = Vec::new();
@@ -751,6 +745,35 @@ fn remove_dolby_vision_metadata(
     } else {
         anyhow::bail!("Failed to remove Dolby Vision metadata from base layer")
     }
+}
+
+/// Produce the Dolby Vision-clean base layer for the repair paths. When a previous run
+/// already sealed `BL_clean.hevc`, skip the raw extraction entirely — the intermediate
+/// `DV_raw.hevc` is deleted once the clean BL is complete, so re-extracting it on resume
+/// would waste a full-size disk pass for nothing.
+fn extract_clean_base_layer(
+    input_file: &str,
+    temp_dir: &Path,
+    message: &str,
+    resume_enabled: bool,
+    stall_timeout: u64,
+) -> Result<PathBuf> {
+    let clean_bl = temp_dir.join("BL_clean.hevc");
+    if resume_enabled && resume::is_complete(&clean_bl) {
+        progress::print_info("Reusing Dolby Vision-clean base layer from a previous run.");
+        return Ok(clean_bl);
+    }
+
+    let raw_hevc = temp_dir.join("DV_raw.hevc");
+    extract_video_hevc(
+        input_file,
+        &raw_hevc,
+        temp_dir,
+        message,
+        resume_enabled,
+        stall_timeout,
+    )?;
+    remove_dolby_vision_metadata(&raw_hevc, temp_dir, resume_enabled)
 }
 
 fn convert_mel_to_profile81(
