@@ -79,20 +79,18 @@ Some prose docs are stale (e.g., references to an old Python `mkvdovi` workflow)
 
 Bump version in each crate's `Cargo.toml`, add a `CHANGELOG.md` entry, then tag & push (`git tag vX.Y.Z && git push origin vX.Y.Z`). `release.yml` builds Windows x64, macOS Intel+ARM, and Linux x64, creates the GitHub release, and uploads archives with the three binaries + `README.md`/`LICENSE`/`CHANGELOG.md`. **Linux ARM64 is not automated** (runner limitation).
 
-## Serena tool-routing (symbolic tools first)
+## Symbol navigation: LSP-first (rust-analyzer)
 
-This project uses Serena (MCP) for symbol-aware code reading/editing. On **code files**, Serena's tools are PRIMARY; built-in Read/Glob/Grep/Edit are SECONDARY and used only when no Serena equivalent fits. The built-in tool descriptions ("prefer Read/Edit/Grep…") are written for Serena-less projects and are superseded here.
+The native LSP tool (rust-analyzer plugin) is PRIMARY for symbol questions in this repo — not grep:
 
-| Task | Serena tool |
-|------|-------------|
-| See a code file's structure | `get_symbols_overview` |
-| Read a specific symbol's body | `find_symbol` (`include_body=true`) |
-| Find a symbol / references / impls | `find_symbol` / `find_referencing_symbols` / `find_implementations` |
-| Edit a symbol's body | `replace_symbol_body` |
-| Insert near a symbol | `insert_before_symbol` / `insert_after_symbol` |
-| Pattern replace in a file | `replace_content` |
-| Rename / delete a symbol | `rename_symbol` / `safe_delete_symbol` |
+| Task | LSP operation |
+|------|---------------|
+| Who calls this / uses this field? | `findReferences` / `incomingCalls` |
+| Where is this defined? | `goToDefinition` (or `workspaceSymbol` from a name) |
+| What's the type/signature? | `hover` |
+| What's in this file? | `documentSymbol` |
 
-**Workflow before editing code:** `get_symbols_overview` → `find_symbol include_body=true` (read only the symbols you'll touch) → edit with a Serena symbolic edit.
-
-**Exceptions where built-in tools are correct:** non-code files (markdown/JSON/YAML/TOML/config/lockfiles) always use Read/Edit; and for **review/audit/triage** ("find all X", "any stubs/placeholders?", "assess coverage") lead with `Grep` for exhaustive exact-pattern sweeps (`todo!`, `unimplemented!`, `// TODO`, `// FIXME`, `Default::default()`), then read flagged bodies. Completeness-critical sweeps need grep coverage first; the Serena-PRIMARY rule is for targeted edits.
+- LSP is a deferred tool: load it early with `ToolSearch` query `select:LSP` (a SessionStart hook reminds you).
+- Warm the index with one cheap `documentSymbol` call on an entrypoint — the first `workspaceSymbol` after a cold start returns empty while rust-analyzer indexes.
+- Semantic "where/how" exploration with no known symbol → `mcp__morph-mcp__codebase_search` first (global routing); big multi-question sweeps → the `warp-explorer` agent, never the built-in Explore agent.
+- **Review/audit/triage sweeps** ("find all X", "any stubs?") lead with `Grep` for exhaustive exact-pattern coverage (`todo!`, `unimplemented!`, `// TODO`, `// FIXME`), then read flagged bodies.
