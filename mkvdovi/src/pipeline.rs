@@ -451,42 +451,52 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // --- Extract base layer ---
     current_step += 1;
     progress::print_step(current_step, total_steps, "Extracting base layer...");
-    let bl_hevc = temp_dir.join("BL.hevc");
 
-    if resume_enabled && resume::is_complete(&bl_hevc) {
-        progress::print_info("Reusing extracted base layer from a previous run.");
+    // When the BL source is already a raw Annex B HEVC stream in the temp dir (mdfix and FEL
+    // paths), re-extracting it with ffmpeg would just duplicate ~the full video size on disk.
+    let bl_hevc = if bl_source_file.extension().is_some_and(|ext| ext == "hevc") {
+        progress::print_info("Base layer is already a raw HEVC stream; skipping re-extraction.");
+        bl_source_file.clone()
     } else {
-        let mut ffmpeg_cmd = Command::new("ffmpeg");
-        ffmpeg_cmd.args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-stats",
-            "-i",
-            bl_source_file.to_str().unwrap(),
-            "-map",
-            "0:v:0",
-            "-c:v",
-            "copy",
-            "-f",
-            "hevc",
-            "-y",
-            bl_hevc.to_str().unwrap(),
-        ]);
+        let bl_hevc = temp_dir.join("BL.hevc");
 
-        let bl_total = fs::metadata(&bl_source_file).ok().map(|m| m.len());
-        if !run_command_with_progress(
-            &mut ffmpeg_cmd,
-            &temp_dir.join("ffmpeg_extract_bl.log"),
-            "Extracting base layer HEVC stream",
-            &bl_hevc,
-            bl_total,
-            args.stall_timeout,
-        )? {
-            return Ok(false);
+        if resume_enabled && resume::is_complete(&bl_hevc) {
+            progress::print_info("Reusing extracted base layer from a previous run.");
+        } else {
+            let mut ffmpeg_cmd = Command::new("ffmpeg");
+            ffmpeg_cmd.args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-stats",
+                "-i",
+                bl_source_file.to_str().unwrap(),
+                "-map",
+                "0:v:0",
+                "-c:v",
+                "copy",
+                "-f",
+                "hevc",
+                "-y",
+                bl_hevc.to_str().unwrap(),
+            ]);
+
+            let bl_total = fs::metadata(&bl_source_file).ok().map(|m| m.len());
+            if !run_command_with_progress(
+                &mut ffmpeg_cmd,
+                &temp_dir.join("ffmpeg_extract_bl.log"),
+                "Extracting base layer HEVC stream",
+                &bl_hevc,
+                bl_total,
+                args.stall_timeout,
+            )? {
+                return Ok(false);
+            }
+            resume::mark_done(&bl_hevc)?;
         }
-        resume::mark_done(&bl_hevc)?;
-    }
+
+        bl_hevc
+    };
 
     // --- Inject RPU ---
     current_step += 1;
@@ -527,6 +537,13 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             return Ok(false);
         }
         resume::mark_done(&bl_rpu_hevc)?;
+
+        // The injected stream supersedes its temp-dir input; drop it early so the mux step
+        // does not need both full-size streams on disk. Resume never re-reads it once
+        // BL_RPU.hevc is sealed. Inputs outside the temp dir (e.g. the source MKV) are kept.
+        if bl_hevc.starts_with(&temp_dir) {
+            let _ = fs::remove_file(&bl_hevc);
+        }
     }
 
     // --- Mux ---
@@ -723,6 +740,10 @@ fn remove_dolby_vision_metadata(
     )? && clean_bl.exists()
     {
         resume::mark_done(&clean_bl)?;
+        // The raw DV stream is no longer needed once the clean BL is sealed; resume skips
+        // both steps when BL_clean.hevc is complete, so dropping it early is safe and frees
+        // ~the full video size during long conversions.
+        let _ = fs::remove_file(input_hevc);
         Ok(clean_bl)
     } else {
         anyhow::bail!("Failed to remove Dolby Vision metadata from base layer")
