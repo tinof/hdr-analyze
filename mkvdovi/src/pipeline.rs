@@ -214,8 +214,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
             let mut extra_args = Vec::new();
             add_optimizer_args(&mut extra_args, args);
-            measurements_file =
-                run_hdr_analyzer(clean_bl.to_str().unwrap(), &temp_dir, &extra_args, args)?;
+            // Analyze the original container, not the raw Annex B stream: without a container
+            // duration the seek-based crop probes are unavailable and the in-stream fallback
+            // can commit a degenerate active area on dark openings. MEL base-layer pixels are
+            // identical in the source.
+            measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
             if measurements_file.is_none() {
                 return Ok(false);
             }
@@ -263,8 +266,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
             let mut extra_args = Vec::new();
             add_optimizer_args(&mut extra_args, args);
-            measurements_file =
-                run_hdr_analyzer(clean_bl.to_str().unwrap(), &temp_dir, &extra_args, args)?;
+            // Same rationale as the MEL path: analyze the container so crop probing can seek.
+            measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
             if measurements_file.is_none() {
                 return Ok(false);
             }
