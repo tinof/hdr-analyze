@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> Single source of truth for AI agents in this repo. `AGENTS.md` points here. See `.rust-skills/AGENTS.md` for general Rust development guidelines.
+> Single source of truth for AI agents in this repo. `AGENTS.md` points here. Rust style and lint policy live in the "Lint/style policy" section below — there is no separate Rust guidelines pack.
 
 ## What this repo actually is
 
