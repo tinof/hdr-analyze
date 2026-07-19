@@ -200,22 +200,22 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             progress::print_info(
                 "Rebuilding Profile 7 MEL metadata from fresh base-layer measurements (--mdfix).",
             );
-            let raw_hevc = temp_dir.join("DV_raw.hevc");
-            extract_video_hevc(
+            let clean_bl = extract_clean_base_layer(
                 input_file,
-                &raw_hevc,
                 &temp_dir,
                 "Extracting Dolby Vision HEVC stream",
                 resume_enabled,
                 args.stall_timeout,
             )?;
-            let clean_bl = remove_dolby_vision_metadata(&raw_hevc, &temp_dir, resume_enabled)?;
             bl_source_file = clean_bl.clone();
 
             let mut extra_args = Vec::new();
             add_optimizer_args(&mut extra_args, args);
-            measurements_file =
-                run_hdr_analyzer(clean_bl.to_str().unwrap(), &temp_dir, &extra_args, args)?;
+            // Analyze the original container, not the raw Annex B stream: without a container
+            // duration the seek-based crop probes are unavailable and the in-stream fallback
+            // can commit a degenerate active area on dark openings. MEL base-layer pixels are
+            // identical in the source.
+            measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
             if measurements_file.is_none() {
                 return Ok(false);
             }
@@ -249,22 +249,19 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             progress::print_info(
                 "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
             );
-            let raw_hevc = temp_dir.join("DV_raw.hevc");
-            extract_video_hevc(
+            let clean_bl = extract_clean_base_layer(
                 input_file,
-                &raw_hevc,
                 &temp_dir,
                 "Extracting Profile 8 HEVC stream",
                 resume_enabled,
                 args.stall_timeout,
             )?;
-            let clean_bl = remove_dolby_vision_metadata(&raw_hevc, &temp_dir, resume_enabled)?;
             bl_source_file = clean_bl.clone();
 
             let mut extra_args = Vec::new();
             add_optimizer_args(&mut extra_args, args);
-            measurements_file =
-                run_hdr_analyzer(clean_bl.to_str().unwrap(), &temp_dir, &extra_args, args)?;
+            // Same rationale as the MEL path: analyze the container so crop probing can seek.
+            measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
             if measurements_file.is_none() {
                 return Ok(false);
             }
@@ -404,12 +401,29 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
+    // Prefer source-honest per-scene L1 from the analyzer sidecar when it exists. Without it,
+    // dovi_tool's madVR path fills L1 avg with a fixed placeholder and (with custom targets)
+    // replaces L1 max with optimizer targets.
+    let l1_sidecar = measurements_file
+        .as_deref()
+        .and_then(metadata::load_l1_sidecar);
+    if l1_sidecar.is_some() {
+        progress::print_info(
+            "Using measured L1 sidecar: source-honest per-scene min/avg/max in the RPU.",
+        );
+    } else if measurements_file.is_some() {
+        progress::print_warn(
+            "No L1 sidecar next to the measurements file; falling back to legacy madVR-file generation.",
+        );
+    }
+
     metadata::generate_extra_json(
         &extra_json_path,
         &static_meta,
         &final_trims,
         cm_v40_config.as_ref(),
         level5_offsets,
+        l1_sidecar.as_ref(),
     )?;
     progress::print_info("Configuration written.");
 
@@ -422,6 +436,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         args.peak_source,
         hdr10plus_json.as_deref(),
         measurements_file.as_deref(),
+        l1_sidecar.is_some(),
         resume_enabled,
     )?;
 
@@ -433,42 +448,52 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // --- Extract base layer ---
     current_step += 1;
     progress::print_step(current_step, total_steps, "Extracting base layer...");
-    let bl_hevc = temp_dir.join("BL.hevc");
 
-    if resume_enabled && resume::is_complete(&bl_hevc) {
-        progress::print_info("Reusing extracted base layer from a previous run.");
+    // When the BL source is already a raw Annex B HEVC stream in the temp dir (mdfix and FEL
+    // paths), re-extracting it with ffmpeg would just duplicate ~the full video size on disk.
+    let bl_hevc = if bl_source_file.extension().is_some_and(|ext| ext == "hevc") {
+        progress::print_info("Base layer is already a raw HEVC stream; skipping re-extraction.");
+        bl_source_file.clone()
     } else {
-        let mut ffmpeg_cmd = Command::new("ffmpeg");
-        ffmpeg_cmd.args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-stats",
-            "-i",
-            bl_source_file.to_str().unwrap(),
-            "-map",
-            "0:v:0",
-            "-c:v",
-            "copy",
-            "-f",
-            "hevc",
-            "-y",
-            bl_hevc.to_str().unwrap(),
-        ]);
+        let bl_hevc = temp_dir.join("BL.hevc");
 
-        let bl_total = fs::metadata(&bl_source_file).ok().map(|m| m.len());
-        if !run_command_with_progress(
-            &mut ffmpeg_cmd,
-            &temp_dir.join("ffmpeg_extract_bl.log"),
-            "Extracting base layer HEVC stream",
-            &bl_hevc,
-            bl_total,
-            args.stall_timeout,
-        )? {
-            return Ok(false);
+        if resume_enabled && resume::is_complete(&bl_hevc) {
+            progress::print_info("Reusing extracted base layer from a previous run.");
+        } else {
+            let mut ffmpeg_cmd = Command::new("ffmpeg");
+            ffmpeg_cmd.args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-stats",
+                "-i",
+                bl_source_file.to_str().unwrap(),
+                "-map",
+                "0:v:0",
+                "-c:v",
+                "copy",
+                "-f",
+                "hevc",
+                "-y",
+                bl_hevc.to_str().unwrap(),
+            ]);
+
+            let bl_total = fs::metadata(&bl_source_file).ok().map(|m| m.len());
+            if !run_command_with_progress(
+                &mut ffmpeg_cmd,
+                &temp_dir.join("ffmpeg_extract_bl.log"),
+                "Extracting base layer HEVC stream",
+                &bl_hevc,
+                bl_total,
+                args.stall_timeout,
+            )? {
+                return Ok(false);
+            }
+            resume::mark_done(&bl_hevc)?;
         }
-        resume::mark_done(&bl_hevc)?;
-    }
+
+        bl_hevc
+    };
 
     // --- Inject RPU ---
     current_step += 1;
@@ -509,6 +534,13 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             return Ok(false);
         }
         resume::mark_done(&bl_rpu_hevc)?;
+
+        // The injected stream supersedes its temp-dir input; drop it early so the mux step
+        // does not need both full-size streams on disk. Resume never re-reads it once
+        // BL_RPU.hevc is sealed. Inputs outside the temp dir (e.g. the source MKV) are kept.
+        if bl_hevc.starts_with(&temp_dir) {
+            let _ = fs::remove_file(&bl_hevc);
+        }
     }
 
     // --- Mux ---
@@ -705,10 +737,43 @@ fn remove_dolby_vision_metadata(
     )? && clean_bl.exists()
     {
         resume::mark_done(&clean_bl)?;
+        // The raw DV stream is no longer needed once the clean BL is sealed; resume skips
+        // both steps when BL_clean.hevc is complete, so dropping it early is safe and frees
+        // ~the full video size during long conversions.
+        let _ = fs::remove_file(input_hevc);
         Ok(clean_bl)
     } else {
         anyhow::bail!("Failed to remove Dolby Vision metadata from base layer")
     }
+}
+
+/// Produce the Dolby Vision-clean base layer for the repair paths. When a previous run
+/// already sealed `BL_clean.hevc`, skip the raw extraction entirely — the intermediate
+/// `DV_raw.hevc` is deleted once the clean BL is complete, so re-extracting it on resume
+/// would waste a full-size disk pass for nothing.
+fn extract_clean_base_layer(
+    input_file: &str,
+    temp_dir: &Path,
+    message: &str,
+    resume_enabled: bool,
+    stall_timeout: u64,
+) -> Result<PathBuf> {
+    let clean_bl = temp_dir.join("BL_clean.hevc");
+    if resume_enabled && resume::is_complete(&clean_bl) {
+        progress::print_info("Reusing Dolby Vision-clean base layer from a previous run.");
+        return Ok(clean_bl);
+    }
+
+    let raw_hevc = temp_dir.join("DV_raw.hevc");
+    extract_video_hevc(
+        input_file,
+        &raw_hevc,
+        temp_dir,
+        message,
+        resume_enabled,
+        stall_timeout,
+    )?;
+    remove_dolby_vision_metadata(&raw_hevc, temp_dir, resume_enabled)
 }
 
 fn convert_mel_to_profile81(
@@ -855,7 +920,16 @@ fn run_hdr_analyzer(
 ) -> Result<Option<PathBuf>> {
     let tool_name = "hdr_analyzer_mvp";
     let mut exe = PathBuf::from(tool_name);
-    if Path::new("target/release/hdr_analyzer_mvp").exists() {
+    // Prefer the analyzer shipped next to this mkvdovi binary so a stale PATH install
+    // (e.g. an old version without the L1 sidecar) is never silently picked up.
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(sibling) = current_exe.parent().map(|dir| dir.join(tool_name)) {
+            if sibling.exists() {
+                exe = sibling;
+            }
+        }
+    }
+    if exe == Path::new(tool_name) && Path::new("target/release/hdr_analyzer_mvp").exists() {
         exe = Path::new("target/release/hdr_analyzer_mvp").to_path_buf();
     }
 
@@ -1202,6 +1276,7 @@ fn generate_rpu(
     peak_source: PeakSource,
     meta_file: Option<&Path>,
     meas_file: Option<&Path>,
+    embedded_l1_shots: bool,
     resume: bool,
 ) -> Result<Option<PathBuf>> {
     let rpu_out = temp_dir.join("RPU.bin");
@@ -1231,8 +1306,12 @@ fn generate_rpu(
                 .arg(peak_source.to_string());
         }
         HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
-            cmd.arg("--madvr-file").arg(meas_file.unwrap());
-            cmd.arg("--use-custom-targets");
+            // With embedded shots, the config already carries measured per-scene L1;
+            // passing --madvr-file would override it (madVR-derived L1 wins in dovi_tool).
+            if !embedded_l1_shots {
+                cmd.arg("--madvr-file").arg(meas_file.unwrap());
+                cmd.arg("--use-custom-targets");
+            }
         }
         _ => return Ok(None),
     }
