@@ -1,4 +1,4 @@
-use ffmpeg_next::frame;
+use ffmpeg_next::{format, frame};
 
 pub const CROP_EDGE_TOLERANCE: u32 = 2;
 const FRAME_SAMPLE_STEP: usize = 10;
@@ -175,13 +175,14 @@ pub fn is_frame_usable_for_crop(frame: &frame::Video) -> bool {
 
     let y_data = frame.data(0);
     let stride = frame.stride(0);
+    let p010 = frame.format() == format::Pixel::P010LE;
     let mut sampled = 0usize;
     let mut non_black = 0usize;
 
     for y in (0..height).step_by(FRAME_SAMPLE_STEP) {
         for x in (0..width).step_by(FRAME_SAMPLE_STEP) {
             sampled += 1;
-            if is_non_black_10bit_limited(read_luma10(y_data, stride, x, y)) {
+            if is_non_black_10bit_limited(read_luma10(y_data, stride, x, y, p010)) {
                 non_black += 1;
             }
         }
@@ -190,15 +191,20 @@ pub fn is_frame_usable_for_crop(frame: &frame::Video) -> bool {
     sampled > 0 && (non_black as f64 / sampled as f64) >= MIN_USABLE_NON_BLACK_FRACTION
 }
 
-fn read_luma10(y_data: &[u8], stride: usize, x: usize, y: usize) -> u16 {
-    // YUV420P10LE: 10-bit little-endian stored in 16-bit containers, 2 bytes per sample
+fn read_luma10(y_data: &[u8], stride: usize, x: usize, y: usize, p010: bool) -> u16 {
+    // YUV420P10LE stores the 10-bit code in the low bits; P010LE stores it in the high bits.
     let offset = y.saturating_mul(stride) + x.saturating_mul(2);
     if offset + 1 >= y_data.len() {
         return 0;
     }
     let lo = y_data[offset];
     let hi = y_data[offset + 1];
-    u16::from_le_bytes([lo, hi])
+    let raw = u16::from_le_bytes([lo, hi]);
+    if p010 {
+        (raw >> 6) & 0x03FF
+    } else {
+        raw
+    }
 }
 
 /// Detect active video area by scanning for rows/columns with sufficient non-black pixels.
@@ -215,6 +221,7 @@ pub fn detect_crop(frame: &frame::Video) -> CropRect {
 
     let y_data = frame.data(0);
     let stride = frame.stride(0);
+    let p010 = frame.format() == format::Pixel::P010LE;
 
     let sample_step = FRAME_SAMPLE_STEP;
     let min_row_samples = (width as usize).div_ceil(sample_step).max(1);
@@ -228,7 +235,7 @@ pub fn detect_crop(frame: &frame::Video) -> CropRect {
         let mut non_black = 0usize;
         let mut x = 0usize;
         while x < width as usize {
-            let l = read_luma10(y_data, stride, x, y);
+            let l = read_luma10(y_data, stride, x, y, p010);
             if is_non_black_10bit_limited(l) {
                 non_black += 1;
                 if non_black >= required_non_black_row {
@@ -249,7 +256,7 @@ pub fn detect_crop(frame: &frame::Video) -> CropRect {
         let mut non_black = 0usize;
         let mut x = 0usize;
         while x < width as usize {
-            let l = read_luma10(y_data, stride, x, y);
+            let l = read_luma10(y_data, stride, x, y, p010);
             if is_non_black_10bit_limited(l) {
                 non_black += 1;
                 if non_black >= required_non_black_row {
@@ -270,7 +277,7 @@ pub fn detect_crop(frame: &frame::Video) -> CropRect {
         let mut non_black = 0usize;
         let mut y = 0usize;
         while y < height as usize {
-            let l = read_luma10(y_data, stride, x, y);
+            let l = read_luma10(y_data, stride, x, y, p010);
             if is_non_black_10bit_limited(l) {
                 non_black += 1;
                 if non_black >= required_non_black_col {
@@ -291,7 +298,7 @@ pub fn detect_crop(frame: &frame::Video) -> CropRect {
         let mut non_black = 0usize;
         let mut y = 0usize;
         while y < height as usize {
-            let l = read_luma10(y_data, stride, x, y);
+            let l = read_luma10(y_data, stride, x, y, p010);
             if is_non_black_10bit_limited(l) {
                 non_black += 1;
                 if non_black >= required_non_black_col {

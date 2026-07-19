@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ptr;
 
 use anyhow::{anyhow, Context, Result};
 use ffmpeg_next as ffmpeg;
@@ -314,7 +315,11 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
 
 #[cfg(test)]
 mod tests {
-    use super::spread_probe_timestamps;
+    use std::ptr;
+
+    use ffmpeg_next as ffmpeg;
+
+    use super::{select_cuda_format, spread_probe_timestamps};
 
     #[test]
     fn probe_timestamps_span_the_middle_seventy_percent() {
@@ -328,46 +333,65 @@ mod tests {
     fn one_probe_targets_the_midpoint() {
         assert_eq!(spread_probe_timestamps(200, 1_000, 1), vec![700]);
     }
+
+    #[test]
+    fn cuda_format_callback_selects_cuda_when_offered() {
+        let formats = [
+            ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_P010LE,
+            ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_CUDA,
+            ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_NONE,
+        ];
+        let selected = unsafe { select_cuda_format(ptr::null_mut(), formats.as_ptr()) };
+        assert_eq!(selected, ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_CUDA);
+    }
+
+    #[test]
+    fn cuda_format_callback_uses_software_fallback_when_cuda_is_missing() {
+        let formats = [
+            ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_YUV420P10LE,
+            ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_NONE,
+        ];
+        let selected = unsafe { select_cuda_format(ptr::null_mut(), formats.as_ptr()) };
+        assert_eq!(selected, ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_YUV420P10LE);
+    }
 }
 
 /// Set up hardware-accelerated decoder based on the specified acceleration type.
 ///
 /// # Arguments
-/// * `decoder_context` - The decoder context to configure
+/// * `parameters` - Stream codec parameters copied into each attempted decoder
 /// * `hwaccel` - Hardware acceleration type ("cuda", "vaapi", "videotoolbox")
 ///
 /// # Returns
 /// `Result<codec::decoder::Video>` - Configured hardware decoder
 pub fn setup_hardware_decoder(
-    decoder_context: codec::context::Context,
+    parameters: &codec::Parameters,
     hwaccel: &str,
 ) -> Result<codec::decoder::Video> {
     match hwaccel {
-        "cuda" => {
-            // Try to find CUDA-specific decoder
-            if let Some(cuda_decoder) = codec::decoder::find_by_name("hevc_cuvid") {
-                let mut context = codec::context::Context::new_with_codec(cuda_decoder);
-                // SAFETY: Both context pointers are valid - context is newly created and
-                // decoder_context is passed by value (moved). We copy simple POD fields
-                // (width, height, pix_fmt) which are safe integer/enum values.
-                // The mutable pointer is valid because we own `context`.
-                unsafe {
-                    (*context.as_mut_ptr()).width = (*decoder_context.as_ptr()).width;
-                    (*context.as_mut_ptr()).height = (*decoder_context.as_ptr()).height;
-                    (*context.as_mut_ptr()).pix_fmt = (*decoder_context.as_ptr()).pix_fmt;
-                }
-                context
-                    .decoder()
-                    .video()
-                    .context("Failed to create CUDA hardware decoder")
-            } else {
-                println!("CUDA decoder not available, falling back to software decoder");
-                decoder_context
-                    .decoder()
-                    .video()
-                    .context("Failed to create fallback software decoder")
+        "cuda" => match open_cuda_hwdevice_decoder(parameters) {
+            Ok(decoder) => {
+                println!("CUDA NVDEC active through FFmpeg AVHWDeviceContext");
+                Ok(decoder)
             }
-        }
+            Err(hwdevice_error) => {
+                eprintln!(
+                    "CUDA hwdevice decoder unavailable ({hwdevice_error:#}); trying hevc_cuvid"
+                );
+                match open_cuvid_decoder(parameters) {
+                    Ok(decoder) => {
+                        println!("CUDA decode active through hevc_cuvid fallback");
+                        Ok(decoder)
+                    }
+                    Err(cuvid_error) => {
+                        eprintln!(
+                            "hevc_cuvid unavailable ({cuvid_error:#}); falling back to software decode"
+                        );
+                        open_software_decoder(parameters)
+                    }
+                }
+            }
+        },
         "vaapi" | "videotoolbox" => {
             // For VAAPI and VideoToolbox, we'll use software decoding for now
             // as hardware acceleration setup is more complex and requires device contexts
@@ -375,20 +399,166 @@ pub fn setup_hardware_decoder(
                 "Hardware acceleration {} requested, using software decoder for now",
                 hwaccel
             );
-            decoder_context
-                .decoder()
-                .video()
-                .context("Failed to create software decoder")
+            open_software_decoder(parameters)
         }
         _ => {
             println!(
                 "Unknown hardware acceleration type '{}', using software decoder",
                 hwaccel
             );
-            decoder_context
-                .decoder()
-                .video()
-                .context("Failed to create software decoder")
+            open_software_decoder(parameters)
         }
     }
+}
+
+pub fn open_software_decoder(parameters: &codec::Parameters) -> Result<codec::decoder::Video> {
+    let mut context = codec::context::Context::from_parameters(parameters.clone())
+        .context("Failed to create software decoder context")?;
+    set_automatic_thread_count(&mut context);
+    context
+        .decoder()
+        .video()
+        .context("Failed to create software decoder")
+}
+
+fn set_automatic_thread_count(context: &mut codec::context::Context) {
+    // SAFETY: context owns a live AVCodecContext and thread_count is a plain integer field.
+    unsafe {
+        (*context.as_mut_ptr()).thread_count = 0;
+    }
+}
+
+unsafe extern "C" fn select_cuda_format(
+    _context: *mut ffmpeg::ffi::AVCodecContext,
+    formats: *const ffmpeg::ffi::AVPixelFormat,
+) -> ffmpeg::ffi::AVPixelFormat {
+    if formats.is_null() {
+        return ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_NONE;
+    }
+
+    // Preserve FFmpeg's first software choice so decode can continue if a device
+    // reinitialization causes CUDA to disappear from a later negotiation.
+    let fallback = unsafe { *formats };
+    let mut current = formats;
+    loop {
+        // SAFETY: FFmpeg guarantees a valid AV_PIX_FMT_NONE-terminated array for get_format.
+        let pixel_format = unsafe { *current };
+        if pixel_format == ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_NONE {
+            return fallback;
+        }
+        if pixel_format == ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_CUDA {
+            return pixel_format;
+        }
+        // SAFETY: the list is terminated by AV_PIX_FMT_NONE, checked above.
+        current = unsafe { current.add(1) };
+    }
+}
+
+fn open_cuda_hwdevice_decoder(parameters: &codec::Parameters) -> Result<codec::decoder::Video> {
+    let decoder = codec::decoder::find(parameters.id())
+        .context("No decoder is registered for the input codec")?;
+    let supports_cuda = unsafe {
+        let mut index = 0;
+        let mut found = false;
+        loop {
+            let config = ffmpeg::ffi::avcodec_get_hw_config(decoder.as_ptr(), index);
+            if config.is_null() {
+                break;
+            }
+            let config = &*config;
+            let uses_device_context =
+                config.methods & ffmpeg::ffi::AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX as i32 != 0;
+            if uses_device_context
+                && config.device_type == ffmpeg::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA
+                && config.pix_fmt == ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_CUDA
+            {
+                found = true;
+                break;
+            }
+            index += 1;
+        }
+        found
+    };
+    if !supports_cuda {
+        return Err(anyhow::anyhow!(
+            "decoder '{}' does not advertise CUDA hwdevice support",
+            decoder.name()
+        ));
+    }
+
+    let mut context = codec::context::Context::new_with_codec(decoder);
+    context
+        .set_parameters(parameters.clone())
+        .context("Failed to copy codec parameters into CUDA decoder")?;
+    set_automatic_thread_count(&mut context);
+
+    unsafe {
+        let codec_context = context.as_mut_ptr();
+        (*codec_context).get_format = Some(select_cuda_format);
+
+        let mut device_context = ptr::null_mut();
+        let status = ffmpeg::ffi::av_hwdevice_ctx_create(
+            &mut device_context,
+            ffmpeg::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
+            ptr::null(),
+            ptr::null_mut(),
+            0,
+        );
+        if status < 0 || device_context.is_null() {
+            if !device_context.is_null() {
+                ffmpeg::ffi::av_buffer_unref(&mut device_context);
+            }
+            return Err(anyhow::anyhow!(
+                "av_hwdevice_ctx_create(CUDA) failed with FFmpeg error {status}"
+            ));
+        }
+
+        let decoder_reference = ffmpeg::ffi::av_buffer_ref(device_context);
+        ffmpeg::ffi::av_buffer_unref(&mut device_context);
+        if decoder_reference.is_null() {
+            return Err(anyhow::anyhow!(
+                "failed to retain the CUDA AVHWDeviceContext"
+            ));
+        }
+        (*codec_context).hw_device_ctx = decoder_reference;
+    }
+
+    context
+        .decoder()
+        .video()
+        .context("Failed to open CUDA hwdevice decoder")
+}
+
+fn open_cuvid_decoder(parameters: &codec::Parameters) -> Result<codec::decoder::Video> {
+    let cuda_decoder =
+        codec::decoder::find_by_name("hevc_cuvid").context("FFmpeg does not provide hevc_cuvid")?;
+    let mut context = codec::context::Context::new_with_codec(cuda_decoder);
+    context
+        .set_parameters(parameters.clone())
+        .context("Failed to copy codec parameters into hevc_cuvid")?;
+    set_automatic_thread_count(&mut context);
+    context
+        .decoder()
+        .video()
+        .context("Failed to open hevc_cuvid")
+}
+
+/// Download an AV_PIX_FMT_CUDA frame to system memory (typically as P010LE).
+pub fn transfer_hardware_frame(source: &frame::Video) -> Result<frame::Video> {
+    if source.format() != format::Pixel::CUDA {
+        return Err(anyhow::anyhow!(
+            "hardware transfer requires an AV_PIX_FMT_CUDA frame"
+        ));
+    }
+
+    let mut destination = frame::Video::empty();
+    let status = unsafe {
+        ffmpeg::ffi::av_hwframe_transfer_data(destination.as_mut_ptr(), source.as_ptr(), 0)
+    };
+    if status < 0 {
+        return Err(anyhow::anyhow!(
+            "av_hwframe_transfer_data failed with FFmpeg error {status}"
+        ));
+    }
+    Ok(destination)
 }

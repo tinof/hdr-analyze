@@ -23,9 +23,10 @@ fn copy_frame(frame: &MadVRFrame) -> MadVRFrame {
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 
-use ffmpeg_next::{codec, format, frame, software};
+use ffmpeg_next::{format, frame, software};
 
 use crate::analysis::frame::{analyze_native_frame_cropped, FrameAnalysisOptions, FramePeakStats};
+use crate::analysis::gpu::GpuAnalyzer;
 use crate::analysis::histogram::{
     apply_histogram_ema, apply_histogram_temporal_median, select_peak_pq,
 };
@@ -34,7 +35,10 @@ use crate::analysis::scene::{
 };
 use crate::cli::{Cli, PeakDomain, PeakEstimator};
 use crate::crop::{detect_crop, is_frame_usable_for_crop, CropRect, CROP_EDGE_TOLERANCE};
-use crate::ffmpeg_io::{probe_crop, setup_hardware_decoder, TransferFunction, VideoInfo};
+use crate::ffmpeg_io::{
+    open_software_decoder, probe_crop, setup_hardware_decoder, transfer_hardware_frame,
+    TransferFunction, VideoInfo,
+};
 use crate::l1_sidecar::{write_l1_sidecar, FrameL1Measurement};
 use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
 use crate::writer::write_measurement_file;
@@ -198,6 +202,65 @@ fn effective_downscale(requested: u32) -> u32 {
             );
             1
         }
+    }
+}
+
+/// Convert (and optionally downscale) a decoded frame to YUV420P10LE, creating the
+/// scaler lazily from the actual input frame format (hardware decoders only reveal
+/// their output format once frames arrive).
+fn scale_to_yuv420p10(
+    input: &frame::Video,
+    scaler: &mut Option<software::scaling::Context>,
+    output: &mut frame::Video,
+    downscale: u32,
+) -> Result<()> {
+    let target_width = ((input.width() / downscale.max(1)).max(2)) & !1;
+    let target_height = ((input.height() / downscale.max(1)).max(2)) & !1;
+    let needs_new = match scaler {
+        Some(existing) => {
+            existing.input().format != input.format()
+                || existing.input().width != input.width()
+                || existing.input().height != input.height()
+        }
+        None => true,
+    };
+    if needs_new {
+        *scaler = Some(
+            software::scaling::Context::get(
+                input.format(),
+                input.width(),
+                input.height(),
+                format::Pixel::YUV420P10LE,
+                target_width,
+                target_height,
+                software::scaling::Flags::FAST_BILINEAR,
+            )
+            .context("Failed to create scaling context")?,
+        );
+        *output = frame::Video::empty();
+    }
+    scaler
+        .as_mut()
+        .expect("scaler initialized")
+        .run(input, output)
+        .context("Failed to convert analysis frame")
+}
+
+fn scale_rect(rect: CropRect, factor: u32) -> CropRect {
+    CropRect {
+        x: rect.x * factor,
+        y: rect.y * factor,
+        width: rect.width * factor,
+        height: rect.height * factor,
+    }
+}
+
+fn shrink_rect(rect: CropRect, factor: u32) -> CropRect {
+    CropRect {
+        x: rect.x / factor,
+        y: rect.y / factor,
+        width: (rect.width / factor).max(2),
+        height: (rect.height / factor).max(2),
     }
 }
 
@@ -440,64 +503,81 @@ fn run_native_analysis_pipeline(
         .best(ffmpeg_next::media::Type::Video)
         .context("No video stream found")?;
     let video_stream_index = video_stream.index();
+    let codec_parameters = video_stream.parameters();
 
-    let mut decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
-        .context("Failed to create decoder context from stream parameters")?;
-
-    // SAFETY: decoder_context is valid and as_mut_ptr() returns a valid mutable pointer.
-    // Setting thread_count to 0 enables FFmpeg's automatic thread count selection,
-    // which is a safe operation that only affects the decoder's threading behavior.
-    unsafe {
-        let ctx = decoder_context.as_mut_ptr();
-        (*ctx).thread_count = 0;
-    }
-
-    let mut decoder = if let Some(hwaccel) = &cli.hwaccel {
-        println!("Attempting to use hardware acceleration: {}", hwaccel);
-        setup_hardware_decoder(decoder_context, hwaccel)?
+    let cuda_requested = cli.hwaccel.as_deref() == Some("cuda");
+    let gpu_block_reason = if !cuda_requested {
+        None
+    } else if analysis_options.denoise_mode == "median3" {
+        Some("--pre-denoise median3 is CPU-only")
+    } else if analysis_options.peak_estimator == PeakEstimator::Robust {
+        Some("--peak-estimator robust is CPU-only (needs grain statistics)")
     } else {
-        decoder_context
-            .decoder()
-            .video()
-            .context("Failed to create video decoder")?
+        None
+    };
+    let mut gpu_analyzer = if cuda_requested && gpu_block_reason.is_none() {
+        match GpuAnalyzer::new(analysis_options.transfer_function, cli.hlg_peak_nits) {
+            Ok(analyzer) => {
+                println!(
+                    "CUDA analysis active (NVRTC kernel on full-resolution frames, {}x sampling stride)",
+                    downscale
+                );
+                Some(analyzer)
+            }
+            Err(error) => {
+                eprintln!("CUDA analysis unavailable ({error:#}); using CPU analysis");
+                None
+            }
+        }
+    } else {
+        if let Some(reason) = gpu_block_reason {
+            eprintln!("CUDA analysis disabled: {reason}; using CPU analysis");
+        }
+        None
     };
 
-    let mut scaler: Option<software::scaling::Context> = None;
-    let mut target_w = decoder.width();
-    let mut target_h = decoder.height();
+    let mut decoder = if let Some(hwaccel) = cli.hwaccel.as_deref() {
+        println!("Attempting to use hardware acceleration: {hwaccel}");
+        setup_hardware_decoder(&codec_parameters, hwaccel)?
+    } else {
+        open_software_decoder(&codec_parameters)?
+    };
+
+    let full_w = decoder.width();
+    let full_h = decoder.height();
+    let mut target_w = full_w;
+    let mut target_h = full_h;
     if downscale > 1 {
         target_w = (target_w / downscale).max(2) & !1;
         target_h = (target_h / downscale).max(2) & !1;
     }
-    let need_scaler = decoder.format() != format::Pixel::YUV420P10LE || downscale > 1;
-    if need_scaler {
-        scaler = Some(
-            software::scaling::Context::get(
-                decoder.format(),
-                decoder.width(),
-                decoder.height(),
-                format::Pixel::YUV420P10LE,
-                target_w,
-                target_h,
-                software::scaling::Flags::FAST_BILINEAR,
-            )
-            .context("Failed to create scaling context")?,
-        );
-    }
 
+    // The GPU path analyzes full-resolution frames with a sampling stride, so its
+    // crop rectangle lives in full-resolution coordinates; the CPU path keeps the
+    // downscaled coordinate space of its converted analysis frames.
+    let gpu_active_at_start = gpu_analyzer.is_some();
     let mut crop_rect_opt = if cli.no_crop {
-        let rect = CropRect::full(target_w, target_h);
+        let rect = if gpu_active_at_start {
+            CropRect::full(full_w, full_h)
+        } else {
+            CropRect::full(target_w, target_h)
+        };
         println!(
             "\nCrop disabled: using full frame {}x{}",
             rect.width, rect.height
         );
         Some(rect)
+    } else if gpu_active_at_start && downscale > 1 {
+        initial_crop.map(|rect| scale_rect(rect, downscale))
     } else {
         initial_crop
     };
     let mut crop_monitor = crop_rect_opt
         .filter(|_| !cli.no_crop)
         .map(|_| CropStabilityMonitor::new());
+
+    let mut cpu_scaler: Option<software::scaling::Context> = None;
+    let mut scaled_frame = frame::Video::empty();
 
     let mut frames = Vec::new();
     let mut l1_measurements = Vec::new();
@@ -553,121 +633,77 @@ fn run_native_analysis_pipeline(
     }
     pb.set_position(0); // Show initial progress immediately
 
-    for (stream, packet) in input_context.packets() {
-        if stream.index() == video_stream_index {
-            decoder
-                .send_packet(&packet)
-                .context("Failed to send packet to decoder")?;
-
-            let mut decoded_frame = frame::Video::empty();
-            let mut scaled_frame = frame::Video::empty();
-            while decoder.receive_frame(&mut decoded_frame).is_ok() {
-                // Determine if we should analyze this frame or use cached data
-                let should_analyze =
-                    frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
-
-                let (analyzed_frame, l1_measurement, peak_stats) = if should_analyze {
-                    let analysis_frame = if let Some(ref mut sc) = scaler {
-                        sc.run(&decoded_frame, &mut scaled_frame)
-                            .context("Failed to scale frame")?;
-                        &scaled_frame
-                    } else {
-                        &decoded_frame
-                    };
-
-                    let rect =
-                        resolve_crop_rect(&mut crop_rect_opt, &mut crop_monitor, analysis_frame);
-
-                    let analysis_start = if cli.profile_performance {
-                        Some(Instant::now())
-                    } else {
-                        None
-                    };
-                    let frame_result =
-                        analyze_native_frame_cropped(analysis_frame, &rect, analysis_options)?;
-                    if let Some(start) = analysis_start {
-                        analysis_duration += start.elapsed();
-                    }
-
-                    // Scene detection on analyzed frames
-                    if let Some(ref prev_hist) = previous_histogram {
-                        let raw_diff =
-                            compute_scene_diff(cli, &frame_result.frame.lum_histogram, prev_hist);
-                        let diff_for_threshold = if smoothing_window > 0 {
-                            diff_window.push_back(raw_diff);
-                            if diff_window.len() > smoothing_window {
-                                diff_window.pop_front();
-                            }
-                            let sum: f64 = diff_window.iter().sum();
-                            sum / (diff_window.len() as f64)
-                        } else {
-                            raw_diff
-                        };
-
-                        if diff_for_threshold > cli.scene_threshold
-                            && cut_allowed(Some(last_cut_frame), frame_count, cli.min_scene_length)
-                        {
-                            scene_cuts.push(frame_count);
-                            last_cut_frame = frame_count;
-                            sample_scene_cut_crop(&mut crop_monitor, rect, analysis_frame);
-                        }
-                    }
-                    previous_histogram = Some(frame_result.frame.lum_histogram.clone());
-                    last_analyzed_frame = Some(copy_frame(&frame_result.frame));
-                    last_l1_measurement = Some(frame_result.l1);
-                    last_peak_stats = Some(frame_result.peak_stats);
-                    (frame_result.frame, frame_result.l1, frame_result.peak_stats)
-                } else {
-                    // Use cached frame data for skipped frames
-                    (
-                        copy_frame(last_analyzed_frame.as_ref().unwrap()),
-                        last_l1_measurement.unwrap(),
-                        last_peak_stats.unwrap(),
-                    )
-                };
-
-                frames.push(analyzed_frame);
-                l1_measurements.push(l1_measurement);
-                frame_peak_stats.push(peak_stats);
-                frame_count += 1;
-
-                // Update progress display
-                pb.set_position(frame_count as u64);
-            }
-        }
-    }
-
-    decoder
-        .send_eof()
-        .context("Failed to send EOF to decoder")?;
-    let mut decoded_frame = frame::Video::empty();
-    let mut scaled_frame = frame::Video::empty();
-    while decoder.receive_frame(&mut decoded_frame).is_ok() {
+    let mut process_decoded = |decoded_frame: &frame::Video| -> Result<()> {
         // Determine if we should analyze this frame or use cached data
         let should_analyze = frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
 
         let (analyzed_frame, l1_measurement, peak_stats) = if should_analyze {
-            let analysis_frame = if let Some(ref mut sc) = scaler {
-                sc.run(&decoded_frame, &mut scaled_frame)
-                    .context("Failed to scale final frame")?;
-                &scaled_frame
+            let transferred = if decoded_frame.format() == format::Pixel::CUDA {
+                Some(transfer_hardware_frame(decoded_frame)?)
             } else {
-                &decoded_frame
+                None
             };
-
-            let rect = resolve_crop_rect(&mut crop_rect_opt, &mut crop_monitor, analysis_frame);
+            let host_frame = transferred.as_ref().unwrap_or(decoded_frame);
 
             let analysis_start = if cli.profile_performance {
                 Some(Instant::now())
             } else {
                 None
             };
-            let frame_result =
-                analyze_native_frame_cropped(analysis_frame, &rect, analysis_options)?;
+
+            let mut gpu_output = None;
+            let mut gpu_failed = false;
+            if let Some(analyzer) = gpu_analyzer.as_mut() {
+                let rect = resolve_crop_rect(&mut crop_rect_opt, &mut crop_monitor, host_frame);
+                match analyzer.analyze(host_frame, &rect, downscale, analysis_options) {
+                    Ok(result) => gpu_output = Some((result, rect)),
+                    Err(error) => {
+                        eprintln!(
+                            "\nCUDA analysis failed at frame {frame_count} ({error:#}); switching to CPU analysis"
+                        );
+                        gpu_failed = true;
+                    }
+                }
+            }
+            if gpu_failed {
+                gpu_analyzer = None;
+                if downscale > 1 {
+                    // Re-map the committed crop into the CPU path's downscaled space.
+                    crop_rect_opt = crop_rect_opt.map(|rect| shrink_rect(rect, downscale));
+                }
+            }
+
+            let used_gpu = gpu_output.is_some();
+            let mut used_scaled = false;
+            let (frame_result, rect) = if let Some((result, rect)) = gpu_output {
+                (result, rect)
+            } else {
+                let needs_scaling =
+                    host_frame.format() != format::Pixel::YUV420P10LE || downscale > 1;
+                let analysis_frame: &frame::Video = if needs_scaling {
+                    scale_to_yuv420p10(host_frame, &mut cpu_scaler, &mut scaled_frame, downscale)?;
+                    used_scaled = true;
+                    &scaled_frame
+                } else {
+                    host_frame
+                };
+                let rect = resolve_crop_rect(&mut crop_rect_opt, &mut crop_monitor, analysis_frame);
+                (
+                    analyze_native_frame_cropped(analysis_frame, &rect, analysis_options)?,
+                    rect,
+                )
+            };
             if let Some(start) = analysis_start {
                 analysis_duration += start.elapsed();
             }
 
+            let cut_sample_frame: &frame::Video = if used_gpu || !used_scaled {
+                host_frame
+            } else {
+                &scaled_frame
+            };
+
+            // Scene detection on analyzed frames
             if let Some(ref prev_hist) = previous_histogram {
                 let raw_diff =
                     compute_scene_diff(cli, &frame_result.frame.lum_histogram, prev_hist);
@@ -681,12 +717,13 @@ fn run_native_analysis_pipeline(
                 } else {
                     raw_diff
                 };
+
                 if diff_for_threshold > cli.scene_threshold
                     && cut_allowed(Some(last_cut_frame), frame_count, cli.min_scene_length)
                 {
                     scene_cuts.push(frame_count);
                     last_cut_frame = frame_count;
-                    sample_scene_cut_crop(&mut crop_monitor, rect, analysis_frame);
+                    sample_scene_cut_crop(&mut crop_monitor, rect, cut_sample_frame);
                 }
             }
             previous_histogram = Some(frame_result.frame.lum_histogram.clone());
@@ -695,6 +732,7 @@ fn run_native_analysis_pipeline(
             last_peak_stats = Some(frame_result.peak_stats);
             (frame_result.frame, frame_result.l1, frame_result.peak_stats)
         } else {
+            // Use cached frame data for skipped frames
             (
                 copy_frame(last_analyzed_frame.as_ref().unwrap()),
                 last_l1_measurement.unwrap(),
@@ -706,8 +744,33 @@ fn run_native_analysis_pipeline(
         l1_measurements.push(l1_measurement);
         frame_peak_stats.push(peak_stats);
         frame_count += 1;
+
+        // Update progress display
         pb.set_position(frame_count as u64);
+        Ok(())
+    };
+
+    for (stream, packet) in input_context.packets() {
+        if stream.index() == video_stream_index {
+            decoder
+                .send_packet(&packet)
+                .context("Failed to send packet to decoder")?;
+
+            let mut decoded_frame = frame::Video::empty();
+            while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                process_decoded(&decoded_frame)?;
+            }
+        }
     }
+
+    decoder
+        .send_eof()
+        .context("Failed to send EOF to decoder")?;
+    let mut decoded_frame = frame::Video::empty();
+    while decoder.receive_frame(&mut decoded_frame).is_ok() {
+        process_decoded(&decoded_frame)?;
+    }
+    drop(process_decoded);
 
     // Finalize progress display
     pb.finish_with_message("Complete");
