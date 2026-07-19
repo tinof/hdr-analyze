@@ -8,6 +8,17 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **CUDA-accelerated analysis backend** for `hdr_analyzer_mvp` (opt-in `cuda` cargo feature,
+  activated at runtime with `--hwaccel cuda`). NVDEC hardware decode via a proper FFmpeg CUDA
+  `AVHWDeviceContext` (with `hevc_cuvid` and software fallbacks) feeds a single-launch
+  NVRTC-compiled kernel that computes the v5 luminance histogram, hue histogram, 4096-bin
+  peak-domain PQ histogram, max-RGB peaks, and exact per-pixel means on full-resolution frames
+  with a sampling stride — no swscale, and only a few KB of results downloaded per frame.
+  Validated bit-identical L1 measurements, scene cuts, and MaxCLL against the CPU path;
+  ~12× analysis throughput measured on an RTX 4070 (17 → 213 fps at 4K). `--pre-denoise median3`
+  and `--peak-estimator robust` remain CPU-only; all failure modes fall back to CPU analysis.
+  `mkvdovi --hwaccel cuda` forwards the flag to the analyzer it spawns. No CUDA toolchain is
+  needed at build time (driver + NVRTC at runtime only).
 - Added Profile 7 FEL to Profile 8.1 conversion in `mkvdovi`: BL+EL compositing applies polynomial
   luma reshaping, MMR chroma reshaping, and NLQ LinearDeadzone residuals before local or Modal-backed
   HEVC re-encoding and fresh RPU generation.

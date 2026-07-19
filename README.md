@@ -13,6 +13,12 @@ dynamic tone-mapping metadata.
 
 **Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdovi → Dynamic HDR MKV`
 
+> ⚡ **CUDA-accelerated** — as far as we know, this is the only open-source HDR10 → Dolby Vision
+> measurement pipeline with end-to-end GPU acceleration: NVDEC hardware decode plus a custom CUDA
+> analysis kernel. On an RTX 4070 the analysis pass runs ~12× faster than the CPU path
+> (a 43-minute 4K episode measures in ~6 minutes), with bit-identical L1 output. See
+> [GPU acceleration](#gpu-acceleration-cuda).
+
 > **Renamed in v0.3.0:** the converter formerly called `mkvdolby` is now **`mkvdovi`**
 > (see [docs/PROVENANCE.md](docs/PROVENANCE.md) for why). For one release, archives ship a
 > transitional `mkvdolby` copy and leftover `mkvdolby_temp_*` directories still resume.
@@ -56,6 +62,11 @@ This is a Rust workspace with three shipped binaries:
   Direct `max` remains the estimator default pending a successful real-content parity gate.
 - **Native HLG workflow**: auto-detects ARIB STD-B67 and converts to PQ histograms in-memory
   (`--hlg-peak-nits`, default 1000).
+- **CUDA-accelerated analysis** (optional `cuda` build feature): NVDEC hardware decode through a
+  proper FFmpeg `AVHWDeviceContext` plus a single-launch NVRTC-compiled analysis kernel computing
+  the v5 histogram, hue histogram, 4096-bin peak-domain PQ histogram, max-RGB peaks, and exact
+  per-pixel means on the GPU. Validated bit-identical to the CPU path; automatic CPU fallback at
+  every stage.
 - **Dolby Vision CM v4.0** output by default (L1/L2/L6/L9/L11/L254) via `mkvdovi`.
 - **Profile 7 FEL preservation**: composites BL+EL polynomial/MMR reshaping and NLQ residuals,
   then emits a Profile 8.1-compatible base layer; local and Modal encoding backends are supported.
@@ -97,6 +108,14 @@ Clone and build the workspace (compiles all three binaries):
 git clone https://github.com/tinof/hdr-analyze.git
 cd hdr-analyze
 cargo build --release --workspace
+```
+
+On a machine with an NVIDIA GPU, build the analyzer with the CUDA backend
+(the other binaries are unaffected):
+
+```bash
+cargo build --release -p hdr_analyzer_mvp --features cuda
+cargo build --release -p mkvdovi -p verifier
 ```
 
 Binaries land in `target/release/`:
@@ -147,6 +166,9 @@ The examples below cover the common paths. For every flag and default, see
 # Full-frame analysis (disable crop detection)
 ./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --no-crop
 
+# GPU-accelerated analysis (requires the `cuda` build feature and an NVIDIA GPU)
+./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --hwaccel cuda
+
 # Opt into grain-robust max-RGB peaks and save per-frame diagnostics
 ./target/release/hdr_analyzer_mvp -i "grainy.mkv" -o "out.bin" \
   --peak-estimator robust --dump-frame-stats "frame_stats.csv"
@@ -169,6 +191,7 @@ Converts HDR10/HDR10+/HLG/Profile 7 input to a Profile 8.1 MKV with CM v4.0 meta
 mkvdovi                                  # convert all .mkv files in the current directory
 mkvdovi "input.mkv"                      # convert a specific file
 mkvdovi "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
+mkvdovi "input.mkv" --hwaccel cuda           # GPU-accelerated analysis (and NVENC for FEL re-encodes)
 mkvdovi "input.mkv" --analysis-quality accurate   # fast | balanced (default) | accurate
 mkvdovi "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
 mkvdovi "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean
@@ -186,6 +209,27 @@ and [developer handoff](docs/profile7_fel_developer_handoff.md).
 → HDR10+ peak mapping, CM v4.0 metadata, and verification details:
 [docs/DOLBY_VISION.md](docs/DOLBY_VISION.md). Full flag list:
 [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#mkvdovi).
+
+### GPU acceleration (CUDA)
+
+Build `hdr_analyzer_mvp` with `--features cuda` and pass `--hwaccel cuda` (or use
+`mkvdovi --hwaccel cuda`, which forwards it to the analyzer it spawns) to run the whole
+measurement pass on the GPU:
+
+- **Decode**: HEVC 4K10 frames are decoded by NVDEC via an FFmpeg CUDA `AVHWDeviceContext`
+  (with `hevc_cuvid` and software fallbacks).
+- **Analysis**: one CUDA kernel launch per frame computes the luminance/hue/PQ histograms,
+  max-RGB peaks, and exact per-pixel means directly on full-resolution frames using a sampling
+  stride — swscale downscaling is bypassed entirely, and only a few KB of results leave the GPU
+  per frame.
+- **Parity**: validated bit-identical (12-bit precision) L1 measurements, scene cuts, and MaxCLL
+  against the CPU path. Measured on an RTX 4070: analysis throughput 17 → 213 fps (~12×).
+- **Fallbacks**: no `cuda` build feature, no NVIDIA device, `--pre-denoise median3`, or
+  `--peak-estimator robust` (which needs the CPU grain statistics) all fall back to the CPU path
+  automatically — mid-run kernel failures do too.
+
+The `cuda` feature needs only the NVIDIA driver and NVRTC at *runtime* (the kernel is compiled
+on startup); no `nvcc` or CUDA toolchain is required at build time.
 
 ### Verifier
 

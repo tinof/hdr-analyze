@@ -188,7 +188,7 @@ mkvdovi "input.mkv"     # process a specific file
 |------|---------|-------------|
 | `--analysis-quality <fast\|balanced\|accurate>` | `balanced` | HDR10/HLG analysis preset: `fast` = half-res/every 3rd frame; `balanced` = half-res/every frame; `accurate` = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass |
-| `--hwaccel <none\|cuda>` | `none` | Hardware acceleration hint for analysis and encoding |
+| `--hwaccel <none\|cuda>` | `none` | Hardware acceleration: GPU analysis in the spawned analyzer, NVENC for FEL re-encodes |
 | `--encoder <libx265\|videotoolbox>` | `libx265` | Encoder for HLG→PQ conversion (`videotoolbox` ≈ 10× faster on Apple Silicon) |
 
 ### HDR10+ peak mapping
@@ -288,9 +288,16 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
 
 ## Hardware acceleration
 
-### Analyzer (decoding)
+### Analyzer (decoding + analysis)
 
-- `cuda`: attempts the `hevc_cuvid` decoder; automatic fallback to software decoding if unavailable.
+- `cuda`: with a `--features cuda` build, enables the full GPU path — NVDEC decode through an
+  FFmpeg CUDA `AVHWDeviceContext` (falling back to `hevc_cuvid`, then software) plus an
+  NVRTC-compiled CUDA kernel that computes the histograms, max-RGB peaks, and per-pixel means on
+  full-resolution frames with a sampling stride (`--downscale` maps to the stride). Bit-identical
+  L1 output vs. the CPU path; ~12× analysis throughput measured on an RTX 4070.
+  `--pre-denoise median3` and `--peak-estimator robust` are CPU-only and disable the GPU kernel;
+  any runtime CUDA failure falls back to CPU analysis mid-run. Without the `cuda` build feature,
+  `--hwaccel cuda` still attempts hardware decode and otherwise behaves as before.
 - `vaapi` / `videotoolbox`: currently log and fall back to software decoding (proper device
   contexts are planned). The pipeline remains fully functional via software decoding everywhere.
 

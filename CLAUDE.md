@@ -23,6 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `cargo clippy --workspace --all-targets -- -D warnings`
   - `cargo test --workspace --verbose`
 - Build all release binaries: `cargo build --release --workspace`
+- CUDA-enabled analyzer (NVIDIA hosts): `cargo build --release -p hdr_analyzer_mvp --features cuda` — also lint it with `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` (CI only covers the default feature set)
 - Test one crate: `cargo test -p hdr_analyzer_mvp` (or `-p mkvdovi`, `-p verifier`)
 - Run a single test by name: `cargo test -p <crate> -- <test_name>`
 - Run one binary: `cargo run -p <crate> -- ...`
@@ -36,6 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Real entrypoints and boundaries
 
 - `hdr_analyzer_mvp/src/main.rs`: CLI parse + validation; orchestrates via `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `writer.rs`.
+- **Optional CUDA backend** (`cuda` cargo feature, off by default): `analysis/gpu.rs` + NVRTC-compiled `analysis/kernels.cu`. Activated at runtime by `--hwaccel cuda`; NVDEC decode via FFmpeg `AVHWDeviceContext` in `ffmpeg_io.rs` (cuvid → software fallbacks). The kernel analyzes **full-resolution** frames with a sampling stride (`--downscale` = stride, no swscale), so its crop rect lives in full-res coordinates — `pipeline.rs` scales rects between spaces (`scale_rect`/`shrink_rect`). `--pre-denoise median3` and `--peak-estimator robust` are CPU-only (robust needs the cross-quad diff histogram); GPU `FramePeakStats` report neutral sigma/n_eff. Validated bit-identical L1 output vs. CPU. Keep kernel result-buffer layout in sync between `kernels.cu` and `gpu.rs` constants.
 - `mkvdovi/src/main.rs`: file discovery/sorting + early `inspect`/`composite-pipe` dispatch + per-file orchestration via `pipeline::convert_file`. Key modules: `fel_composite.rs` (Profile 7 BL+EL processing), `rpu_check.rs` (MEL/FEL/P8 classification and RPU diagnostics), `external.rs` (tool checks/invocation), `metadata.rs` (`CmV40Config`, L2/L5/L9/L11 generation), `verify.rs`, `progress.rs`.
 - `verifier/src/main.rs`: standalone measurement-validator CLI.
 
@@ -47,6 +49,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Successful conversion deletes the source input by default**; pass `--keep-source` to prevent deletion.
 - **Robust to interruption:** extract/inject/mux/encode show a live byte-progress bar (throughput + ETA) and warn after `--stall-timeout` (default 300s, `0` disables) if the output file stops growing. An interrupted run (e.g. SSH `SIGHUP`) preserves `mkvdovi_temp_*` and prints a resume hint; a re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels (`resume.rs`). `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.
 - For HDR10 without found measurements, it auto-runs `hdr_analyzer_mvp`. `--analysis-quality` controls sampling (downscale/sample-rate): `fast` = half-res/every 3rd frame, `balanced` = half-res/every frame (default), `accurate` = full-res/every frame.
+- `mkvdovi --hwaccel cuda` is forwarded to the spawned `hdr_analyzer_mvp` (GPU analysis if that binary was built with `--features cuda`) and selects NVENC for FEL re-encodes. mkvdovi prefers `target/release/hdr_analyzer_mvp` relative to cwd over PATH.
 - For HDR10+ input, L1 is derived from source HDR10+ metadata; panel peak is **not** passed as a `--trim-targets` override. HDR10+ scene peaks above 3× mastering-display peak produce advisory warnings only — **never add a silent clamp**.
 - `--verify` resolves tools from `PATH`, validates structured RPU frame JSON, and hard-fails malformed Profile 8 / L1 / L6 / CM v4.0 L9/L11/L254 metadata.
 - `scripts/mkvdovi_hifi_workflow.sh` is a specialist comparison helper for inputs that **already** contain DV metadata. Use `mkvdovi` directly for HDR10+ sources.
