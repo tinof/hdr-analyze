@@ -15,7 +15,8 @@ dynamic tone-mapping metadata.
 
 > ⚡ **CUDA-accelerated** — as far as we know, this is the only open-source HDR10 → Dolby Vision
 > measurement pipeline with end-to-end GPU acceleration: NVDEC hardware decode plus a custom CUDA
-> analysis kernel. On an RTX 4070 the analysis pass runs ~12× faster than the CPU path
+> analysis kernel. **Zero-config**: `mkvdovi` auto-detects your NVIDIA GPU at startup and enables
+> the CUDA path automatically. On an RTX 4070 the analysis pass runs ~12× faster than the CPU path
 > (a 43-minute 4K episode measures in ~6 minutes), with bit-identical L1 output. See
 > [GPU acceleration](#gpu-acceleration-cuda).
 
@@ -191,8 +192,8 @@ Converts HDR10/HDR10+/HLG/Profile 7 input to a Profile 8.1 MKV with CM v4.0 meta
 mkvdovi                                  # convert all .mkv files in the current directory
 mkvdovi "input.mkv"                      # convert a specific file
 mkvdovi "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
-mkvdovi "input.mkv" --hwaccel cuda           # GPU-accelerated analysis (and NVENC for FEL re-encodes)
-mkvdovi "input.mkv" --analysis-quality accurate   # fast | balanced (default) | accurate
+mkvdovi "input.mkv" --hwaccel none           # force the CPU pipeline (auto-detection is the default)
+mkvdovi "input.mkv" --analysis-quality accurate   # auto (default) | fast | balanced | accurate
 mkvdovi "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
 mkvdovi "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean
 mkvdovi inspect "input.mkv"                       # full RPU metadata inspection
@@ -212,9 +213,15 @@ and [developer handoff](docs/profile7_fel_developer_handoff.md).
 
 ### GPU acceleration (CUDA)
 
-Build `hdr_analyzer_mvp` with `--features cuda` and pass `--hwaccel cuda` (or use
-`mkvdovi --hwaccel cuda`, which forwards it to the analyzer it spawns) to run the whole
-measurement pass on the GPU:
+**`mkvdovi` is zero-config**: on startup it probes for an NVIDIA GPU (`nvidia-smi`) and, when
+found, automatically enables CUDA — NVDEC + GPU analysis in the analyzer it spawns, and NVENC for
+FEL/HLG re-encodes (guarded by an ffmpeg `hevc_nvenc` capability check, with automatic libx265
+fallback). When the spawned `hdr_analyzer_mvp` was built with `--features cuda` (its `--version`
+reports `+cuda`), auto mode also upgrades analysis quality to `accurate` — full-resolution,
+every-frame measurement that is still ~4× faster than the old CPU default. Opt out with
+`--hwaccel none` or pin quality with `--analysis-quality balanced`.
+
+For direct analyzer use, build `hdr_analyzer_mvp` with `--features cuda` and pass `--hwaccel cuda`:
 
 - **Decode**: HEVC 4K10 frames are decoded by NVDEC via an FFmpeg CUDA `AVHWDeviceContext`
   (with `hevc_cuvid` and software fallbacks).

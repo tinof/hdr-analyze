@@ -192,6 +192,10 @@ fn main() -> anyhow::Result<()> {
     let mut final_args = args.clone();
     final_args.peak_source = peak_source;
 
+    // Resolve `auto` hwaccel / analysis-quality to concrete values for this machine
+    // (one-time detection; all downstream code sees only concrete settings).
+    pipeline::resolve_auto_settings(&mut final_args);
+
     let trim_targets: Vec<u32> = final_args
         .trim_targets
         .split(',')

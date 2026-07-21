@@ -186,9 +186,9 @@ mkvdovi "input.mkv"     # process a specific file
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--analysis-quality <fast\|balanced\|accurate>` | `balanced` | HDR10/HLG analysis preset: `fast` = half-res/every 3rd frame; `balanced` = half-res/every frame; `accurate` = full-res/every frame |
+| `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass |
-| `--hwaccel <none\|cuda>` | `none` | Hardware acceleration: GPU analysis in the spawned analyzer, NVENC for FEL re-encodes |
+| `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); GPU analysis in the spawned analyzer, NVENC for FEL/HLG re-encodes |
 | `--encoder <libx265\|videotoolbox>` | `libx265` | Encoder for HLG→PQ conversion (`videotoolbox` ≈ 10× faster on Apple Silicon) |
 
 ### HDR10+ peak mapping
@@ -287,6 +287,23 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
 ---
 
 ## Hardware acceleration
+
+### mkvdovi auto-detection (default)
+
+`--hwaccel auto` (the default) resolves once at startup:
+
+- NVIDIA GPU present (`nvidia-smi -L` succeeds, including the WSL2 location
+  `/usr/lib/wsl/lib/nvidia-smi`) → behaves as `--hwaccel cuda`.
+- Otherwise → behaves as `--hwaccel none` (today's CPU pipeline).
+- `--analysis-quality auto` (the default) additionally resolves to `accurate` only when CUDA is
+  active **and** the spawned `hdr_analyzer_mvp` advertises `+cuda` in `--version`; otherwise
+  `balanced`. This avoids accidentally running full-res CPU analysis with a non-CUDA analyzer build.
+- NVENC selection for FEL/HLG re-encodes is guarded by an `ffmpeg -encoders` probe for
+  `hevc_nvenc`; if missing, mkvdovi warns and falls back to the configured software encoder
+  instead of failing mid-encode.
+
+The resolved choice is printed at startup. Explicit `--hwaccel none|cuda` values skip detection
+entirely.
 
 ### Analyzer (decoding + analysis)
 

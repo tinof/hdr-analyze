@@ -847,17 +847,55 @@ fn is_dolby_vision(hdr_type: HdrFormat) -> bool {
     )
 }
 
+/// Locate the hdr_analyzer_mvp binary, preferring a fresh local release build.
+pub fn analyzer_executable() -> PathBuf {
+    let local = Path::new("target/release/hdr_analyzer_mvp");
+    if local.exists() {
+        local.to_path_buf()
+    } else {
+        PathBuf::from("hdr_analyzer_mvp")
+    }
+}
+
+/// Resolve `auto` settings to concrete values for this machine, once at startup.
+/// `--hwaccel auto` becomes `cuda` when an NVIDIA GPU is detected (else `none`);
+/// `--analysis-quality auto` becomes `accurate` only when GPU analysis is actually
+/// available (CUDA resolved + analyzer built with the cuda feature), because
+/// full-resolution every-frame analysis on the CPU would be slower than today's
+/// balanced default.
+pub fn resolve_auto_settings(args: &mut Args) {
+    if args.hwaccel == HwAccel::Auto {
+        if external::detect_nvidia_gpu() {
+            args.hwaccel = HwAccel::Cuda;
+            progress::print_info(
+                "Auto-detected NVIDIA GPU: CUDA acceleration enabled (decode + analysis; NVENC for re-encodes).",
+            );
+        } else {
+            args.hwaccel = HwAccel::None;
+            progress::print_info("No NVIDIA GPU detected: using the CPU pipeline.");
+        }
+    }
+    if args.analysis_quality == AnalysisQuality::Auto {
+        let gpu_analysis = args.hwaccel == HwAccel::Cuda
+            && external::analyzer_has_cuda_feature(&analyzer_executable());
+        args.analysis_quality = if gpu_analysis {
+            progress::print_info(
+                "GPU analysis available: using accurate (full-resolution) analysis quality.",
+            );
+            AnalysisQuality::Accurate
+        } else {
+            AnalysisQuality::Balanced
+        };
+    }
+}
+
 fn run_hdr_analyzer(
     input: &str,
     temp_dir: &Path,
     extra_args: &[String],
     args: &Args,
 ) -> Result<Option<PathBuf>> {
-    let tool_name = "hdr_analyzer_mvp";
-    let mut exe = PathBuf::from(tool_name);
-    if Path::new("target/release/hdr_analyzer_mvp").exists() {
-        exe = Path::new("target/release/hdr_analyzer_mvp").to_path_buf();
-    }
+    let exe = analyzer_executable();
 
     let dir = Path::new(input).parent().unwrap_or(Path::new("."));
     let stem = Path::new(input).file_stem().unwrap().to_string_lossy();
@@ -885,8 +923,9 @@ fn run_hdr_analyzer(
 
 fn analysis_quality_args(quality: AnalysisQuality) -> (&'static str, &'static str) {
     match quality {
+        // Auto is resolved to a concrete value at startup; map it defensively.
+        AnalysisQuality::Auto | AnalysisQuality::Balanced => ("2", "1"),
         AnalysisQuality::Fast => ("2", "3"),
-        AnalysisQuality::Balanced => ("2", "1"),
         AnalysisQuality::Accurate => ("1", "1"),
     }
 }
@@ -1110,7 +1149,7 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args, resume: bool) ->
         &vf,
     ]);
 
-    if args.hwaccel == HwAccel::Cuda {
+    if args.hwaccel == HwAccel::Cuda && external::ffmpeg_has_encoder("hevc_nvenc") {
         cmd.args([
             "-c:v",
             "hevc_nvenc",
@@ -1139,6 +1178,11 @@ fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args, resume: bool) ->
             "tv",
         ]);
     } else {
+        if args.hwaccel == HwAccel::Cuda {
+            progress::print_warn(
+                "ffmpeg lacks hevc_nvenc; using the configured software encoder instead.",
+            );
+        }
         match args.encoder {
             Encoder::Libx265 => {
                 cmd.args([
@@ -1256,6 +1300,7 @@ mod tests {
         assert_eq!(analysis_quality_args(AnalysisQuality::Fast), ("2", "3"));
         assert_eq!(analysis_quality_args(AnalysisQuality::Balanced), ("2", "1"));
         assert_eq!(analysis_quality_args(AnalysisQuality::Accurate), ("1", "1"));
+        assert_eq!(analysis_quality_args(AnalysisQuality::Auto), ("2", "1"));
     }
 
     #[test]

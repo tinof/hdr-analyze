@@ -371,6 +371,39 @@ pub fn get_command_output(cmd: &mut Command) -> Result<String> {
     }
 }
 
+/// Detect a usable NVIDIA GPU by asking nvidia-smi to list devices.
+/// On WSL2 the binary may live outside PATH in /usr/lib/wsl/lib.
+pub fn detect_nvidia_gpu() -> bool {
+    let smi = find_tool("nvidia-smi").or_else(|| {
+        let wsl = Path::new("/usr/lib/wsl/lib/nvidia-smi");
+        wsl.exists().then(|| wsl.to_path_buf())
+    });
+    let Some(smi) = smi else {
+        return false;
+    };
+    get_command_output(Command::new(smi).arg("-L"))
+        .map(|out| out.contains("GPU"))
+        .unwrap_or(false)
+}
+
+/// Check whether the ffmpeg on PATH provides a given encoder (e.g. "hevc_nvenc").
+pub fn ffmpeg_has_encoder(name: &str) -> bool {
+    get_command_output(Command::new("ffmpeg").args(["-hide_banner", "-encoders"]))
+        .map(|out| {
+            out.lines()
+                .any(|line| line.split_whitespace().nth(1) == Some(name))
+        })
+        .unwrap_or(false)
+}
+
+/// Check whether an hdr_analyzer_mvp binary was built with the CUDA analysis
+/// backend (its --version output advertises "+cuda").
+pub fn analyzer_has_cuda_feature(exe: &Path) -> bool {
+    get_command_output(Command::new(exe).arg("--version"))
+        .map(|out| out.contains("+cuda"))
+        .unwrap_or(false)
+}
+
 /// Run a command, inheriting stderr (so progress bars work naturally) but capturing/logging stdout.
 pub fn run_command_inherit_stderr(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     let log_file = File::create(log_path).context("Failed to create log file")?;

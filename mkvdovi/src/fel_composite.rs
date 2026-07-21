@@ -1525,7 +1525,7 @@ fn spawn_reencode_composited_from_stdin(
         "-y",
     ]);
 
-    if args.hwaccel == HwAccel::Cuda {
+    if args.hwaccel == HwAccel::Cuda && external::ffmpeg_has_encoder("hevc_nvenc") {
         let qp_str = args.fel_crf.to_string();
         cmd.args([
             "-c:v",
@@ -1560,6 +1560,11 @@ fn spawn_reencode_composited_from_stdin(
             cmd.args(["-bsf:v", &bsf]);
         }
     } else {
+        if args.hwaccel == HwAccel::Cuda {
+            progress::print_warn(
+                "ffmpeg lacks hevc_nvenc; using the configured software encoder for the FEL re-encode.",
+            );
+        }
         let x265_params = format!(
             "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:master-display={}:max-cll={},{}:hdr-opt=1:repeat-headers=1",
             master_display, max_cll, max_fall

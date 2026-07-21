@@ -158,7 +158,7 @@ pub struct Args {
     /// Analysis quality for HDR10/HLG sources.
     /// fast = half-res, every 3rd frame (old default); balanced = half-res, every frame;
     /// accurate = full-res, every frame (slowest but most precise L1).
-    #[arg(long, value_enum, default_value_t = AnalysisQuality::Balanced)]
+    #[arg(long, value_enum, default_value_t = AnalysisQuality::Auto)]
     pub analysis_quality: AnalysisQuality,
 
     /// Keep the source file after successful conversion (by default it is deleted).
@@ -177,7 +177,8 @@ pub struct Args {
     pub stall_timeout: u64,
 
     /// Hardware acceleration hint for analysis and encoding.
-    #[arg(long, value_enum, default_value_t = HwAccel::None)]
+    /// auto (default) detects an NVIDIA GPU at startup and uses CUDA when available.
+    #[arg(long, value_enum, default_value_t = HwAccel::Auto)]
     pub hwaccel: HwAccel,
 
     /// Encoder to use for HLG to PQ conversion (libx265 or hevc_videotoolbox).
@@ -197,6 +198,27 @@ pub struct Args {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn hwaccel_and_analysis_quality_default_to_auto() {
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        assert_eq!(args.hwaccel, HwAccel::Auto);
+        assert_eq!(args.analysis_quality, AnalysisQuality::Auto);
+    }
+
+    #[test]
+    fn explicit_hwaccel_and_quality_values_parse() {
+        let args = Args::try_parse_from([
+            "mkvdovi",
+            "--hwaccel",
+            "none",
+            "--analysis-quality",
+            "balanced",
+        ])
+        .unwrap();
+        assert_eq!(args.hwaccel, HwAccel::None);
+        assert_eq!(args.analysis_quality, AnalysisQuality::Balanced);
+    }
 
     #[test]
     fn inspect_subcommand_precedes_input_vec() {
@@ -241,6 +263,8 @@ mod tests {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum HwAccel {
+    /// Detect the best backend for this machine (CUDA when an NVIDIA GPU is present).
+    Auto,
     None,
     Cuda,
 }
@@ -248,6 +272,7 @@ pub enum HwAccel {
 impl std::fmt::Display for HwAccel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            HwAccel::Auto => write!(f, "auto"),
             HwAccel::None => write!(f, "none"),
             HwAccel::Cuda => write!(f, "cuda"),
         }
@@ -370,13 +395,16 @@ impl std::fmt::Display for OptimizerProfile {
 }
 
 /// Controls the resolution and frame-sampling rate of the hdr_analyzer_mvp pass.
+/// auto (default) picks accurate on a CUDA-capable setup, balanced otherwise.
 /// Higher quality = more accurate per-scene L1 luminance, at the cost of analysis time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum AnalysisQuality {
+    /// Pick automatically: accurate when GPU analysis is active, balanced otherwise.
+    #[default]
+    Auto,
     /// Half-resolution, every 3rd frame — fastest; may miss brief peak frames.
     Fast,
     /// Half-resolution, every frame — good balance of speed and accuracy.
-    #[default]
     Balanced,
     /// Full resolution, every frame — most accurate L1; significantly slower.
     Accurate,

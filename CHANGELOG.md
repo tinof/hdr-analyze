@@ -8,6 +8,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **Zero-config hardware auto-detection in `mkvdovi`**: `--hwaccel` now defaults to `auto`,
+  which probes for an NVIDIA GPU (`nvidia-smi`, including the WSL2 fallback path) once at startup
+  and resolves to `cuda` or `none`. `--analysis-quality` now defaults to `auto`, resolving to
+  `accurate` (full-resolution, every-frame) when GPU analysis is actually available — detected via
+  the spawned `hdr_analyzer_mvp --version` advertising `+cuda` — and `balanced` otherwise.
+  NVENC use for FEL/HLG re-encodes is guarded by an ffmpeg `hevc_nvenc` capability probe with a
+  warn-and-fall-back-to-libx265 path instead of a mid-encode failure. Explicit
+  `--hwaccel none|cuda` and quality values bypass detection entirely.
 - **CUDA-accelerated analysis backend** for `hdr_analyzer_mvp` (opt-in `cuda` cargo feature,
   activated at runtime with `--hwaccel cuda`). NVDEC hardware decode via a proper FFmpeg CUDA
   `AVHWDeviceContext` (with `hevc_cuvid` and software fallbacks) feeds a single-launch

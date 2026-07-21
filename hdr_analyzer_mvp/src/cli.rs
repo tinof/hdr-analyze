@@ -2,6 +2,13 @@ use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
 
+/// Version string advertising compiled-in optional backends; mkvdovi probes
+/// `--version` for "+cuda" to decide whether GPU analysis is available.
+#[cfg(feature = "cuda")]
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (+cuda)");
+#[cfg(not(feature = "cuda"))]
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum PeakEstimator {
     /// Use the highest measured peak-domain pixel.
@@ -24,7 +31,7 @@ pub enum PeakDomain {
 // --- Command Line Interface ---
 #[derive(Parser)]
 #[command(name = "hdr_analyzer_mvp")]
-#[command(version)]
+#[command(version = VERSION)]
 #[command(about = "HDR10 to Dolby Vision converter - Phase 1 MVP")]
 pub struct Cli {
     /// Path to the input video file (positional)
