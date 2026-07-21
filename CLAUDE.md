@@ -24,6 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `cargo test --workspace --verbose`
 - Build all release binaries: `cargo build --release --workspace`
 - CUDA-enabled analyzer (NVIDIA hosts): `cargo build --release -p hdr_analyzer_mvp --features cuda` — also lint it with `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` (CI only covers the default feature set)
+- Refresh the dev install after changes: `./scripts/dev-refresh.sh` — rebuilds the workspace release binaries **then** the CUDA analyzer last (a plain workspace build overwrites the analyzer without the cuda feature). On this dev box `~/.local/bin/{mkvdovi,hdr_analyzer_mvp,verifier}` are symlinks into `target/release/`, so the system-wide commands always run the latest build.
 - Test one crate: `cargo test -p hdr_analyzer_mvp` (or `-p mkvdovi`, `-p verifier`)
 - Run a single test by name: `cargo test -p <crate> -- <test_name>`
 - Run one binary: `cargo run -p <crate> -- ...`
