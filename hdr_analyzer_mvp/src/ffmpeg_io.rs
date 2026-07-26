@@ -222,6 +222,9 @@ pub fn probe_crop(input_path: &str, probe_count: u32, downscale: u32) -> Result<
 pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::context::Input)> {
     // Initialize FFmpeg
     ffmpeg::init().context("Failed to initialize FFmpeg")?;
+    // Silence per-NAL decoder chatter (e.g. "Skipping NAL unit 63" for every DV RPU NAL,
+    // logged at INFO) that would otherwise flood stderr and tear the progress bar.
+    ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Warning);
 
     // Open input file
     let input_context = format::input(input_path).context("Failed to open input video file")?;
