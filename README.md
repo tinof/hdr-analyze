@@ -13,16 +13,20 @@ dynamic tone-mapping metadata.
 
 **Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdovi → Dynamic HDR MKV`
 
-> ⚡ **CUDA-accelerated** — as far as we know, this is the only open-source HDR10 → Dolby Vision
-> measurement pipeline with end-to-end GPU acceleration: NVDEC hardware decode plus a custom CUDA
-> analysis kernel. **Zero-config**: `mkvdovi` auto-detects your NVIDIA GPU at startup and enables
-> the CUDA path automatically. On an RTX 4070 the analysis pass runs ~12× faster than the CPU path
-> (a 43-minute 4K episode measures in ~6 minutes), with bit-identical L1 output. See
-> [GPU acceleration](#gpu-acceleration-cuda).
+> ⚡ **CUDA-accelerated HDR metadata analysis** — end-to-end GPU acceleration of the measurement
+> pass: NVDEC hardware decode plus a custom CUDA analysis kernel. **Zero-config**: `mkvdovi`
+> auto-detects your NVIDIA GPU at startup and enables the CUDA path automatically. On the tested
+> RTX 4070 configuration the analysis pass measured approximately 12× the throughput of this
+> project's CPU path (a 43-minute 4K episode measures in ~6 minutes), with bit-identical L1 output.
+> See [GPU acceleration](#gpu-acceleration-cuda).
 
-> **Renamed in v0.3.0:** the converter formerly called `mkvdolby` is now **`mkvdovi`**
-> (see [docs/PROVENANCE.md](docs/PROVENANCE.md) for why). For one release, archives ship a
-> transitional `mkvdolby` copy and leftover `mkvdolby_temp_*` directories still resume.
+> HDR-Analyze is an independent open-source project. It and its outputs are not affiliated with,
+> endorsed by, sponsored by, certified by, approved by, or licensed by Dolby Laboratories. The
+> metadata it produces is intended for workflows compatible with the Dolby Vision® format
+> (Profile 8.1) through separately installed open-source tooling.
+
+> **Renamed in v0.3.0:** the converter is now **`mkvdovi`**. See the
+> [CHANGELOG](CHANGELOG.md) for the transitional-compatibility details.
 
 For HDR10+ inputs, `mkvdovi` extracts the source HDR10+ metadata directly and passes it to
 `dovi_tool`; it does not run `hdr_analyzer_mvp` unless HDR10+ metadata extraction fails and the
@@ -31,10 +35,10 @@ workflow falls back to HDR10 analysis.
 ## Documentation
 
 - **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — complete flag reference for all three tools.
-- **[docs/DOLBY_VISION.md](docs/DOLBY_VISION.md)** — current conversion paths, HDR10+ mapping, CM v4.0 metadata, and verification.
+- **[docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md)** — current conversion paths, HDR10+ mapping, CM v4.0 metadata, and verification.
 - **[docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md)** — analyzer accuracy gaps and validation design.
 - **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — analysis internals and research.
-- **[docs/PROVENANCE.md](docs/PROVENANCE.md)** — clean-room statement: the public standards this is built from.
+- **[docs/PROVENANCE.md](docs/PROVENANCE.md)** — implementation provenance: the public standards this is built from, and the limits of that statement.
 - **[ROADMAP.md](ROADMAP.md)** — canonical status and active work.
 - **[CHANGELOG.md](CHANGELOG.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**
 
@@ -44,7 +48,9 @@ This is a Rust workspace with three shipped binaries:
 
 - **`hdr_analyzer_mvp`** — HDR analysis engine; processes video and writes madVR-compatible `.bin`
   measurement files plus explicit `.l1.json` measurement sidecars.
-- **`mkvdovi`** — native HDR10/HDR10+/HLG → Dolby Vision Profile 8.1 (CM v4.0) conversion orchestrator.
+- **`mkvdovi`** — orchestrates conversion of HDR10, HDR10+, and HLG sources into Profile 8.1 MKVs
+  (CM v4.0 metadata) designed to be compatible with the Dolby Vision format, using separately
+  installed `dovi_tool`.
 - **`verifier`** — utility for reading, validating, and inspecting `.bin` measurement files.
 
 ## Key Features
@@ -68,12 +74,14 @@ This is a Rust workspace with three shipped binaries:
   the v5 histogram, hue histogram, 4096-bin peak-domain PQ histogram, max-RGB peaks, and exact
   per-pixel means on the GPU. Validated bit-identical to the CPU path; automatic CPU fallback at
   every stage.
-- **Dolby Vision CM v4.0** output by default (L1/L2/L6/L9/L11/L254) via `mkvdovi`.
+- **CM v4.0 metadata generation** by default via `mkvdovi` — emits L1/L2/L6/L9/L11/L254 metadata
+  intended for Profile 8.1-compatible workflows.
 - **Profile 7 FEL preservation**: composites BL+EL polynomial/MMR reshaping and NLQ residuals,
   then emits a Profile 8.1-compatible base layer; local and Modal encoding backends are supported.
-- **Dolby Vision metadata repair**: `mkvdovi inspect` audits RPU L1 patterns, while `--mdfix`
-  rebuilds Profile 7 MEL/Profile 8 metadata from fresh base-layer measurements without re-encoding
-  the picture. Dolby Vision and repair inputs keep their source by default.
+- **Metadata inspection and repair**: `mkvdovi inspect` audits RPU L1 patterns, while `--mdfix`
+  rebuilds metadata for supported Profile 7 MEL and Profile 8 inputs from fresh base-layer
+  measurements without re-encoding the picture. Inputs that already carry RPU metadata, and all
+  repair runs, keep their source by default.
 - **Cross-platform**: software decoding everywhere; optional CUDA attempt on NVIDIA with graceful
   fallback. ARM64-tuned (NEON, `--sample-rate`/`--downscale` give 3–4× throughput on CPU-limited systems).
 
@@ -142,7 +150,7 @@ install -Dm755 scripts/mkvdovi_hifi_workflow.sh "$HOME/.local/bin/mkvdovi_hifi_w
 ```
 
 `mkvdovi_hifi_workflow.sh` is a specialist comparison helper for regenerating files that already
-contain Dolby Vision metadata. Use `mkvdovi` directly for HDR10+ sources.
+contain metadata in the Dolby Vision format. Use `mkvdovi` directly for HDR10+ sources.
 
 Prebuilt binaries for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux** are published on
 the [Releases page](https://github.com/tinof/hdr-analyze/releases).
@@ -179,10 +187,12 @@ The examples below cover the common paths. For every flag and default, see
 
 ### mkvdovi (conversion tool)
 
-Converts HDR10/HDR10+/HLG/Profile 7 input to a Profile 8.1 MKV with CM v4.0 metadata.
+Converts HDR10/HDR10+/HLG/Profile 7 input to a Profile 8.1 MKV with CM v4.0 metadata, designed for
+compatibility with the Dolby Vision format.
 
-> For non-DV conversions, `mkvdovi` deletes the source file after success unless `--keep-source` is
-> passed. Dolby Vision inputs and all `--mdfix` runs keep the source as a metadata-safety default.
+> For conversions from sources without RPU metadata, `mkvdovi` deletes the source file after success
+> unless `--keep-source` is passed. Inputs that already carry RPU metadata, and all `--mdfix` runs,
+> keep the source as a metadata-safety default.
 >
 > An interrupted run (e.g. a dropped SSH session) keeps its `mkvdovi_temp_*` directory and prints a
 > resume hint — just re-run the same command to **resume** from the last completed step (`--no-resume`
@@ -208,7 +218,7 @@ offsets when available. See [the FEL preservation design](docs/profile7_fel_to_p
 and [developer handoff](docs/profile7_fel_developer_handoff.md).
 
 → HDR10+ peak mapping, CM v4.0 metadata, and verification details:
-[docs/DOLBY_VISION.md](docs/DOLBY_VISION.md). Full flag list:
+[docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md). Full flag list:
 [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#mkvdovi).
 
 ### GPU acceleration (CUDA)
@@ -257,8 +267,9 @@ Reports version/flags, scene & frame stats, peak brightness and avg PQ, histogra
 - **HLG/VAAPI/VideoToolbox decode** currently fall back to software decoding; proper device contexts
   are planned (see [Roadmap](#roadmap)).
 - **v6 per-gamut peaks** (`peak_pq_dcip3`, `peak_pq_709`) are approximated from BT.2020. These are a
-  **madVR measurement-file** feature only and are **not used by the Dolby Vision conversion** (which
-  uses the v5 file plus the BT.2020 peak and histogram), so the approximation does not affect DV output;
+  **madVR measurement-file** feature only and are **not used by the Profile 8.1 conversion** (which
+  uses the v5 file plus the BT.2020 peak and histogram), so the approximation does not affect the
+  generated RPU metadata;
   it matters only for a standalone v6 `.bin` consumed by madVR. PQ max-RGB peak measurement is now
   implemented; accurate target-gamut transforms remain a follow-up (see [Roadmap](#roadmap)).
 
@@ -275,7 +286,7 @@ summing ≈ 100; PQ values in `[0,1]`; scenes valid and within frame range.
 
 ## Roadmap
 
-See **[ROADMAP.md](ROADMAP.md)**. Near-term work includes source-honest Dolby Vision generation,
+See **[ROADMAP.md](ROADMAP.md)**. Near-term work includes source-faithful Profile 8.1 metadata generation,
 robust L1 min/average measurements, L5 emission, numerical CI regression gates, hybrid scene
 detection, and proper VAAPI/VideoToolbox device contexts.
 
@@ -302,7 +313,7 @@ pre-commit install --hook-type pre-push   # quick tests on push
 
 - **quietvoid** — for `dovi_tool`, `hdr10plus_tool`, and the MIT-licensed `madvr_parse` library.
 - **The Doom9 and MakeMKV forum communities** — for the collective research and documentation of
-  HDR formats and Dolby Vision packaging that made an open implementation possible.
+  HDR formats and RPU metadata packaging that made an open implementation possible.
 - `ffmpeg-next`, `clap`, `anyhow` and the wider Rust ecosystem.
 
 ## License
@@ -314,18 +325,21 @@ MIT License.
 - Does not include, redistribute, or reverse-engineer any Dolby Laboratories proprietary code,
   lookup tables, CM v4.0 trims, or binary blobs.
 - Does not bypass, circumvent, or interfere with any DRM or content-protection mechanism.
-- Not an official Dolby or HDR10+ Technologies product; no trademarks claimed.
+- Not an official Dolby or HDR10+ Technologies product, and not certified or approved by either;
+  no rights in their trademarks are claimed.
 - The analyzer outputs generic per-frame luminance data. Final packaging into a playback-compatible
   stream is done by `dovi_tool` and `mkvmerge`, which the user installs independently.
 
 ## Legal & Trademarks
 
 This software is a research project for video analysis and is not an official product of Dolby
-Laboratories.
+Laboratories or HDR10+ Technologies, LLC.
 
-- **Dolby Vision** is a trademark of Dolby Laboratories.
-- **HDR10+** is a trademark of HDR10+ Technologies, LLC.
+- Dolby and Dolby Vision are registered trademarks of Dolby Laboratories Licensing Corporation.
+- HDR10+ is a trademark of HDR10+ Technologies, LLC.
+- All other third-party trademarks are the property of their respective owners.
 
-This project is not affiliated with, endorsed by, or sponsored by Dolby Laboratories or HDR10+
-Technologies, LLC. Reference to these standards is strictly for compatibility and interoperability
-purposes.
+This project is not affiliated with, endorsed by, sponsored by, certified by, approved by, or
+licensed by Dolby Laboratories or HDR10+ Technologies, LLC. References to these marks are
+nominative — they identify the formats this project is designed to interoperate with, and nothing
+more.

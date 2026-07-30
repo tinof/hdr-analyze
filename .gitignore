@@ -89,6 +89,9 @@ RELEASE_STRATEGY.md
 /tmp/
 dev-handoff.md
 
-# Licensed Dolby documentation and third-party reference docs - never commit
-docs/dolby_vision_professional_tools_user_manual*.pdf
+# Licensed Dolby documentation and third-party reference docs - never commit.
+# Licensee-confidential under the Professional Tools EULA (see docs/PROVENANCE.md);
+# republication is prohibited, so match these anywhere in the tree, not just docs/.
+dolby_vision_professional_tools*
+Dolby_Vision_Professional_Tools*
 docs/dovi_tool_readme.md

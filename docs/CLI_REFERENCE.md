@@ -2,7 +2,7 @@
 
 Complete command-line reference for the three HDR-Analyze binaries. For a quick start, see the
 [README](../README.md). For HDR10+ peak mapping and Dolby Vision metadata details, see
-[DOLBY_VISION.md](DOLBY_VISION.md).
+[FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).
 
 All defaults below are taken directly from `--help`; run `<binary> --help` to confirm for your build.
 
@@ -176,7 +176,7 @@ mkvdovi "input.mkv"     # process a specific file
 | `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv` |
 | `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables) — tells a stalled tool apart from merely slow storage |
-| `--verify` | off | After muxing, validate the result (see [DOLBY_VISION.md](DOLBY_VISION.md#post-mux-verification)) |
+| `--verify` | off | After muxing, validate the result (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
 | `-v, --verbose` | off | Show raw command output (debugging) |
 | `-q, --quiet` | off | Minimal output (errors and final result only) |
 | `--drop-chapters` | off | Drop chapters in the output (kept by default) |
@@ -199,7 +199,7 @@ mkvdovi "input.mkv"     # process a specific file
 | `-b, --boost` | off | Brighter preset; switches another selected `--peak-source` to `histogram99` |
 | `--boost-experimental` | off | Asks `hdr_analyzer_mvp` to use a more aggressive optimizer profile |
 
-See [DOLBY_VISION.md](DOLBY_VISION.md#hdr10-peak-mapping) for guidance on each source.
+See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#hdr10-peak-mapping) for guidance on each source.
 
 ### Dolby Vision metadata (CM v4.0)
 

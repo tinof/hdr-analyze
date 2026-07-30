@@ -7,7 +7,7 @@
 
 This document explains the technical gaps and validation method. Status and prioritization live only
 in the [roadmap](../ROADMAP.md); current conversion usage lives in
-[DOLBY_VISION.md](DOLBY_VISION.md).
+[FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).
 
 ## What `cm_analyze` produces
 

@@ -2,11 +2,11 @@
 
 This is the single source of truth for active `hdr-analyze` work. Completed changes belong in
 [`CHANGELOG.md`](CHANGELOG.md); current user-facing behavior belongs in
-[`docs/DOLBY_VISION.md`](docs/DOLBY_VISION.md); technical accuracy analysis belongs in
+[`docs/FORMAT_COMPATIBILITY.md`](docs/FORMAT_COMPATIBILITY.md); technical accuracy analysis belongs in
 [`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md).
 
-> **North star:** approach the accuracy and feature set of Dolby Vision's `cm_analyze` with a fully
-> open-source, research-based analyzer. Parity is measured, never asserted.
+> **North star:** a fully open-source, research-based analyzer whose measurement accuracy stands up
+> against the reference tooling it is compared to. Parity is measured, never asserted.
 
 Status meanings: **Open** has not shipped; **Partial** has useful pieces in place but does not meet
 the stated outcome; **Core complete** meets the original gate but retains named follow-up work.
@@ -20,8 +20,8 @@ max-RGB. Against the parity workstreams below, **WS0 (validation foundation) is 
 
 ## Conversion quality
 
-The current priority is accurate HDR10 / HDR10+ / HLG → Dolby Vision conversion. The intended default
-is source-honest metadata: content-derived L1, neutral trims, and no display-specific optimizer target
+The current priority is accurate HDR10 / HDR10+ / HLG → Profile 8.1 conversion. The intended default
+is source-faithful metadata: content-derived L1, neutral trims, and no display-specific optimizer target
 baked in by default. Display-targeted behavior remains opt-in.
 
 | ID | Status | Work |
@@ -46,7 +46,7 @@ The detailed gap table and validation method live in
 | **WS2** | **Open** | Add per-shot L1 aggregation and an optional L4-style temporal filter/shot anchor. Promote hybrid scene detection only after it beats histogram-only against reference boundaries. |
 | **WS3** | **Open** | Emit and validate L5 active-area metadata (P3). |
 | **WS4** | **Open; experimental** | Derive optional L2/L8 trims from an open tone-mapping baseline such as ITU-R BT.2390. Neutral trims remain the default unless blinded A/B testing demonstrates an improvement. |
-| **WS5** | **Open** | Export Dolby Vision metadata XML for Resolve/Metafier interchange and independent validation. |
+| **WS5** | **Open** | Export CM metadata XML for Resolve/Metafier interchange and independent validation. |
 
 ## Engineering backlog
 
@@ -60,8 +60,8 @@ The detailed gap table and validation method live in
 
 ## Explicit non-goals
 
-- No proprietary Dolby code, LUTs, tone curves, or binary blobs; see
-  [`docs/PROVENANCE.md`](docs/PROVENANCE.md).
+- No proprietary Dolby code, LUTs, tone curves, or binary blobs in this repository; see
+  [`docs/PROVENANCE.md`](docs/PROVENANCE.md) for the provenance statement and its stated limits.
 - No silent peak clamping; suspicious values produce advisory warnings.
 - No `cm_analyze` parity claim without reproducible measurements.
 

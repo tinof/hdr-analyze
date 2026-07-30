@@ -1,4 +1,4 @@
-# Dolby Vision Conversion Guide
+# Format Compatibility & Conversion Guide
 
 How `mkvdovi` converts HDR10, HDR10+, and HLG sources, maps brightness metadata, generates CM v4.0
 metadata, and verifies the result. For every flag, see [CLI_REFERENCE.md](CLI_REFERENCE.md). For

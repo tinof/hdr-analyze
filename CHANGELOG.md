@@ -6,6 +6,26 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Changed
+
+- **Trademark and provenance hygiene across the documentation.** Removed the promotional
+  "only open-source HDR10 → Dolby Vision pipeline" claim from the README hero and replaced
+  brand-led feature labels with format-neutral descriptions ("Profile 8.1", "CM v4.0 metadata",
+  "RPU metadata"), keeping trademark references nominative and descriptive. Added a
+  non-affiliation disclaimer beside the first prominent use, and corrected the trademark
+  attribution to Dolby Laboratories Licensing Corporation. Renamed `docs/DOLBY_VISION.md` to
+  [`docs/FORMAT_COMPATIBILITY.md`](docs/FORMAT_COMPATIBILITY.md) (all links updated).
+- **[`docs/PROVENANCE.md`](docs/PROVENANCE.md) rewritten as auditable facts rather than legal
+  conclusions.** Retitled "Implementation Provenance and Source-Material Boundary"; replaced
+  absolute claims ("clean", "public standards only", "enforced by review") with scoped,
+  knowledge-qualified statements; strengthened the patent disclaimer to state that no
+  freedom-to-operate review has been performed and that independent development does not
+  establish non-infringement; and recorded a dated review of the licensed-tool EULA (v5.6.4,
+  reviewed 2026-07-31): no benchmark or publication restriction exists, so published validation
+  material is limited to derived statistics computed by this project, never the tool's
+  documentation or raw output. Broadened `.gitignore` so licensee-confidential Dolby
+  documentation cannot be committed from anywhere in the tree.
+
 ### Added
 
 - **Zero-config hardware auto-detection in `mkvdovi`**: `--hwaccel` now defaults to `auto`,
