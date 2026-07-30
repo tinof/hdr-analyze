@@ -6,6 +6,15 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Removed
+
+- **The transitional `mkvdolby` binary alias is no longer shipped.** Release archives contained a
+  `mkvdolby` copy of the converter for one release after the v0.3.0 rename; that compatibility
+  window has closed, so the Linux/macOS and Windows archive steps now ship `mkvdovi` only. Scripts
+  still invoking `mkvdolby` must be updated. Recognition of leftover `mkvdolby_temp_*` resume
+  directories is **retained** — those are on-disk state belonging to users mid-conversion, not a
+  distributed product name, and removing it would strand an interrupted run.
+
 ### Changed
 
 - **Trademark and provenance hygiene across the documentation.** Removed the promotional

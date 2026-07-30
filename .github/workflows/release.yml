@@ -39,7 +39,7 @@ jobs:
             | Tool | Description |
             |------|-------------|
             | `hdr_analyzer_mvp` | HDR10/HLG frame analyzer and measurement generator |
-            | `mkvdovi` | HDR10/HDR10+/HLG to Dolby Vision Profile 8.1 converter |
+            | `mkvdovi` | HDR10/HDR10+/HLG to Profile 8.1 converter (CM v4.0 metadata) |
             | `verifier` | madVR measurement file verification utility |
             
             ### 📦 Download
@@ -77,7 +77,7 @@ jobs:
             # HDR10 analysis
             ./hdr_analyzer_mvp -i input.mkv -o measurements.bin
             
-            # Convert to Dolby Vision while preserving the source for A/B testing
+            # Convert to Profile 8.1 while preserving the source for A/B testing
             ./mkvdovi --keep-source --verify input.mkv
             
             # Verify binary files
@@ -86,15 +86,15 @@ jobs:
             
             ### 📝 What's New
             
-            - **Breaking rename:** `mkvdolby` is now `mkvdovi`; this release includes a transitional
-              `mkvdolby` alias and recognizes existing resume directories.
+            - **Transitional `mkvdolby` alias removed.** The converter is `mkvdovi`; archives no
+              longer ship the pre-v0.3.0 alias. Update any scripts that still invoke `mkvdolby`.
             - **Measured PQ max-RGB peaks:** direct PQ peaks now default to BT.2020 NCL max-RGB,
-              validated against synthetic truth and Dolby's `cm_analyze`; use
+              validated against synthetic truth and licensed reference tooling; use
               `--peak-domain luma` for the legacy Y-luma measurement.
             - **Resilient long conversions:** live byte progress, stall warnings, graceful
               interruption, and automatic resume from completed artifacts.
-            - **Published validation and provenance:** reproducible accuracy tables and an explicit
-              clean-room boundary for licensed-tool comparisons.
+            - **Published validation and provenance:** reproducible accuracy tables and a documented
+              source-material boundary for licensed-tool comparisons.
 
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for detailed changes.
             
@@ -211,8 +211,6 @@ jobs:
           # Copy all binaries
           cp "target/${{ matrix.target }}/release/hdr_analyzer_mvp" "$staging/bin/"
           cp "target/${{ matrix.target }}/release/mkvdovi" "$staging/bin/"
-          # Transitional alias after the v0.3.0 rename; remove in the next release.
-          cp "target/${{ matrix.target }}/release/mkvdovi" "$staging/bin/mkvdolby"
           cp "target/${{ matrix.target }}/release/verifier" "$staging/bin/"
           cp scripts/mkvdovi_hifi_workflow.sh "$staging/bin/"
           
@@ -237,8 +235,6 @@ jobs:
           # Copy all binaries
           cp "target/${{ matrix.target }}/release/hdr_analyzer_mvp.exe" "$staging/bin/"
           cp "target/${{ matrix.target }}/release/mkvdovi.exe" "$staging/bin/"
-          # Transitional alias after the v0.3.0 rename; remove in the next release.
-          cp "target/${{ matrix.target }}/release/mkvdovi.exe" "$staging/bin/mkvdolby.exe"
           cp "target/${{ matrix.target }}/release/verifier.exe" "$staging/bin/"
           
           # Copy documentation
