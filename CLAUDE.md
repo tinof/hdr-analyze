@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repo actually is
 
 - Rust workspace (`resolver = "2"`) with **three shipped binaries**: `hdr_analyzer_mvp` (HDR10 analysis → PQ histograms + DV L1 metadata), `mkvdovi` (MKV container + Dolby Vision metadata injection, CM v4.0), `verifier` (MadVR / RPU measurement validation).
-- `tools/compare_baseline` is a separate utility crate, **excluded** from the workspace. Build/run it explicitly with `--manifest-path tools/compare_baseline/Cargo.toml`.
+- `tools/compare_baseline` and `tools/l1_diff` are separate utility crates, **excluded** from the workspace. Build/run them explicitly with `--manifest-path tools/<name>/Cargo.toml`.
 - Release profile is tuned: `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = "abort"` — release builds are slow to link; expect it.
 
 ## Toolchain and platform quirks
@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Real entrypoints and boundaries
 
-- `hdr_analyzer_mvp/src/main.rs`: CLI parse + validation; orchestrates via `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `writer.rs`.
+- `hdr_analyzer_mvp/src/main.rs`: CLI parse + validation; orchestrates via `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg, gpu) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `l1_sidecar.rs`, `writer.rs`.
 - **Optional CUDA backend** (`cuda` cargo feature, off by default): `analysis/gpu.rs` + NVRTC-compiled `analysis/kernels.cu`. Activated at runtime by `--hwaccel cuda`; NVDEC decode via FFmpeg `AVHWDeviceContext` in `ffmpeg_io.rs` (cuvid → software fallbacks). The kernel analyzes **full-resolution** frames with a sampling stride (`--downscale` = stride, no swscale), so its crop rect lives in full-res coordinates — `pipeline.rs` scales rects between spaces (`scale_rect`/`shrink_rect`). `--pre-denoise median3` and `--peak-estimator robust` are CPU-only (robust needs the cross-quad diff histogram); GPU `FramePeakStats` report neutral sigma/n_eff. Validated bit-identical L1 output vs. CPU. Keep kernel result-buffer layout in sync between `kernels.cu` and `gpu.rs` constants.
 - `mkvdovi/src/main.rs`: file discovery/sorting + early `inspect`/`composite-pipe` dispatch + per-file orchestration via `pipeline::convert_file`. Key modules: `fel_composite.rs` (Profile 7 BL+EL processing), `rpu_check.rs` (MEL/FEL/P8 classification and RPU diagnostics), `external.rs` (tool checks/invocation), `metadata.rs` (`CmV40Config`, L2/L5/L9/L11 generation), `verify.rs`, `progress.rs`.
 - `verifier/src/main.rs`: standalone measurement-validator CLI.
@@ -50,6 +50,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Successful conversion deletes the source input by default**; pass `--keep-source` to prevent deletion.
 - **Robust to interruption:** extract/inject/mux/encode show a live byte-progress bar (throughput + ETA) and warn after `--stall-timeout` (default 300s, `0` disables) if the output file stops growing. An interrupted run (e.g. SSH `SIGHUP`) preserves `mkvdovi_temp_*` and prints a resume hint; a re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels (`resume.rs`). `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.
 - For HDR10 without found measurements, it auto-runs `hdr_analyzer_mvp`. `--analysis-quality` controls sampling (downscale/sample-rate): `auto` (default) = `accurate` when GPU analysis is available else `balanced`; `fast` = half-res/every 3rd frame, `balanced` = half-res/every frame, `accurate` = full-res/every frame.
+- **L1 sidecar contract:** the analyzer writes per-scene L1 stats to `<measurements>.l1.json` (`hdr_analyzer_mvp/src/l1_sidecar.rs`); mkvdovi reads it via `metadata::load_l1_sidecar` for source-honest per-scene L1. The schema is versioned (`version: 1`) and a missing/invalid/other-version sidecar **silently** falls back to measurements-only L1 — so a schema change must bump the version on both sides (same class of cross-binary contract as the `+cuda` version probe).
 - `--hwaccel` defaults to **`auto`**: `pipeline::resolve_auto_settings` (called once from `main.rs`) probes `nvidia-smi` (incl. `/usr/lib/wsl/lib/nvidia-smi` on WSL2) and resolves to `cuda` or `none` before any file processing — downstream code only ever sees concrete values. GPU analysis availability is probed via `hdr_analyzer_mvp --version` containing `+cuda` (set from the analyzer's `cuda` feature in its `cli.rs` VERSION const — keep that contract if you touch either side). NVENC selection for FEL/HLG re-encodes is additionally guarded by `external::ffmpeg_has_encoder("hevc_nvenc")` with a warn+libx265 fallback.
 - Explicit `mkvdovi --hwaccel cuda` is forwarded to the spawned `hdr_analyzer_mvp` (GPU analysis if that binary was built with `--features cuda`) and selects NVENC for FEL re-encodes. mkvdovi prefers `target/release/hdr_analyzer_mvp` relative to cwd over PATH (`pipeline::analyzer_executable`).
 - For HDR10+ input, L1 is derived from source HDR10+ metadata; panel peak is **not** passed as a `--trim-targets` override. HDR10+ scene peaks above 3× mastering-display peak produce advisory warnings only — **never add a silent clamp**.
@@ -97,5 +98,4 @@ The native LSP tool (rust-analyzer plugin) is PRIMARY for symbol questions in th
 
 - LSP is a deferred tool: load it early with `ToolSearch` query `select:LSP` (a SessionStart hook reminds you).
 - Warm the index with one cheap `documentSymbol` call on an entrypoint — the first `workspaceSymbol` after a cold start returns empty while rust-analyzer indexes.
-- Semantic "where/how" exploration with no known symbol → `mcp__morph-mcp__codebase_search` first (global routing); big multi-question sweeps → the `warp-explorer` agent, never the built-in Explore agent.
 - **Review/audit/triage sweeps** ("find all X", "any stubs?") lead with `Grep` for exhaustive exact-pattern coverage (`todo!`, `unimplemented!`, `// TODO`, `// FIXME`), then read flagged bodies.
