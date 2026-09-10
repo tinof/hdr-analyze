@@ -1,0 +1,62 @@
+name: Setup FFmpeg build dependencies
+description: >
+  Install FFmpeg development files for ffmpeg-sys-next on the current runner OS.
+  libclang (for bindgen) and pkg-config are preinstalled on all GitHub-hosted images.
+  Windows uses a prebuilt LGPL shared FFmpeg from BtbN/FFmpeg-Builds instead of a
+  from-source vcpkg build.
+
+inputs:
+  windows-ffmpeg-asset:
+    description: BtbN release asset (in the rolling `latest` release) used on Windows.
+    default: ffmpeg-n9.0-latest-win64-lgpl-shared-9.0
+
+outputs:
+  bin-dir:
+    description: Directory holding the FFmpeg runtime DLLs and LICENSE.txt (Windows only).
+    value: ${{ steps.windows.outputs.bin-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install FFmpeg dev libs (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libclang-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+        echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> "$GITHUB_ENV"
+
+    - name: Install FFmpeg (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install ffmpeg
+        echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(brew --prefix)/include" >> "$GITHUB_ENV"
+
+    - name: Download prebuilt FFmpeg (Windows)
+      id: windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        ASSET: ${{ inputs.windows-ffmpeg-asset }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $base = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest'
+        $zip = Join-Path $env:RUNNER_TEMP "$env:ASSET.zip"
+        Invoke-WebRequest "$base/$env:ASSET.zip" -OutFile $zip
+        $sums = Join-Path $env:RUNNER_TEMP 'ffmpeg-checksums.sha256'
+        Invoke-WebRequest "$base/checksums.sha256" -OutFile $sums
+        $line = Get-Content $sums | Where-Object { $_.Trim().EndsWith(" $env:ASSET.zip") } | Select-Object -First 1
+        $expected = if ($line) { ($line.Trim() -split '\s+')[0] } else { '' }
+        $actual = (Get-FileHash $zip -Algorithm SHA256).Hash
+        if (-not $expected -or $actual -ne $expected) {
+          throw "FFmpeg checksum mismatch: expected '$expected', got '$actual'"
+        }
+        Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP -Force
+        $dir = Join-Path $env:RUNNER_TEMP $env:ASSET
+        Copy-Item (Join-Path $dir 'LICENSE.txt') (Join-Path $dir 'bin\FFMPEG-LICENSE.txt')
+        "FFMPEG_DIR=$dir" >> $env:GITHUB_ENV
+        "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+        (Join-Path $dir 'bin') >> $env:GITHUB_PATH
+        "bin-dir=$(Join-Path $dir 'bin')" >> $env:GITHUB_OUTPUT

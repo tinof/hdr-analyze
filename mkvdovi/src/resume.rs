@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Sentinel path for a completed artifact: `<artifact>.done`.
-fn marker_path(artifact: &Path) -> PathBuf {
+pub fn marker_path(artifact: &Path) -> PathBuf {
     let mut name = artifact.as_os_str().to_owned();
     name.push(".done");
     PathBuf::from(name)

@@ -22,6 +22,15 @@ fn test_mkvdovi_help() {
 }
 
 #[test]
+fn test_mkvdovi_help_contains_dovi_input() {
+    mkvdovi_cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--dovi-input"));
+}
+
+#[test]
 fn test_mkvdovi_execution_sample() {
     if !have_dovi_tool() {
         eprintln!("Skipping: dovi_tool not found in PATH");

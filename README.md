@@ -100,12 +100,13 @@ welcome, but there is no support SLA. Please do not expect production-level main
   `rust-toolchain.toml`).
 - **FFmpeg development libraries** (for compiling `ffmpeg-next`):
   - macOS: `brew install ffmpeg pkg-config`
-  - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev pkg-config`
-  - Windows: install FFmpeg dev libraries or use vcpkg
+  - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libclang-dev pkg-config`
+  - Windows: download an LGPL *shared* FFmpeg build (e.g. BtbN/FFmpeg-Builds `win64-lgpl-shared`), set `FFMPEG_DIR` to the extracted folder and `LIBCLANG_PATH` to your LLVM `bin`, and keep its `bin` on `PATH` at runtime (vcpkg also works, but compiles FFmpeg from source)
+  - Any FFmpeg from 3.4 through 9.x works (`ffmpeg-next` 9 detects the installed version)
 - **Build tools**: C compiler / build tools (Xcode CLT on macOS, `build-essential` on Linux, MSVC on Windows).
 - **External tools (NOT included)** — install and place in your `PATH`:
   - [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases): required for RPU generation/injection.
-    **2.3.2+ recommended** (fixes duplicated end-padding in `inject-rpu`).
+    **2.3.2+ recommended** (fixes duplicated end-padding in `inject-rpu`); **2.3.4+** additionally enables direct MKV input (skips the full-size HEVC extraction).
   - [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases): required for HDR10+ inputs.
   - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): required by `mkvdovi` for final MKV packaging.
 
@@ -203,6 +204,7 @@ mkvdovi                                  # convert all .mkv files in the current
 mkvdovi "input.mkv"                      # convert a specific file
 mkvdovi "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
 mkvdovi "input.mkv" --hwaccel none           # force the CPU pipeline (auto-detection is the default)
+mkvdovi "input.mkv" --dovi-input raw         # auto (default, direct MKV with dovi_tool 2.3.4+) | raw | mkv
 mkvdovi "input.mkv" --analysis-quality accurate   # auto (default) | fast | balanced | accurate
 mkvdovi "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
 mkvdovi "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean

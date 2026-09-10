@@ -82,10 +82,7 @@ fn rpu_format_label(format: RpuFormatKind) -> &'static str {
 }
 
 pub fn extract_rpu(input: &str, output: &Path, limit: Option<u32>) -> Result<()> {
-    let dovi_tool_path =
-        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let dovi_abs = fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
-    let mut cmd = Command::new(dovi_abs);
+    let mut cmd = external::dovi_tool_command();
     cmd.arg("extract-rpu")
         .arg("-i")
         .arg(input)
@@ -110,11 +107,10 @@ pub fn extract_rpu(input: &str, output: &Path, limit: Option<u32>) -> Result<()>
 
 pub fn try_extract_rpu_quiet(input: &str, output: &Path, limit: Option<u32>) -> bool {
     let _ = fs::remove_file(output);
-    let Some(dovi_tool_path) = external::find_tool("dovi_tool") else {
+    if external::find_tool("dovi_tool").is_none() {
         return false;
-    };
-    let dovi_abs = fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
-    let mut cmd = Command::new(dovi_abs);
+    }
+    let mut cmd = external::dovi_tool_command();
     cmd.arg("extract-rpu")
         .arg("-i")
         .arg(input)

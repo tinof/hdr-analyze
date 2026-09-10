@@ -189,6 +189,7 @@ mkvdovi "input.mkv"     # process a specific file
 | `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass |
 | `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); GPU analysis in the spawned analyzer, NVENC for FEL/HLG re-encodes |
+| `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
 | `--encoder <libx265\|videotoolbox>` | `libx265` | Encoder for HLG→PQ conversion (`videotoolbox` ≈ 10× faster on Apple Silicon) |
 
 ### HDR10+ peak mapping
