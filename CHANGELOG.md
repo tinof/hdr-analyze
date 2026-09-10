@@ -25,6 +25,15 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed
 
+- **CI/release FFmpeg setup simplified.** One composite action (`.github/actions/setup-ffmpeg`)
+  replaces six copy-pasted per-OS install blocks. Windows uses a checksum-verified prebuilt LGPL
+  FFmpeg (BtbN) instead of compiling it from source with vcpkg on every run, and tools already on
+  the runner images (LLVM, pkg-config, build-essential) are no longer reinstalled. The Windows
+  release zip now **bundles the LGPL FFmpeg DLLs and licence**, so the analyzer runs without a
+  separate FFmpeg install; CI smoke-tests that bundle on every Windows build.
+- **`ffmpeg-next` 8.0 → 9.0** with only the `codec`/`format`/`software-scaling` features. Fixes
+  macOS builds against Homebrew's FFmpeg 9 and stops linking the unused avfilter, avdevice and
+  swresample libraries. FFmpeg 3.4 through 9.x remain supported.
 - **Updated `dolby_vision` crate from 3.3 to 3.4**: incorporates the L11 byte 1 parsing fix, benefiting in-process inspection (`inspect`) and `--mdfix`.
 - **Progress and stall detection for `dovi_tool` operations**: `remove`, `convert`, and `demux` now display live byte progress with `--stall-timeout` monitoring.
 - **Trademark and provenance hygiene across the documentation.** Removed the promotional

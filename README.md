@@ -100,8 +100,9 @@ welcome, but there is no support SLA. Please do not expect production-level main
   `rust-toolchain.toml`).
 - **FFmpeg development libraries** (for compiling `ffmpeg-next`):
   - macOS: `brew install ffmpeg pkg-config`
-  - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libavdevice-dev libswscale-dev pkg-config`
-  - Windows: install FFmpeg dev libraries or use vcpkg
+  - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libclang-dev pkg-config`
+  - Windows: download an LGPL *shared* FFmpeg build (e.g. BtbN/FFmpeg-Builds `win64-lgpl-shared`), set `FFMPEG_DIR` to the extracted folder and `LIBCLANG_PATH` to your LLVM `bin`, and keep its `bin` on `PATH` at runtime (vcpkg also works, but compiles FFmpeg from source)
+  - Any FFmpeg from 3.4 through 9.x works (`ffmpeg-next` 9 detects the installed version)
 - **Build tools**: C compiler / build tools (Xcode CLT on macOS, `build-essential` on Linux, MSVC on Windows).
 - **External tools (NOT included)** — install and place in your `PATH`:
   - [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases): required for RPU generation/injection.

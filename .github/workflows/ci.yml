@@ -25,14 +25,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install FFmpeg dev libs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config clang lld libclang-dev \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libavfilter-dev libavdevice-dev libswscale-dev
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
+      - uses: ./.github/actions/setup-ffmpeg
       - name: cargo fmt (check)
         run: cargo fmt --all -- --check
       - name: cargo clippy (deny warnings)
@@ -46,14 +39,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install FFmpeg dev libs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config clang lld libclang-dev \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libavfilter-dev libavdevice-dev libswscale-dev
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
+      - uses: ./.github/actions/setup-ffmpeg
       - name: cargo test (locked)
         run: cargo test --workspace --verbose
 
@@ -61,6 +47,7 @@ jobs:
     name: Build (xplat)
     runs-on: ${{ matrix.os }}
     needs: [lint, test]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -69,46 +56,17 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-
-      - name: Install dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-24.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config clang lld libclang-dev \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libavfilter-dev libavdevice-dev libswscale-dev
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> $GITHUB_ENV
-
-      - name: Install dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install llvm ffmpeg pkg-config
-          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> $GITHUB_ENV
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(brew --prefix)/include" >> $GITHUB_ENV
-
-      - name: Cache vcpkg (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/cache@v5
-        with:
-          path: C:\vcpkg\installed
-          key: ${{ runner.os }}-vcpkg-ffmpeg-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-ffmpeg-
-
-      - name: Install dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          choco install -y llvm
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install ffmpeg:x64-windows
-          echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "PKG_CONFIG_PATH=$env:VCPKG_INSTALLATION_ROOT\\installed\\x64-windows\\lib\\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
+      - id: ffmpeg
+        uses: ./.github/actions/setup-ffmpeg
       - name: cargo build
         run: cargo build --release --workspace --verbose
+      - name: Smoke-test Windows FFmpeg DLL bundle
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/bundle"
+          cp target/release/*.exe "$RUNNER_TEMP/bundle/"
+          bash scripts/ci/bundle-windows-ffmpeg.sh "${{ steps.ffmpeg.outputs.bin-dir }}" "$RUNNER_TEMP/bundle"
 
   security-audit:
     name: Security Audit

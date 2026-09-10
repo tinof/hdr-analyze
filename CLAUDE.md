@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `rust-toolchain.toml` pins `channel = "stable"` (not a fixed version number) with components `clippy` + `rustfmt` and explicit cross targets. CI uses `dtolnay/rust-toolchain@stable`.
 - `.cargo/config.toml` sets `-C target-cpu=native` globally; on Linux ARM64 (`aarch64-unknown-linux-gnu`) it also forces `clang` + `lld`. This host is Oracle ARM/Ampere. Don't remove unless you mean to change perf/link behavior.
-- `ffmpeg-next` is used, so local/CI builds need FFmpeg dev libs + `clang`/`libclang` and `BINDGEN_EXTRA_CLANG_ARGS` configured (see `ci.yml` for the exact apt/brew/vcpkg packages and env per OS).
+- `ffmpeg-next` is used, so local/CI builds need FFmpeg dev libs + `clang`/`libclang` and `BINDGEN_EXTRA_CLANG_ARGS` configured — one composite action, `.github/actions/setup-ffmpeg`, does this per OS for both workflows (apt on Linux, `brew install ffmpeg` on macOS, a checksum-verified BtbN LGPL shared build via `FFMPEG_DIR` on Windows; libclang/pkg-config come preinstalled on the runner images). `ffmpeg-next` 9 is built with only `codec`/`format`/`software-scaling`, so avfilter/avdevice/swresample dev libs are not needed. The Windows release zip bundles the FFmpeg DLLs via `scripts/ci/bundle-windows-ffmpeg.sh`, which CI smoke-tests on every Windows build.
 
 ## High-signal commands (use these exact forms)
 
