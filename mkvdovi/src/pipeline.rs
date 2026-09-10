@@ -8,13 +8,33 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use serde_json::Value;
 
-use crate::cli::{AnalysisQuality, Args, CmVersion, Encoder, HwAccel, PeakSource};
-use crate::external::{self, run_command_with_progress, run_command_with_spinner};
+use crate::cli::{AnalysisQuality, Args, CmVersion, DoviInput, Encoder, HwAccel, PeakSource};
+use crate::external::{self, run_command_with_progress, run_command_with_spinner, ToolVersion};
 use crate::fel_composite;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
 use crate::rpu_check::{self, Level5Offsets};
+
+pub const DOVI_TOOL_MKV_INPUT_MIN: ToolVersion = (2, 3, 4);
+
+fn resolve_dovi_input(requested: DoviInput, version: Option<ToolVersion>) -> DoviInput {
+    match requested {
+        DoviInput::Auto => {
+            if version >= Some(DOVI_TOOL_MKV_INPUT_MIN) {
+                DoviInput::Mkv
+            } else {
+                DoviInput::Raw
+            }
+        }
+        DoviInput::Raw => DoviInput::Raw,
+        DoviInput::Mkv => DoviInput::Mkv,
+    }
+}
+
+pub(crate) fn feed_mkv_to_dovi_tool(mode: DoviInput, raw_sealed: bool) -> bool {
+    mode == DoviInput::Mkv && !raw_sealed
+}
 
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let input_path = Path::new(input_file);
@@ -204,8 +224,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 input_file,
                 &temp_dir,
                 "Extracting Dolby Vision HEVC stream",
+                args,
                 resume_enabled,
-                args.stall_timeout,
             )?;
             bl_source_file = clean_bl.clone();
 
@@ -253,8 +273,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 input_file,
                 &temp_dir,
                 "Extracting Profile 8 HEVC stream",
+                args,
                 resume_enabled,
-                args.stall_timeout,
             )?;
             bl_source_file = clean_bl.clone();
 
@@ -507,10 +527,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     if resume_enabled && resume::is_complete(&bl_rpu_hevc) {
         progress::print_info("Reusing RPU-injected base layer from a previous run.");
     } else {
-        let dovi_tool_path =
-            external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-        let mut dovi_cmd =
-            Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path));
+        let mut dovi_cmd = external::dovi_tool_command();
 
         dovi_cmd.args([
             "inject-rpu",
@@ -651,10 +668,64 @@ fn add_optimizer_args(args_vec: &mut Vec<String>, args: &Args) {
     args_vec.push(args.optimizer_profile.to_string());
 }
 
-fn dovi_tool_command() -> Command {
-    let dovi_tool_path =
-        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    Command::new(fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path))
+fn run_dovi_video_step(
+    input_file: &str,
+    raw_hevc: &Path,
+    output: &Path,
+    temp_dir: &Path,
+    args: &Args,
+    resume_enabled: bool,
+    extract_message: &str,
+    log_stem: &str,
+    message: &str,
+    build: impl Fn(&Path) -> Command,
+) -> Result<bool> {
+    let raw_sealed = resume_enabled && resume::is_complete(raw_hevc);
+    if feed_mkv_to_dovi_tool(args.dovi_input, raw_sealed) {
+        let mut mkv_cmd = build(Path::new(input_file));
+        let mkv_log = temp_dir.join(format!("{log_stem}_mkv.log"));
+        let total = fs::metadata(input_file).ok().map(|m| m.len());
+        let success = run_command_with_progress(
+            &mut mkv_cmd,
+            &mkv_log,
+            message,
+            output,
+            total,
+            args.stall_timeout,
+        )?;
+        let non_empty =
+            output.exists() && fs::metadata(output).map(|m| m.len() > 0).unwrap_or(false);
+        if success && non_empty {
+            return Ok(true);
+        }
+        let _ = fs::remove_file(output);
+        progress::print_warn(&format!(
+            "dovi_tool could not read the MKV directly (see {}); falling back to ffmpeg extraction.",
+            mkv_log.display()
+        ));
+    }
+
+    extract_video_hevc(
+        input_file,
+        raw_hevc,
+        temp_dir,
+        extract_message,
+        resume_enabled,
+        args.stall_timeout,
+    )?;
+    let mut raw_cmd = build(raw_hevc);
+    let raw_log = temp_dir.join(format!("{log_stem}.log"));
+    let total = fs::metadata(raw_hevc).ok().map(|m| m.len());
+    let success = run_command_with_progress(
+        &mut raw_cmd,
+        &raw_log,
+        message,
+        output,
+        total,
+        args.stall_timeout,
+    )?;
+    let non_empty = output.exists() && fs::metadata(output).map(|m| m.len() > 0).unwrap_or(false);
+    Ok(success && non_empty)
 }
 
 fn extract_video_hevc(
@@ -710,43 +781,6 @@ fn extract_video_hevc(
     }
 }
 
-fn remove_dolby_vision_metadata(
-    input_hevc: &Path,
-    temp_dir: &Path,
-    resume_enabled: bool,
-) -> Result<PathBuf> {
-    let clean_bl = temp_dir.join("BL_clean.hevc");
-    if resume_enabled && resume::is_complete(&clean_bl) {
-        progress::print_info("Reusing Dolby Vision-clean base layer from a previous run.");
-        return Ok(clean_bl);
-    }
-
-    let mut command = dovi_tool_command();
-    command.args([
-        "remove",
-        "-i",
-        input_hevc.to_str().unwrap(),
-        "-o",
-        clean_bl.to_str().unwrap(),
-    ]);
-
-    if run_command_with_spinner(
-        &mut command,
-        &temp_dir.join("dovi_remove.log"),
-        "Removing existing Dolby Vision metadata",
-    )? && clean_bl.exists()
-    {
-        resume::mark_done(&clean_bl)?;
-        // The raw DV stream is no longer needed once the clean BL is sealed; resume skips
-        // both steps when BL_clean.hevc is complete, so dropping it early is safe and frees
-        // ~the full video size during long conversions.
-        let _ = fs::remove_file(input_hevc);
-        Ok(clean_bl)
-    } else {
-        anyhow::bail!("Failed to remove Dolby Vision metadata from base layer")
-    }
-}
-
 /// Produce the Dolby Vision-clean base layer for the repair paths. When a previous run
 /// already sealed `BL_clean.hevc`, skip the raw extraction entirely — the intermediate
 /// `DV_raw.hevc` is deleted once the clean BL is complete, so re-extracting it on resume
@@ -755,8 +789,8 @@ fn extract_clean_base_layer(
     input_file: &str,
     temp_dir: &Path,
     message: &str,
+    args: &Args,
     resume_enabled: bool,
-    stall_timeout: u64,
 ) -> Result<PathBuf> {
     let clean_bl = temp_dir.join("BL_clean.hevc");
     if resume_enabled && resume::is_complete(&clean_bl) {
@@ -765,15 +799,37 @@ fn extract_clean_base_layer(
     }
 
     let raw_hevc = temp_dir.join("DV_raw.hevc");
-    extract_video_hevc(
+    let success = run_dovi_video_step(
         input_file,
         &raw_hevc,
+        &clean_bl,
         temp_dir,
-        message,
+        args,
         resume_enabled,
-        stall_timeout,
+        message,
+        "dovi_remove",
+        "Removing existing Dolby Vision metadata",
+        |input| {
+            let mut command = external::dovi_tool_command();
+            command.args([
+                "remove",
+                "-i",
+                input.to_str().unwrap(),
+                "-o",
+                clean_bl.to_str().unwrap(),
+            ]);
+            command
+        },
     )?;
-    remove_dolby_vision_metadata(&raw_hevc, temp_dir, resume_enabled)
+
+    if success {
+        resume::mark_done(&clean_bl)?;
+        let _ = fs::remove_file(&raw_hevc);
+        let _ = fs::remove_file(resume::marker_path(&raw_hevc));
+        Ok(clean_bl)
+    } else {
+        anyhow::bail!("Failed to remove Dolby Vision metadata from base layer")
+    }
 }
 
 fn convert_mel_to_profile81(
@@ -786,36 +842,36 @@ fn convert_mel_to_profile81(
     let raw_hevc = temp_dir.join("DV_raw.hevc");
     let converted_hevc = temp_dir.join("P81_discard.hevc");
 
-    extract_video_hevc(
-        input_file,
-        &raw_hevc,
-        temp_dir,
-        "Extracting Profile 7 MEL HEVC stream",
-        resume_enabled,
-        args.stall_timeout,
-    )?;
-
     if resume_enabled && resume::is_complete(&converted_hevc) {
         progress::print_info("Reusing converted Profile 8.1 HEVC from a previous run.");
     } else {
-        let mut command = dovi_tool_command();
-        command.args([
-            "-m",
-            "2",
-            "convert",
-            "--discard",
-            "-i",
-            raw_hevc.to_str().unwrap(),
-            "-o",
-            converted_hevc.to_str().unwrap(),
-        ]);
-
-        if !run_command_with_spinner(
-            &mut command,
-            &temp_dir.join("dovi_convert_discard.log"),
+        let success = run_dovi_video_step(
+            input_file,
+            &raw_hevc,
+            &converted_hevc,
+            temp_dir,
+            args,
+            resume_enabled,
+            "Extracting Profile 7 MEL HEVC stream",
+            "dovi_convert_discard",
             "Converting MEL RPU to Profile 8.1 and discarding EL",
-        )? || !converted_hevc.exists()
-        {
+            |input| {
+                let mut command = external::dovi_tool_command();
+                command.args([
+                    "-m",
+                    "2",
+                    "convert",
+                    "--discard",
+                    "-i",
+                    input.to_str().unwrap(),
+                    "-o",
+                    converted_hevc.to_str().unwrap(),
+                ]);
+                command
+            },
+        )?;
+
+        if !success {
             return Ok(false);
         }
         resume::mark_done(&converted_hevc)?;
@@ -962,6 +1018,24 @@ pub fn resolve_auto_settings(args: &mut Args) {
         } else {
             AnalysisQuality::Balanced
         };
+    }
+    let version = external::dovi_tool_version();
+    if args.dovi_input == DoviInput::Auto {
+        let resolved = resolve_dovi_input(args.dovi_input, version);
+        args.dovi_input = resolved;
+        if resolved == DoviInput::Mkv {
+            if let Some((maj, min, pat)) = version {
+                progress::print_info(&format!(
+                    "dovi_tool {maj}.{min}.{pat} reads MKV directly: skipping the full-size HEVC extraction (--dovi-input raw to disable)."
+                ));
+            }
+        }
+    } else if args.dovi_input == DoviInput::Mkv {
+        if version.is_none() || version < Some(DOVI_TOOL_MKV_INPUT_MIN) {
+            progress::print_warn(
+                "Direct MKV input needs dovi_tool 2.3.4+; the ffmpeg fallback will likely be used.",
+            );
+        }
     }
 }
 
@@ -1331,12 +1405,7 @@ fn generate_rpu(
         return Ok(Some(rpu_out));
     }
     let extra_json = temp_dir.join("extra.json");
-    // Resolve tool path
-    let dovi_tool_path =
-        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let dovi_abs = fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
-
-    let mut cmd = Command::new(&dovi_abs);
+    let mut cmd = external::dovi_tool_command();
     cmd.args([
         "generate",
         "-j",
@@ -1441,5 +1510,39 @@ mod tests {
         let peak_nits = hdr10plus_peak_nits(&scene, PeakSource::MaxSclLuminance).unwrap();
 
         assert!((peak_nits - 179.66).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resolve_dovi_input_matrix() {
+        assert_eq!(
+            resolve_dovi_input(DoviInput::Auto, Some((2, 3, 4))),
+            DoviInput::Mkv
+        );
+        assert_eq!(
+            resolve_dovi_input(DoviInput::Auto, Some((2, 10, 0))),
+            DoviInput::Mkv
+        );
+        assert_eq!(
+            resolve_dovi_input(DoviInput::Auto, Some((2, 3, 3))),
+            DoviInput::Raw
+        );
+        assert_eq!(resolve_dovi_input(DoviInput::Auto, None), DoviInput::Raw);
+        assert_eq!(
+            resolve_dovi_input(DoviInput::Raw, Some((9, 9, 9))),
+            DoviInput::Raw
+        );
+        assert_eq!(
+            resolve_dovi_input(DoviInput::Mkv, Some((2, 3, 3))),
+            DoviInput::Mkv
+        );
+        assert_eq!(resolve_dovi_input(DoviInput::Mkv, None), DoviInput::Mkv);
+    }
+
+    #[test]
+    fn feed_mkv_to_dovi_tool_rules() {
+        assert!(feed_mkv_to_dovi_tool(DoviInput::Mkv, false));
+        assert!(!feed_mkv_to_dovi_tool(DoviInput::Mkv, true));
+        assert!(!feed_mkv_to_dovi_tool(DoviInput::Raw, false));
+        assert!(!feed_mkv_to_dovi_tool(DoviInput::Auto, false));
     }
 }

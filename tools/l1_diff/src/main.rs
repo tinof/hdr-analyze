@@ -1,7 +1,9 @@
 //! Compare hdr_analyzer_mvp measurements against reference Dolby Vision L1 metadata.
 //!
 //! Reference input is a CSV with header `frame,min_pq,max_pq,avg_pq` where PQ values
-//! are 12-bit codes (0..4095), e.g. extracted from `dovi_tool export -d all=rpu.json`.
+//! are 12-bit codes (0..4095), e.g. extracted from `dovi_tool export -d all=rpu.json`
+//! (dovi_tool 2.3.3+ `export --levels level1` writes a much smaller per-frame L1 CSV;
+//! check its header against the one above before use).
 //!
 //! Definitional caveats (reported, never silently corrected):
 //! 1. Direct peaks may be max-RGB or Y-luma (`--peak-domain`); DV L1 max is max-RGB derived.

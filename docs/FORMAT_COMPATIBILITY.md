@@ -128,7 +128,9 @@ mkvdovi "input.mkv" --source-primaries 0
 | **L254** | Default CM v4.0 algorithm metadata added by `dovi_tool` |
 
 `mkvdovi` does not synthesize L3 offsets or creative L8 trims. L2 values are neutral (`2048`), and
-experimental non-neutral trim derivation remains opt-in roadmap work.
+experimental non-neutral trim derivation remains opt-in roadmap work. Note that while `dovi_tool` 2.3.4
+parses Level 253 extension metadata blocks, the `dolby_vision` crate (3.4.0) used in-process (for inspect
+sampling and FEL NLQ parsing) does not yet support L253 blocks; support will be updated when the crate releases it.
 
 ### HLG caveat
 

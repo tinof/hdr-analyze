@@ -67,7 +67,7 @@ pub fn verify_post_mux_with_options(
         hevc_path.to_str().unwrap(),
     ]);
 
-    let mut extract_rpu = Command::new("dovi_tool");
+    let mut extract_rpu = external::dovi_tool_command();
     extract_rpu.args([
         "extract-rpu",
         "-i",
@@ -83,13 +83,13 @@ pub fn verify_post_mux_with_options(
         return false;
     }
 
-    let mut summary_cmd = Command::new("dovi_tool");
+    let mut summary_cmd = external::dovi_tool_command();
     summary_cmd.args(["info", "--summary", "-i", rpu_path.to_str().unwrap()]);
     if let Ok(summary) = external::get_command_output(&mut summary_cmd) {
         let _ = std::fs::write(temp_dir.join("dovi_info_summary.log"), summary);
     }
 
-    let mut frame_cmd = Command::new("dovi_tool");
+    let mut frame_cmd = external::dovi_tool_command();
     frame_cmd.args(["info", "--frame", "0", "-i", rpu_path.to_str().unwrap()]);
     match external::get_command_output(&mut frame_cmd) {
         Ok(frame_output) => {

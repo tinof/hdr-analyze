@@ -99,12 +99,9 @@ struct FrameParams {
 pub fn detect_profile7_fel(input_file: &str, temp_dir: &Path) -> Result<Option<FelInfo>> {
     // Extract RPU to analyze
     let rpu_path = temp_dir.join("detect_rpu.bin");
-    let dovi_tool_path =
-        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let dovi_abs = fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
+    let mut cmd = external::dovi_tool_command();
 
     // Extract RPU (limit to 1 frame for quick detection)
-    let mut cmd = Command::new(&dovi_abs);
     cmd.args([
         "extract-rpu",
         "-i",
@@ -124,7 +121,7 @@ pub fn detect_profile7_fel(input_file: &str, temp_dir: &Path) -> Result<Option<F
     }
 
     // Get info summary
-    let mut info_cmd = Command::new(&dovi_abs);
+    let mut info_cmd = external::dovi_tool_command();
     info_cmd.args(["info", "-i", rpu_path.to_str().unwrap(), "-s"]);
 
     let info_output = external::get_command_output(&mut info_cmd);
@@ -181,25 +178,70 @@ pub fn convert_fel_to_hdr10(input_file: &str, temp_dir: &Path, args: &Args) -> R
         return Ok(composited_mkv);
     }
 
-    progress::print_info("FEL step 1/5: extracting HEVC bitstream.");
-    extract_hevc_from_mkv(
-        input_file,
-        &raw_hevc,
-        temp_dir,
-        resume_enabled,
-        args.stall_timeout,
-    )?;
+    let demuxed = if resume_enabled
+        && resume::is_complete(&bl_hevc)
+        && resume::is_complete(&el_hevc)
+        && resume::is_complete(&rpu_bin)
+    {
+        progress::print_info("Reusing demuxed FEL layers and RPU from a previous run.");
+        true
+    } else if crate::pipeline::feed_mkv_to_dovi_tool(
+        args.dovi_input,
+        resume_enabled && resume::is_complete(&raw_hevc),
+    ) {
+        progress::print_info("FEL step 1/5: reading BL/EL directly from the MKV.");
+        let direct_ok = demux_dual_layer(
+            Path::new(input_file),
+            &bl_hevc,
+            &el_hevc,
+            &rpu_bin,
+            temp_dir,
+            "_mkv",
+            args.stall_timeout,
+        )?;
+        if !direct_ok {
+            let _ = fs::remove_file(&bl_hevc);
+            let _ = fs::remove_file(&el_hevc);
+            let _ = fs::remove_file(&rpu_bin);
+            let _ = fs::remove_file(resume::marker_path(&bl_hevc));
+            let _ = fs::remove_file(resume::marker_path(&el_hevc));
+            let _ = fs::remove_file(resume::marker_path(&rpu_bin));
+            progress::print_warn(&format!(
+                "dovi_tool could not read the MKV directly (see dovi_demux_mkv.log / dovi_extract_rpu_mkv.log in {}); falling back to ffmpeg extraction.",
+                temp_dir.display()
+            ));
+            false
+        } else {
+            true
+        }
+    } else {
+        false
+    };
 
-    // Step 2: Demux into BL and EL
-    progress::print_info("FEL step 2/5: demuxing BL and EL layers.");
-    demux_dual_layer(
-        &raw_hevc,
-        &bl_hevc,
-        &el_hevc,
-        &rpu_bin,
-        temp_dir,
-        resume_enabled,
-    )?;
+    if !demuxed {
+        progress::print_info("FEL step 1/5: extracting HEVC bitstream.");
+        extract_hevc_from_mkv(
+            input_file,
+            &raw_hevc,
+            temp_dir,
+            resume_enabled,
+            args.stall_timeout,
+        )?;
+
+        // Step 2: Demux into BL and EL
+        progress::print_info("FEL step 2/5: demuxing BL and EL layers.");
+        if !demux_dual_layer(
+            &raw_hevc,
+            &bl_hevc,
+            &el_hevc,
+            &rpu_bin,
+            temp_dir,
+            "",
+            args.stall_timeout,
+        )? {
+            bail!("Failed to demux BL/EL with dovi_tool");
+        }
+    }
 
     // Step 3: Probe properties needed for streaming encode
     println!("{}", "Step 3/5: Reading source video properties...".green());
@@ -411,71 +453,65 @@ fn extract_hevc_from_mkv(
 }
 
 fn demux_dual_layer(
-    raw_hevc: &Path,
+    input: &Path,
     bl_out: &Path,
     el_out: &Path,
     rpu_out: &Path,
     temp_dir: &Path,
-    resume_enabled: bool,
-) -> Result<()> {
-    if resume_enabled
-        && resume::is_complete(bl_out)
-        && resume::is_complete(el_out)
-        && resume::is_complete(rpu_out)
-    {
-        progress::print_info("Reusing demuxed FEL layers and RPU from a previous run.");
-        return Ok(());
-    }
-
-    let dovi_tool_path =
-        external::find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
-    let dovi_abs = fs::canonicalize(&dovi_tool_path).unwrap_or(dovi_tool_path);
-
-    let mut cmd = Command::new(&dovi_abs);
+    log_suffix: &str,
+    stall_timeout: u64,
+) -> Result<bool> {
+    let mut cmd = external::dovi_tool_command();
     cmd.args([
         "demux",
         "-i",
-        raw_hevc.to_str().unwrap(),
+        input.to_str().unwrap(),
         "-b",
         bl_out.to_str().unwrap(),
         "-e",
         el_out.to_str().unwrap(),
     ]);
 
-    if !run_command_with_spinner(
+    let input_size = fs::metadata(input).ok().map(|m| m.len());
+    let demux_log = temp_dir.join(format!("dovi_demux{log_suffix}.log"));
+    if !run_command_with_progress(
         &mut cmd,
-        &temp_dir.join("dovi_demux.log"),
+        &demux_log,
         "Demuxing dual-layer HEVC",
+        bl_out,
+        input_size,
+        stall_timeout,
     )? {
-        bail!("Failed to demux BL/EL with dovi_tool");
-    }
-    if !bl_out.exists() || !el_out.exists() {
-        bail!("dovi_tool demux completed without producing both BL and EL");
+        return Ok(false);
     }
 
     // Also extract RPU separately
-    let mut rpu_cmd = Command::new(&dovi_abs);
+    let mut rpu_cmd = external::dovi_tool_command();
     rpu_cmd.args([
         "extract-rpu",
         "-i",
-        raw_hevc.to_str().unwrap(),
+        input.to_str().unwrap(),
         "-o",
         rpu_out.to_str().unwrap(),
     ]);
 
-    if !run_command_with_spinner(
-        &mut rpu_cmd,
-        &temp_dir.join("dovi_extract_rpu.log"),
-        "Extracting RPU data",
-    )? {
-        bail!("Failed to extract RPU with dovi_tool");
+    let rpu_log = temp_dir.join(format!("dovi_extract_rpu{log_suffix}.log"));
+    if !run_command_with_spinner(&mut rpu_cmd, &rpu_log, "Extracting RPU data")? {
+        return Ok(false);
     }
 
-    resume::mark_done(bl_out)?;
-    resume::mark_done(el_out)?;
-    resume::mark_done(rpu_out)?;
+    let bl_ok = fs::metadata(bl_out).map(|m| m.len() > 0).unwrap_or(false);
+    let el_ok = fs::metadata(el_out).map(|m| m.len() > 0).unwrap_or(false);
+    let rpu_ok = fs::metadata(rpu_out).map(|m| m.len() > 0).unwrap_or(false);
 
-    Ok(())
+    if bl_ok && el_ok && rpu_ok {
+        resume::mark_done(bl_out)?;
+        resume::mark_done(el_out)?;
+        resume::mark_done(rpu_out)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 /// Composite BL + EL using the NLQ LinearDeadzone algorithm.

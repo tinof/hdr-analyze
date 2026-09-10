@@ -45,7 +45,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## mkvdovi operational gotchas (easy to miss)
 
 - **Checks external tools at runtime** (`external::check_dependencies`): requires `ffmpeg`, `mkvmerge`, `dovi_tool`, and either `mediainfo` or `ffprobe`. HDR10+ processing additionally invokes `hdr10plus_tool` — keep it in `PATH` for HDR10+ inputs.
-- `dovi_tool` 2.3.2+ is recommended; its `inject-rpu` padding fix is relied on by the existing orchestration call.
+- `dovi_tool` 2.3.2 is the floor (its `inject-rpu` padding fix is relied on by the existing orchestration call); 2.3.4+ lets mkvdovi pass the MKV directly to remove/convert/demux (`--dovi-input auto|raw|mkv`, auto = on when 2.3.4+ detected via `dovi_tool --version`), with automatic per-step fallback to ffmpeg extraction; direct attempts log to `*_mkv.log` in the temp dir.
+- `dovi_tool` 2.3.4 parses Level 253 ext-metadata blocks, but the `dolby_vision` crate 3.4.0 used in-process (inspect sampling, FEL NLQ parsing) does not yet — re-bump when the crate releases L253 support.
 - With no input args, it recursively processes `.mkv` files from cwd, skipping `mkvdovi_temp_*`/legacy `mkvdolby_temp_*` paths and files already ending `.DV.mkv`. Explicit `--mdfix` allows a DV input and writes a distinct `*.mdfix.DV.mkv` candidate.
 - **Successful conversion deletes the source input by default**; pass `--keep-source` to prevent deletion.
 - **Robust to interruption:** extract/inject/mux/encode show a live byte-progress bar (throughput + ETA) and warn after `--stall-timeout` (default 300s, `0` disables) if the output file stops growing. An interrupted run (e.g. SSH `SIGHUP`) preserves `mkvdovi_temp_*` and prints a resume hint; a re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels (`resume.rs`). `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.

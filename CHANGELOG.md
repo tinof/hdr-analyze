@@ -8,6 +8,8 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Removed
 
+- **Duplicate vendored `dovi_tool` README** (`docs/dovitool.README.md`). Third-party reference docs
+  are kept local-only per `.gitignore` policy; nothing in the repo linked to the tracked copy.
 - **The transitional `mkvdolby` binary alias is no longer shipped.** Release archives contained a
   `mkvdolby` copy of the converter for one release after the v0.3.0 rename; that compatibility
   window has closed, so the Linux/macOS and Windows archive steps now ship `mkvdovi` only. Scripts
@@ -15,8 +17,16 @@ This document provides a historical record of completed milestones, feature impl
   directories is **retained** — those are on-disk state belonging to users mid-conversion, not a
   distributed product name, and removing it would strand an interrupted run.
 
+### Fixed
+
+- **Metadata-removal step safety fix:** `extract_clean_base_layer` now deletes only its own intermediate
+  temporary raw stream (`DV_raw.hevc`) and completion sentinel rather than the input path, preventing any
+  possibility of deleting the source MKV in direct input mode.
+
 ### Changed
 
+- **Updated `dolby_vision` crate from 3.3 to 3.4**: incorporates the L11 byte 1 parsing fix, benefiting in-process inspection (`inspect`) and `--mdfix`.
+- **Progress and stall detection for `dovi_tool` operations**: `remove`, `convert`, and `demux` now display live byte progress with `--stall-timeout` monitoring.
 - **Trademark and provenance hygiene across the documentation.** Removed the promotional
   "only open-source HDR10 → Dolby Vision pipeline" claim from the README hero and replaced
   brand-led feature labels with format-neutral descriptions ("Profile 8.1", "CM v4.0 metadata",
@@ -37,6 +47,12 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **Direct MKV input to `dovi_tool`** (`--dovi-input auto|raw|mkv`): when `dovi_tool` 2.3.4+ is detected,
+  `mkvdovi` feeds the MKV container directly to `remove`, `convert`, and `demux` subcommands instead of
+  extracting a full-size intermediate raw HEVC stream with ffmpeg. Saves substantial disk space and
+  runtime by skipping the HEVC extraction pass on Profile 7 MEL → 8.1 discard, `--mdfix`, and Profile 7
+  FEL compositing paths. Any direct read failure automatically falls back to ffmpeg extraction with
+  advisory logging (`*_mkv.log`).
 - **Zero-config hardware auto-detection in `mkvdovi`**: `--hwaccel` now defaults to `auto`,
   which probes for an NVIDIA GPU (`nvidia-smi`, including the WSL2 fallback path) once at startup
   and resolves to `cuda` or `none`. `--analysis-quality` now defaults to `auto`, resolving to

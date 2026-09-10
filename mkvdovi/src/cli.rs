@@ -181,6 +181,13 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = HwAccel::Auto)]
     pub hwaccel: HwAccel,
 
+    /// How Dolby Vision inputs are fed to dovi_tool for remove/convert/demux.
+    /// auto (default) passes the MKV directly when dovi_tool is 2.3.4+ (skipping a full-size
+    /// ffmpeg HEVC extraction), else extracts first. raw always extracts; mkv always tries the
+    /// container first. A failed direct read falls back to extraction automatically.
+    #[arg(long, value_enum, default_value_t = DoviInput::Auto)]
+    pub dovi_input: DoviInput,
+
     /// Encoder to use for HLG to PQ conversion (libx265 or hevc_videotoolbox).
     #[arg(long, value_enum, default_value_t = Encoder::Libx265)]
     pub encoder: Encoder,
@@ -204,6 +211,16 @@ mod tests {
         let args = Args::try_parse_from(["mkvdovi"]).unwrap();
         assert_eq!(args.hwaccel, HwAccel::Auto);
         assert_eq!(args.analysis_quality, AnalysisQuality::Auto);
+        assert_eq!(args.dovi_input, DoviInput::Auto);
+    }
+
+    #[test]
+    fn explicit_dovi_input_values_parse() {
+        for (value, expected) in [("raw", DoviInput::Raw), ("mkv", DoviInput::Mkv)] {
+            let args = Args::try_parse_from(["mkvdovi", "--dovi-input", value]).unwrap();
+            assert_eq!(args.dovi_input, expected);
+            assert_eq!(args.dovi_input.to_string(), value);
+        }
     }
 
     #[test]
@@ -275,6 +292,23 @@ impl std::fmt::Display for HwAccel {
             HwAccel::Auto => write!(f, "auto"),
             HwAccel::None => write!(f, "none"),
             HwAccel::Cuda => write!(f, "cuda"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DoviInput {
+    Auto,
+    Raw,
+    Mkv,
+}
+
+impl std::fmt::Display for DoviInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DoviInput::Auto => write!(f, "auto"),
+            DoviInput::Raw => write!(f, "raw"),
+            DoviInput::Mkv => write!(f, "mkv"),
         }
     }
 }

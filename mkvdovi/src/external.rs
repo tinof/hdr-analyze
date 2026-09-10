@@ -404,6 +404,40 @@ pub fn analyzer_has_cuda_feature(exe: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// A `(major, minor, patch)` tool version; tuple ordering gives version comparison.
+pub type ToolVersion = (u32, u32, u32);
+
+/// Parse a `--version` line such as `dovi_tool 2.3.4` into `(2, 3, 4)`.
+/// Pre-release/build suffixes (`-beta.1`, `+cuda`) and a leading `v` are ignored.
+pub fn parse_tool_version(output: &str) -> Option<ToolVersion> {
+    let token = output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .split_whitespace()
+        .last()?;
+    let token = token.strip_prefix('v').unwrap_or(token);
+    let core = token.split(['-', '+']).next()?;
+    let mut parts = core.split('.').map(|part| part.parse::<u32>().ok());
+    let version = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(version)
+}
+
+/// The installed `dovi_tool` version, or `None` when it is missing or unparseable.
+pub fn dovi_tool_version() -> Option<ToolVersion> {
+    find_tool("dovi_tool")?;
+    get_command_output(dovi_tool_command().arg("--version"))
+        .ok()
+        .as_deref()
+        .and_then(parse_tool_version)
+}
+
+/// A `Command` for the `dovi_tool` found on PATH (canonicalized, so symlinked installs work).
+pub fn dovi_tool_command() -> Command {
+    let path = find_tool("dovi_tool").unwrap_or_else(|| PathBuf::from("dovi_tool"));
+    Command::new(std::fs::canonicalize(&path).unwrap_or(path))
+}
+
 /// Run a command, inheriting stderr (so progress bars work naturally) but capturing/logging stdout.
 pub fn run_command_inherit_stderr(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     let log_file = File::create(log_path).context("Failed to create log file")?;
@@ -450,4 +484,47 @@ pub fn run_command_inherit_stderr(cmd: &mut Command, log_path: &Path) -> Result<
 
     let status = child.wait()?;
     Ok(status.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_plain_tool_versions() {
+        assert_eq!(parse_tool_version("dovi_tool 2.3.4\n"), Some((2, 3, 4)));
+        assert_eq!(
+            parse_tool_version("\n  dovi_tool v10.0.1  "),
+            Some((10, 0, 1))
+        );
+        assert_eq!(parse_tool_version("2.3.3"), Some((2, 3, 3)));
+    }
+
+    #[test]
+    fn ignores_prerelease_and_build_suffixes() {
+        assert_eq!(
+            parse_tool_version("dovi_tool 2.4.0-beta.1"),
+            Some((2, 4, 0))
+        );
+        assert_eq!(
+            parse_tool_version("hdr_analyzer_mvp 0.3.0+cuda"),
+            Some((0, 3, 0))
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_versions() {
+        assert_eq!(parse_tool_version(""), None);
+        assert_eq!(parse_tool_version("dovi_tool"), None);
+        assert_eq!(parse_tool_version("dovi_tool 2.3"), None);
+        assert_eq!(parse_tool_version("dovi_tool 2.3.4.5"), None);
+        assert_eq!(parse_tool_version("dovi_tool 2.x.4"), None);
+    }
+
+    #[test]
+    fn tool_versions_order_numerically() {
+        assert!((2, 3, 4) > (2, 3, 3));
+        assert!((2, 10, 0) > (2, 3, 4));
+        assert!((3, 0, 0) > (2, 99, 99));
+    }
 }
