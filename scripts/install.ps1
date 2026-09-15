@@ -59,7 +59,7 @@ function Install-HdrAnalyze {
         }
 
         # Find and copy binaries
-        $binDir = Join-Path $tempDir "hdr-analyze-$version-$target" "bin"
+        $binDir = Join-Path (Join-Path $tempDir "hdr-analyze-$version-$target") "bin"
         if (-not (Test-Path $binDir)) {
             Write-Error "Binary directory not found in archive"
         }
@@ -71,6 +71,19 @@ function Install-HdrAnalyze {
                 Copy-Item -Path $srcPath -Destination $InstallDir -Force
                 Write-Success "Installed: $binary"
             }
+        }
+
+        # hdr_analyzer_mvp.exe links against the FFmpeg DLLs bundled in the archive.
+        $dlls = @(Get-ChildItem -Path $binDir -Filter "*.dll" -ErrorAction SilentlyContinue)
+        foreach ($dll in $dlls) {
+            Copy-Item -Path $dll.FullName -Destination $InstallDir -Force
+        }
+        if ($dlls.Count -gt 0) {
+            Write-Success "Installed: $($dlls.Count) FFmpeg DLLs"
+        }
+        $ffmpegLicense = Join-Path $binDir "FFMPEG-LICENSE.txt"
+        if (Test-Path $ffmpegLicense) {
+            Copy-Item -Path $ffmpegLicense -Destination $InstallDir -Force
         }
     }
     finally {

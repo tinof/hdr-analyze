@@ -6,13 +6,13 @@
 > **Branch reviewed:** `feat/profile7-fel-to-profile81`
 > **Compositor status (2026-09-15):** experimental. Chroma MMR now uses the co-located 2×2 luma mean
 > and the real opposite chroma plane (previously a flat `i*4` luma index and neutral Cr for Cb). No
-> independent reference comparison has run; see F1 and R1 in [ROADMAP.md](../ROADMAP.md).
+> independent reference comparison has run; see F1 and R1 in [ROADMAP.md](../../ROADMAP.md).
 
 ---
 
 ## Summary
 
-This handoff is the implementation plan for testing the metadata-only FEL approximation hypothesis described in `docs/profile7_fel_to_profile81_preservation.md`.
+This handoff is the implementation plan for testing the metadata-only FEL approximation hypothesis described in `docs/experimental/profile7_fel_to_profile81_preservation.md`.
 
 Current branch state:
 

@@ -1,26 +1,40 @@
-# Toward `cm_analyze` Parity — Technical Gap Analysis
+# Toward `cm_analyze` parity: technical gap analysis
 
-> **Goal:** approach the accuracy and feature set of Dolby Vision's `cm_analyze` with a fully
-> open-source, research-based analyzer. This project does not include, reverse-engineer, or
-> redistribute proprietary Dolby code, lookup tables, tone curves, or binary blobs. Parity is measured,
-> never asserted.
+This is a gap analysis. It compares the metadata this project generates with the metadata Dolby's
+`cm_analyze` produces, level by level, and records what is known to differ.
 
-This document explains the technical gaps and validation method. Status and prioritization live only
-in the [roadmap](../ROADMAP.md); current conversion usage lives in
+Two questions are kept apart. Format compatibility means the generated RPU carries the CM v4.0
+metadata levels that Dolby Vision playback devices read. Algorithm parity means the values in those
+levels match what `cm_analyze` computes on the same pixels. The project has format compatibility. It
+does not have algorithm parity and does not claim it. The analyzer is an independent implementation
+based on published standards and measurement; it does not include, reverse-engineer, or redistribute
+Dolby code, lookup tables, tone curves, or binaries (see [PROVENANCE.md](PROVENANCE.md)). Differences
+are measured in [VALIDATION.md](VALIDATION.md), not asserted.
+
+Known differences today:
+
+- The default direct peak reads hot on grainy content: +92.6 and +74.4 codes per shot against
+  `cm_analyze --analysis-version 2` on two real-content samples.
+- `cm_analyze`'s default CM v4 L1 applies a peak floor at PQ(100 nits) and an anchored average. This
+  analyzer reports measured values instead.
+- There is no L4 temporal anchoring, L2 trims are neutral, and L3/L8 are not derived.
+- L5 comes from one crop for the whole file, and there is no XML export.
+
+Status and prioritization live in the [roadmap](../ROADMAP.md); current conversion usage lives in
 [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).
 
 ## What `cm_analyze` produces
 
 Dolby Vision mastering carries Display Management metadata in an RPU. The relevant levels are:
 
-- **L1** — min / avg / max luminance of the active picture area, organized and stabilized by shot.
-- **L5** — active-area letterbox/pillarbox offsets.
-- **L6** — ST.2086 mastering-display metadata plus MaxCLL/MaxFALL.
-- **L2/L3/L8** — target-display creative trims and offsets.
-- **L4** — temporal filtering / shot anchoring used to stabilize L1.
-- **L9** — source/mastering-display primaries.
-- **L11** — content type and reference-mode hint.
-- **L254** — Content Mapping algorithm version metadata.
+- L1: min / avg / max luminance of the active picture area, organized and stabilized by shot.
+- L5: active-area letterbox/pillarbox offsets.
+- L6: ST.2086 mastering-display metadata plus MaxCLL/MaxFALL.
+- L2/L3/L8: target-display creative trims and offsets.
+- L4: temporal filtering / shot anchoring used to stabilize L1.
+- L9: source/mastering-display primaries.
+- L11: content type and reference-mode hint.
+- L254: Content Mapping algorithm version metadata.
 
 The central parity problem is accurate, temporally stable L1 over the correct active area. Creative
 trims are a separate, higher-risk tone-mapping problem.
@@ -52,15 +66,15 @@ Key facts:
   generator input; it does **not** infer L1 minimum from the histogram. `mkvdovi` therefore bypasses
   the madVR path and passes the sidecar's per-scene minimum, max-RGB mean, and maximum as explicit
   generator shots.
-- Seven seek-based crop probes are used by default across 15%–85% of seekable inputs. Black/low-signal
+- Seven seek-based crop probes are used by default across 15% to 85% of seekable inputs. Black/low-signal
   frames are rejected, candidates are clustered within two pixels, and multiple aspect-ratio modes
   use their union. Scene cuts are monitored but do not change the committed crop.
 - The committed crop is recorded in full-resolution coordinates (sidecar v2) and emitted as L5 offsets.
 - L2 trims are neutral (`2048`). L9 detection prefers mastering-display primaries, then container
   primaries, and warns before falling back to BT.2020.
 - With `dovi_tool generate --use-custom-targets` and optimizer targets present, the generated
-  per-frame L1 maximum follows optimizer `target_pq`, not the analyzer's measured peak. That path is
-  reachable only through `mkvdovi --legacy-madvr-l1`.
+  per-frame L1 maximum follows optimizer `target_pq`, not the analyzer's measured peak. That path
+  requires `mkvdovi --legacy-madvr-l1`.
 - The shot maximum is the maximum of its frame peaks, so one retained grain spike can set a whole
   shot. Robust aggregation is investigated together with spatial-support peak estimation.
 
@@ -68,15 +82,15 @@ Key facts:
 
 | Level | Current state | Remaining gap | Roadmap |
 |-------|---------------|---------------|---------|
-| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias only +92.6→+80.4 and +74.4→+66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms; HLG max-RGB | P2 / WS1 |
-| **L1 avg** | Per-scene max-RGB mean delivered in the RPU (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar | Revisit only with new validation evidence; cm v4's "avg" is an anchored constant, not a mean | WS1 |
+| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias from +92.6 to +80.4 and from +74.4 to +66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms; HLG max-RGB | P2 / WS1 |
+| **L1 avg** | Per-scene max-RGB mean delivered in the RPU (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar | Revisit when new validation evidence exists; cm v4's "avg" is an anchored constant, not a mean | WS1 |
 | **L1 min** | Noise-rejected active-area minimum delivered per scene in the RPU | Maintain validation coverage | WS1 |
-| **L4** | None; optimizer smooths madVR `target_nits` only | Shot-anchored L1 and optional temporal filtering | WS2 |
+| **L4** | None; optimizer smooths madVR `target_nits`, not L1 | Shot-anchored L1 and optional temporal filtering | WS2 |
 | **L5** | Offsets from the committed crop (HDR10/HLG); sampled source L5 for Dolby Vision inputs | Per-scene offsets for changing aspect ratios | P3 / WS3 |
 | **L6** | Container/MediaInfo values with warned fallbacks | Optionally measure MaxCLL/MaxFALL from analysis | P6 |
 | **L2/L3/L8** | Neutral L2; no L3/L8 derivation | Experimental open tone-mapping baseline and A/B validation | WS4 |
 | **L9** | Auto-detected with CLI override | Maintain and expand inconsistent-source diagnostics | P5 / P6 |
-| **L11/L254** | Emitted | Maintain validation coverage | — |
+| **L11/L254** | Emitted | Maintain validation coverage | None |
 | **XML** | No export | Resolve/Metafier-compatible metadata interchange | WS5 |
 
 ## Accuracy gaps
@@ -101,7 +115,7 @@ question and reframed the remaining gap:
   +92.6 codes hot on heavy-grain content and +74.4 on milder content. The first robust estimator
   combines a 4096-bin max-RGB histogram, cross-quad noise estimate, inferred Gaussian support, and
   noise-adjusted content floor. It passes deterministic additive-luma, chroma, and
-  multiplicative-linear grain truth, but the one-shot real-content gate improved bias only to
+  multiplicative-linear grain truth, but the one-shot real-content gate improved bias to
   +80.4/+66.4 codes. Frames with a single extreme-tail pixel intentionally retain the raw peak, and
   per-shot fold-max can select them. Robust mode is therefore explicit opt-in, not the default;
   spatial-support handling requires a separate validated design.
