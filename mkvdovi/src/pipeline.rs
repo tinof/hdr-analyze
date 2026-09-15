@@ -53,7 +53,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let temp_dir_name = format!("mkvdovi_temp_{}", stem);
     let mut temp_dir = dir.join(&temp_dir_name);
     // Pre-rename compat (mkvdolby -> mkvdovi in v0.3.0): resume from a leftover
-    // `mkvdolby_temp_*` directory when no new-style one exists. Remove after one release.
+    // `mkvdolby_temp_*` directory when no new-style one exists. Such directories predate resume
+    // fingerprints, so they resume through the missing-fingerprint path below.
     if resume_enabled && !temp_dir.exists() {
         let legacy_temp_dir = dir.join(format!("mkvdolby_temp_{}", stem));
         if legacy_temp_dir.exists() {
@@ -62,22 +63,34 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
 
     // A leftover temp dir means a previous run for this file was interrupted. With resume
-    // enabled we reuse its completed steps, but only when it was created for this exact input
-    // and these settings; otherwise we discard it and start clean.
+    // enabled we reuse its completed steps when it was created for this exact input and these
+    // settings. A directory with no fingerprint was left by an older mkvdovi (an interrupted FEL
+    // composite can be hours of work), so it resumes with a warning. A directory with a
+    // different fingerprint is discarded.
     let fingerprint = resume::Fingerprint::for_input(input_path, resume_settings(args)).ok();
     let mut resuming = resume_enabled && temp_dir.exists();
-    if resuming
-        && !fingerprint
+    if resuming {
+        let status = fingerprint
             .as_ref()
-            .is_some_and(|current| current.matches(&temp_dir))
-    {
-        progress::print_warn(&format!(
-            "Leftover temp dir '{}' was created for a different input, settings, or mkvdovi version; starting clean.",
-            temp_dir.display()
-        ));
-        let _ = fs::remove_dir_all(&temp_dir);
-        temp_dir = dir.join(&temp_dir_name);
-        resuming = false;
+            .map_or(resume::FingerprintStatus::Differs, |current| {
+                current.check(&temp_dir)
+            });
+        match status {
+            resume::FingerprintStatus::Matches => {}
+            resume::FingerprintStatus::Missing => progress::print_warn(&format!(
+                "Leftover temp dir '{}' has no resume fingerprint (created by an older mkvdovi); resuming its completed steps, which may carry metadata from that version. Pass --no-resume to start clean.",
+                temp_dir.display()
+            )),
+            resume::FingerprintStatus::Differs => {
+                progress::print_warn(&format!(
+                    "Leftover temp dir '{}' was created for a different input, settings, or mkvdovi version; starting clean.",
+                    temp_dir.display()
+                ));
+                let _ = fs::remove_dir_all(&temp_dir);
+                temp_dir = dir.join(&temp_dir_name);
+                resuming = false;
+            }
+        }
     }
 
     if output_file.exists() && !resuming {
@@ -344,31 +357,40 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
         HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported => {
             // Reuse existing measurements only when their L1 sidecar is valid for this input
-            // (or the user explicitly asked for the legacy optimizer-target path).
-            measurements_file = metadata::find_measurements_file(input_path);
-            let reuse = match measurements_file.as_deref() {
-                None => false,
-                Some(_) if args.legacy_madvr_l1 => true,
-                Some(existing) => {
-                    let expect = metadata::SidecarExpectation::for_input(
-                        input_path,
-                        metadata::get_frame_count(input_file),
-                    );
-                    match metadata::load_l1_sidecar(existing, &expect) {
-                        Ok(sidecar) => {
-                            report_reused_sidecar(&sidecar, existing, args);
+            // (or the user explicitly asked for the legacy optimizer-target path). Every
+            // candidate is tried in turn, so a stale shared file cannot shadow a valid one.
+            let candidates = metadata::measurements_candidates(input_path);
+            let reuse = if args.legacy_madvr_l1 {
+                measurements_file = candidates.into_iter().next();
+                measurements_file.is_some()
+            } else if candidates.is_empty() {
+                false
+            } else {
+                let expect = metadata::SidecarExpectation::for_input(
+                    input_path,
+                    metadata::get_frame_count(input_file),
+                );
+                let mut reused = false;
+                for existing in candidates {
+                    match metadata::load_l1_sidecar(&existing, &expect) {
+                        Ok((sidecar, advisories)) => {
+                            report_reused_sidecar(&sidecar, &existing, args);
+                            print_sidecar_advisories(&advisories);
                             l1_sidecar = Some(sidecar);
-                            true
+                            measurements_file = Some(existing);
+                            reused = true;
+                            break;
                         }
-                        Err(error) => {
-                            progress::print_warn(&format!(
-                                "Existing measurements '{}' cannot be reused ({error}); re-running analysis.",
-                                existing.display()
-                            ));
-                            false
-                        }
+                        Err(error) => progress::print_warn(&format!(
+                            "Existing measurements '{}' cannot be reused ({error}).",
+                            existing.display()
+                        )),
                     }
                 }
+                if !reused {
+                    progress::print_info("No reusable measurements found; re-running analysis.");
+                }
+                reused
             };
 
             if reuse {
@@ -482,7 +504,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             // Freshly produced by the analyzer in this run: validate structure only.
             match metadata::load_l1_sidecar(measurements, &metadata::SidecarExpectation::default())
             {
-                Ok(sidecar) => l1_sidecar = Some(sidecar),
+                Ok((sidecar, advisories)) => {
+                    print_sidecar_advisories(&advisories);
+                    l1_sidecar = Some(sidecar);
+                }
                 Err(error) => {
                     progress::print_error(&format!(
                         "The analyzer's L1 sidecar is unusable ({error}). Refusing to fall back to optimizer-derived L1; pass --legacy-madvr-l1 to force it."
@@ -1164,6 +1189,13 @@ fn run_hdr_analyzer(
         return Ok(Some(out_path));
     }
     Ok(None)
+}
+
+/// Print the advisory warnings that came back with a valid L1 sidecar.
+fn print_sidecar_advisories(advisories: &[String]) {
+    for advisory in advisories {
+        progress::print_warn(advisory);
+    }
 }
 
 /// Print provenance for reused measurements and warn when they are coarser than the

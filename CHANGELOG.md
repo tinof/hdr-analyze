@@ -36,14 +36,20 @@ This document provides a historical record of completed milestones, feature impl
   unknown-version, structurally invalid, or mismatched L1 sidecar, `mkvdovi` warns and re-runs the
   analyzer instead of generating L1 through `dovi_tool --madvr-file --use-custom-targets`. That
   path, where L1 max follows optimizer targets and L1 avg is a placeholder, now requires
-  `--legacy-madvr-l1`.
+  `--legacy-madvr-l1`. Every measurements candidate is tried in turn, the analyzer's own
+  `<stem>_measurements.bin` first, so a stale shared `measurements.bin` cannot block reuse. The
+  sidecar frame count may differ from MediaInfo's input count by 0.1 % (at least 2 frames),
+  because MediaInfo estimates it from duration for MKVs without statistics tags. Scenes whose
+  average exceeds the peak, which `--peak-domain luma` or a percentile/robust estimator can
+  produce, print a warning instead of rejecting the measurements.
 - **L1 sidecar version 2.** The analyzer records its version, input identity, sampling settings, GPU
   use, and the committed crop in full-resolution coordinates. `mkvdovi` and `tools/l1_diff` accept
   versions 1 and 2.
 - **Resume is bound to the input and settings.** A leftover temp directory is resumed only when its
   `resume.json` fingerprint matches the input name, size, and mtime, the mkvdovi version, and the
   artifact-affecting settings. Otherwise it is discarded with a warning. Temp directories from
-  earlier versions have no fingerprint and restart clean.
+  earlier versions, including `mkvdolby_temp_*`, have no fingerprint; they resume with a warning
+  instead of being discarded, so an interrupted FEL composite survives the upgrade.
 - **Input contract warnings.** The analyzer warns when a stream is tagged full range or with a
   non-BT.2020 matrix, because it assumes limited-range BT.2020 NCL samples.
 - **CI/release FFmpeg setup simplified.** One composite action (`.github/actions/setup-ffmpeg`)

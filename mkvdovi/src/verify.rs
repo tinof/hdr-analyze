@@ -152,7 +152,7 @@ pub fn verify_post_mux_with_options(
         }
     }
     if let (Some(meas_path), Some(rpu)) = (measurements, rpu_frames) {
-        if let Ok(sidecar) =
+        if let Ok((sidecar, _advisories)) =
             metadata::load_l1_sidecar(meas_path, &metadata::SidecarExpectation::default())
         {
             if sidecar.frame_count() != rpu {
