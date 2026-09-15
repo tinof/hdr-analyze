@@ -548,6 +548,9 @@ fn composite_bl_el_nlq(
     // YUV 4:2:0: Y = w*h, U = w*h/4, V = w*h/4 → total = w*h*3/2
     let y_pixels = (width * height) as usize;
     let uv_pixels = y_pixels / 4;
+    let luma_width = width as usize;
+    let luma_height = height as usize;
+    let chroma_width = luma_width / 2;
     let bl_frame_bytes = y_pixels * 2 + uv_pixels * 2 * 2; // 16-bit per component
     let el_frame_bytes = y_pixels * 2 + uv_pixels * 2 * 2; // 10-bit stored as 16-bit (output of ffmpeg)
     let out_frame_bytes = y_pixels * 2 + uv_pixels * 2 * 2; // 10-bit stored as 16-bit
@@ -686,7 +689,6 @@ fn composite_bl_el_nlq(
             0, // channel 0 = Y
             Some(reshaping),
             None, // Y doesn't need cross-channel refs
-            None,
         );
 
         // U (Cb) plane: MMR reshaping needs BL luma
@@ -697,8 +699,13 @@ fn composite_bl_el_nlq(
             nlq,
             1, // channel 1 = U/Cb
             Some(reshaping),
-            Some(&bl_buf[..y_pixels * 2]), // BL Y for MMR
-            None,                          // Cb doesn't need Cb ref (it IS Cb)
+            Some(ChromaRefs {
+                luma: &bl_buf[..y_pixels * 2],
+                luma_width,
+                luma_height,
+                other_chroma: &bl_buf[bl_v_offset..bl_v_offset + uv_pixels * 2], // BL Cr
+                chroma_width,
+            }),
         );
 
         // V (Cr) plane: MMR reshaping needs BL luma + BL Cb
@@ -709,8 +716,13 @@ fn composite_bl_el_nlq(
             nlq,
             2, // channel 2 = V/Cr
             Some(reshaping),
-            Some(&bl_buf[..y_pixels * 2]), // BL Y for MMR
-            Some(&bl_buf[bl_u_offset..bl_u_offset + uv_pixels * 2]), // BL Cb for MMR
+            Some(ChromaRefs {
+                luma: &bl_buf[..y_pixels * 2],
+                luma_width,
+                luma_height,
+                other_chroma: &bl_buf[bl_u_offset..bl_u_offset + uv_pixels * 2], // BL Cb
+                chroma_width,
+            }),
         );
 
         out.write_all(&out_buf)
@@ -948,6 +960,42 @@ fn apply_mmr_reshape(
     reshaped_16.clamp(0, 65535)
 }
 
+/// Neutral chroma (code 512) in the 16-bit scale ffmpeg's yuv420p16le output uses.
+const NEUTRAL_CHROMA_16: i64 = 512 << 6;
+
+fn read_sample16(plane: &[u8], index: usize) -> i64 {
+    let index = index.min(plane.len() / 2 - 1);
+    i64::from(u16::from_le_bytes([plane[index * 2], plane[index * 2 + 1]]))
+}
+
+/// Base-layer cross-channel inputs for chroma MMR reshaping of one 4:2:0 chroma plane.
+struct ChromaRefs<'a> {
+    /// Full-resolution BL luma plane (16-bit LE).
+    luma: &'a [u8],
+    luma_width: usize,
+    luma_height: usize,
+    /// The other BL chroma plane: Cr when reshaping Cb, Cb when reshaping Cr (16-bit LE).
+    other_chroma: &'a [u8],
+    chroma_width: usize,
+}
+
+impl ChromaRefs<'_> {
+    /// Luma co-located with chroma sample `index`. A 4:2:0 chroma sample covers the 2x2 luma
+    /// block at (2*row, 2*col); its rounded mean is a box downsample of luma to the chroma grid,
+    /// which avoids biasing the prediction toward the block's top-left sample. Blocks at an
+    /// odd-sized right or bottom edge reuse the last row or column.
+    fn colocated_luma(&self, index: usize) -> i64 {
+        let row = index / self.chroma_width.max(1);
+        let col = index % self.chroma_width.max(1);
+        let y0 = (row * 2).min(self.luma_height - 1);
+        let y1 = (y0 + 1).min(self.luma_height - 1);
+        let x0 = (col * 2).min(self.luma_width - 1);
+        let x1 = (x0 + 1).min(self.luma_width - 1);
+        let at = |y: usize, x: usize| read_sample16(self.luma, y * self.luma_width + x);
+        (at(y0, x0) + at(y0, x1) + at(y1, x0) + at(y1, x1) + 2) >> 2
+    }
+}
+
 /// Apply NLQ LinearDeadzone compositing to a single plane.
 ///
 /// The pipeline per pixel:
@@ -976,8 +1024,7 @@ fn composite_plane(
     params: &NlqParams,
     channel: usize,
     reshaping: Option<&ReshapingParams>,
-    bl_y_data: Option<&[u8]>, // Full-res BL luma for MMR cross-channel (needed for chroma channels)
-    bl_cb_data: Option<&[u8]>, // Full-res BL Cb for MMR (needed for Cr channel)
+    chroma_refs: Option<ChromaRefs<'_>>, // BL cross-channel inputs for chroma MMR
 ) {
     let pixel_count = bl_data.len() / 2;
     let coeff_log2_denom = params.coeff_log2_denom;
@@ -1017,44 +1064,19 @@ fn composite_plane(
                     reshape.coeff_log2_denom,
                 ),
                 (ReshapingCurve::MMR { .. }, ch) if ch == 1 || ch == 2 => {
-                    // For chroma MMR, we need the co-located BL luma and Cb values.
-                    // For 4:2:0, chroma is subsampled — we use the corresponding
-                    // subsampled luma position. bl_y_data here should already be
-                    // subsampled or we average. For simplicity, use the same pixel index.
-                    let y_val = bl_y_data.map_or(bl_16, |y| {
-                        // Chroma is subsampled 2x in each dimension for 4:2:0
-                        // Map chroma pixel i to luma pixel: row = i/(w/2), col = i%(w/2)
-                        // Corresponding luma = (row*2)*w + (col*2)
-                        // But we don't have width here, so use a simpler co-located approach:
-                        // Just sample the Y plane at a position proportional to the chroma position
-                        // Since both planes are passed as flat arrays, and chroma has 1/4 the pixels,
-                        // we approximate by sampling luma at i*4 (center of 2x2 block)
-                        let luma_idx = (i * 4).min(y.len() / 2 - 1);
-                        i64::from(u16::from_le_bytes([y[luma_idx * 2], y[luma_idx * 2 + 1]]))
-                    });
-                    let cb_val = if ch == 2 {
-                        bl_cb_data.map_or(512 << 6, |cb| {
-                            let idx = i.min(cb.len() / 2 - 1);
-                            i64::from(u16::from_le_bytes([cb[idx * 2], cb[idx * 2 + 1]]))
-                        })
-                    } else {
-                        // For Cb channel, we don't need a separate Cb reference
-                        // The current channel IS Cb, so use bl_16 as Cb
-                        bl_16
-                    };
-                    let cr_val = if ch == 1 {
-                        // For Cb channel, we don't have Cr yet — use neutral
-                        512 << 6
-                    } else {
-                        // For Cr channel (ch==2), bl_16 is the Cr value
-                        bl_16
-                    };
-
-                    // MMR expects (Y, Cb, Cr) regardless of which chroma channel we're reshaping
+                    // MMR predicts a chroma sample from the co-located BL (Y, Cb, Cr) triple.
+                    // Without cross-channel references (unit tests only) fall back to this
+                    // plane's own value for luma and neutral for the other chroma plane.
+                    let (y_val, other_chroma) = chroma_refs
+                        .as_ref()
+                        .map_or((bl_16, NEUTRAL_CHROMA_16), |refs| {
+                            (refs.colocated_luma(i), read_sample16(refs.other_chroma, i))
+                        });
+                    // MMR expects (Y, Cb, Cr) regardless of which chroma channel is reshaped.
                     let (cb_for_mmr, cr_for_mmr) = if ch == 1 {
-                        (bl_16, cr_val)
+                        (bl_16, other_chroma)
                     } else {
-                        (cb_val, bl_16)
+                        (other_chroma, bl_16)
                     };
 
                     apply_mmr_reshape(
@@ -1804,16 +1826,7 @@ mod tests {
         let el_data: Vec<u8> = vec![0x00, 0x40]; // 16384 LE
         let mut out_data = vec![0u8; 2];
 
-        composite_plane(
-            &bl_data,
-            &el_data,
-            &mut out_data,
-            &params,
-            0,
-            None,
-            None,
-            None,
-        );
+        composite_plane(&bl_data, &el_data, &mut out_data, &params, 0, None, None);
 
         let out_val = u16::from_le_bytes([out_data[0], out_data[1]]);
         // With identity (disabled residual), BL 32768 → 10-bit 512 → 16-bit 32768
@@ -1841,16 +1854,7 @@ mod tests {
         let el_data: Vec<u8> = vec![0x00, 0x84]; // 33792 → 10-bit: 528
         let mut out_data = vec![0u8; 2];
 
-        composite_plane(
-            &bl_data,
-            &el_data,
-            &mut out_data,
-            &params,
-            0,
-            None,
-            None,
-            None,
-        );
+        composite_plane(&bl_data, &el_data, &mut out_data, &params, 0, None, None);
 
         let out_val = u16::from_le_bytes([out_data[0], out_data[1]]);
         // Output should differ from BL since EL has a residual contribution
@@ -2086,7 +2090,6 @@ mod tests {
             0, // luma
             Some(&reshaping),
             None,
-            None,
         );
 
         let out_val = u16::from_le_bytes([out_data[0], out_data[1]]);
@@ -2095,6 +2098,96 @@ mod tests {
             out_10, 256,
             "Reshaping should map BL 512 → 256, got {out_10}"
         );
+    }
+
+    fn plane16(values: &[u16]) -> Vec<u8> {
+        values
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn chroma_sample_reads_its_own_2x2_luma_block() {
+        // 4x4 luma, 2x2 chroma. Chroma (row 1, col 1) = index 3 covers luma rows 2-3, cols 2-3.
+        let luma = plane16(&[
+            0, 0, 100, 100, //
+            0, 0, 100, 100, //
+            200, 200, 400, 800, //
+            200, 200, 1200, 1600, //
+        ]);
+        let other = plane16(&[1, 2, 3, 4]);
+        let refs = ChromaRefs {
+            luma: &luma,
+            luma_width: 4,
+            luma_height: 4,
+            other_chroma: &other,
+            chroma_width: 2,
+        };
+        assert_eq!(refs.colocated_luma(0), 0);
+        assert_eq!(refs.colocated_luma(1), 100);
+        assert_eq!(refs.colocated_luma(2), 200);
+        // Mean of 400, 800, 1200, 1600. The old flat i*4 index read luma[12] = 200.
+        assert_eq!(refs.colocated_luma(3), 1000);
+    }
+
+    #[test]
+    fn cb_mmr_reshaping_reads_the_real_cr_sample() {
+        let params = NlqParams {
+            nlq_offset: [512, 512, 512],
+            vdr_in_max_int: [0; 3],
+            vdr_in_max: [0; 3],
+            linear_deadzone_slope_int: [0; 3],
+            linear_deadzone_slope: [0; 3],
+            linear_deadzone_threshold_int: [0; 3],
+            linear_deadzone_threshold: [0; 3],
+            coeff_log2_denom: 23,
+            disable_residual_flag: true,
+            el_bit_depth: 10,
+        };
+        let denom: i64 = 23;
+        // Order-1 MMR with only the Cr coefficient (k3) set: output = Cr.
+        let reshaping = ReshapingParams {
+            curves: [
+                ReshapingCurve::Identity,
+                ReshapingCurve::MMR {
+                    pivots: vec![0, 1023],
+                    pieces: vec![(1, 0, vec![vec![0, 0, 1i64 << denom, 0, 0, 0, 0]])],
+                },
+                ReshapingCurve::Identity,
+            ],
+            coeff_log2_denom: denom,
+        };
+        let cb = plane16(&[512 << 6]);
+        let el = plane16(&[512 << 6]);
+        let cr = plane16(&[700 << 6]);
+        let luma = plane16(&[300 << 6; 4]);
+        let mut out = vec![0u8; 2];
+        composite_plane(
+            &cb,
+            &el,
+            &mut out,
+            &params,
+            1,
+            Some(&reshaping),
+            Some(ChromaRefs {
+                luma: &luma,
+                luma_width: 2,
+                luma_height: 2,
+                other_chroma: &cr,
+                chroma_width: 1,
+            }),
+        );
+        let reference = ReshapingCurve::MMR {
+            pivots: vec![0, 1023],
+            pieces: vec![(1, 0, vec![vec![0, 0, 1i64 << denom, 0, 0, 0, 0]])],
+        };
+        let expected = apply_mmr_reshape(300 << 6, 512 << 6, 700 << 6, &reference, denom);
+        let neutral = apply_mmr_reshape(300 << 6, 512 << 6, NEUTRAL_CHROMA_16, &reference, denom);
+        assert_ne!(expected, neutral, "test curve must depend on Cr");
+        let out_16 = i64::from(u16::from_le_bytes([out[0], out[1]]));
+        assert_eq!(out_16 >> 6, ((expected + 32) >> 6).clamp(0, 1023));
+        assert_eq!(out_16 >> 6, 700);
     }
 
     #[test]
