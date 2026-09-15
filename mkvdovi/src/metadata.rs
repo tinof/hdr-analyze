@@ -85,29 +85,37 @@ pub fn get_ffprobe_json(input_file: &str) -> Result<Value> {
     serde_json::from_str(&out).context("Failed to parse ffprobe JSON")
 }
 
-pub fn find_measurements_file(input_file: &Path) -> Option<PathBuf> {
+/// Existing measurements files for `input_file`, most specific first. The analyzer's own output
+/// (`<stem>_measurements.bin`) leads and the shared `measurements.bin` comes last, so a stale
+/// file from another title cannot shadow the valid one.
+pub fn measurements_candidates(input_file: &Path) -> Vec<PathBuf> {
     let dir = input_file.parent().unwrap_or(Path::new("."));
-    let stem = input_file.file_stem()?.to_string_lossy();
-    let name = input_file.file_name()?.to_string_lossy();
+    let (Some(stem), Some(name)) = (input_file.file_stem(), input_file.file_name()) else {
+        return Vec::new();
+    };
+    let stem = stem.to_string_lossy();
+    let name = name.to_string_lossy();
 
     let candidates = [
+        dir.join(format!("{stem}_measurements.bin")),
+        dir.join(format!("{stem}.measurements")),
+        dir.join(format!("{name}.measurements")),
+        input_file.with_extension("mkv.measurements"),
         dir.join("measurements.bin"),
-        input_file.with_extension("mkv.measurements"), // loose approx
-        dir.join(format!("{}.measurements", name)),
-        dir.join(format!("{}.measurements", stem)),
-        dir.join(format!("{}_measurements.bin", stem)),
     ];
 
-    for candidate in &candidates {
-        if candidate.exists() {
-            return Some(candidate.clone());
+    let mut found: Vec<PathBuf> = Vec::new();
+    for candidate in candidates {
+        if candidate.exists() && !found.contains(&candidate) {
+            found.push(candidate);
         }
     }
+    found
+}
 
-    // Globbing is strictly needed if pattern matching logic is fuzzy but candidates usually cover it.
-    // The python script does glob for exact prefixes.
-    // Simplifying for now: exact matches are most common.
-    None
+/// The most specific existing measurements file for `input_file`.
+pub fn find_measurements_file(input_file: &Path) -> Option<PathBuf> {
+    measurements_candidates(input_file).into_iter().next()
 }
 
 pub fn find_details_file(input_file: &Path) -> Option<PathBuf> {
@@ -712,11 +720,12 @@ pub fn l1_sidecar_path(measurements_file: &Path) -> PathBuf {
 }
 
 /// Load and validate the L1 sidecar next to a measurements file. Every failure is reported
-/// so callers can re-run analysis instead of silently using optimizer-derived L1.
+/// so callers can re-run analysis instead of silently using optimizer-derived L1. On success
+/// the sidecar comes back with advisory warnings the caller should print.
 pub fn load_l1_sidecar(
     measurements_file: &Path,
     expect: &SidecarExpectation,
-) -> std::result::Result<L1Sidecar, SidecarError> {
+) -> std::result::Result<(L1Sidecar, Vec<String>), SidecarError> {
     let path = l1_sidecar_path(measurements_file);
     let file = match File::open(&path) {
         Ok(file) => file,
@@ -737,15 +746,69 @@ pub fn load_l1_sidecar(
                 reason: error.to_string(),
             }
         })?;
-    validate_l1_sidecar(&sidecar, expect)?;
-    Ok(sidecar)
+    let advisories = validate_l1_sidecar(&sidecar, expect)?;
+    Ok((sidecar, advisories))
 }
 
-/// Structural and identity checks for a parsed sidecar.
+/// Largest difference between the sidecar's frame count and MediaInfo's input count that still
+/// reuses the sidecar. MediaInfo estimates `FrameCount` from duration when an MKV has no
+/// statistics tags, so small differences are expected. `--verify` still compares the RPU with the
+/// muxed output exactly, which catches real truncation.
+pub fn frame_count_tolerance(expected: u64) -> u64 {
+    (expected / 1000).max(2)
+}
+
+/// Most scenes listed by name in the min <= avg <= max advisory.
+const MAX_ORDERING_ADVISORY_SCENES: usize = 5;
+
+/// One advisory for scenes outside min <= avg <= max. The analyzer's average is always the
+/// max-RGB mean, while the peak follows --peak-domain and --peak-estimator, so a luma peak domain
+/// or a percentile/robust estimator can legitimately put the average above the peak. dovi_tool
+/// clamps L1 to spec limits, so this is not a reason to discard measurements.
+fn ordering_advisories(sidecar: &L1Sidecar) -> Vec<String> {
+    let violations: Vec<String> = sidecar
+        .scenes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, scene)| {
+            if scene.avg_max_rgb_pq_12bit > scene.max_pq_12bit {
+                Some(format!(
+                    "scene {index}: avg {} exceeds max {}",
+                    scene.avg_max_rgb_pq_12bit, scene.max_pq_12bit
+                ))
+            } else if scene.min_pq_12bit > scene.avg_max_rgb_pq_12bit {
+                Some(format!(
+                    "scene {index}: min {} exceeds avg {}",
+                    scene.min_pq_12bit, scene.avg_max_rgb_pq_12bit
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if violations.is_empty() {
+        return Vec::new();
+    }
+    let shown = violations[..violations.len().min(MAX_ORDERING_ADVISORY_SCENES)].join("; ");
+    let hidden = violations
+        .len()
+        .saturating_sub(MAX_ORDERING_ADVISORY_SCENES);
+    let more = if hidden > 0 {
+        format!("; and {hidden} more")
+    } else {
+        String::new()
+    };
+    vec![format!(
+        "L1 sidecar scenes are outside min <= avg <= max ({shown}{more}). This is expected with a luma peak domain or a percentile/robust peak estimator; dovi_tool clamps these values."
+    )]
+}
+
+/// Structural and identity checks for a parsed sidecar. Violations that would make the RPU
+/// wrong are errors; conditions the conversion tolerates come back as advisory warnings.
 pub fn validate_l1_sidecar(
     sidecar: &L1Sidecar,
     expect: &SidecarExpectation,
-) -> std::result::Result<(), SidecarError> {
+) -> std::result::Result<Vec<String>, SidecarError> {
     if !matches!(sidecar.version, 1 | 2) {
         return Err(SidecarError::UnsupportedVersion(sidecar.version));
     }
@@ -760,14 +823,6 @@ pub fn validate_l1_sidecar(
         if scene.end < scene.start {
             return invalid(format!("scene {index} ends before it starts"));
         }
-        if !(scene.min_pq_12bit <= scene.avg_max_rgb_pq_12bit
-            && scene.avg_max_rgb_pq_12bit <= scene.max_pq_12bit)
-        {
-            return invalid(format!(
-                "scene {index} violates min <= avg <= max ({} / {} / {})",
-                scene.min_pq_12bit, scene.avg_max_rgb_pq_12bit, scene.max_pq_12bit
-            ));
-        }
         if let Some(previous) = index.checked_sub(1).map(|i| &sidecar.scenes[i]) {
             if scene.start != previous.end + 1 {
                 return invalid(format!(
@@ -777,6 +832,7 @@ pub fn validate_l1_sidecar(
             }
         }
     }
+    let mut advisories = ordering_advisories(sidecar);
     let covered = sidecar.frame_count();
     if let Some(frames) = &sidecar.frames {
         if frames.min_pq_12bit.len() as u64 != covered {
@@ -787,9 +843,16 @@ pub fn validate_l1_sidecar(
         }
     }
     if let Some(expected) = expect.frames {
-        if expected != covered {
+        let difference = expected.abs_diff(covered);
+        let tolerance = frame_count_tolerance(expected);
+        if difference > tolerance {
             return invalid(format!(
                 "covers {covered} frames but the input video has {expected}"
+            ));
+        }
+        if difference > 0 {
+            advisories.push(format!(
+                "L1 sidecar covers {covered} frames but MediaInfo reports {expected} for the input; within the {tolerance}-frame tolerance, because MediaInfo estimates the count from duration when the MKV has no statistics tags."
             ));
         }
     }
@@ -808,7 +871,7 @@ pub fn validate_l1_sidecar(
             ));
         }
     }
-    Ok(())
+    Ok(advisories)
 }
 
 pub fn generate_extra_json(
@@ -1216,7 +1279,7 @@ mod tests {
             size_bytes: Some(42),
             frames: Some(20),
         };
-        validate_l1_sidecar(&sidecar, &expect).unwrap();
+        assert!(validate_l1_sidecar(&sidecar, &expect).unwrap().is_empty());
         assert!(sidecar
             .provenance_summary()
             .contains("crop 3840x1600+0+280"));
@@ -1240,7 +1303,7 @@ mod tests {
     fn sidecar_frame_count_mismatch_is_rejected() {
         let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
         let expect = SidecarExpectation {
-            frames: Some(21),
+            frames: Some(40),
             ..Default::default()
         };
         assert!(matches!(
@@ -1252,7 +1315,6 @@ mod tests {
     #[test]
     fn structurally_broken_sidecars_are_rejected() {
         let cases = [
-            vec![scene(0, 9, 1, 50, 40)],                         // avg > max
             vec![scene(0, 9, 1, 5, 40), scene(11, 19, 1, 5, 40)], // gap
             vec![scene(5, 9, 1, 5, 40)],                          // does not start at 0
             vec![],                                               // empty
@@ -1277,6 +1339,92 @@ mod tests {
             validate_l1_sidecar(&future, &SidecarExpectation::default()),
             Err(SidecarError::UnsupportedVersion(3))
         ));
+    }
+
+    #[test]
+    fn avg_above_max_is_an_advisory_not_an_error() {
+        let sidecar = L1Sidecar {
+            version: 2,
+            scenes: vec![scene(0, 9, 1, 3000, 2900), scene(10, 19, 1, 5, 40)],
+            ..Default::default()
+        };
+        let advisories = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap();
+        assert_eq!(advisories.len(), 1);
+        assert!(advisories[0].contains("scene 0: avg 3000 exceeds max 2900"));
+        assert!(!advisories[0].contains("scene 1"));
+    }
+
+    #[test]
+    fn ordering_advisory_lists_at_most_five_scenes() {
+        let scenes = (0..8)
+            .map(|index| scene(index * 10, index * 10 + 9, 1, 50, 40))
+            .collect();
+        let sidecar = L1Sidecar {
+            version: 2,
+            scenes,
+            ..Default::default()
+        };
+        let advisories = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap();
+        assert_eq!(advisories.len(), 1);
+        assert!(advisories[0].contains("scene 4:"));
+        assert!(!advisories[0].contains("scene 5:"));
+        assert!(advisories[0].contains("and 3 more"));
+    }
+
+    #[test]
+    fn freshly_written_sidecar_with_avg_above_max_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let measurements = dir.path().join("title_measurements.bin");
+        fs::write(&measurements, b"").unwrap();
+        let mut sidecar = v2_sidecar_json();
+        sidecar["scenes"][1]["avg_max_rgb_pq_12bit"] = json!(3000);
+        sidecar["scenes"][1]["max_pq_12bit"] = json!(2900);
+        fs::write(
+            l1_sidecar_path(&measurements),
+            serde_json::to_vec(&sidecar).unwrap(),
+        )
+        .unwrap();
+        let (loaded, advisories) =
+            load_l1_sidecar(&measurements, &SidecarExpectation::default()).unwrap();
+        assert_eq!(loaded.frame_count(), 20);
+        assert_eq!(advisories.len(), 1);
+    }
+
+    #[test]
+    fn sidecar_frame_count_within_tolerance_validates_with_advisory() {
+        let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+        for frames in [18, 21, 22] {
+            let expect = SidecarExpectation {
+                frames: Some(frames),
+                ..Default::default()
+            };
+            let advisories = validate_l1_sidecar(&sidecar, &expect).unwrap();
+            assert_eq!(advisories.len(), 1, "{frames} frames");
+            assert!(advisories[0].contains(&format!("MediaInfo reports {frames}")));
+        }
+        assert_eq!(frame_count_tolerance(20), 2);
+        assert_eq!(frame_count_tolerance(143_562), 143);
+    }
+
+    #[test]
+    fn measurements_candidates_prefer_the_analyzer_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("title.mkv");
+        let shared = dir.path().join("measurements.bin");
+        let own = dir.path().join("title_measurements.bin");
+        let named = dir.path().join("title.mkv.measurements");
+
+        assert!(measurements_candidates(&input).is_empty());
+        fs::write(&shared, b"stale").unwrap();
+        assert_eq!(measurements_candidates(&input), vec![shared.clone()]);
+
+        fs::write(&own, b"valid").unwrap();
+        fs::write(&named, b"other").unwrap();
+        assert_eq!(
+            measurements_candidates(&input),
+            vec![own.clone(), named, shared]
+        );
+        assert_eq!(find_measurements_file(&input), Some(own));
     }
 
     #[test]

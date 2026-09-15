@@ -176,7 +176,7 @@ mkvdovi "input.mkv"     # process a specific file
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
 | `--keep-source` | off | Keep a non-DV source (DV inputs and `--mdfix` runs are always kept by default) |
 | `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv` |
-| `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, but only when the temp dir was created for the same input, mkvdovi version, and settings) |
+| `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, when the temp dir was created for the same input, mkvdovi version, and settings; a temp dir left by an older mkvdovi, with no fingerprint, resumes with a warning) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables) — tells a stalled tool apart from merely slow storage |
 | `--verify` | off | After muxing, validate the result: RPU structure, and RPU frame count against the muxed video track and the L1 sidecar (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
 | `-v, --verbose` | off | Show raw command output (debugging) |
@@ -262,7 +262,8 @@ keep long runs safe and observable:
   mid-conversion (`SIGHUP`). On interrupt, `mkvdovi` preserves its `mkvdovi_temp_*` directory.
 - **Resume is automatic.** Re-running over the same input reuses every completed step (analysis,
   RPU, extracted base layer, …) from the leftover temp dir — it does not redo hours of work.
-  Pass `--no-resume` to force a clean re-run.
+  A temp dir created for a different input or settings is discarded; one left by an older
+  mkvdovi (no fingerprint) resumes with a warning. Pass `--no-resume` to force a clean re-run.
 - **Progress is live.** Extract/inject/mux/encode show bytes written, throughput, and ETA, and
   warn (after `--stall-timeout` seconds, default 300) if the output file stops growing — so a
   genuinely stalled tool is distinguishable from slow-but-moving I/O.

@@ -29,6 +29,17 @@ pub struct Fingerprint {
     pub settings: String,
 }
 
+/// How a leftover temp directory's stored fingerprint relates to the current run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FingerprintStatus {
+    /// Created for this input, mkvdovi version, and settings.
+    Matches,
+    /// Created for something else, or the stored fingerprint is unreadable.
+    Differs,
+    /// No fingerprint: the directory predates resume fingerprints.
+    Missing,
+}
+
 impl Fingerprint {
     pub fn for_input(input: &Path, settings: String) -> std::io::Result<Self> {
         let metadata = fs::metadata(input)?;
@@ -54,13 +65,20 @@ impl Fingerprint {
         fs::write(temp_dir.join(FINGERPRINT_FILE), json)
     }
 
-    /// True when `temp_dir` holds a fingerprint equal to this one. A missing or unreadable
-    /// fingerprint (e.g. a directory from an older mkvdovi) never matches.
-    pub fn matches(&self, temp_dir: &Path) -> bool {
-        fs::read(temp_dir.join(FINGERPRINT_FILE))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Fingerprint>(&bytes).ok())
-            .is_some_and(|stored| stored == *self)
+    /// Compare the fingerprint stored in `temp_dir` with this one. A missing file means an older
+    /// mkvdovi created the directory; an unreadable or unparseable file counts as different.
+    pub fn check(&self, temp_dir: &Path) -> FingerprintStatus {
+        let bytes = match fs::read(temp_dir.join(FINGERPRINT_FILE)) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return FingerprintStatus::Missing;
+            }
+            Err(_) => return FingerprintStatus::Differs,
+        };
+        match serde_json::from_slice::<Fingerprint>(&bytes) {
+            Ok(stored) if stored == *self => FingerprintStatus::Matches,
+            _ => FingerprintStatus::Differs,
+        }
     }
 }
 
@@ -110,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_matches_only_the_same_input_and_settings() {
+    fn fingerprint_status_distinguishes_missing_from_differs() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input.mkv");
         fs::write(&input, b"source").unwrap();
@@ -118,16 +136,19 @@ mod tests {
         fs::create_dir(&temp).unwrap();
 
         let fingerprint = Fingerprint::for_input(&input, "quality=Accurate".into()).unwrap();
-        assert!(!fingerprint.matches(&temp), "no fingerprint written yet");
+        assert_eq!(fingerprint.check(&temp), FingerprintStatus::Missing);
         fingerprint.write(&temp).unwrap();
-        assert!(fingerprint.matches(&temp));
+        assert_eq!(fingerprint.check(&temp), FingerprintStatus::Matches);
 
         let other_settings = Fingerprint::for_input(&input, "quality=Fast".into()).unwrap();
-        assert!(!other_settings.matches(&temp));
+        assert_eq!(other_settings.check(&temp), FingerprintStatus::Differs);
 
         fs::write(&input, b"replaced source").unwrap();
         let replaced = Fingerprint::for_input(&input, "quality=Accurate".into()).unwrap();
-        assert!(!replaced.matches(&temp));
+        assert_eq!(replaced.check(&temp), FingerprintStatus::Differs);
+
+        fs::write(temp.join(FINGERPRINT_FILE), b"not json").unwrap();
+        assert_eq!(fingerprint.check(&temp), FingerprintStatus::Differs);
     }
 
     #[test]
