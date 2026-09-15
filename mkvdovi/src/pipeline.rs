@@ -62,8 +62,23 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
 
     // A leftover temp dir means a previous run for this file was interrupted. With resume
-    // enabled we reuse its completed steps; otherwise we discard it and start clean.
-    let resuming = resume_enabled && temp_dir.exists();
+    // enabled we reuse its completed steps, but only when it was created for this exact input
+    // and these settings; otherwise we discard it and start clean.
+    let fingerprint = resume::Fingerprint::for_input(input_path, resume_settings(args)).ok();
+    let mut resuming = resume_enabled && temp_dir.exists();
+    if resuming
+        && !fingerprint
+            .as_ref()
+            .is_some_and(|current| current.matches(&temp_dir))
+    {
+        progress::print_warn(&format!(
+            "Leftover temp dir '{}' was created for a different input, settings, or mkvdovi version; starting clean.",
+            temp_dir.display()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        temp_dir = dir.join(&temp_dir_name);
+        resuming = false;
+    }
 
     if output_file.exists() && !resuming {
         progress::print_warn(&format!(
@@ -91,6 +106,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         let _ = fs::remove_dir_all(&temp_dir);
     }
     fs::create_dir_all(&temp_dir).context("Failed to create temp directory")?;
+    if let Some(fingerprint) = &fingerprint {
+        fingerprint
+            .write(&temp_dir)
+            .context("Failed to write resume fingerprint")?;
+    }
     if resuming {
         progress::print_info("Resuming from a previous run — completed steps will be reused.");
     }
@@ -703,6 +723,28 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         );
     }
     Ok(true)
+}
+
+/// Settings that change the artifacts a temp directory holds. Part of the resume fingerprint.
+fn resume_settings(args: &Args) -> String {
+    format!(
+        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} hlg_peak_nits={} encoder={:?} mdfix={} legacy_madvr_l1={}",
+        args.hwaccel,
+        args.analysis_quality,
+        args.optimizer_profile,
+        args.boost,
+        args.boost_experimental,
+        args.cm_version,
+        args.content_type,
+        args.reference_mode,
+        args.source_primaries,
+        args.trim_targets,
+        args.peak_source,
+        args.hlg_peak_nits,
+        args.encoder,
+        args.mdfix,
+        args.legacy_madvr_l1,
+    )
 }
 
 fn output_path_for(input_path: &Path, mdfix: bool) -> PathBuf {
