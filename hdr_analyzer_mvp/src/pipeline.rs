@@ -23,7 +23,7 @@ fn copy_frame(frame: &MadVRFrame) -> MadVRFrame {
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 
-use ffmpeg_next::{format, frame, software};
+use ffmpeg_next::{format, frame, software, util::color};
 
 use crate::analysis::frame::{analyze_native_frame_cropped, FrameAnalysisOptions, FramePeakStats};
 use crate::analysis::gpu::GpuAnalyzer;
@@ -280,6 +280,11 @@ pub fn run(
         TransferFunction::Pq | TransferFunction::Unknown => {
             cli.peak_domain.unwrap_or(PeakDomain::MaxRgb)
         }
+        TransferFunction::Unsupported(name) => {
+            anyhow::bail!(
+                "transfer characteristic '{name}' is not an HDR transfer; this analyzer measures PQ (SMPTE 2084) and HLG signals only"
+            );
+        }
     };
 
     match video_info.transfer_function {
@@ -294,7 +299,22 @@ pub fn run(
                 "Transfer function unspecified; defaulting to PQ analysis path. Use --hlg-peak-nits if needed."
             );
         }
-        TransferFunction::Pq => {}
+        TransferFunction::Pq | TransferFunction::Unsupported(_) => {}
+    }
+
+    if video_info.color_range == color::Range::JPEG {
+        eprintln!(
+            "Warning: stream is tagged full range; samples are interpreted as limited range (64..940), so measured levels will be biased."
+        );
+    }
+    if !matches!(
+        video_info.color_space,
+        color::Space::Unspecified | color::Space::BT2020NCL | color::Space::BT2020CL
+    ) {
+        eprintln!(
+            "Warning: stream matrix is tagged {:?}; max-RGB peaks use BT.2020 non-constant-luminance coefficients.",
+            video_info.color_space
+        );
     }
 
     println!(

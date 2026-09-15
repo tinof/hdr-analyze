@@ -20,7 +20,11 @@ const MAX_DECODED_FRAMES_PER_PROBE: usize = 120;
 pub enum TransferFunction {
     Pq,
     Hlg,
+    /// No transfer tag (or a reserved value): analyzed as PQ with a notice.
     Unknown,
+    /// A tagged non-HDR transfer (BT.709, BT.2020 10/12-bit SDR gamma, sRGB, ...). The analyzer
+    /// refuses these: ITU-T H.273 BT2020_10/BT2020_12 share the BT.709 curve, not SMPTE ST 2084.
+    Unsupported(&'static str),
 }
 
 impl fmt::Display for TransferFunction {
@@ -29,6 +33,7 @@ impl fmt::Display for TransferFunction {
             TransferFunction::Pq => write!(f, "PQ (SMPTE 2084)"),
             TransferFunction::Hlg => write!(f, "HLG (ARIB STD-B67)"),
             TransferFunction::Unknown => write!(f, "Unspecified"),
+            TransferFunction::Unsupported(name) => write!(f, "{name} (not an HDR transfer)"),
         }
     }
 }
@@ -37,9 +42,10 @@ impl From<color::TransferCharacteristic> for TransferFunction {
     fn from(value: color::TransferCharacteristic) -> Self {
         use color::TransferCharacteristic::*;
         match value {
-            SMPTE2084 | BT2020_10 | BT2020_12 => TransferFunction::Pq,
+            SMPTE2084 => TransferFunction::Pq,
             ARIB_STD_B67 => TransferFunction::Hlg,
-            _ => TransferFunction::Unknown,
+            Unspecified | Reserved | Reserved0 => TransferFunction::Unknown,
+            other => TransferFunction::Unsupported(other.name().unwrap_or("unknown")),
         }
     }
 }
@@ -51,6 +57,10 @@ pub struct VideoInfo {
     pub height: u32,
     pub total_frames: Option<u32>,
     pub transfer_function: TransferFunction,
+    /// Signalled sample range. The analyzer assumes limited (MPEG) range.
+    pub color_range: color::Range,
+    /// Signalled YCbCr matrix. The analyzer assumes BT.2020 non-constant luminance.
+    pub color_space: color::Space,
 }
 
 fn spread_probe_timestamps(start: i64, duration: i64, count: u32) -> Vec<i64> {
@@ -249,6 +259,8 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
         .context("Failed to create video decoder")?;
     let width = decoder.width();
     let height = decoder.height();
+    let color_range = decoder.color_range();
+    let color_space = decoder.color_space();
 
     // Try multiple methods to estimate frame count
     let frame_count = {
@@ -311,6 +323,8 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
         height,
         total_frames: frame_count,
         transfer_function,
+        color_range,
+        color_space,
     };
 
     Ok((info, input_context))
@@ -322,7 +336,37 @@ mod tests {
 
     use ffmpeg_next as ffmpeg;
 
-    use super::{select_cuda_format, spread_probe_timestamps};
+    use ffmpeg_next::util::color::TransferCharacteristic;
+
+    use super::{select_cuda_format, spread_probe_timestamps, TransferFunction};
+
+    #[test]
+    fn transfer_mapping_accepts_only_hdr_curves() {
+        assert_eq!(
+            TransferFunction::from(TransferCharacteristic::SMPTE2084),
+            TransferFunction::Pq
+        );
+        assert_eq!(
+            TransferFunction::from(TransferCharacteristic::ARIB_STD_B67),
+            TransferFunction::Hlg
+        );
+        assert_eq!(
+            TransferFunction::from(TransferCharacteristic::Unspecified),
+            TransferFunction::Unknown
+        );
+        assert!(matches!(
+            TransferFunction::from(TransferCharacteristic::BT2020_10),
+            TransferFunction::Unsupported(_)
+        ));
+        assert!(matches!(
+            TransferFunction::from(TransferCharacteristic::BT2020_12),
+            TransferFunction::Unsupported(_)
+        ));
+        assert!(matches!(
+            TransferFunction::from(TransferCharacteristic::BT709),
+            TransferFunction::Unsupported(_)
+        ));
+    }
 
     #[test]
     fn probe_timestamps_span_the_middle_seventy_percent() {
