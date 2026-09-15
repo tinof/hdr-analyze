@@ -93,10 +93,14 @@ The native LSP tool (rust-analyzer plugin) is PRIMARY for symbol questions in th
 | Task | LSP operation |
 |------|---------------|
 | Who calls this / uses this field? | `findReferences` / `incomingCalls` |
+| What does this function call? | `outgoingCalls` (resolves into deps too, not just this crate) |
 | Where is this defined? | `goToDefinition` (or `workspaceSymbol` from a name) |
-| What's the type/signature? | `hover` |
+| What's the type/signature? | `hover` (returns the full signature **plus** the doc comment) |
 | What's in this file? | `documentSymbol` |
 
 - LSP is a deferred tool: load it early with `ToolSearch` query `select:LSP` (a SessionStart hook reminds you).
-- Warm the index with one cheap `documentSymbol` call on an entrypoint — the first `workspaceSymbol` after a cold start returns empty while rust-analyzer indexes.
+- **Warm the index first, and expect a wait.** One cheap `documentSymbol` call on an entrypoint (e.g. `hdr_analyzer_mvp/src/main.rs`) kicks off indexing, but it is not instant: on this host the first `workspaceSymbol` still returned empty and only resolved after ~45s. `documentSymbol` works immediately; treat an empty `workspaceSymbol` as "still indexing", not "no such symbol", and retry once.
+- **Positions are 1-based on both axes and must land exactly on the symbol.** `goToImplementation` at `mkvdovi/src/progress.rs:127:11` (inside the `for` keyword) returned "no definition found"; the same call at `127:6` (on `Drop`) returned 182 impls. A "no definition found" result usually means a bad column, not a missing symbol — recount before concluding anything.
+- **`goToImplementation` has little local value here: the repo declares no traits of its own** (`rg '^(pub )?trait '` → zero hits). Every `impl X for Y` implements a std or third-party trait, so the operation dumps the whole ecosystem's impl list (182 entries for `Drop`, of which 2 are ours). For repo-local work use `findReferences` and the call-hierarchy pair instead.
+- Cross-crate and cross-dep resolution both work: `findReferences` on `l1_sidecar::write_l1_sidecar` finds its `pipeline.rs` call sites, and `outgoingCalls` resolves through to `anyhow::Context::with_context`, `serde_json::to_writer_pretty` and `std::fs::File::create`. `incomingCalls` also surfaces **test** callers, which is the cheapest way to find a function's existing coverage.
 - **Review/audit/triage sweeps** ("find all X", "any stubs?") lead with `Grep` for exhaustive exact-pattern coverage (`todo!`, `unimplemented!`, `// TODO`, `// FIXME`), then read flagged bodies.
