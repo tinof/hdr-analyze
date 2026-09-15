@@ -39,7 +39,9 @@ use crate::ffmpeg_io::{
     open_software_decoder, probe_crop, setup_hardware_decoder, transfer_hardware_frame,
     TransferFunction, VideoInfo,
 };
-use crate::l1_sidecar::{write_l1_sidecar, FrameL1Measurement};
+use crate::l1_sidecar::{
+    write_l1_sidecar, AnalysisMetadata, FrameL1Measurement, SidecarProvenance, SourceMetadata,
+};
 use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
 use crate::writer::write_measurement_file;
 
@@ -255,6 +257,40 @@ fn scale_rect(rect: CropRect, factor: u32) -> CropRect {
     }
 }
 
+/// Map a crop from the CPU path's downscaled analysis space back to full-resolution source
+/// coordinates. Edges that touch the analysis frame border snap to the source border so an
+/// even-rounded analysis size never invents a 1-2 pixel offset.
+fn crop_to_full_resolution(
+    rect: CropRect,
+    downscale: u32,
+    analysis_size: (u32, u32),
+    full_size: (u32, u32),
+) -> CropRect {
+    if downscale <= 1 {
+        return rect;
+    }
+    let (analysis_w, analysis_h) = analysis_size;
+    let (full_w, full_h) = full_size;
+    let x = (rect.x * downscale).min(full_w.saturating_sub(2));
+    let y = (rect.y * downscale).min(full_h.saturating_sub(2));
+    let right = if rect.x + rect.width >= analysis_w {
+        full_w
+    } else {
+        ((rect.x + rect.width) * downscale).min(full_w)
+    };
+    let bottom = if rect.y + rect.height >= analysis_h {
+        full_h
+    } else {
+        ((rect.y + rect.height) * downscale).min(full_h)
+    };
+    CropRect {
+        x,
+        y,
+        width: right.saturating_sub(x).max(2),
+        height: bottom.saturating_sub(y).max(2),
+    }
+}
+
 fn shrink_rect(rect: CropRect, factor: u32) -> CropRect {
     CropRect {
         x: rect.x / factor,
@@ -381,7 +417,7 @@ pub fn run(
         }
     };
 
-    let (mut scenes, mut frames, mut l1_measurements, frame_peak_stats, crop) =
+    let (mut scenes, mut frames, mut l1_measurements, frame_peak_stats, crop, gpu_active) =
         run_native_analysis_pipeline(
             cli,
             video_info,
@@ -487,10 +523,62 @@ pub fn run(
         cli.peak_estimator,
         cli.peak_percentile,
         crop,
+        &SidecarProvenance {
+            source: SourceMetadata {
+                file_name: Path::new(input_path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                size_bytes: std::fs::metadata(input_path)
+                    .map(|meta| meta.len())
+                    .unwrap_or(0),
+                width: video_info.width,
+                height: video_info.height,
+                transfer_function: video_info.transfer_function.to_string(),
+            },
+            analysis: AnalysisMetadata {
+                downscale,
+                sample_rate: cli.sample_rate.max(1),
+                gpu: gpu_active,
+                no_crop: cli.no_crop,
+            },
+        },
     )?;
     println!("Wrote L1 measurement sidecar: {}", sidecar_path.display());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod crop_space_tests {
+    use super::*;
+
+    #[test]
+    fn cpu_crop_maps_back_to_full_resolution() {
+        let letterbox = CropRect {
+            x: 0,
+            y: 140,
+            width: 1920,
+            height: 800,
+        };
+        let full = crop_to_full_resolution(letterbox, 2, (1920, 1080), (3840, 2160));
+        assert_eq!(
+            (full.x, full.y, full.width, full.height),
+            (0, 280, 3840, 1600)
+        );
+        let unscaled = crop_to_full_resolution(letterbox, 1, (1920, 1080), (1920, 1080));
+        assert_eq!(unscaled.height, 800);
+    }
+
+    #[test]
+    fn edge_touching_crop_snaps_to_odd_source_border() {
+        let full_frame = CropRect::full(958, 538);
+        let mapped = crop_to_full_resolution(full_frame, 2, (958, 538), (1917, 1077));
+        assert_eq!(
+            (mapped.x, mapped.y, mapped.width, mapped.height),
+            (0, 0, 1917, 1077)
+        );
+    }
 }
 
 fn compute_scene_diff(cli: &Cli, curr_hist: &[f64], prev_hist: &[f64]) -> f64 {
@@ -514,6 +602,7 @@ fn run_native_analysis_pipeline(
     Vec<FrameL1Measurement>,
     Vec<FramePeakStats>,
     CropRect,
+    bool,
 )> {
     println!("Starting native analysis pipeline...");
     let total_frames = video_info.total_frames;
@@ -834,8 +923,27 @@ fn run_native_analysis_pipeline(
         );
     }
 
-    let crop = crop_rect_opt.unwrap_or_else(|| CropRect::full(target_w, target_h));
-    Ok((scenes, frames, l1_measurements, frame_peak_stats, crop))
+    // The GPU path keeps its crop in full-resolution coordinates; the CPU path (including a
+    // mid-run fallback, which shrinks the rect) keeps downscaled analysis coordinates.
+    let gpu_active = gpu_analyzer.is_some();
+    let crop = if gpu_active {
+        crop_rect_opt.unwrap_or_else(|| CropRect::full(full_w, full_h))
+    } else {
+        crop_to_full_resolution(
+            crop_rect_opt.unwrap_or_else(|| CropRect::full(target_w, target_h)),
+            downscale,
+            (target_w, target_h),
+            (full_w, full_h),
+        )
+    };
+    Ok((
+        scenes,
+        frames,
+        l1_measurements,
+        frame_peak_stats,
+        crop,
+        gpu_active,
+    ))
 }
 
 fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {

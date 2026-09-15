@@ -5,9 +5,9 @@ use clap::{Parser, ValueEnum};
 /// Version string advertising compiled-in optional backends; mkvdovi probes
 /// `--version` for "+cuda" to decide whether GPU analysis is available.
 #[cfg(feature = "cuda")]
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (+cuda)");
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (+cuda)");
 #[cfg(not(feature = "cuda"))]
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum PeakEstimator {
