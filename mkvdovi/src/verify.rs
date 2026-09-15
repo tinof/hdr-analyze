@@ -85,9 +85,13 @@ pub fn verify_post_mux_with_options(
 
     let mut summary_cmd = external::dovi_tool_command();
     summary_cmd.args(["info", "--summary", "-i", rpu_path.to_str().unwrap()]);
-    if let Ok(summary) = external::get_command_output(&mut summary_cmd) {
-        let _ = std::fs::write(temp_dir.join("dovi_info_summary.log"), summary);
-    }
+    let rpu_frames = match external::get_command_output(&mut summary_cmd) {
+        Ok(summary) => {
+            let _ = std::fs::write(temp_dir.join("dovi_info_summary.log"), &summary);
+            summary_frame_count(&summary)
+        }
+        Err(_) => None,
+    };
 
     let mut frame_cmd = external::dovi_tool_command();
     frame_cmd.args(["info", "--frame", "0", "-i", rpu_path.to_str().unwrap()]);
@@ -115,7 +119,57 @@ pub fn verify_post_mux_with_options(
         }
     }
 
-    // 3. Duration consistency check (1-second tolerance).
+    // 3. Completeness: the RPU must cover every frame of the muxed video track. MediaInfo reads
+    // mkvmerge's NUMBER_OF_FRAMES statistics tag, so the output count is exact.
+    let output_frames = output_file.to_str().and_then(metadata::get_frame_count);
+    let input_frames = metadata::get_frame_count(input_file);
+    match (rpu_frames, output_frames) {
+        (Some(rpu), Some(video)) if rpu != video => {
+            println!(
+                "{}",
+                format!("RPU covers {rpu} frames but the output video track has {video}.").red()
+            );
+            ok = false;
+        }
+        (Some(rpu), Some(video)) => {
+            println!("Frame count: RPU {rpu} = output video {video}.");
+        }
+        _ => println!(
+            "{}",
+            "Could not compare RPU and output video frame counts (dovi_tool summary or MediaInfo FrameCount missing)."
+                .yellow()
+        ),
+    }
+    // The input count can be a duration-based estimate when the source muxer wrote no
+    // statistics tags, so a mismatch here is advisory.
+    if let (Some(input), Some(video)) = (input_frames, output_frames) {
+        if input != video {
+            println!(
+                "{}",
+                format!("Output video has {video} frames but the input reports {input}; check for truncation.")
+                    .yellow()
+            );
+        }
+    }
+    if let (Some(meas_path), Some(rpu)) = (measurements, rpu_frames) {
+        if let Ok(sidecar) =
+            metadata::load_l1_sidecar(meas_path, &metadata::SidecarExpectation::default())
+        {
+            if sidecar.frame_count() != rpu {
+                println!(
+                    "{}",
+                    format!(
+                        "RPU covers {rpu} frames but the L1 measurements cover {}.",
+                        sidecar.frame_count()
+                    )
+                    .red()
+                );
+                ok = false;
+            }
+        }
+    }
+
+    // 4. Duration consistency check on the video track (1-second tolerance).
     if let (Some(d_in), Some(d_out)) = (
         metadata::get_duration_from_mediainfo(input_file),
         get_duration_from_file(output_file),
@@ -135,6 +189,17 @@ pub fn verify_post_mux_with_options(
     }
 
     ok
+}
+
+/// Frame count from `dovi_tool info --summary` output (`Frames: N`).
+fn summary_frame_count(summary: &str) -> Option<u64> {
+    let after = &summary[summary.find("Frames:")? + "Frames:".len()..];
+    let digits: String = after
+        .trim_start()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse().ok()
 }
 
 fn parse_dovi_frame_json(output: &str) -> Result<serde_json::Value, String> {
@@ -254,6 +319,13 @@ fn run_logged_command(cmd: &mut Command, log_path: &Path) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn summary_frame_count_is_parsed() {
+        let summary = "Parsing RPU file...\nSummary:\n  Frames: 2908\n  Profile: 8\n";
+        assert_eq!(summary_frame_count(summary), Some(2908));
+        assert_eq!(summary_frame_count("no summary"), None);
+    }
 
     fn valid_frame() -> serde_json::Value {
         json!({
