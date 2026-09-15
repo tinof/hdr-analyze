@@ -24,7 +24,7 @@ pub enum RpuFormatKind {
     OtherDolbyVision,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Level5Offsets {
     pub left: u16,
     pub right: u16,

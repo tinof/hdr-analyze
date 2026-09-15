@@ -161,6 +161,12 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = AnalysisQuality::Auto)]
     pub analysis_quality: AnalysisQuality,
 
+    /// Compatibility escape hatch: build L1 from the madVR measurements file with dovi_tool's
+    /// --use-custom-targets instead of the analyzer's measured L1 sidecar. L1 max then comes
+    /// from optimizer targets and L1 average is a placeholder. Only for reproducing old output.
+    #[arg(long)]
+    pub legacy_madvr_l1: bool,
+
     /// Keep the source file after successful conversion (by default it is deleted).
     #[arg(long)]
     pub keep_source: bool,

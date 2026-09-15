@@ -19,12 +19,33 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- **FEL compositing chroma correspondence.** Chroma MMR reshaping previously read luma at a flat
+  `i*4` index, which is not the 2D co-located position, and substituted neutral Cr when reshaping
+  Cb. It now averages the co-located 2×2 luma block and reads the real opposite chroma plane.
+  Covered by unit tests only; no FEL sample or independent reference comparison was available, so
+  the FEL path remains experimental.
+- **Analyzer transfer classification.** The BT.2020 10/12-bit transfer tags share the BT.709 SDR
+  curve and are no longer treated as PQ; the analyzer refuses every tagged non-HDR transfer.
 - **Metadata-removal step safety fix:** `extract_clean_base_layer` now deletes only its own intermediate
   temporary raw stream (`DV_raw.hevc`) and completion sentinel rather than the input path, preventing any
   possibility of deleting the source MKV in direct input mode.
 
 ### Changed
 
+- **No silent optimizer-target fallback.** When existing measurements have a missing, unreadable,
+  unknown-version, structurally invalid, or mismatched L1 sidecar, `mkvdovi` warns and re-runs the
+  analyzer instead of generating L1 through `dovi_tool --madvr-file --use-custom-targets`. That
+  path, where L1 max follows optimizer targets and L1 avg is a placeholder, now requires
+  `--legacy-madvr-l1`.
+- **L1 sidecar version 2.** The analyzer records its version, input identity, sampling settings, GPU
+  use, and the committed crop in full-resolution coordinates. `mkvdovi` and `tools/l1_diff` accept
+  versions 1 and 2.
+- **Resume is bound to the input and settings.** A leftover temp directory is resumed only when its
+  `resume.json` fingerprint matches the input name, size, and mtime, the mkvdovi version, and the
+  artifact-affecting settings. Otherwise it is discarded with a warning. Temp directories from
+  earlier versions have no fingerprint and restart clean.
+- **Input contract warnings.** The analyzer warns when a stream is tagged full range or with a
+  non-BT.2020 matrix, because it assumes limited-range BT.2020 NCL samples.
 - **CI/release FFmpeg setup simplified.** One composite action (`.github/actions/setup-ffmpeg`)
   replaces six copy-pasted per-OS install blocks. Windows uses a checksum-verified prebuilt LGPL
   FFmpeg (BtbN) instead of compiling it from source with vcpkg on every run, and tools already on
@@ -56,6 +77,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **L5 active-area metadata from the committed crop.** HDR10/HLG conversions emit L5 offsets that
+  describe the same active area the measurements used. Sampled source L5 keeps precedence for Dolby
+  Vision inputs; full-frame content keeps the `dovi_tool` zero default.
+- **Frame-coverage verification.** `--verify` compares the RPU frame count with the muxed video
+  track and the L1 sidecar, and fails on a mismatch.
+- **Measurement provenance output.** Reused measurements print their provenance and warn when they
+  were analyzed more coarsely than the resolved `--analysis-quality`.
+- **`Cargo.lock` is tracked** for reproducible application builds.
 - **Direct MKV input to `dovi_tool`** (`--dovi-input auto|raw|mkv`): when `dovi_tool` 2.3.4+ is detected,
   `mkvdovi` feeds the MKV container directly to `remove`, `convert`, and `demux` subcommands instead of
   extracting a full-size intermediate raw HEVC stream with ffmpeg. Saves substantial disk space and

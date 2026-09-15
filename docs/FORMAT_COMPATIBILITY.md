@@ -18,6 +18,14 @@ HDR10 and HDR10+ picture data is therefore never filtered or re-encoded. Convers
 paths is determined by metadata accuracy and the display's mapping. HLG is the only path that changes
 pixels.
 
+### Analyzer input contract
+
+`hdr_analyzer_mvp` measures PQ (SMPTE ST 2084) and HLG (ARIB STD-B67) signals. Any other tagged
+transfer is refused, including the BT.2020 10/12-bit tags, which share the BT.709 SDR curve. An
+untagged transfer is analyzed as PQ with a notice. Samples are interpreted as limited range with
+BT.2020 non-constant-luminance coefficients; streams tagged full range or with another matrix produce
+a warning.
+
 ### Analysis quality and optimizer behavior
 
 For HDR10/HLG analysis, `--analysis-quality` selects:
@@ -25,14 +33,22 @@ For HDR10/HLG analysis, `--analysis-quality` selects:
 | Preset | Resolution | Frames analyzed |
 |--------|------------|-----------------|
 | `fast` | half | every third frame |
-| `balanced` (default) | half | every frame |
+| `balanced` | half | every frame |
 | `accurate` | full | every frame |
 
-The analyzer currently enables its dynamic `target_nits` optimizer by default. For HDR10/HLG,
-`mkvdovi` passes the resulting v5 measurements to `dovi_tool generate --use-custom-targets`. The
-exact RPU-level effect of that switch has not yet been characterized; it is tracked as P0 in the
-[roadmap](../ROADMAP.md#conversion-quality). A source-honest default without custom optimizer targets
-is planned but has **not** shipped, so do not read that design decision as current behavior.
+The default `auto` resolves to `accurate` when CUDA analysis is available and to `balanced` otherwise.
+
+The analyzer still computes its dynamic `target_nits` optimizer for the madVR `.bin`, but `mkvdovi`
+does not use it for L1. HDR10/HLG RPUs take per-scene L1 minimum, max-RGB mean, and maximum from the
+analyzer's `.l1.json` sidecar. `--legacy-madvr-l1` restores the old
+`dovi_tool generate --madvr-file --use-custom-targets` path, where L1 max follows optimizer
+`target_pq` and L1 avg is a placeholder; use it only to reproduce old output.
+
+Existing measurements next to the input are reused only when their sidecar validates: scenes start at
+frame 0, are contiguous, keep min ≤ avg ≤ max, cover the input's video frame count, and (version 2)
+name the same file and size. Otherwise `mkvdovi` warns and re-runs the analyzer. Reused measurements
+print their provenance, with a warning when they were analyzed more coarsely than the resolved
+`--analysis-quality`.
 
 `--target-peak-nits` belongs to `hdr_analyzer_mvp` v6 header output and does not configure a display
 target in `mkvdovi`. The planned opt-in `mkvdovi --target-nits` workflow does not exist yet.
@@ -46,7 +62,9 @@ picture is not cut. Scene cuts provide reporting-only stability telemetry; the c
 change per scene.
 
 Use `--crop-probes 0` for the hardened in-stream fallback or `--no-crop` for full-frame diagnostics.
-The committed crop affects analysis, but L5 active-area metadata is not yet emitted.
+The committed crop is recorded in full-resolution coordinates and emitted as L5 active-area offsets.
+Sampled source L5 keeps precedence for Dolby Vision inputs. Because the crop is one conservative
+stream-level union, changing aspect ratios are not described per scene.
 
 ### L1 measurement sidecar
 
@@ -59,9 +77,12 @@ percentile; `--min-percentile 0` requests the absolute minimum.
 Y-luma and max-RGB mean series use identical EMA/temporal smoothing settings and scene resets before
 serialization. Robust minima remain raw per-frame spatial-percentile measurements.
 
-This sidecar is for measurement and validation. `dovi_tool`'s madVR input path hardcodes L1 minimum to
-zero, so the sidecar minimum is not inserted into the RPU yet. That wiring is deferred until it can be
-made compatible with `--use-custom-targets` frame edits.
+`mkvdovi` embeds the per-scene values as explicit `dovi_tool generate` shots, so the measured minimum,
+max-RGB mean, and maximum reach the RPU. Sidecar version 2 (current) adds `analyzer_version`,
+`source` (file name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, crop
+disabled), and stores `crop` in full-resolution coordinates (`crop_space: "full"`). `mkvdovi` accepts
+versions 1 and 2. Version 1 carries no identity or full-resolution crop, so only structure and frame
+count are checked and no L5 is derived from it.
 
 ## HDR10+ peak mapping
 
@@ -119,9 +140,9 @@ mkvdovi "input.mkv" --source-primaries 0
 
 | Level | Current output |
 |-------|----------------|
-| **L1** | Scene mid/max from analyzer measurements; `dovi_tool` currently hardcodes min to zero for madVR input. The analyzer's robust min is retained in its JSON sidecar |
+| **L1** | HDR10/HLG: per-scene minimum, max-RGB mean, and maximum from the analyzer's L1 sidecar. HDR10+: derived from source scenes |
 | **L2** | Neutral compatibility trims for 100/600/1000-nit targets |
-| **L5** | `dovi_tool` defaults; detected crop is not emitted yet |
+| **L5** | HDR10/HLG: offsets from the committed crop. Dolby Vision inputs: sampled source L5. Full-frame content: `dovi_tool` zero default |
 | **L6** | Static mastering-display metadata and MaxCLL/MaxFALL |
 | **L9** | Mastering-display primaries, preferring MediaInfo mastering metadata over container primaries; warned BT.2020 fallback and CLI override |
 | **L11** | Content type and reference mode (`movies` / `false` by default) |
@@ -147,8 +168,10 @@ mkvdovi --keep-source --verify "input.mkv"
 
 For HDR10/HLG inputs with measurements, `mkvdovi` resolves `verifier` from `PATH`. It also extracts
 the final RPU and validates structured `dovi_tool info --frame 0` JSON: Profile 8, ordered L1 values,
-sane L6 metadata, and required L9/L11/L254 blocks for CM v4.0. Missing source L6 fields or L9
-primaries are reported when warned fallbacks are used.
+sane L6 metadata, and required L9/L11/L254 blocks for CM v4.0. It fails when the RPU frame count
+from `dovi_tool info --summary` differs from the muxed video track's frame count or from the L1
+sidecar, and warns when the output and input video frame counts differ. Missing source L6 fields or
+L9 primaries are reported when warned fallbacks are used.
 
 ## Playback troubleshooting
 

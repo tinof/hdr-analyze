@@ -1,5 +1,9 @@
 # Research Brief: Lossless-ish FEL Preservation via RPU Modification
 
+> **Status (2026-09-15):** research idea, not a plan of record. The ordered feasibility track, which
+> starts with an independent reference decode, is R1 in [ROADMAP.md](../ROADMAP.md). FEL cannot be
+> baked into metadata generally or losslessly; see Known Limitations.
+
 ## Problem Statement
 
 Dolby Vision Profile 7 files contain dual layers:
@@ -44,7 +48,9 @@ Avoid HEVC re-encoding by capturing FEL's *effective adjustments* as modified RP
 ## Known Limitations
 
 - Arbitrary per-pixel spatial corrections (vignettes, localized adjustments) cannot be captured in RPU
-- This approach would be "lossy" for spatial FEL data but could preserve 80-90% of artistic intent for curve-based grading
+- This approach would be lossy for spatial FEL data. No measurement supports any preservation percentage; the earlier "80-90% of artistic intent" estimate is retracted (see [profile7_fel_to_profile81_preservation.md](profile7_fel_to_profile81_preservation.md))
+- If identical BL values require different reconstructed values at different locations, a shared pixel-value transform cannot reproduce both. A 10-bit display does not remove this: the residual changes the result before display quantization
+- RPU syntax that allows polynomial/MMR structures does not show that arbitrary fitted transforms play back correctly as Profile 8.1; that needs a decoder test on the target player first
 - RPU must be regenerated relative to the specific BL—it describes transformations for that exact base layer
 
 ## Potential Tooling Stack

@@ -11,7 +11,9 @@ All defaults below are taken directly from `--help`; run `<binary> --help` to co
 ## `hdr_analyzer_mvp`
 
 Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file plus an
-analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics.
+analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics and
+provenance (sidecar version 2: analyzer version, input identity, sampling settings, full-resolution
+crop). Inputs tagged with a non-HDR transfer are refused.
 
 ```bash
 hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
@@ -174,9 +176,9 @@ mkvdovi "input.mkv"     # process a specific file
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
 | `--keep-source` | off | Keep a non-DV source (DV inputs and `--mdfix` runs are always kept by default) |
 | `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv` |
-| `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps) |
+| `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, but only when the temp dir was created for the same input, mkvdovi version, and settings) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables) — tells a stalled tool apart from merely slow storage |
-| `--verify` | off | After muxing, validate the result (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
+| `--verify` | off | After muxing, validate the result: RPU structure, and RPU frame count against the muxed video track and the L1 sidecar (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
 | `-v, --verbose` | off | Show raw command output (debugging) |
 | `-q, --quiet` | off | Minimal output (errors and final result only) |
 | `--drop-chapters` | off | Drop chapters in the output (kept by default) |
@@ -187,7 +189,8 @@ mkvdovi "input.mkv"     # process a specific file
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
-| `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass |
+| `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
+| `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation |
 | `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); GPU analysis in the spawned analyzer, NVENC for FEL/HLG re-encodes |
 | `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
 | `--encoder <libx265\|videotoolbox>` | `libx265` | Encoder for HLG→PQ conversion (`videotoolbox` ≈ 10× faster on Apple Silicon) |

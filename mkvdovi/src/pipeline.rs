@@ -62,8 +62,23 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
 
     // A leftover temp dir means a previous run for this file was interrupted. With resume
-    // enabled we reuse its completed steps; otherwise we discard it and start clean.
-    let resuming = resume_enabled && temp_dir.exists();
+    // enabled we reuse its completed steps, but only when it was created for this exact input
+    // and these settings; otherwise we discard it and start clean.
+    let fingerprint = resume::Fingerprint::for_input(input_path, resume_settings(args)).ok();
+    let mut resuming = resume_enabled && temp_dir.exists();
+    if resuming
+        && !fingerprint
+            .as_ref()
+            .is_some_and(|current| current.matches(&temp_dir))
+    {
+        progress::print_warn(&format!(
+            "Leftover temp dir '{}' was created for a different input, settings, or mkvdovi version; starting clean.",
+            temp_dir.display()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        temp_dir = dir.join(&temp_dir_name);
+        resuming = false;
+    }
 
     if output_file.exists() && !resuming {
         progress::print_warn(&format!(
@@ -91,6 +106,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         let _ = fs::remove_dir_all(&temp_dir);
     }
     fs::create_dir_all(&temp_dir).context("Failed to create temp directory")?;
+    if let Some(fingerprint) = &fingerprint {
+        fingerprint
+            .write(&temp_dir)
+            .context("Failed to write resume fingerprint")?;
+    }
     if resuming {
         progress::print_info("Resuming from a previous run — completed steps will be reused.");
     }
@@ -145,7 +165,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
 
     // Compute total steps based on the detected format
-    let total_steps: u8 = match hdr_type {
+    let mut total_steps: u8 = match hdr_type {
         HdrFormat::Hdr10Plus => 7, // detect, extract HEVC, extract meta, config, RPU, inject, mux
         HdrFormat::Hlg => 8,       // detect, analyze, HLG→PQ, config, RPU, extract BL, inject, mux
         HdrFormat::Hdr10WithMeasurements => 6, // detect, config, RPU, extract BL, inject, mux
@@ -157,6 +177,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     };
 
     let mut current_step: u8 = 1; // Step 1 (detect) already done
+
+    // Measured L1 sidecar, loaded when existing measurements are reused (validated against the
+    // input) or right after a fresh analyzer run.
+    let mut l1_sidecar: Option<metadata::L1Sidecar> = None;
 
     // --- Format-specific metadata extraction ---
     // Pre-handle HDR10+ to allow fallback to HDR10Unsupported if metadata is missing
@@ -319,22 +343,46 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             }
         }
         HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported => {
-            // Try finding measurements
+            // Reuse existing measurements only when their L1 sidecar is valid for this input
+            // (or the user explicitly asked for the legacy optimizer-target path).
             measurements_file = metadata::find_measurements_file(input_path);
+            let reuse = match measurements_file.as_deref() {
+                None => false,
+                Some(_) if args.legacy_madvr_l1 => true,
+                Some(existing) => {
+                    let expect = metadata::SidecarExpectation::for_input(
+                        input_path,
+                        metadata::get_frame_count(input_file),
+                    );
+                    match metadata::load_l1_sidecar(existing, &expect) {
+                        Ok(sidecar) => {
+                            report_reused_sidecar(&sidecar, existing, args);
+                            l1_sidecar = Some(sidecar);
+                            true
+                        }
+                        Err(error) => {
+                            progress::print_warn(&format!(
+                                "Existing measurements '{}' cannot be reused ({error}); re-running analysis.",
+                                existing.display()
+                            ));
+                            false
+                        }
+                    }
+                }
+            };
 
-            if measurements_file.is_some() {
+            if reuse {
                 progress::print_info("Using existing measurements file.");
                 if args.boost_experimental {
                     progress::print_warn(
                         "Experimental boost requested, but using existing measurements.",
                     );
                 }
-            } else if hdr_type == HdrFormat::Hdr10WithMeasurements {
-                // Should have found it
-                progress::print_error("Expected madVR measurements file not found.");
-                return Ok(false);
             } else {
                 // Generate them
+                if hdr_type == HdrFormat::Hdr10WithMeasurements {
+                    total_steps += 1;
+                }
                 current_step += 1;
                 progress::print_step(current_step, total_steps, "Generating measurements...");
 
@@ -421,20 +469,45 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
-    // Prefer source-honest per-scene L1 from the analyzer sidecar when it exists. Without it,
-    // dovi_tool's madVR path fills L1 avg with a fixed placeholder and (with custom targets)
-    // replaces L1 max with optimizer targets.
-    let l1_sidecar = measurements_file
-        .as_deref()
-        .and_then(metadata::load_l1_sidecar);
-    if l1_sidecar.is_some() {
-        progress::print_info(
-            "Using measured L1 sidecar: source-honest per-scene min/avg/max in the RPU.",
-        );
-    } else if measurements_file.is_some() {
-        progress::print_warn(
-            "No L1 sidecar next to the measurements file; falling back to legacy madVR-file generation.",
-        );
+    // Source-honest per-scene L1 from the analyzer sidecar is mandatory for measurement-based
+    // generation. dovi_tool's madVR path fills L1 avg with a fixed placeholder and (with custom
+    // targets) replaces L1 max with optimizer targets, so it is reachable only by explicit opt-in.
+    if let Some(measurements) = measurements_file.as_deref() {
+        if args.legacy_madvr_l1 {
+            l1_sidecar = None;
+            progress::print_warn(
+                "--legacy-madvr-l1: L1 max comes from optimizer targets and L1 avg is a placeholder, not measured values.",
+            );
+        } else if l1_sidecar.is_none() {
+            // Freshly produced by the analyzer in this run: validate structure only.
+            match metadata::load_l1_sidecar(measurements, &metadata::SidecarExpectation::default())
+            {
+                Ok(sidecar) => l1_sidecar = Some(sidecar),
+                Err(error) => {
+                    progress::print_error(&format!(
+                        "The analyzer's L1 sidecar is unusable ({error}). Refusing to fall back to optimizer-derived L1; pass --legacy-madvr-l1 to force it."
+                    ));
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    if let Some(sidecar) = &l1_sidecar {
+        progress::print_info(&format!(
+            "Using measured L1 sidecar ({}): source-honest per-scene min/avg/max in the RPU.",
+            sidecar.provenance_summary()
+        ));
+        // Offsets sampled from a source RPU keep precedence; otherwise describe the same active
+        // area the measurements were taken over.
+        if level5_offsets.is_none() {
+            if let Some(offsets) = metadata::level5_from_sidecar(sidecar) {
+                progress::print_info(&format!(
+                    "L5 active area from the committed crop: left {}, right {}, top {}, bottom {}.",
+                    offsets.left, offsets.right, offsets.top, offsets.bottom
+                ));
+                level5_offsets = Some(offsets);
+            }
+        }
     }
 
     metadata::generate_extra_json(
@@ -650,6 +723,28 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         );
     }
     Ok(true)
+}
+
+/// Settings that change the artifacts a temp directory holds. Part of the resume fingerprint.
+fn resume_settings(args: &Args) -> String {
+    format!(
+        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} hlg_peak_nits={} encoder={:?} mdfix={} legacy_madvr_l1={}",
+        args.hwaccel,
+        args.analysis_quality,
+        args.optimizer_profile,
+        args.boost,
+        args.boost_experimental,
+        args.cm_version,
+        args.content_type,
+        args.reference_mode,
+        args.source_primaries,
+        args.trim_targets,
+        args.peak_source,
+        args.hlg_peak_nits,
+        args.encoder,
+        args.mdfix,
+        args.legacy_madvr_l1,
+    )
 }
 
 fn output_path_for(input_path: &Path, mdfix: bool) -> PathBuf {
@@ -1069,6 +1164,39 @@ fn run_hdr_analyzer(
         return Ok(Some(out_path));
     }
     Ok(None)
+}
+
+/// Print provenance for reused measurements and warn when they are coarser than the
+/// resolved --analysis-quality preset.
+fn report_reused_sidecar(sidecar: &metadata::L1Sidecar, measurements: &Path, args: &Args) {
+    progress::print_info(&format!(
+        "Existing measurements provenance: {}",
+        sidecar.provenance_summary()
+    ));
+    let (downscale, sample_rate) = analysis_quality_args(args.analysis_quality);
+    let wanted = (
+        downscale.parse::<u32>().unwrap_or(1),
+        sample_rate.parse::<u32>().unwrap_or(1),
+    );
+    match &sidecar.analysis {
+        Some(analysis) if analysis.downscale > wanted.0 || analysis.sample_rate > wanted.1 => {
+            progress::print_warn(&format!(
+                "Existing measurements were analyzed at downscale {} / sample-rate {}, coarser than --analysis-quality {} (downscale {} / sample-rate {}). Delete '{}' to re-analyze.",
+                analysis.downscale,
+                analysis.sample_rate,
+                format!("{:?}", args.analysis_quality).to_lowercase(),
+                wanted.0,
+                wanted.1,
+                measurements.display()
+            ));
+        }
+        Some(_) => {}
+        None => progress::print_warn(&format!(
+            "Existing measurements carry no analysis provenance (sidecar v{}); delete '{}' to re-analyze with the current analyzer.",
+            sidecar.version,
+            measurements.display()
+        )),
+    }
 }
 
 fn analysis_quality_args(quality: AnalysisQuality) -> (&'static str, &'static str) {

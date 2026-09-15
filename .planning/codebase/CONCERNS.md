@@ -18,7 +18,7 @@
 - Impact: Complex cross-platform build; Linux ARM64 builds fail without custom CI setup (not automated)
 - Fix approach: Document required dev deps per OS; consider vendoring FFmpeg bindings or using system-provided bindings
 
-**L1 sidecar schema versioning is implicit and fragile**
+**L1 sidecar schema versioning is implicit and fragile** — *Resolved 2026-09-15: versioned loader with explicit errors and re-analysis; v2 schema tests on both sides.*
 - Issue: Schema version in `hdr_analyzer_mvp/src/l1_sidecar.rs` (line 12, `L1_SIDECAR_VERSION = 1`) must stay in sync with what `mkvdovi/src/metadata.rs` expects. Version mismatch causes **silent fallback** to measurements-only L1 (per CLAUDE.md lines 53).
 - Files: `hdr_analyzer_mvp/src/l1_sidecar.rs` (write), `mkvdovi/src/metadata.rs::load_l1_sidecar` (read)
 - Impact: A future schema bump (e.g., adding new fields) breaks the contract; downstream mkvdovi silently ignores new sidecars without warning
@@ -30,7 +30,7 @@
 - Impact: CUDA code path can rot without CI catching compile/clippy errors; GPU analysis correctness is validated locally but not in CI
 - Fix approach: Add conditional CI step `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` (only on GPU-capable runners or optional check). Existing CLAUDE.md documents this locally but CI gap remains.
 
-**Temp directory resumption doesn't validate input file freshness**
+**Temp directory resumption doesn't validate input file freshness** — *Resolved 2026-09-15: `resume.json` fingerprint (input name/size/mtime, version, settings).*
 - Issue: `mkvdovi/src/pipeline.rs` (lines 32-46) resumes from `mkvdovi_temp_*` on re-invocation without checking if the source input was modified since the temp dir was created
 - Files: `mkvdovi/src/pipeline.rs::convert_file`
 - Impact: If source file changes mid-workflow (e.g., re-download), resumption may use stale partial outputs

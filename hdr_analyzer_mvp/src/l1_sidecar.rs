@@ -9,7 +9,12 @@ use serde::{Deserialize, Serialize};
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
-pub const L1_SIDECAR_VERSION: u32 = 1;
+/// Version 2 added analyzer/source/analysis provenance and moved `crop` to full-resolution
+/// source coordinates (`crop_space: "full"`). Version 1 stored the crop in analysis space.
+pub const L1_SIDECAR_VERSION: u32 = 2;
+
+/// Coordinate space of `L1Sidecar::crop` since version 2.
+pub const CROP_SPACE_FULL: &str = "full";
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameL1Measurement {
@@ -20,6 +25,11 @@ pub struct FrameL1Measurement {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct L1Sidecar {
     pub version: u32,
+    /// `hdr_analyzer_mvp --version` string, including `(+cuda)` for GPU-capable builds.
+    pub analyzer_version: String,
+    pub source: SourceMetadata,
+    pub analysis: AnalysisMetadata,
+    pub crop_space: String,
     pub min_percentile: f64,
     pub denoise_mode: String,
     pub peak_domain: String,
@@ -28,6 +38,34 @@ pub struct L1Sidecar {
     pub crop: CropMetadata,
     pub scenes: Vec<SceneL1Metadata>,
     pub frames: FrameL1Metadata,
+}
+
+/// Identity of the analyzed input, so consumers can reject a sidecar written for another file.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SourceMetadata {
+    /// File name only (no directory).
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub width: u32,
+    pub height: u32,
+    pub transfer_function: String,
+}
+
+/// Sampling settings the measurements were produced with.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AnalysisMetadata {
+    pub downscale: u32,
+    pub sample_rate: u32,
+    /// True when the CUDA kernel analyzed the whole run (a mid-run CPU fallback reports false).
+    pub gpu: bool,
+    pub no_crop: bool,
+}
+
+/// Provenance recorded alongside the L1 statistics.
+#[derive(Clone, Debug)]
+pub struct SidecarProvenance {
+    pub source: SourceMetadata,
+    pub analysis: AnalysisMetadata,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -72,6 +110,7 @@ pub fn write_l1_sidecar(
     peak_estimator: PeakEstimator,
     peak_percentile: f64,
     crop: CropRect,
+    provenance: &SidecarProvenance,
 ) -> Result<PathBuf> {
     if frames.len() != measurements.len() {
         anyhow::bail!(
@@ -87,6 +126,10 @@ pub fn write_l1_sidecar(
         .collect();
     let sidecar = L1Sidecar {
         version: L1_SIDECAR_VERSION,
+        analyzer_version: crate::cli::VERSION.to_owned(),
+        source: provenance.source.clone(),
+        analysis: provenance.analysis.clone(),
+        crop_space: CROP_SPACE_FULL.to_owned(),
         min_percentile,
         denoise_mode: denoise_mode.to_owned(),
         peak_domain: match peak_domain {
@@ -182,6 +225,75 @@ fn pq_to_12bit(pq: f64) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v2_sidecar_records_provenance_and_full_resolution_crop() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("m.bin");
+        let scenes = vec![MadVRScene {
+            start: 0,
+            end: 1,
+            ..Default::default()
+        }];
+        let frames = vec![
+            MadVRFrame {
+                avg_pq: 0.2,
+                peak_pq_2020: 0.6,
+                ..Default::default()
+            },
+            MadVRFrame {
+                avg_pq: 0.3,
+                peak_pq_2020: 0.7,
+                ..Default::default()
+            },
+        ];
+        let measurements = vec![FrameL1Measurement::default(); 2];
+        let provenance = SidecarProvenance {
+            source: SourceMetadata {
+                file_name: "input.mkv".into(),
+                size_bytes: 1234,
+                width: 3840,
+                height: 2160,
+                transfer_function: "PQ (SMPTE 2084)".into(),
+            },
+            analysis: AnalysisMetadata {
+                downscale: 2,
+                sample_rate: 1,
+                gpu: false,
+                no_crop: false,
+            },
+        };
+        let path = write_l1_sidecar(
+            &output,
+            &scenes,
+            &frames,
+            &measurements,
+            0.1,
+            "none",
+            PeakDomain::MaxRgb,
+            PeakEstimator::Max,
+            99.9,
+            CropRect {
+                x: 0,
+                y: 280,
+                width: 3840,
+                height: 1600,
+            },
+            &provenance,
+        )
+        .unwrap();
+
+        let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
+        assert_eq!(json["version"], 2);
+        assert_eq!(json["crop_space"], "full");
+        assert_eq!(json["crop"]["y"], 280);
+        assert_eq!(json["source"]["size_bytes"], 1234);
+        assert_eq!(json["analysis"]["downscale"], 2);
+        assert!(json["analyzer_version"]
+            .as_str()
+            .unwrap()
+            .starts_with(env!("CARGO_PKG_VERSION")));
+    }
 
     #[test]
     fn sidecar_path_appends_suffix_without_replacing_bin_extension() {
