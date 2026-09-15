@@ -74,10 +74,11 @@ This is a Rust workspace with three shipped binaries:
   the v5 histogram, hue histogram, 4096-bin peak-domain PQ histogram, max-RGB peaks, and exact
   per-pixel means on the GPU. Validated bit-identical to the CPU path; automatic CPU fallback at
   every stage.
-- **CM v4.0 metadata generation** by default via `mkvdovi` — emits L1/L2/L6/L9/L11/L254 metadata
+- **CM v4.0 metadata generation** by default via `mkvdovi` — emits L1/L2/L5/L6/L9/L11/L254 metadata
   intended for Profile 8.1-compatible workflows.
-- **Profile 7 FEL preservation**: composites BL+EL polynomial/MMR reshaping and NLQ residuals,
-  then emits a Profile 8.1-compatible base layer; local and Modal encoding backends are supported.
+- **Profile 7 FEL preservation** (experimental): composites BL+EL polynomial/MMR reshaping and NLQ
+  residuals, then emits a Profile 8.1-compatible base layer; local and Modal encoding backends are
+  supported. Not yet validated against an independent reference decode.
 - **Metadata inspection and repair**: `mkvdovi inspect` audits RPU L1 patterns, while `--mdfix`
   rebuilds metadata for supported Profile 7 MEL and Profile 8 inputs from fresh base-layer
   measurements without re-encoding the picture. Inputs that already carry RPU metadata, and all
@@ -197,7 +198,7 @@ compatibility with the Dolby Vision format.
 >
 > An interrupted run (e.g. a dropped SSH session) keeps its `mkvdovi_temp_*` directory and prints a
 > resume hint — just re-run the same command to **resume** from the last completed step (`--no-resume`
-> forces a clean run). For long conversions, run under `tmux`/`nohup` so a disconnect can't kill them.
+> forces a clean run). A temp directory is resumed only for the same input, mkvdovi version, and settings. For long conversions, run under `tmux`/`nohup` so a disconnect can't kill them.
 
 ```bash
 mkvdovi                                  # convert all .mkv files in the current directory
@@ -218,6 +219,10 @@ before new Profile 8.1 metadata is generated. `--mdfix` strips the old RPU from 
 analyzes the clean base layer, and remuxes a fresh RPU while preserving sampled L5 active-area
 offsets when available. See [the FEL preservation design](docs/profile7_fel_to_profile81_preservation.md)
 and [developer handoff](docs/profile7_fel_developer_handoff.md).
+
+HDR10/HLG RPUs carry measured per-scene L1 and L5 active-area offsets from the analyzer's sidecar.
+Existing measurements are reused only when that sidecar matches the input; otherwise the analyzer runs
+again. The old optimizer-target L1 path requires `--legacy-madvr-l1`.
 
 → HDR10+ peak mapping, CM v4.0 metadata, and verification details:
 [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md). Full flag list:
@@ -265,7 +270,8 @@ Reports version/flags, scene & frame stats, peak brightness and avg PQ, histogra
   black/low-signal frames and commit a stable active area before analysis. When multiple aspect-ratio
   modes are observed, their union preserves all picture; scene cuts report crop changes but do not
   apply a new crop per scene. Use `--crop-probes 0` for in-stream fallback detection or `--no-crop`
-  for full-frame diagnostics. L5 active-area metadata is not emitted yet.
+  for full-frame diagnostics. The committed crop is emitted as L5 active-area metadata; per-scene L5
+  for changing aspect ratios is not.
 - **HLG/VAAPI/VideoToolbox decode** currently fall back to software decoding; proper device contexts
   are planned (see [Roadmap](#roadmap)).
 - **v6 per-gamut peaks** (`peak_pq_dcip3`, `peak_pq_709`) are approximated from BT.2020. These are a
@@ -288,9 +294,10 @@ summing ≈ 100; PQ values in `[0,1]`; scenes valid and within frame range.
 
 ## Roadmap
 
-See **[ROADMAP.md](ROADMAP.md)**. Near-term work includes source-faithful Profile 8.1 metadata generation,
-robust L1 min/average measurements, L5 emission, numerical CI regression gates, hybrid scene
-detection, and proper VAAPI/VideoToolbox device contexts.
+See **[ROADMAP.md](ROADMAP.md)**. The current priority is dependable HDR10/HDR10+ → Profile 8.1
+conversion with reproducible evidence: a final-RPU regression corpus, a documented playback test
+procedure, then grain-robust peaks and shot aggregation. FEL compositing stays experimental until it
+is validated against an independent reference.
 
 ## Contributing & Quality Gates
 

@@ -35,7 +35,7 @@ trims are a separate, higher-risk tone-mapping problem.
 | Scene detection | `analysis/scene.rs` | Histogram-distance cuts and minimum scene length |
 | Optimizer | `optimizer.rs` | madVR `target_nits`; this is not itself a Dolby metadata level |
 | DV configuration | `mkvdovi/src/metadata.rs` | Neutral L2, L6, L9, L11 |
-| RPU assembly | `mkvdovi/src/pipeline.rs` | `dovi_tool generate`; L1 inferred from source data/measurements, default L5, L254 from `dovi_tool` |
+| RPU assembly | `mkvdovi/src/pipeline.rs` | `dovi_tool generate` with explicit per-scene L1 shots from the sidecar, L5 from the committed crop, L254 from `dovi_tool` |
 
 Key facts:
 
@@ -49,27 +49,30 @@ Key facts:
 - The analyzer measures a robust active-area minimum from a 4096-bin fine-PQ histogram after
   selected denoising. It defaults to P0.1; `--min-percentile 0` selects the absolute minimum.
 - `madvr_parse::MadVRFrame` has no minimum field, and `dovi_tool` hardcodes `min_pq = 0` for madVR
-  generator input; it does **not** infer L1 minimum from the histogram. The measured minimum is
-  therefore emitted only in `<output>.l1.json` pending explicit RPU wiring.
+  generator input; it does **not** infer L1 minimum from the histogram. `mkvdovi` therefore bypasses
+  the madVR path and passes the sidecar's per-scene minimum, max-RGB mean, and maximum as explicit
+  generator shots.
 - Seven seek-based crop probes are used by default across 15%–85% of seekable inputs. Black/low-signal
   frames are rejected, candidates are clustered within two pixels, and multiple aspect-ratio modes
   use their union. Scene cuts are monitored but do not change the committed crop.
-- The committed crop affects measurements but is not passed through as L5 metadata.
+- The committed crop is recorded in full-resolution coordinates (sidecar v2) and emitted as L5 offsets.
 - L2 trims are neutral (`2048`). L9 detection prefers mastering-display primaries, then container
   primaries, and warns before falling back to BT.2020.
 - With `dovi_tool generate --use-custom-targets` and optimizer targets present, the generated
-  per-frame L1 maximum follows optimizer `target_pq`, not the analyzer's measured peak. Untangling
-  custom-target frame edits from source-honest L1 delivery remains P0 work.
+  per-frame L1 maximum follows optimizer `target_pq`, not the analyzer's measured peak. That path is
+  reachable only through `mkvdovi --legacy-madvr-l1`.
+- The shot maximum is the maximum of its frame peaks, so one retained grain spike can set a whole
+  shot. Robust aggregation is investigated together with spatial-support peak estimation.
 
 ## Per-level gap table
 
 | Level | Current state | Remaining gap | Roadmap |
 |-------|---------------|---------------|---------|
-| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias only +92.6→+80.4 and +74.4→+66.4 codes; isolated-tail frames selected by fold-max remain the open gap. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms; HLG max-RGB | P2 / WS1 |
-| **L1 avg** | True Y-luma mean delivered through scene measurements; Y and max-RGB means also recorded in the sidecar | Decide from validation whether the RPU average domain should change — real-content evidence: our max-RGB mean matches cm v2's shot average within ~10 codes, while cm v4's "avg" is an anchored constant | WS1 |
-| **L1 min** | Noise-rejected active-area minimum measured and emitted in the sidecar | Wire measured minimum into the RPU without conflicting with custom-target frame edits | WS1 / P0 |
+| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias only +92.6→+80.4 and +74.4→+66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms; HLG max-RGB | P2 / WS1 |
+| **L1 avg** | Per-scene max-RGB mean delivered in the RPU (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar | Revisit only with new validation evidence; cm v4's "avg" is an anchored constant, not a mean | WS1 |
+| **L1 min** | Noise-rejected active-area minimum delivered per scene in the RPU | Maintain validation coverage | WS1 |
 | **L4** | None; optimizer smooths madVR `target_nits` only | Shot-anchored L1 and optional temporal filtering | WS2 |
-| **L5** | `dovi_tool` default | Emit offsets from the committed crop and validate variable-AR policy | P3 / WS3 |
+| **L5** | Offsets from the committed crop (HDR10/HLG); sampled source L5 for Dolby Vision inputs | Per-scene offsets for changing aspect ratios | P3 / WS3 |
 | **L6** | Container/MediaInfo values with warned fallbacks | Optionally measure MaxCLL/MaxFALL from analysis | P6 |
 | **L2/L3/L8** | Neutral L2; no L3/L8 derivation | Experimental open tone-mapping baseline and A/B validation | WS4 |
 | **L9** | Auto-detected with CLI override | Maintain and expand inconsistent-source diagnostics | P5 / P6 |

@@ -4,6 +4,9 @@
 > **Updated:** June 4, 2026
 > **Crate:** `mkvdovi`
 > **Branch reviewed:** `feat/profile7-fel-to-profile81`
+> **Compositor status (2026-09-15):** experimental. Chroma MMR now uses the co-located 2×2 luma mean
+> and the real opposite chroma plane (previously a flat `i*4` luma index and neutral Cr for Cb). No
+> independent reference comparison has run; see F1 and R1 in [ROADMAP.md](../ROADMAP.md).
 
 ---
 

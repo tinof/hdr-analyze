@@ -119,9 +119,9 @@
   - Written by: `hdr_analyzer_mvp`
   - Read by: `verifier`, `mkvdovi`, `dovi_tool`
 - `.l1.json` - L1 measurement sidecar (JSON, per-scene/per-frame luminance)
-  - Written by: `hdr_analyzer_mvp` (optional, default off)
-  - Read by: `mkvdovi` for source-honest L1 metadata generation
-  - Schema: Versioned (version: 1); schema change requires coordinated version bump
+  - Written by: `hdr_analyzer_mvp` (every run)
+  - Read by: `mkvdovi` for source-honest L1 metadata generation and L5 offsets
+  - Schema: Versioned (writer emits version 2 with provenance and a full-resolution crop; readers accept 1 and 2); schema change requires coordinated version bump
 - `.mkv` - Final output container (Matroska)
   - Contains: Base layer video + Dolby Vision RPU track
   - Metadata: L1/L2/L5/L6/L9/L11/L254 levels (CM v4.0)
@@ -170,9 +170,9 @@
 
 **`hdr_analyzer_mvp` → `mkvdovi`:**
 - Analyzer writes `.bin` measurements
-- Optional: Analyzer writes `.l1.json` L1 sidecar (schema versioned)
+- Analyzer writes `.l1.json` L1 sidecar (schema versioned)
 - mkvdovi reads both files via `metadata::load_l1_sidecar()` for source-honest per-scene L1
-- Contract: L1 schema version mismatch → silently falls back to measurements-only L1
+- Contract: a missing, invalid, mismatched, or unknown-version sidecar → visible warning and analyzer re-run (legacy optimizer-target L1 only with `--legacy-madvr-l1`)
 
 **`mkvdovi` → External tools:**
 1. FFmpeg decode → extract BL/EL frames → store in temp directory
