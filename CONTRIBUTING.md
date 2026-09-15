@@ -55,14 +55,11 @@ We welcome several types of contributions:
 
 ### Prerequisites
 
-- **Rust toolchain** (1.70 or later): Install from [rustup.rs](https://rustup.rs/)
-- **FFmpeg**: Must be installed and available in your system PATH
-- **Tools**:
-  - `git` (Version Control)
-  - `mkvmerge` (MKVToolNix)
-  - `mediainfo`
-  - `dovi_tool`
-  - `hdr10plus_tool`
+- Rust stable with `clippy` and `rustfmt`. `rust-toolchain.toml` selects it when you install through [rustup](https://rustup.rs/).
+- FFmpeg development libraries plus `clang`/`libclang` for the `ffmpeg-next` bindings.
+- Runtime tools for `mkvdovi`: `ffmpeg`, `mkvmerge`, `dovi_tool` 2.3.2 or later, `mediainfo` or `ffprobe`, and `hdr10plus_tool` for HDR10+ inputs.
+
+[docs/INSTALLATION.md](docs/INSTALLATION.md) has the per-OS package commands, the source build and the CUDA build.
 
 ### Building the Project
 
@@ -77,24 +74,27 @@ cargo build
 # Build in release mode (for performance testing)
 cargo build --release
 
-# Run the tool
-./target/debug/hdr_analyzer_mvp --help
+# Run the tools
+cargo run -p hdr_analyzer_mvp -- --help
+cargo run -p mkvdovi -- --help
 ```
 
-### Running the Tools manually
+### Running the tools from source
 
-While `cargo run` works, the workspace includes scripts and specialized workflows.
+#### 1. The `mkvdovi` converter
+`mkvdovi` runs the end-to-end conversion. It deletes a non-Dolby Vision source after a successful run, so pass `--keep-source` while testing.
 
-#### 1. The `mkvdovi` Script
-The `mkvdovi` script provides an end-to-end workflow for processing video files.
-
--   **Standard Run**:
+-   Standard run:
     ```bash
-    PYTHONPATH="mkvdovi/src" python -m mkvdovi.cli "<input_video>"
+    cargo run -p mkvdovi --release -- "<input_video>" --keep-source
     ```
--   **Run with Verification**:
+-   Run with verification:
     ```bash
-    PYTHONPATH="mkvdovi/src" python -m mkvdovi.cli "<input_video>" --verify
+    cargo run -p mkvdovi --release -- "<input_video>" --keep-source --verify
+    ```
+-   Inspect the RPU of an existing file:
+    ```bash
+    cargo run -p mkvdovi --release -- inspect "<input_video>"
     ```
 
 #### 2. Running the Analyzer Directly
@@ -110,15 +110,17 @@ The `mkvdovi` script provides an end-to-end workflow for processing video files.
 ### Running Tests
 
 ```bash
-# Run all tests
-cargo test
+# Run all workspace tests
+cargo test --workspace --verbose
 
-# Run tests with output
-cargo test -- --nocapture
+# Run one crate's tests
+cargo test -p mkvdovi
 
-# Run specific test
-cargo test test_name
+# Run one test by name, with output
+cargo test -p <crate> -- <test_name> --nocapture
 ```
+
+Some `mkvdovi` integration tests skip when `dovi_tool` is not in `PATH` or the sample media file is absent.
 
 ## Coding Standards
 
@@ -133,7 +135,7 @@ cargo test test_name
 
 ### Code Quality Requirements
 
-- **All code must pass `cargo clippy --release -- -D warnings`**
+- **All code must pass `cargo clippy --workspace --all-targets -- -D warnings`**
 - **All code must be formatted with `cargo fmt`**
 - **Add comprehensive documentation** for public functions using `///` comments
 - **Include examples** in documentation where helpful
@@ -184,13 +186,18 @@ To inspect the final Dolby Vision MKV file:
     dovi_tool info -i RPU.bin --summary
     ```
 
-### 3. Baseline Comparison Harness
-To guard against regressions, use the `compare_baseline` tool.
+### 3. Baseline comparison and L1 scoring
+`tools/compare_baseline` and `tools/l1_diff` are excluded from the workspace, so build each one with its own manifest. The binaries land in `tools/<name>/target/release/`.
 
-1.  **Build the tool**: `cargo build --release -p compare_baseline`
-2.  **Run comparison**:
+1.  Compare two directories of measurement files:
     ```bash
-    target/release/compare_baseline --baseline ./path/to/baseline_bins --current ./path/to/current_bins
+    cargo build --release --manifest-path tools/compare_baseline/Cargo.toml
+    tools/compare_baseline/target/release/compare_baseline --baseline ./path/to/baseline_bins --current ./path/to/current_bins
+    ```
+2.  Score analyzer L1 against a reference L1 CSV (reads `<ours>.l1.json` by default):
+    ```bash
+    cargo build --release --manifest-path tools/l1_diff/Cargo.toml
+    tools/l1_diff/target/release/l1_diff --ours video_measurements.bin --reference reference_l1.csv
     ```
 
 ## Submitting Changes
@@ -199,9 +206,9 @@ To guard against regressions, use the `compare_baseline` tool.
 
 1. **Ensure your code follows all coding standards**:
    ```bash
-   cargo fmt
-   cargo clippy --release -- -D warnings
-   cargo test
+   cargo fmt --all -- --check
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace --verbose
    ```
 
 2. **Update documentation** if needed (README.md, CHANGELOG.md)

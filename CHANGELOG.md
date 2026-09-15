@@ -6,6 +6,10 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+---
+
+## [0.4.0] - 2026-09-15
+
 ### Removed
 
 - **Duplicate vendored `dovi_tool` README** (`docs/dovitool.README.md`). Third-party reference docs
@@ -19,6 +23,10 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- **Windows installer.** `install.ps1` now copies the FFmpeg DLLs and license bundled in the zip,
+  so the installed analyzer can start. It also no longer uses a three-argument `Join-Path`, which
+  Windows PowerShell 5.1 rejects. Not yet tested on Windows; the documentation recommends the zip
+  until it is.
 - **FEL compositing chroma correspondence.** Chroma MMR reshaping previously read luma at a flat
   `i*4` index, which is not the 2D co-located position, and substituted neutral Cr when reshaping
   Cb. It now averages the co-located 2×2 luma block and reads the real opposite chroma plane.
@@ -32,6 +40,8 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed
 
+- **Release archives include the documentation.** `docs/`, `CONTRIBUTING.md` and `ROADMAP.md`
+  ship next to `README.md`, so its relative links work inside an extracted archive.
 - **No silent optimizer-target fallback.** When existing measurements have a missing, unreadable,
   unknown-version, structurally invalid, or mismatched L1 sidecar, `mkvdovi` warns and re-runs the
   analyzer instead of generating L1 through `dovi_tool --madvr-file --use-custom-targets`. That
@@ -162,6 +172,22 @@ This document provides a historical record of completed milestones, feature impl
 - Dolby Vision inputs and all `--mdfix` runs keep their source by default. New FEL/repair artifacts
   use the v0.3 resume sentinels and live progress reporting; the legacy `mkvdolby_temp_*` resume
   compatibility remains intact for one release.
+
+### Documentation
+
+- **Metadata-source and pipeline corrections.** The installation guide now says MediaInfo supplies
+  the L6 and L9 source values and that an `ffprobe`-only setup falls back to defaults. The format
+  guide states that HLG is measured before the PQ re-encode, and the CLI reference states that the
+  sidecar's per-scene minimum is written to L1.
+- The README is rewritten around the HDR10 and HDR10+ to Profile 8.1 workflow, with a compatibility
+  table that says which paths re-encode the picture.
+- Added [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for release binaries, runtime tools, source
+  builds and the CUDA build, and [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for the recorded
+  benchmark and its unrecorded fields.
+- Moved the FEL research notes and the Modal offload notes to
+  [`docs/experimental/`](docs/experimental/README.md). None of it is a release feature.
+- Removed the vendored `hdr10plus_tool` README (`docs/hdr10plus_tool_README.md`), in line with the
+  local-only policy for third-party reference docs.
 
 ---
 

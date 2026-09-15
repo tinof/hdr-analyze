@@ -4,17 +4,17 @@ authors:
   - family-names: "Fotiou"
     given-names: "Konstantinos"
     # orcid: "https://orcid.org/0000-0000-0000-0000" # Optional: Add your ORCID if you have one
-title: "HDR-Analyze: Dynamic HDR Metadata Generator for Dolby Vision"
-version: 0.3.0
+title: "HDR-Analyze: independent HDR analysis and Dolby Vision metadata generation"
+version: 0.4.0
 # doi: 10.5281/zenodo.1234  # Optional: Get a DOI via Zenodo/GitHub integration
-date-released: 2026-07-06
+date-released: 2026-09-15
 url: "https://github.com/tinof/hdr-analyze"
 preferred-citation:
   type: software
   authors:
   - family-names: "Fotiou"
     given-names: "Konstantinos"
-  title: "HDR-Analyze: Dynamic HDR Metadata Generator for Dolby Vision"
+  title: "HDR-Analyze: independent HDR analysis and Dolby Vision metadata generation"
   year: 2026
 keywords:
   - hdr

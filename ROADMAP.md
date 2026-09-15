@@ -10,13 +10,13 @@ This is the single source of truth for active `hdr-analyze` work. Completed chan
 
 Status meanings: **Open** has not shipped; **Partial** has useful pieces in place but does not meet
 the stated outcome; **Core complete** meets the original gate but retains named follow-up work;
-**Complete** has no named follow-up; **Deferred** is intentionally not scheduled.
+**Deferred** is intentionally not scheduled. Items with no follow-up left move to the changelog.
 
 ## Current status (updated 2026-09-15)
 
 The v0.3.0 release shipped the `mkvdolby` → `mkvdovi` rename, published measured accuracy in
 [`docs/VALIDATION.md`](docs/VALIDATION.md), and made PQ direct peaks default to BT.2020 NCL max-RGB.
-Since then, measured per-scene L1 reaches the RPU by default, and the unreleased work adds L5 from the
+Since then, measured per-scene L1 reaches the RPU by default, and v0.4.0 adds L5 from the
 committed crop, measurement and resume provenance, frame-coverage verification, an analyzer input
 contract, and FEL chroma fixes (see [`CHANGELOG.md`](CHANGELOG.md)).
 
@@ -36,7 +36,7 @@ into the tables and priorities below.
 - **No silent degradation.** A path that produces weaker metadata must be explicit and visible.
 - **Source-faithful defaults.** Measured L1 and neutral trims stay the default; display-targeted
   behavior stays opt-in.
-- **Measured research claims only.** Unmeasured expectations, such as the retired "80–90% of FEL
+- **Measured research claims only.** Unmeasured expectations, such as the retired "80-90% of FEL
   intent" estimate, are not targets.
 
 ## Priorities
@@ -59,7 +59,6 @@ scene detection (E4), and broader hardware acceleration (E5). Neutral trims stay
 |----|--------|------|
 | **P0** | **Core complete** | Measured per-scene L1 (minimum, max-RGB mean, maximum) reaches the RPU as explicit `dovi_tool generate` shots and bypasses optimizer targets. A missing, invalid, or mismatched sidecar re-runs analysis. The old `--madvr-file --use-custom-targets` generation, where L1 max follows optimizer `target_pq` and L1 avg is a placeholder, is reachable only through `--legacy-madvr-l1`. Remaining: a real-content run confirming the extracted RPU matches the sidecar. |
 | **P1** | **Partial** | Source-honest generation is the default. Open: decide whether full-resolution every-frame analysis becomes the CPU default. Today `auto` resolves to `accurate` only with CUDA analysis and to `balanced` otherwise; measure the CPU cost first. |
-| **P2** | **Complete** | PQ max-RGB peaks, robust crop probing, per-pixel Y/max-RGB means, and a noise-rejected minimum; the measured minimum now reaches the RPU. |
 | **P3** | **Core complete** | L5 offsets come from the committed full-resolution crop (sidecar v2); sampled source L5 keeps precedence for Dolby Vision inputs. Open: changing aspect ratios need per-scene offsets, treated as a separate validation problem. |
 | **P4** | **Deferred** | Opt-in `--target-nits` display-targeted workflow wired into optimizer behavior. |
 | **P5** | **Partial** | L9 detection prefers mastering-display primaries and has an override. Still needed: `hdr10plus_tool extract --skip-reorder` fallback and BT.2020 mastering primaries for HLG→PQ output. |
@@ -76,7 +75,6 @@ The detailed gap table and validation method live in
 | **WS0** | **Core complete** | `tools/l1_diff`, synthetic ground-truth tests, embedded-L1 comparison, and licensed `cm_analyze` scoring have shipped. Grow the corpus and add an automated `l1_diff` regression gate; the utility is currently excluded from workspace CI. |
 | **WS1** | **Partial** | Measurement core, measured-minimum delivery, and the max-RGB-mean average domain have shipped. Open: a grain-robust peak. Raw max-RGB reads +92.6 / +74.4 codes hot against `cm_analyze` v2; the opt-in robust estimator reached +80.4 / +66.4 and missed its promotion gate ([VALIDATION.md §7](docs/VALIDATION.md)). Investigate spatial support and temporal persistence together while preserving genuine small speculars; do not enable the current robust estimator by default. Also open: true target-gamut peaks and HLG max-RGB. |
 | **WS2** | **Partial** | Initial shot aggregation shipped: the shot maximum is the maximum of its frame peaks, so one retained grain spike can set a whole shot. Open: robust aggregation (investigated with WS1), an optional L4-style temporal filter, and hybrid scene detection promoted only after it beats histogram-only against reference boundaries. |
-| **WS3** | **Core complete** | L5 active-area metadata emitted from the committed crop (P3). |
 | **WS4** | **Deferred; experimental** | Optional L2/L8 trims from an open tone-mapping baseline such as ITU-R BT.2390. Neutral trims remain the default unless blinded A/B testing demonstrates an improvement. |
 | **WS5** | **Open; conditional** | CM metadata XML export. Worthwhile only if the external Profile 5 authoring route (R2) is chosen. |
 | **WS6** | **Open** | Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes, rapid cuts, and changing aspect ratios. Checks run on the RPU extracted from the muxed file. Add a Shield/TV playback procedure comparing matched material from the same master, recording player, firmware, TV picture mode, and HDMI path. |

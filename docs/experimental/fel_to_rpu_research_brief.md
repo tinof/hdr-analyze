@@ -1,7 +1,7 @@
 # Research Brief: Lossless-ish FEL Preservation via RPU Modification
 
 > **Status (2026-09-15):** research idea, not a plan of record. The ordered feasibility track, which
-> starts with an independent reference decode, is R1 in [ROADMAP.md](../ROADMAP.md). FEL cannot be
+> starts with an independent reference decode, is R1 in [ROADMAP.md](../../ROADMAP.md). FEL cannot be
 > baked into metadata generally or losslessly; see Known Limitations.
 
 ## Problem Statement

@@ -284,5 +284,5 @@ This reinforces two requirements for the preservation branch:
 - [Dolby Vision UHD Blu-ray Authoring Workflow Guide](https://professional.dolby.com/siteassets/pdfs/dolby_vision_uhd_bluray_authoring_workflow.pdf)
 - [Dolby Vision Metadata Levels](https://professionalsupport.dolby.com/s/article/Dolby-Vision-Metadata-Levels)
 - [Dolby Vision Profiles and Levels](https://professionalsupport.dolby.com/s/article/What-is-Dolby-Vision-Profile?language=en_US)
-- `docs/profile7_fel_developer_handoff.md`
+- `docs/experimental/profile7_fel_developer_handoff.md`
 - `mkvdovi/src/fel_composite.rs`

@@ -1,4 +1,4 @@
-# Format Compatibility & Conversion Guide
+# Format compatibility and conversion guide
 
 How `mkvdovi` converts HDR10, HDR10+, and HLG sources, maps brightness metadata, generates CM v4.0
 metadata, and verifies the result. For every flag, see [CLI_REFERENCE.md](CLI_REFERENCE.md). For
@@ -6,17 +6,35 @@ analyzer accuracy and remaining technical gaps, see [CM_ANALYZE_PARITY.md](CM_AN
 
 ## Conversion paths
 
-- **HDR10:** the base layer is copied unchanged. When no compatible measurements exist, `mkvdovi`
-  runs `hdr_analyzer_mvp` and supplies its madVR v5 file to `dovi_tool generate`.
-- **HDR10+:** the base layer is copied unchanged. Source HDR10+ metadata is extracted and supplied
-  directly to `dovi_tool generate`; the analyzer is used only if extraction fails and processing falls
-  back to HDR10.
-- **HLG:** pixels are converted from HLG to PQ with `zscale` and encoded with x265 or VideoToolbox,
-  then analyzed for RPU generation.
+| Input | Output | Picture re-encoded | Maturity |
+|-------|--------|--------------------|----------|
+| HDR10 | Profile 8.1, CM v4.0, L1 from analyzer measurements | No | Measurement comparisons published; playback unvalidated |
+| HDR10+ | Profile 8.1, L1 from source HDR10+ metadata | No | Measurement comparisons published; playback unvalidated |
+| HLG | Profile 8.1 after HLG to PQ conversion | Yes: libx265, `hevc_videotoolbox` or `hevc_nvenc` | Works, less validated |
+| Dolby Vision Profile 7 MEL | Profile 8.1, metadata-only enhancement layer discard | No | Works |
+| Dolby Vision Profile 7 FEL | Profile 8.1 from a BL+EL composite | Yes: composite, then re-encode | Experimental, compositor accuracy unverified |
+| Dolby Vision Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata, source kept | No | Works, not a guaranteed improvement over authored metadata |
 
-HDR10 and HDR10+ picture data is therefore never filtered or re-encoded. Conversion quality for those
-paths is determined by metadata accuracy and the display's mapping. HLG is the only path that changes
-pixels.
+Not supported: Profile 5 output, lossless FEL to Profile 8 conversion, and XML metadata export.
+
+- HDR10: the base layer is copied unchanged. When no compatible measurements exist, `mkvdovi`
+  runs `hdr_analyzer_mvp` and supplies its measurements to `dovi_tool generate`.
+- HDR10+: the base layer is copied unchanged. Source HDR10+ metadata is extracted with
+  `hdr10plus_tool` and supplied directly to `dovi_tool generate`. The file falls back to HDR10
+  analysis only when extraction runs but yields no metadata (the stream carries no dynamic metadata,
+  or the extraction step exits with an error or writes an empty file). `hdr10plus_tool` is not
+  checked at startup, and if it cannot be started the file fails instead of falling back.
+- HLG: the analyzer first measures the original HLG stream, mapping it to PQ with
+  `--hlg-peak-nits`. The pipeline then converts the video from HLG to PQ with `zscale` and encodes
+  it with libx265 or `hevc_videotoolbox` (`--encoder`), or with `hevc_nvenc` under `--hwaccel cuda`
+  when FFmpeg has it. The encoded PQ picture is not measured again, so L1 describes the analyzer's
+  PQ mapping of the source rather than the encoder output.
+- Profile 7 FEL: the base and enhancement layers are composited in software and re-encoded, then a
+  new Profile 8.1 RPU is generated. See [experimental/README.md](experimental/README.md).
+
+HDR10, HDR10+, Profile 7 MEL and `--mdfix` picture data is never filtered or re-encoded. Conversion
+quality for those paths depends on metadata accuracy and the display's mapping. HLG and Profile 7 FEL
+change pixels.
 
 ### Analyzer input contract
 
@@ -89,11 +107,11 @@ count are checked and no L5 is derived from it.
 For HDR10+ input, `mkvdovi` forwards the selected peak source to
 `dovi_tool generate --hdr10plus-peak-source`:
 
-- **`histogram`** — default and recommended balanced baseline.
-- **`histogram99`** — last HDR10+ histogram percentile (usually 99.98%); selected by `--boost` when a
-  deliberately brighter alternative is desired.
-- **`max-scl`** — largest RGB MaxSCL component; more sensitive to channel highlights and outliers.
-- **`max-scl-luminance`** — luminance calculated from MaxSCL components; can look dimmer.
+- `histogram`: default and recommended balanced baseline.
+- `histogram99`: last HDR10+ histogram percentile (usually 99.98%). `--boost` selects it when you
+  want a brighter alternative on purpose.
+- `max-scl`: largest RGB MaxSCL component. More sensitive to channel highlights and outliers.
+- `max-scl-luminance`: luminance calculated from MaxSCL components. Can look dimmer.
 
 Neutral L2 compatibility targets remain `100,600,1000`. They are not panel-calibration controls and
 should not be replaced with a television's measured peak brightness. A Dolby Vision-capable display
@@ -143,8 +161,8 @@ mkvdovi "input.mkv" --source-primaries 0
 | **L1** | HDR10/HLG: per-scene minimum, max-RGB mean, and maximum from the analyzer's L1 sidecar. HDR10+: derived from source scenes |
 | **L2** | Neutral compatibility trims for 100/600/1000-nit targets |
 | **L5** | HDR10/HLG: offsets from the committed crop. Dolby Vision inputs: sampled source L5. Full-frame content: `dovi_tool` zero default |
-| **L6** | Static mastering-display metadata and MaxCLL/MaxFALL |
-| **L9** | Mastering-display primaries, preferring MediaInfo mastering metadata over container primaries; warned BT.2020 fallback and CLI override |
+| **L6** | Static mastering-display metadata and MaxCLL/MaxFALL, read with MediaInfo; warned defaults when MediaInfo is absent or a field is missing |
+| **L9** | Mastering-display primaries, preferring MediaInfo mastering metadata over container primaries; warned BT.2020 fallback (also used when MediaInfo is absent) and CLI override |
 | **L11** | Content type and reference mode (`movies` / `false` by default) |
 | **L254** | Default CM v4.0 algorithm metadata added by `dovi_tool` |
 

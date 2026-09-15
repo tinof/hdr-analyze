@@ -60,10 +60,9 @@ jobs:
             curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | bash
             ```
             
-            **Windows (PowerShell):**
-            ```powershell
-            irm https://github.com/${{ github.repository }}/releases/latest/download/install.ps1 | iex
-            ```
+            **Windows:** download the zip above, extract it, and keep the FFmpeg DLLs next to the
+            `.exe` files. `install.ps1` is also attached to this release but has not been tested on
+            Windows yet.
             
             ### ⚙️ Prerequisites
             
@@ -177,7 +176,8 @@ jobs:
           else
             cp scripts/mkvdovi_hifi_workflow.sh "$staging/bin/"
           fi
-          cp README.md CHANGELOG.md LICENSE "$staging/"
+          cp README.md CHANGELOG.md CONTRIBUTING.md ROADMAP.md LICENSE "$staging/"
+          cp -R docs "$staging/docs"
           if [ "$RUNNER_OS" = "Windows" ]; then
             asset="$staging.zip"
             7z a "$asset" "$staging"
@@ -281,8 +281,11 @@ jobs:
             │   ├── verifier
             │   ├── mkvdovi_hifi_workflow.sh (Linux/macOS)
             │   └── FFmpeg LGPL DLLs + FFMPEG-LICENSE.txt (Windows)
+            ├── docs/
             ├── README.md
             ├── CHANGELOG.md
+            ├── CONTRIBUTING.md
+            ├── ROADMAP.md
             └── LICENSE
             \`\`\`
 

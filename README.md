@@ -4,305 +4,113 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-blue.svg)](https://github.com/rust-lang/rust)
 
-Convert any HDR10, HLG, or HDR10+ video to dynamic metadata — entirely free and open-source.
+HDR-Analyze measures HDR10 and HDR10+ video and converts it to Dolby Vision Profile 8.1 without re-encoding the picture.
 
-HDR-Analyze reads raw 10-bit pixel data frame-by-frame, computes precise per-frame luminance
-measurements, and generates dynamic metadata (`.bin`) compatible with existing open-source tools
-like `dovi_tool`. The companion `mkvdovi` tool then packages the result into a final MKV with
-dynamic tone-mapping metadata.
+HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.4.0.
 
-**Workflow:** `HDR10/HLG MKV → hdr_analyzer_mvp → measurements.bin → mkvdovi → Dynamic HDR MKV`
+## What you get
 
-> ⚡ **CUDA-accelerated HDR metadata analysis** — end-to-end GPU acceleration of the measurement
-> pass: NVDEC hardware decode plus a custom CUDA analysis kernel. **Zero-config**: `mkvdovi`
-> auto-detects your NVIDIA GPU at startup and enables the CUDA path automatically. On the tested
-> RTX 4070 configuration the analysis pass measured approximately 12× the throughput of this
-> project's CPU path (a 43-minute 4K episode measures in ~6 minutes), with bit-identical L1 output.
-> See [GPU acceleration](#gpu-acceleration-cuda).
+- HDR10 and HDR10+ files become Profile 8.1 MKVs with the video stream copied, not re-encoded. HLG and Profile 7 FEL sources take a re-encode path (see the table below).
+- An open-source analysis engine that measures decoded pixels and writes per-scene L1 plus L2, L6, L9 and L11 metadata. `dovi_tool` generates and injects the RPU.
+- Direct analysis of the compressed source. You do not need a ProRes or raw intermediate.
+- Optional NVDEC decode and CUDA analysis, at approximately 12× the analysis throughput of this project's CPU path on the tested configuration ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
+- Published validation against synthetic references and Dolby-generated metadata, including an open gap on grainy content ([docs/VALIDATION.md](docs/VALIDATION.md)).
 
-> HDR-Analyze is an independent open-source project. It and its outputs are not affiliated with,
-> endorsed by, sponsored by, certified by, approved by, or licensed by Dolby Laboratories. The
-> metadata it produces is intended for workflows compatible with the Dolby Vision® format
-> (Profile 8.1) through separately installed open-source tooling.
+It also reuses existing HDR10+ metadata, audits RPUs with `mkvdovi inspect`, rebuilds metadata on existing Dolby Vision files with `--mdfix`, and runs on the CPU under Linux, macOS and Windows.
 
-> **Renamed in v0.3.0:** the converter is now **`mkvdovi`**. See the
-> [CHANGELOG](CHANGELOG.md) for the transitional-compatibility details.
+## Quick start
 
-For HDR10+ inputs, `mkvdovi` extracts the source HDR10+ metadata directly and passes it to
-`dovi_tool`; it does not run `hdr_analyzer_mvp` unless HDR10+ metadata extraction fails and the
-workflow falls back to HDR10 analysis.
+Install the release binaries (Linux x64, macOS Intel and Apple Silicon, Windows x64):
+
+```bash
+curl -fsSL https://github.com/tinof/hdr-analyze/releases/latest/download/install.sh | bash
+```
+
+On Windows, download the zip from the [latest release](https://github.com/tinof/hdr-analyze/releases/latest) and keep the bundled FFmpeg DLLs next to the `.exe` files. A PowerShell install script also exists, but it has not been tested on Windows yet ([details](docs/INSTALLATION.md)).
+
+Convert a file:
+
+```bash
+mkvdovi movie.mkv --keep-source
+```
+
+> **The source file is deleted after a successful conversion** unless you pass `--keep-source`.
+> Inputs that already carry Dolby Vision metadata, and all `--mdfix` runs, keep the source.
+
+Install these tools separately and put them on `PATH`. `mkvdovi` checks for all but the last one at startup:
+
+| Tool | Needed for |
+|---|---|
+| `ffmpeg` | every conversion |
+| `mkvmerge` (MKVToolNix) | final MKV packaging |
+| [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases) 2.3.2 or newer | RPU generation and injection (2.3.4+ reads MKV directly) |
+| `mediainfo` (recommended) or `ffprobe` | stream inspection. MediaInfo supplies the L6 and L9 source values; with `ffprobe` alone they fall back to defaults. |
+| [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) | HDR10+ input. An HDR10+ file fails if the tool is missing. |
+
+To build from source instead, run `cargo build --release --workspace`. For GPU analysis on an NVIDIA host, add `cargo build --release -p hdr_analyzer_mvp --features cuda` (needs the NVIDIA driver and NVRTC, no `nvcc`). FFmpeg dev libraries, clang and per-OS notes are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+## Compatibility
+
+| Input | Output | Picture re-encoded | Maturity |
+|---|---|---|---|
+| HDR10 | Profile 8.1, CM v4.0 metadata | No | Measurement comparisons published; playback unvalidated |
+| HDR10+ | Profile 8.1, L1 taken from HDR10+ | No | Measurement comparisons published; playback unvalidated |
+| HLG | Profile 8.1 after HLG to PQ conversion | Yes | Works, less validated |
+| Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
+| Dolby Vision Profile 7 FEL | Profile 8.1 from composited BL+EL | Yes | Experimental, unvalidated |
+| Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
+
+Flag-level detail is in [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md) and [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
+
+## Performance and validation
+
+On an RTX 4070 with a 4K source, CUDA analysis ran at 213 fps against 17 fps for the CPU path, with identical L1 output. Several test conditions were not recorded; [docs/PERFORMANCE.md](docs/PERFORMANCE.md) lists them and gives a reproduction recipe.
+
+On synthetic patterns, measured peaks land within 0.25 of one 12-bit PQ code. On an asset with Dolby-generated reference metadata, max-RGB peaks read 12.8 codes high on average. HDR10+-derived L1 matched Dolby's v4 analyzer with a per-shot median error of 1 code (max 17), and scene detection matched 13 of 14 authored cuts while emitting 24 cuts in total.
+
+The weak spot is grain. With the default `max` estimator, two grainy real-content assets read +74 and +93 codes hot against the reference. An opt-in grain-rejecting estimator (`--peak-estimator`, see the CLI reference) narrows this but does not close it.
+
+CPU and GPU agreement shows the two paths are consistent. It says nothing about accuracy. The accuracy evidence is in [docs/VALIDATION.md](docs/VALIDATION.md), and the remaining gaps are in [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md). No playback comparisons have been published yet.
+
+## Why another HDR analyzer?
+
+Dolby provides its own professional tools for this job. If you already use them and the workflow suits you, keep using it. HDR-Analyze exists for other situations:
+
+- You have HDR10 or HDR10+ files and want Profile 8.1 output from a command-line conversion.
+- Reading and changing the analysis code matters to you, down to how each metadata value is computed.
+- Your source is a delivered HEVC file and you would rather not export an intermediate first.
+- You have an NVIDIA GPU and want to use it for the measurement pass.
+- You want published error figures, including where the output is still wrong.
+
+## Limitations
+
+- The default peak estimator is sensitive to film grain (see above). The grain-rejecting estimator is opt-in and CPU-only.
+- Profile 7 FEL conversion is experimental and re-encodes the picture. The research notes are in [docs/experimental/](docs/experimental/README.md).
+- Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
+- There is no Profile 5 output, no lossless FEL path and no XML metadata export.
+- The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
+- HLG is converted to PQ, so the HLG signal is not preserved.
+- Linux ARM64 has no release archive; build it from source.
+- Playback on real displays has not been compared and published.
 
 ## Documentation
 
-- **[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)** — complete flag reference for all three tools.
-- **[docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md)** — current conversion paths, HDR10+ mapping, CM v4.0 metadata, and verification.
-- **[docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md)** — analyzer accuracy gaps and validation design.
-- **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — analysis internals and research.
-- **[docs/PROVENANCE.md](docs/PROVENANCE.md)** — implementation provenance: the public standards this is built from, and the limits of that statement.
-- **[ROADMAP.md](ROADMAP.md)** — canonical status and active work.
-- **[CHANGELOG.md](CHANGELOG.md)** · **[CONTRIBUTING.md](CONTRIBUTING.md)**
+These files ship in each release archive next to this README. They are also [online](https://github.com/tinof/hdr-analyze/tree/main/docs).
 
-## Workspace Members
+- [docs/INSTALLATION.md](docs/INSTALLATION.md): release archives, runtime tools, source and CUDA builds
+- [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md): every flag for `mkvdovi`, `hdr_analyzer_mvp` and `verifier`
+- [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md): conversion paths, HDR10+ mapping, `--verify`
+- [docs/VALIDATION.md](docs/VALIDATION.md): accuracy measurements and method
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md): benchmark record and how to reproduce it
+- [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md): known analysis gaps
+- [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md): analyzer internals
+- [docs/PROVENANCE.md](docs/PROVENANCE.md): what the implementation is derived from
+- [docs/experimental/README.md](docs/experimental/README.md): FEL compositing and other prototypes
+- [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md)
 
-This is a Rust workspace with three shipped binaries:
+## Contributing
 
-- **`hdr_analyzer_mvp`** — HDR analysis engine; processes video and writes madVR-compatible `.bin`
-  measurement files plus explicit `.l1.json` measurement sidecars.
-- **`mkvdovi`** — orchestrates conversion of HDR10, HDR10+, and HLG sources into Profile 8.1 MKVs
-  (CM v4.0 metadata) designed to be compatible with the Dolby Vision format, using separately
-  installed `dovi_tool`.
-- **`verifier`** — utility for reading, validating, and inspecting `.bin` measurement files.
-
-## Key Features
-
-- **Native video processing** via `ffmpeg-next` for direct, zero-copy access to high-bit-depth pixel
-  data — precise per-pixel 10-bit luminance analysis instead of parsing external tool logs.
-- **Accurate per-frame analysis**: MaxCLL and APL from 10-bit YUV420P10LE frames, with multi-position
-  active-video crop probing to ignore black bars.
-- **True L1 statistics plus v5/v6 histograms**: full-precision per-pixel Y/max-RGB means, a
-  noise-rejected active-area minimum, and the compatible 256-bin SDR/HDR histogram (64 + 192).
-- **Native scene detection**: histogram-distance-based cut detection with a configurable threshold.
-- **Dynamic metadata optimizer**: per-frame `target_nits` from a rolling average, 99th-percentile knee
-  detection, scene-aware blending/resets, and bidirectional EMA smoothing (on by default).
-- **Noise robustness**: opt-in max-RGB percentile and synthetic-calibrated grain-robust peak
-  estimators, per-bin EMA smoothing, optional temporal median filtering and pre-analysis denoising.
-  Direct `max` remains the estimator default pending a successful real-content parity gate.
-- **Native HLG workflow**: auto-detects ARIB STD-B67 and converts to PQ histograms in-memory
-  (`--hlg-peak-nits`, default 1000).
-- **CUDA-accelerated analysis** (optional `cuda` build feature): NVDEC hardware decode through a
-  proper FFmpeg `AVHWDeviceContext` plus a single-launch NVRTC-compiled analysis kernel computing
-  the v5 histogram, hue histogram, 4096-bin peak-domain PQ histogram, max-RGB peaks, and exact
-  per-pixel means on the GPU. Validated bit-identical to the CPU path; automatic CPU fallback at
-  every stage.
-- **CM v4.0 metadata generation** by default via `mkvdovi` — emits L1/L2/L5/L6/L9/L11/L254 metadata
-  intended for Profile 8.1-compatible workflows.
-- **Profile 7 FEL preservation** (experimental): composites BL+EL polynomial/MMR reshaping and NLQ
-  residuals, then emits a Profile 8.1-compatible base layer; local and Modal encoding backends are
-  supported. Not yet validated against an independent reference decode.
-- **Metadata inspection and repair**: `mkvdovi inspect` audits RPU L1 patterns, while `--mdfix`
-  rebuilds metadata for supported Profile 7 MEL and Profile 8 inputs from fresh base-layer
-  measurements without re-encoding the picture. Inputs that already carry RPU metadata, and all
-  repair runs, keep their source by default.
-- **Cross-platform**: software decoding everywhere; optional CUDA attempt on NVIDIA with graceful
-  fallback. ARM64-tuned (NEON, `--sample-rate`/`--downscale` give 3–4× throughput on CPU-limited systems).
-
-See [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) for implementation details (PQ-domain
-histogram, scene detection, crop detection) and [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for
-hardware-acceleration and throughput options.
-
-## Project Status
-
-This is a personal research project, shared as-is under the MIT license. Issues and pull requests are
-welcome, but there is no support SLA. Please do not expect production-level maintenance.
-
-## Prerequisites
-
-- **Rust toolchain**: install from <https://rustup.rs/> (the repo pins the stable channel via
-  `rust-toolchain.toml`).
-- **FFmpeg development libraries** (for compiling `ffmpeg-next`):
-  - macOS: `brew install ffmpeg pkg-config`
-  - Ubuntu/Debian: `sudo apt install libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libclang-dev pkg-config`
-  - Windows: download an LGPL *shared* FFmpeg build (e.g. BtbN/FFmpeg-Builds `win64-lgpl-shared`), set `FFMPEG_DIR` to the extracted folder and `LIBCLANG_PATH` to your LLVM `bin`, and keep its `bin` on `PATH` at runtime (vcpkg also works, but compiles FFmpeg from source)
-  - Any FFmpeg from 3.4 through 9.x works (`ffmpeg-next` 9 detects the installed version)
-- **Build tools**: C compiler / build tools (Xcode CLT on macOS, `build-essential` on Linux, MSVC on Windows).
-- **External tools (NOT included)** — install and place in your `PATH`:
-  - [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases): required for RPU generation/injection.
-    **2.3.2+ recommended** (fixes duplicated end-padding in `inject-rpu`); **2.3.4+** additionally enables direct MKV input (skips the full-size HEVC extraction).
-  - [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases): required for HDR10+ inputs.
-  - `mkvmerge` (from [MKVToolNix](https://mkvtoolnix.download/)): required by `mkvdovi` for final MKV packaging.
-
-## Installation & Setup
-
-Clone and build the workspace (compiles all three binaries):
-
-```bash
-git clone https://github.com/tinof/hdr-analyze.git
-cd hdr-analyze
-cargo build --release --workspace
-```
-
-On a machine with an NVIDIA GPU, build the analyzer with the CUDA backend
-(the other binaries are unaffected):
-
-```bash
-cargo build --release -p hdr_analyzer_mvp --features cuda
-cargo build --release -p mkvdovi -p verifier
-```
-
-Binaries land in `target/release/`:
-
-- Analyzer: `./target/release/hdr_analyzer_mvp`
-- Converter: `./target/release/mkvdovi`
-- Verifier: `./target/release/verifier`
-
-After a `git pull`, **always rebuild** so the binaries match the source:
-
-```bash
-git pull
-cargo build --release --workspace   # CRITICAL
-```
-
-Optional local install from a source checkout:
-
-```bash
-install -Dm755 target/release/hdr_analyzer_mvp "$HOME/.local/bin/hdr_analyzer_mvp"
-install -Dm755 target/release/mkvdovi        "$HOME/.local/bin/mkvdovi"
-install -Dm755 target/release/verifier        "$HOME/.local/bin/verifier"
-install -Dm755 scripts/mkvdovi_hifi_workflow.sh "$HOME/.local/bin/mkvdovi_hifi_workflow.sh"
-```
-
-`mkvdovi_hifi_workflow.sh` is a specialist comparison helper for regenerating files that already
-contain metadata in the Dolby Vision format. Use `mkvdovi` directly for HDR10+ sources.
-
-Prebuilt binaries for **Windows**, **macOS** (Intel & Apple Silicon), and **Linux** are published on
-the [Releases page](https://github.com/tinof/hdr-analyze/releases).
-
-## Usage
-
-The examples below cover the common paths. For every flag and default, see
-**[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)**.
-
-### Analyzer
-
-```bash
-# Standard analysis (optimizer on by default)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
-
-# v6 output with explicit target peak
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out_v6.bin" --madvr-version 6 --target-peak-nits 1000
-
-# Tune scene sensitivity / speed up analysis
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --scene-threshold 0.25 --downscale 2
-
-# Full-frame analysis (disable crop detection)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --no-crop
-
-# GPU-accelerated analysis (requires the `cuda` build feature and an NVIDIA GPU)
-./target/release/hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --hwaccel cuda
-
-# Opt into grain-robust max-RGB peaks and save per-frame diagnostics
-./target/release/hdr_analyzer_mvp -i "grainy.mkv" -o "out.bin" \
-  --peak-estimator robust --dump-frame-stats "frame_stats.csv"
-```
-
-→ Noise-robustness, optimizer, and HLG flags: [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#hdr_analyzer_mvp).
-
-### mkvdovi (conversion tool)
-
-Converts HDR10/HDR10+/HLG/Profile 7 input to a Profile 8.1 MKV with CM v4.0 metadata, designed for
-compatibility with the Dolby Vision format.
-
-> For conversions from sources without RPU metadata, `mkvdovi` deletes the source file after success
-> unless `--keep-source` is passed. Inputs that already carry RPU metadata, and all `--mdfix` runs,
-> keep the source as a metadata-safety default.
->
-> An interrupted run (e.g. a dropped SSH session) keeps its `mkvdovi_temp_*` directory and prints a
-> resume hint — just re-run the same command to **resume** from the last completed step (`--no-resume`
-> forces a clean run). A temp directory is resumed only for the same input, mkvdovi version, and settings. For long conversions, run under `tmux`/`nohup` so a disconnect can't kill them.
-
-```bash
-mkvdovi                                  # convert all .mkv files in the current directory
-mkvdovi "input.mkv"                      # convert a specific file
-mkvdovi "input.mkv" --keep-source --verify   # recommended first run (A/B safe, validated)
-mkvdovi "input.mkv" --hwaccel none           # force the CPU pipeline (auto-detection is the default)
-mkvdovi "input.mkv" --dovi-input raw         # auto (default, direct MKV with dovi_tool 2.3.4+) | raw | mkv
-mkvdovi "input.mkv" --analysis-quality accurate   # auto (default) | fast | balanced | accurate
-mkvdovi "input.mkv" --encoder videotoolbox        # ~10× faster HLG→PQ on Apple Silicon
-mkvdovi "input.mkv" --no-resume                   # ignore a leftover temp dir, start clean
-mkvdovi inspect "input.mkv"                       # full RPU metadata inspection
-mkvdovi "input.DV.mkv" --mdfix                    # rebuild DV metadata; writes *.mdfix.DV.mkv
-mkvdovi "profile7-fel.mkv" --fel-crf 16 --fel-preset slow
-```
-
-Profile 7 MEL takes a fast metadata-only path by default. Profile 7 FEL is composited and re-encoded
-before new Profile 8.1 metadata is generated. `--mdfix` strips the old RPU from MEL/Profile 8 video,
-analyzes the clean base layer, and remuxes a fresh RPU while preserving sampled L5 active-area
-offsets when available. See [the FEL preservation design](docs/profile7_fel_to_profile81_preservation.md)
-and [developer handoff](docs/profile7_fel_developer_handoff.md).
-
-HDR10/HLG RPUs carry measured per-scene L1 and L5 active-area offsets from the analyzer's sidecar.
-Existing measurements are reused only when that sidecar matches the input; otherwise the analyzer runs
-again. The old optimizer-target L1 path requires `--legacy-madvr-l1`.
-
-→ HDR10+ peak mapping, CM v4.0 metadata, and verification details:
-[docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md). Full flag list:
-[docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md#mkvdovi).
-
-### GPU acceleration (CUDA)
-
-**`mkvdovi` is zero-config**: on startup it probes for an NVIDIA GPU (`nvidia-smi`) and, when
-found, automatically enables CUDA — NVDEC + GPU analysis in the analyzer it spawns, and NVENC for
-FEL/HLG re-encodes (guarded by an ffmpeg `hevc_nvenc` capability check, with automatic libx265
-fallback). When the spawned `hdr_analyzer_mvp` was built with `--features cuda` (its `--version`
-reports `+cuda`), auto mode also upgrades analysis quality to `accurate` — full-resolution,
-every-frame measurement that is still ~4× faster than the old CPU default. Opt out with
-`--hwaccel none` or pin quality with `--analysis-quality balanced`.
-
-For direct analyzer use, build `hdr_analyzer_mvp` with `--features cuda` and pass `--hwaccel cuda`:
-
-- **Decode**: HEVC 4K10 frames are decoded by NVDEC via an FFmpeg CUDA `AVHWDeviceContext`
-  (with `hevc_cuvid` and software fallbacks).
-- **Analysis**: one CUDA kernel launch per frame computes the luminance/hue/PQ histograms,
-  max-RGB peaks, and exact per-pixel means directly on full-resolution frames using a sampling
-  stride — swscale downscaling is bypassed entirely, and only a few KB of results leave the GPU
-  per frame.
-- **Parity**: validated bit-identical (12-bit precision) L1 measurements, scene cuts, and MaxCLL
-  against the CPU path. Measured on an RTX 4070: analysis throughput 17 → 213 fps (~12×).
-- **Fallbacks**: no `cuda` build feature, no NVIDIA device, `--pre-denoise median3`, or
-  `--peak-estimator robust` (which needs the CPU grain statistics) all fall back to the CPU path
-  automatically — mid-run kernel failures do too.
-
-The `cuda` feature needs only the NVIDIA driver and NVRTC at *runtime* (the kernel is compiled
-on startup); no `nvcc` or CUDA toolchain is required at build time.
-
-### Verifier
-
-```bash
-./target/release/verifier "measurements.bin"
-```
-
-Reports version/flags, scene & frame stats, peak brightness and avg PQ, histogram integrity, and
-`target_nits` stats (if the optimizer was enabled).
-
-## Known Limitations
-
-- **Variable-aspect-ratio analysis uses one conservative crop.** Seven seek-based probes reject
-  black/low-signal frames and commit a stable active area before analysis. When multiple aspect-ratio
-  modes are observed, their union preserves all picture; scene cuts report crop changes but do not
-  apply a new crop per scene. Use `--crop-probes 0` for in-stream fallback detection or `--no-crop`
-  for full-frame diagnostics. The committed crop is emitted as L5 active-area metadata; per-scene L5
-  for changing aspect ratios is not.
-- **HLG/VAAPI/VideoToolbox decode** currently fall back to software decoding; proper device contexts
-  are planned (see [Roadmap](#roadmap)).
-- **v6 per-gamut peaks** (`peak_pq_dcip3`, `peak_pq_709`) are approximated from BT.2020. These are a
-  **madVR measurement-file** feature only and are **not used by the Profile 8.1 conversion** (which
-  uses the v5 file plus the BT.2020 peak and histogram), so the approximation does not affect the
-  generated RPU metadata;
-  it matters only for a standalone v6 `.bin` consumed by madVR. PQ max-RGB peak measurement is now
-  implemented; accurate target-gamut transforms remain a follow-up (see [Roadmap](#roadmap)).
-
-## Quick Start Validation
-
-```bash
-cargo build --release --workspace
-./target/release/hdr_analyzer_mvp -i sample_hdr10.mkv -o measurements_v5.bin
-./target/release/verifier measurements_v5.bin
-```
-
-Expected: version 5/6 as selected; flags 2 (no optimizer) or 3 (optimizer on); 256-bin histograms
-summing ≈ 100; PQ values in `[0,1]`; scenes valid and within frame range.
-
-## Roadmap
-
-See **[ROADMAP.md](ROADMAP.md)**. The current priority is dependable HDR10/HDR10+ → Profile 8.1
-conversion with reproducible evidence: a final-RPU regression corpus, a documented playback test
-procedure, then grain-robust peaks and shot aggregation. FEL compositing stays experimental until it
-is validated against an independent reference.
-
-## Contributing & Quality Gates
-
-Contributions welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. Before committing, run the local
-gates (also enforced in CI):
+This is a personal research project shared under the MIT license, with no support commitment. Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Run the same gates as CI before you commit:
 
 ```bash
 cargo fmt --all -- --check
@@ -310,45 +118,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Optional pre-commit hooks (config in `.pre-commit-config.yaml`):
-
-```bash
-pipx install pre-commit            # or: pip install --user pre-commit
-pre-commit install                 # fmt + clippy on commit
-pre-commit install --hook-type pre-push   # quick tests on push
-```
-
 ## Acknowledgements
 
-- **quietvoid** — for `dovi_tool`, `hdr10plus_tool`, and the MIT-licensed `madvr_parse` library.
-- **The Doom9 and MakeMKV forum communities** — for the collective research and documentation of
-  HDR formats and RPU metadata packaging that made an open implementation possible.
-- `ffmpeg-next`, `clap`, `anyhow` and the wider Rust ecosystem.
+quietvoid wrote [`dovi_tool`](https://github.com/quietvoid/dovi_tool), [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool) and the MIT-licensed `madvr_parse` library. Decoding goes through [FFmpeg](https://ffmpeg.org/) via `ffmpeg-next`, and packaging through [MKVToolNix](https://mkvtoolnix.download/).
 
 ## License
 
-MIT License.
-
-## What This Is NOT
-
-- Does not include, redistribute, or reverse-engineer any Dolby Laboratories proprietary code,
-  lookup tables, CM v4.0 trims, or binary blobs.
-- Does not bypass, circumvent, or interfere with any DRM or content-protection mechanism.
-- Not an official Dolby or HDR10+ Technologies product, and not certified or approved by either;
-  no rights in their trademarks are claimed.
-- The analyzer outputs generic per-frame luminance data. Final packaging into a playback-compatible
-  stream is done by `dovi_tool` and `mkvmerge`, which the user installs independently.
-
-## Legal & Trademarks
-
-This software is a research project for video analysis and is not an official product of Dolby
-Laboratories or HDR10+ Technologies, LLC.
-
-- Dolby and Dolby Vision are registered trademarks of Dolby Laboratories Licensing Corporation.
-- HDR10+ is a trademark of HDR10+ Technologies, LLC.
-- All other third-party trademarks are the property of their respective owners.
-
-This project is not affiliated with, endorsed by, sponsored by, certified by, approved by, or
-licensed by Dolby Laboratories or HDR10+ Technologies, LLC. References to these marks are
-nominative — they identify the formats this project is designed to interoperate with, and nothing
-more.
+MIT.
