@@ -541,10 +541,154 @@ fn primary_index_from_label(primaries: &str) -> Option<u8> {
 }
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
-#[derive(Debug, Deserialize)]
+/// Versions 1 and 2 are accepted; version 2 adds provenance and a full-resolution crop.
+#[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
     pub version: u32,
     pub scenes: Vec<L1SidecarScene>,
+    #[serde(default)]
+    pub analyzer_version: Option<String>,
+    #[serde(default)]
+    pub source: Option<L1SidecarSource>,
+    #[serde(default)]
+    pub analysis: Option<L1SidecarAnalysis>,
+    #[serde(default)]
+    pub crop_space: Option<String>,
+    #[serde(default)]
+    pub crop: Option<L1SidecarCrop>,
+    #[serde(default)]
+    pub frames: Option<L1SidecarFrames>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct L1SidecarSource {
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct L1SidecarAnalysis {
+    pub downscale: u32,
+    pub sample_rate: u32,
+    pub gpu: bool,
+    pub no_crop: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct L1SidecarCrop {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct L1SidecarFrames {
+    pub min_pq_12bit: Vec<u16>,
+}
+
+impl L1Sidecar {
+    /// Number of frames the sidecar covers (last scene end + 1).
+    pub fn frame_count(&self) -> u64 {
+        self.scenes
+            .iter()
+            .map(|scene| scene.end + 1)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// One-line provenance summary for progress output.
+    pub fn provenance_summary(&self) -> String {
+        let mut parts = vec![format!("sidecar v{}", self.version)];
+        if let Some(version) = &self.analyzer_version {
+            parts.push(format!("analyzer {version}"));
+        }
+        if let Some(analysis) = &self.analysis {
+            parts.push(format!(
+                "downscale {}, sample-rate {}{}",
+                analysis.downscale,
+                analysis.sample_rate,
+                if analysis.gpu { ", GPU" } else { "" }
+            ));
+        }
+        if let Some(crop) = self.crop {
+            parts.push(format!(
+                "crop {}x{}+{}+{}",
+                crop.width, crop.height, crop.x, crop.y
+            ));
+        }
+        parts.push(format!("{} frames", self.frame_count()));
+        parts.join(", ")
+    }
+}
+
+/// L5 active-area offsets derived from the analyzer's committed crop. Requires a version 2
+/// sidecar (full-resolution crop plus source dimensions). Returns `None` for a full-frame crop
+/// (dovi_tool's zero default already describes it) or when crop detection was disabled.
+pub fn level5_from_sidecar(sidecar: &L1Sidecar) -> Option<Level5Offsets> {
+    if sidecar.crop_space.as_deref() != Some("full") {
+        return None;
+    }
+    if sidecar
+        .analysis
+        .as_ref()
+        .is_some_and(|analysis| analysis.no_crop)
+    {
+        return None;
+    }
+    let source = sidecar.source.as_ref()?;
+    let crop = sidecar.crop?;
+    let right_edge = crop.x.checked_add(crop.width)?;
+    let bottom_edge = crop.y.checked_add(crop.height)?;
+    if right_edge > source.width || bottom_edge > source.height {
+        return None;
+    }
+    let clamp = |value: u32| u16::try_from(value).unwrap_or(u16::MAX);
+    let offsets = Level5Offsets {
+        left: clamp(crop.x),
+        right: clamp(source.width - right_edge),
+        top: clamp(crop.y),
+        bottom: clamp(source.height - bottom_edge),
+    };
+    (offsets != Level5Offsets::default()).then_some(offsets)
+}
+
+/// Why a sidecar cannot be used for source-honest L1.
+#[derive(Debug, thiserror::Error)]
+pub enum SidecarError {
+    #[error("no L1 sidecar at {0}")]
+    Missing(PathBuf),
+    #[error("L1 sidecar {path} is unreadable: {reason}")]
+    Unreadable { path: PathBuf, reason: String },
+    #[error("unsupported L1 sidecar version {0}")]
+    UnsupportedVersion(u32),
+    #[error("L1 sidecar is invalid: {0}")]
+    Invalid(String),
+}
+
+/// What the caller knows about the input the sidecar must describe. Leave fields `None` for a
+/// sidecar that was just produced (the analyzer run is authoritative), or when the analyzed file
+/// is an intermediate rather than the input.
+#[derive(Debug, Default)]
+pub struct SidecarExpectation {
+    pub file_name: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub frames: Option<u64>,
+}
+
+impl SidecarExpectation {
+    /// Expect the sidecar to describe `input` exactly (identity + optional frame count).
+    pub fn for_input(input: &Path, frames: Option<u64>) -> Self {
+        Self {
+            file_name: input
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+            size_bytes: fs::metadata(input).ok().map(|meta| meta.len()),
+            frames,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -560,18 +704,111 @@ pub struct L1SidecarScene {
     pub max_pq_12bit: u16,
 }
 
-/// Load the L1 sidecar written next to a madVR measurements file, if present and valid.
-/// Returns `None` when the sidecar is missing, unreadable, or an unsupported version, so
-/// callers can fall back to legacy madVR-file generation.
-pub fn load_l1_sidecar(measurements_file: &Path) -> Option<L1Sidecar> {
+/// Path of the L1 sidecar written next to a madVR measurements file.
+pub fn l1_sidecar_path(measurements_file: &Path) -> PathBuf {
     let mut sidecar_path = measurements_file.as_os_str().to_owned();
     sidecar_path.push(".l1.json");
-    let file = File::open(Path::new(&sidecar_path)).ok()?;
-    let sidecar: L1Sidecar = serde_json::from_reader(file).ok()?;
-    if sidecar.version != 1 || sidecar.scenes.is_empty() {
-        return None;
+    PathBuf::from(sidecar_path)
+}
+
+/// Load and validate the L1 sidecar next to a measurements file. Every failure is reported
+/// so callers can re-run analysis instead of silently using optimizer-derived L1.
+pub fn load_l1_sidecar(
+    measurements_file: &Path,
+    expect: &SidecarExpectation,
+) -> std::result::Result<L1Sidecar, SidecarError> {
+    let path = l1_sidecar_path(measurements_file);
+    let file = match File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(SidecarError::Missing(path));
+        }
+        Err(error) => {
+            return Err(SidecarError::Unreadable {
+                path,
+                reason: error.to_string(),
+            });
+        }
+    };
+    let sidecar: L1Sidecar =
+        serde_json::from_reader(std::io::BufReader::new(file)).map_err(|error| {
+            SidecarError::Unreadable {
+                path: path.clone(),
+                reason: error.to_string(),
+            }
+        })?;
+    validate_l1_sidecar(&sidecar, expect)?;
+    Ok(sidecar)
+}
+
+/// Structural and identity checks for a parsed sidecar.
+pub fn validate_l1_sidecar(
+    sidecar: &L1Sidecar,
+    expect: &SidecarExpectation,
+) -> std::result::Result<(), SidecarError> {
+    if !matches!(sidecar.version, 1 | 2) {
+        return Err(SidecarError::UnsupportedVersion(sidecar.version));
     }
-    Some(sidecar)
+    let invalid = |reason: String| Err(SidecarError::Invalid(reason));
+    let Some(first) = sidecar.scenes.first() else {
+        return invalid("no scenes".into());
+    };
+    if first.start != 0 {
+        return invalid(format!("first scene starts at frame {}", first.start));
+    }
+    for (index, scene) in sidecar.scenes.iter().enumerate() {
+        if scene.end < scene.start {
+            return invalid(format!("scene {index} ends before it starts"));
+        }
+        if !(scene.min_pq_12bit <= scene.avg_max_rgb_pq_12bit
+            && scene.avg_max_rgb_pq_12bit <= scene.max_pq_12bit)
+        {
+            return invalid(format!(
+                "scene {index} violates min <= avg <= max ({} / {} / {})",
+                scene.min_pq_12bit, scene.avg_max_rgb_pq_12bit, scene.max_pq_12bit
+            ));
+        }
+        if let Some(previous) = index.checked_sub(1).map(|i| &sidecar.scenes[i]) {
+            if scene.start != previous.end + 1 {
+                return invalid(format!(
+                    "scene {index} starts at frame {} but the previous scene ended at {}",
+                    scene.start, previous.end
+                ));
+            }
+        }
+    }
+    let covered = sidecar.frame_count();
+    if let Some(frames) = &sidecar.frames {
+        if frames.min_pq_12bit.len() as u64 != covered {
+            return invalid(format!(
+                "scenes cover {covered} frames but per-frame data has {}",
+                frames.min_pq_12bit.len()
+            ));
+        }
+    }
+    if let Some(expected) = expect.frames {
+        if expected != covered {
+            return invalid(format!(
+                "covers {covered} frames but the input video has {expected}"
+            ));
+        }
+    }
+    if let Some(source) = &sidecar.source {
+        let name_differs = expect
+            .file_name
+            .as_ref()
+            .is_some_and(|name| *name != source.file_name);
+        let size_differs = expect
+            .size_bytes
+            .is_some_and(|size| size != source.size_bytes);
+        if name_differs || size_differs {
+            return invalid(format!(
+                "produced for '{}' ({} bytes), not this input",
+                source.file_name, source.size_bytes
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn generate_extra_json(
@@ -709,6 +946,25 @@ fn nits_to_pq_code(nits: u32) -> u32 {
     let pq = ((C1 + C2 * luminance_m1) / (1.0 + C3 * luminance_m1)).powf(M2);
 
     (pq * MAX_PQ_CODE).round() as u32
+}
+
+/// Video-track frame count reported by MediaInfo (`FrameCount` on the first Video track).
+pub fn get_frame_count(input_file: &str) -> Option<u64> {
+    let json = get_mediainfo_json(input_file).ok()?;
+    video_track_frame_count(&json)
+}
+
+fn video_track_frame_count(json: &Value) -> Option<u64> {
+    json.pointer("/media/track")?
+        .as_array()?
+        .iter()
+        .find(|track| track.get("@type").and_then(Value::as_str) == Some("Video"))
+        .and_then(|track| track.get("FrameCount"))
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str()?.trim().parse::<u64>().ok())
+        })
 }
 
 pub fn get_duration_from_mediainfo(input_file: &str) -> Option<f64> {
@@ -891,6 +1147,7 @@ mod tests {
                     max_pq_12bit: 3416,
                 },
             ],
+            ..Default::default()
         };
 
         generate_extra_json(output.path(), &metadata, &[], None, None, Some(&sidecar)).unwrap();
@@ -907,6 +1164,168 @@ mod tests {
         assert_eq!(l1["avg_pq"], 614);
         assert_eq!(l1["max_pq"], 2437);
         assert_eq!(shots[1]["metadata_blocks"][0]["Level1"]["avg_pq"], 462);
+    }
+
+    fn scene(start: u64, end: u64, min: u16, avg: u16, max: u16) -> L1SidecarScene {
+        L1SidecarScene {
+            start,
+            end,
+            min_pq_12bit: min,
+            avg_luma_pq_12bit: avg,
+            avg_max_rgb_pq_12bit: avg,
+            max_pq_12bit: max,
+        }
+    }
+
+    fn v2_sidecar_json() -> Value {
+        json!({
+            "version": 2,
+            "analyzer_version": "0.3.0 (+cuda)",
+            "source": {"file_name": "input.mkv", "size_bytes": 42, "width": 3840, "height": 2160,
+                       "transfer_function": "PQ (SMPTE 2084)"},
+            "analysis": {"downscale": 1, "sample_rate": 1, "gpu": true, "no_crop": false},
+            "crop_space": "full",
+            "crop": {"x": 0, "y": 280, "width": 3840, "height": 1600},
+            "scenes": [
+                {"start": 0, "end": 9, "min_pq_12bit": 1, "avg_luma_pq_12bit": 500,
+                 "avg_max_rgb_pq_12bit": 520, "max_pq_12bit": 2400},
+                {"start": 10, "end": 19, "min_pq_12bit": 2, "avg_luma_pq_12bit": 600,
+                 "avg_max_rgb_pq_12bit": 610, "max_pq_12bit": 2500}
+            ],
+            "frames": {"min_pq_12bit": vec![0; 20]}
+        })
+    }
+
+    #[test]
+    fn v1_sidecar_without_provenance_still_validates() {
+        let sidecar: L1Sidecar = serde_json::from_value(json!({
+            "version": 1,
+            "scenes": [{"start": 0, "end": 4, "min_pq_12bit": 0, "avg_luma_pq_12bit": 10,
+                        "avg_max_rgb_pq_12bit": 12, "max_pq_12bit": 100}]
+        }))
+        .unwrap();
+        assert!(validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).is_ok());
+        assert!(sidecar.source.is_none());
+    }
+
+    #[test]
+    fn v2_sidecar_matching_the_input_validates() {
+        let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+        let expect = SidecarExpectation {
+            file_name: Some("input.mkv".into()),
+            size_bytes: Some(42),
+            frames: Some(20),
+        };
+        validate_l1_sidecar(&sidecar, &expect).unwrap();
+        assert!(sidecar
+            .provenance_summary()
+            .contains("crop 3840x1600+0+280"));
+    }
+
+    #[test]
+    fn sidecar_for_a_different_input_is_rejected() {
+        let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+        let expect = SidecarExpectation {
+            file_name: Some("input.mkv".into()),
+            size_bytes: Some(43),
+            frames: None,
+        };
+        assert!(matches!(
+            validate_l1_sidecar(&sidecar, &expect),
+            Err(SidecarError::Invalid(reason)) if reason.contains("not this input")
+        ));
+    }
+
+    #[test]
+    fn sidecar_frame_count_mismatch_is_rejected() {
+        let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+        let expect = SidecarExpectation {
+            frames: Some(21),
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_l1_sidecar(&sidecar, &expect),
+            Err(SidecarError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn structurally_broken_sidecars_are_rejected() {
+        let cases = [
+            vec![scene(0, 9, 1, 50, 40)],                         // avg > max
+            vec![scene(0, 9, 1, 5, 40), scene(11, 19, 1, 5, 40)], // gap
+            vec![scene(5, 9, 1, 5, 40)],                          // does not start at 0
+            vec![],                                               // empty
+        ];
+        for scenes in cases {
+            let sidecar = L1Sidecar {
+                version: 2,
+                scenes,
+                ..Default::default()
+            };
+            assert!(matches!(
+                validate_l1_sidecar(&sidecar, &SidecarExpectation::default()),
+                Err(SidecarError::Invalid(_))
+            ));
+        }
+        let future = L1Sidecar {
+            version: 3,
+            scenes: vec![scene(0, 1, 0, 1, 2)],
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_l1_sidecar(&future, &SidecarExpectation::default()),
+            Err(SidecarError::UnsupportedVersion(3))
+        ));
+    }
+
+    #[test]
+    fn letterbox_crop_becomes_level5_offsets() {
+        let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+        assert_eq!(
+            level5_from_sidecar(&sidecar),
+            Some(Level5Offsets {
+                left: 0,
+                right: 0,
+                top: 280,
+                bottom: 280,
+            })
+        );
+    }
+
+    #[test]
+    fn full_frame_or_legacy_crop_emits_no_level5() {
+        let mut full = v2_sidecar_json();
+        full["crop"] = json!({"x": 0, "y": 0, "width": 3840, "height": 2160});
+        let sidecar: L1Sidecar = serde_json::from_value(full).unwrap();
+        assert_eq!(level5_from_sidecar(&sidecar), None);
+
+        let mut no_crop = v2_sidecar_json();
+        no_crop["analysis"]["no_crop"] = json!(true);
+        let sidecar: L1Sidecar = serde_json::from_value(no_crop).unwrap();
+        assert_eq!(level5_from_sidecar(&sidecar), None);
+
+        let mut v1 = v2_sidecar_json();
+        v1["version"] = json!(1);
+        v1.as_object_mut().unwrap().remove("crop_space");
+        let sidecar: L1Sidecar = serde_json::from_value(v1).unwrap();
+        assert_eq!(level5_from_sidecar(&sidecar), None);
+    }
+
+    #[test]
+    fn missing_sidecar_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = load_l1_sidecar(&dir.path().join("m.bin"), &SidecarExpectation::default());
+        assert!(matches!(result, Err(SidecarError::Missing(_))));
+    }
+
+    #[test]
+    fn mediainfo_video_frame_count_is_parsed() {
+        let json = json!({"media": {"track": [
+            {"@type": "General", "FrameCount": "999"},
+            {"@type": "Video", "FrameCount": "2908"}
+        ]}});
+        assert_eq!(video_track_frame_count(&json), Some(2908));
     }
 
     #[test]
