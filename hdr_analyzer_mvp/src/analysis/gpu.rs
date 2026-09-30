@@ -613,10 +613,14 @@ mod backend {
             unsafe { launch.launch(cfg) }
                 .map_err(|err| anyhow!("CUDA analysis launch failed: {err:?}"))?;
 
-            // Synchronous: a pageable destination makes cudarc wait for the stream.
             self.stream
                 .memcpy_dtoh(&self.results, &mut self.results_host)
                 .map_err(|err| anyhow!("failed to download CUDA analysis results: {err:?}"))?;
+            // A copy into pageable memory normally completes before returning, but CUDA does
+            // not promise it; the results, and the caller's frame, are only safe after this.
+            self.stream
+                .synchronize()
+                .map_err(|err| anyhow!("CUDA analysis did not complete: {err:?}"))?;
             let counts = &self.results_host[..SUMS_WORD];
             let sums = result_sums(&self.results_host);
 

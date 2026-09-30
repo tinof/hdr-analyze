@@ -789,7 +789,7 @@ fn run_native_analysis_pipeline(
                         Some(reason) => {
                             if !device_path_reported {
                                 println!(
-                                    "CUDA analysis downloads NVDEC frames to host memory: {reason}"
+                                    "\nCUDA analysis downloads NVDEC frames to host memory: {reason}"
                                 );
                                 device_path_reported = true;
                             }
@@ -797,7 +797,7 @@ fn run_native_analysis_pipeline(
                         }
                     };
                 if in_place && !device_path_reported {
-                    println!("CUDA analysis on NVDEC device frames (no host round trip)");
+                    println!("\nCUDA analysis on NVDEC device frames (no host round trip)");
                     device_path_reported = true;
                 }
                 let rect = match crop_rect_opt {

@@ -22,9 +22,12 @@ Per-frame GPU time from Nsight Systems (`nsys stats --report cuda_gpu_kern_sum,c
 
 | Per 4K frame | Before | After |
 |---|---:|---:|
-| `analyze_frame` kernel, HDR10 / HLG | 2.43 / 2.55 ms | 0.18 / 0.33 ms |
-| Download of the decoded frame to host memory | ~2.2–2.5 ms | only at scene cuts |
-| Upload of the same frame back to the GPU | ~2.0–2.3 ms | none |
+| `analyze_frame` kernel, HDR10 / HLG | 2.43 / 2.55 ms | 0.16–0.18 / 0.33 ms |
+| Download of the decoded frame to host memory | ~2.2–2.5 ms | none; only scene-cut frames (13 of 1,668 HDR10, 33 of 2,976 HLG) |
+| Upload of the same frame back to the GPU | ~2.0–2.3 ms | none (the only uploads left are 3 LUTs at startup) |
+| Result download (18 KB) | 2 copies | 1 copy |
+
+FFmpeg's own device-to-device copy of each NVDEC surface (~12.5 MB, ~0.04 ms) is unchanged.
 
 The HLG kernel costs more than the HDR10 one because every pixel goes through the Profile 8.4 chroma
 MMR decode for max-RGB. The HLG clip also decodes faster: its bitrate is a third of the HDR10 clip's.

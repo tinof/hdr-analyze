@@ -13,7 +13,7 @@ HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby 
 - HDR10 and HDR10+ files become Profile 8.1 MKVs, and HLG files become Profile 8.4 MKVs. In both cases the video stream is copied, not re-encoded. Only Profile 7 FEL sources take a re-encode path (see the table below).
 - An open-source analysis engine that measures decoded pixels and writes per-scene L1 plus L2, L6, L9 and L11 metadata. `dovi_tool` generates and injects the RPU.
 - Direct analysis of the compressed source. You do not need a ProRes or raw intermediate.
-- Optional NVDEC decode and CUDA analysis, at approximately 12× the analysis throughput of this project's CPU path on the tested configuration ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
+- Optional NVDEC decode and CUDA analysis that works on the decoded frames in GPU memory: 307 fps (4K HDR10) and 470 fps (4K HLG) end to end on an RTX 4070 ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
 - Published validation against synthetic references and Dolby-generated metadata, including an open gap on grainy content ([docs/VALIDATION.md](docs/VALIDATION.md)).
 
 It also reuses existing HDR10+ metadata, audits RPUs with `mkvdovi inspect`, rebuilds metadata on existing Dolby Vision files with `--mdfix`, and runs on the CPU under Linux, macOS and Windows.
@@ -64,7 +64,7 @@ Flag-level detail is in [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY
 
 ## Performance and validation
 
-On an RTX 4070 with a 4K source, CUDA analysis ran at 213 fps against 17 fps for the CPU path, with identical L1 output. Several test conditions were not recorded; [docs/PERFORMANCE.md](docs/PERFORMANCE.md) lists them and gives a reproduction recipe.
+On an RTX 4070, CUDA analysis of 4K sources runs at 307 fps (HDR10) and 470 fps (HLG), counted as frames ÷ wall time of the whole analyzer run, with L1 output identical to earlier builds. [docs/PERFORMANCE.md](docs/PERFORMANCE.md) records the test conditions and gives a reproduction recipe.
 
 On synthetic patterns, measured peaks land within 0.25 of one 12-bit PQ code. On an asset with Dolby-generated reference metadata, max-RGB peaks read 12.8 codes high on average. HDR10+-derived L1 matched Dolby's v4 analyzer with a per-shot median error of 1 code (max 17), and scene detection matched 13 of 14 authored cuts while emitting 24 cuts in total.
 

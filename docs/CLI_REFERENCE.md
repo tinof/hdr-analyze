@@ -320,9 +320,10 @@ entirely.
 - `cuda`: with a `--features cuda` build, enables the full GPU path: NVDEC decode through an
   FFmpeg CUDA `AVHWDeviceContext` (falling back to `hevc_cuvid`, then software) plus an
   NVRTC-compiled CUDA kernel that computes the histograms, max-RGB peaks, and per-pixel means on
-  full-resolution frames with a sampling stride (`--downscale` maps to the stride). Bit-identical
-  L1 output vs. the CPU path. Analysis throughput was approximately 12× that of this project's CPU
-  path on the tested configuration (RTX 4070, 4K source); see [PERFORMANCE.md](PERFORMANCE.md).
+  full-resolution frames with a sampling stride (`--downscale` maps to the stride). 10-bit NVDEC
+  frames are analyzed in GPU memory without a host round trip. Bit-identical L1 output vs. the CPU
+  path. On an RTX 4070, 4K sources analyze at 307 fps (HDR10) and 470 fps (HLG) end to end; see
+  [PERFORMANCE.md](PERFORMANCE.md).
   `--pre-denoise median3` and `--peak-estimator robust` are CPU-only and disable the GPU kernel;
   any runtime CUDA failure falls back to CPU analysis mid-run. Without the `cuda` build feature,
   `--hwaccel cuda` still attempts hardware decode and otherwise behaves as before.
