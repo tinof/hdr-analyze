@@ -172,39 +172,58 @@ pub fn probe_crop(input_path: &str, probe_count: u32, downscale: u32) -> Result<
         let mut decoded_after_target = 0usize;
         let mut candidate = None;
 
-        'packets: for (stream, packet) in input_context.packets() {
-            if stream.index() != stream_index {
-                continue;
-            }
-
-            decoder
-                .send_packet(&packet)
-                .context("failed to send crop probe packet to decoder")?;
-
-            while decoder.receive_frame(&mut decoded_frame).is_ok() {
-                if decoded_frame
+        {
+            // Returns true once this probe is finished: a usable frame, or the frame limit.
+            let mut consider = |decoded: &frame::Video| -> Result<bool> {
+                if decoded
                     .timestamp()
                     .is_some_and(|timestamp| timestamp < target)
                 {
-                    continue;
+                    return Ok(false);
                 }
 
                 decoded_after_target += 1;
                 let analysis_frame = if let Some(ref mut scaler) = scaler {
                     scaler
-                        .run(&decoded_frame, &mut scaled_frame)
+                        .run(decoded, &mut scaled_frame)
                         .context("failed to scale crop probe frame")?;
                     &scaled_frame
                 } else {
-                    &decoded_frame
+                    decoded
                 };
 
                 if is_frame_usable_for_crop(analysis_frame) {
                     candidate = Some(detect_crop(analysis_frame));
-                    break 'packets;
+                    return Ok(true);
                 }
-                if decoded_after_target >= MAX_DECODED_FRAMES_PER_PROBE {
-                    break 'packets;
+                Ok(decoded_after_target >= MAX_DECODED_FRAMES_PER_PROBE)
+            };
+
+            let mut finished = false;
+            'packets: for (stream, packet) in input_context.packets() {
+                if stream.index() != stream_index {
+                    continue;
+                }
+
+                decoder
+                    .send_packet(&packet)
+                    .context("failed to send crop probe packet to decoder")?;
+
+                while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                    if consider(&decoded_frame)? {
+                        finished = true;
+                        break 'packets;
+                    }
+                }
+            }
+
+            // End of file: the decoder still holds its last frames (reordering delay, and more
+            // with frame threading) until it is drained. The next probe's flush resets it.
+            if !finished && decoder.send_eof().is_ok() {
+                while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                    if consider(&decoded_frame)? {
+                        break;
+                    }
                 }
             }
         }

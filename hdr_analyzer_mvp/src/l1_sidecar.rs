@@ -12,7 +12,8 @@ use crate::crop::CropRect;
 /// Version 3 adds `analysis.luminance_mapping`: `"pq"`, or for HLG measured through the Dolby
 /// Vision Profile 8.4 reconstruction `"dovi84-v2"` (luma curve for luma; luma curve + chroma MMR
 /// + RPU matrix for max-RGB) or the earlier `"dovi84-v1"` (luma curve only, max-RGB equal to
-/// luma). Both HLG values share the schema; consumers accept either. Version 2 added analyzer/source/analysis
+/// luma). Both HLG values share the schema; mkvdovi re-analyzes `dovi84-v1` sidecars instead of
+/// reusing them (`metadata::DOVI84_LUMINANCE_MAPPING`). Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
 pub const L1_SIDECAR_VERSION: u32 = 3;

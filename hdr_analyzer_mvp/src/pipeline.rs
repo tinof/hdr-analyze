@@ -812,19 +812,17 @@ fn run_native_analysis_pipeline(
                     device_frames += 1;
                     match analyzer.analyze_device(decoded_frame, &rect, downscale, analysis_options)
                     {
-                        Ok(result) => Ok(result),
-                        Err(error) => {
+                        Err(error) if !analyzer.context_faulted() => {
+                            // Rejected before any CUDA work, so the context is healthy and the
+                            // frame can still be downloaded and analyzed from host memory.
                             eprintln!(
-                                "\nCUDA analysis of an NVDEC frame failed at frame {frame_count} ({error:#}); downloading frames to host memory from now on"
+                                "\nNVDEC frame {frame_count} was not analyzed in place ({error:#}); downloading frames to host memory from now on"
                             );
-                            device_frames_blocked = Some("in-place analysis failed");
-                            // A launched kernel failure can poison the context the decoder
-                            // shares; if even the download fails, stop instead of guessing.
-                            let host = host_view(decoded_frame, &mut transferred).context(
-                                "the shared CUDA context faulted: the NVDEC frame could not be downloaded after a failed in-place analysis",
-                            )?;
+                            device_frames_blocked = Some("in-place analysis was rejected");
+                            let host = host_view(decoded_frame, &mut transferred)?;
                             analyzer.analyze(host, &rect, downscale, analysis_options)
                         }
+                        other => other,
                     }
                 } else {
                     let host = host_view(decoded_frame, &mut transferred)?;
@@ -832,6 +830,17 @@ fn run_native_analysis_pipeline(
                 };
                 match result {
                     Ok(result) => gpu_output = Some((result, rect)),
+                    // A failed CUDA call can leave the context the NVDEC decoder shares unusable,
+                    // and FFmpeg's CUDA download can then report success for a failed copy. No
+                    // later frame can be trusted, so stop instead of falling back.
+                    Err(error)
+                        if analyzer.context_faulted()
+                            && decoded_frame.format() == format::Pixel::CUDA =>
+                    {
+                        return Err(error.context(format!(
+                            "CUDA analysis failed at frame {frame_count}; the NVDEC decoder shares this CUDA context, so the run stops. Rerun with --hwaccel none to analyze on the CPU"
+                        )));
+                    }
                     Err(error) => {
                         eprintln!(
                             "\nCUDA analysis failed at frame {frame_count} ({error:#}); switching to CPU analysis"
@@ -893,12 +902,16 @@ fn run_native_analysis_pipeline(
                 {
                     scene_cuts.push(frame_count);
                     last_cut_frame = frame_count;
-                    let cut_sample_frame: &frame::Video = if used_gpu || !used_scaled {
-                        host_view(decoded_frame, &mut transferred)?
-                    } else {
-                        &scaled_frame
-                    };
-                    sample_scene_cut_crop(&mut crop_monitor, rect, cut_sample_frame);
+                    // Without crop monitoring (--no-crop) nothing reads the pixels, so an NVDEC
+                    // frame is not downloaded.
+                    if crop_monitor.is_some() {
+                        let cut_sample_frame: &frame::Video = if used_gpu || !used_scaled {
+                            host_view(decoded_frame, &mut transferred)?
+                        } else {
+                            &scaled_frame
+                        };
+                        sample_scene_cut_crop(&mut crop_monitor, rect, cut_sample_frame);
+                    }
                 }
             }
             if transferred.is_some() {

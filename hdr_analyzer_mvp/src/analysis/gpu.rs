@@ -238,6 +238,7 @@ mod backend {
         results: CudaSlice<u32>,
         results_host: Vec<u32>,
         max_blocks: u32,
+        faulted: bool,
         y_plane: Option<CudaSlice<u8>>,
         u_plane: Option<CudaSlice<u8>>,
         v_plane: Option<CudaSlice<u8>>,
@@ -338,6 +339,7 @@ mod backend {
                 results,
                 results_host: vec![0; RESULT_WORDS],
                 max_blocks,
+                faulted: false,
                 y_plane: None,
                 u_plane: None,
                 v_plane: None,
@@ -466,21 +468,56 @@ mod backend {
             let (planes, producer) = self
                 .device_planes(frame)
                 .map_err(|reason| anyhow!("NVDEC frame not usable in place: {reason}"))?;
-            // FFmpeg's default producer stream is NULL, the legacy default stream: this
-            // analyzer launches on it too, so the kernel is ordered after NVDEC's surface
-            // copy. A non-NULL producer stream is synchronized explicitly.
-            if !producer.is_null() {
-                self.stream
-                    .context()
-                    .bind_to_thread()
-                    .map_err(|err| anyhow!("failed to bind the CUDA context: {err:?}"))?;
-                // SAFETY: `producer` is FFmpeg's live stream in this same context.
-                check(
-                    unsafe { sys::cuStreamSynchronize(producer) },
-                    "cuStreamSynchronize",
-                )?;
+            let sample_count = Self::sample_count(crop_rect, sample_stride)?;
+            let result = self.wait_for_producer(producer).and_then(|()| {
+                self.launch_and_collect(&planes, crop_rect, sample_stride, sample_count, options)
+            });
+            self.record_fault(result)
+        }
+
+        /// FFmpeg's default producer stream is NULL, the legacy default stream: this analyzer
+        /// launches on it too, so the kernel is ordered after NVDEC's surface copy. A non-NULL
+        /// producer stream is synchronized explicitly.
+        fn wait_for_producer(&self, producer: sys::CUstream) -> Result<()> {
+            if producer.is_null() {
+                return Ok(());
             }
-            self.launch_and_collect(&planes, crop_rect, sample_stride, options)
+            self.stream
+                .context()
+                .bind_to_thread()
+                .map_err(|err| anyhow!("failed to bind the CUDA context: {err:?}"))?;
+            // SAFETY: `producer` is FFmpeg's live stream in this same context.
+            check(
+                unsafe { sys::cuStreamSynchronize(producer) },
+                "cuStreamSynchronize",
+            )
+        }
+
+        /// Whether a CUDA call has failed. The NVDEC decoder shares this context, so after a
+        /// fault neither its frames nor a download of them can be trusted: FFmpeg's CUDA
+        /// transfer can report success after a failed copy.
+        pub fn context_faulted(&self) -> bool {
+            self.faulted
+        }
+
+        /// Every error from the CUDA part of an analysis is a CUDA API failure; validation
+        /// that precedes it (options, frame format, crop) returns before this point.
+        fn record_fault<T>(&mut self, result: Result<T>) -> Result<T> {
+            if result.is_err() {
+                self.faulted = true;
+            }
+            result
+        }
+
+        fn sample_count(crop_rect: &CropRect, sample_stride: u32) -> Result<i32> {
+            let stride = sample_stride.max(1) as i32;
+            let sample_width = (crop_rect.width as i32 + stride - 1) / stride;
+            let sample_height = (crop_rect.height as i32 + stride - 1) / stride;
+            let sample_count = sample_width.saturating_mul(sample_height);
+            if sample_count <= 0 {
+                return Err(anyhow!("crop rectangle produced no samples"));
+            }
+            Ok(sample_count)
         }
 
         pub fn analyze(
@@ -501,7 +538,14 @@ mod backend {
                     ));
                 }
             };
+            let sample_count = Self::sample_count(crop_rect, sample_stride)?;
+            let result = self.upload_host_planes(frame, layout).and_then(|planes| {
+                self.launch_and_collect(&planes, crop_rect, sample_stride, sample_count, options)
+            });
+            self.record_fault(result)
+        }
 
+        fn upload_host_planes(&mut self, frame: &frame::Video, layout: i32) -> Result<Planes> {
             let y_host = frame.data(0);
             let u_host = frame.data(1);
             let v_host = if layout == 0 { frame.data(2) } else { &[] };
@@ -528,7 +572,7 @@ mod backend {
 
             // Uploads, launch and download all run on `self.stream`, so passing raw addresses
             // (outside cudarc's per-slice event tracking) keeps them ordered.
-            let planes = Planes {
+            Ok(Planes {
                 y: Self::device_address(&self.y_plane, &self.stream),
                 u: Self::device_address(&self.u_plane, &self.stream),
                 // P010 has no separate V plane; the kernel never reads it for layout 1.
@@ -547,25 +591,19 @@ mod backend {
                 layout,
                 width: frame.width() as i32,
                 height: frame.height() as i32,
-            };
-            self.launch_and_collect(&planes, crop_rect, sample_stride, options)
+            })
         }
 
+        /// The CUDA part of an analysis: launch, download, synchronize, then parse on the host.
         fn launch_and_collect(
             &mut self,
             planes: &Planes,
             crop_rect: &CropRect,
             sample_stride: u32,
+            sample_count: i32,
             options: &FrameAnalysisOptions<'_>,
         ) -> Result<AnalyzedFrame> {
             let stride = sample_stride.max(1) as i32;
-            let sample_width = (crop_rect.width as i32 + stride - 1) / stride;
-            let sample_height = (crop_rect.height as i32 + stride - 1) / stride;
-            let sample_count = sample_width.saturating_mul(sample_height);
-            if sample_count <= 0 {
-                return Err(anyhow!("crop rectangle produced no samples"));
-            }
-
             self.stream
                 .memset_zeros(&mut self.results)
                 .map_err(|err| anyhow!("failed to clear CUDA result buffer: {err:?}"))?;
@@ -728,6 +766,10 @@ impl GpuAnalyzer {
 
     pub fn device_frame_ineligibility(&self, _frame: &frame::Video) -> Option<&'static str> {
         Some("this binary was built without --features cuda")
+    }
+
+    pub fn context_faulted(&self) -> bool {
+        false
     }
 
     pub fn analyze_device(
