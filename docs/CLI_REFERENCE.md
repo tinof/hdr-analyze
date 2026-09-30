@@ -12,8 +12,8 @@ All defaults below are taken directly from `--help`; run `<binary> --help` to co
 
 Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file plus an
 analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics and
-provenance (sidecar version 2: analyzer version, input identity, sampling settings, full-resolution
-crop). Inputs tagged with a non-HDR transfer are refused.
+provenance (sidecar version 3: analyzer version, input identity, sampling settings, full-resolution
+crop, and `analysis.luminance_mapping`). Inputs tagged with a non-HDR transfer are refused.
 
 ```bash
 hdr_analyzer_mvp -i "video.mkv" -o "measurements.bin"
@@ -51,7 +51,7 @@ hdr_analyzer_mvp "video.mkv"
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `balanced` | Optimizer behavior preset |
 | `--target-peak-nits <nits>` | computed MaxCLL | Override `header.target_peak_nits` (v6 only) |
 | `--target-smoother <off\|ema>` | `ema` | `target_nits` smoother type |
-| `--smoother-bidirectional` | off | Forward+backward EMA smoothing when `--target-smoother ema` |
+| `--smoother-bidirectional` | on (always) | Forward+backward EMA smoothing when `--target-smoother ema`. The flag defaults to true and has no off form, so it currently cannot be disabled |
 | `--smoother-alpha <0.0-1.0>` | `0.2` | EMA alpha for `target_nits` smoothing (lower = more smoothing) |
 
 ### Noise robustness
@@ -174,7 +174,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin" --downsca
 ## `mkvdovi`
 
 Orchestrates the full HDR10/HDR10+/Profile 7 → Dolby Vision Profile 8.1 and HLG → Profile 8.4 (CM v4.0) conversion. Internally
-calls `dovi_tool`, `mkvmerge`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately
+calls `ffmpeg`, `mkvmerge`, `dovi_tool`, `mediainfo` or `ffprobe`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately
 (see [README Prerequisites](../README.md#prerequisites)).
 
 ```bash
@@ -188,7 +188,7 @@ mkvdovi "input.mkv"     # process a specific file
 |------|---------|-------------|
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
 | `--keep-source` | off | Keep a non-DV source (DV inputs and `--mdfix` runs are always kept by default) |
-| `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv` |
+| `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8.1 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv`. Profile 8.4 (HLG base layer) input is refused |
 | `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, when the temp dir was created for the same input, mkvdovi version, and settings; a temp dir left by an older mkvdovi, with no fingerprint, resumes with a warning) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables). This tells a stalled tool apart from merely slow storage |
 | `--verify` | off | After muxing, validate the result: RPU structure, and RPU frame count against the muxed video track and the L1 sidecar (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
@@ -203,7 +203,7 @@ mkvdovi "input.mkv"     # process a specific file
 |------|---------|-------------|
 | `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
-| `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation |
+| `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation. Not available for HLG input (the file is refused) |
 | `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); GPU analysis in the spawned analyzer (HDR10, HLG and `--mdfix`), NVENC for FEL re-encodes |
 | `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
 | `--encoder <libx265\|videotoolbox>` | `libx265` | Software/VideoToolbox encoder for Profile 7 FEL re-encodes (`videotoolbox` ≈ 10× faster on Apple Silicon) |
@@ -233,6 +233,7 @@ See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#hdr10-peak-mapping) for gu
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--fel-crf <N>` | `18` | Local x265 CRF or Modal/NVENC quality parameter |
+| `--fel-nvenc-preset <p1..p7>` | `p5` | NVENC preset for Modal/CUDA FEL encodes (p1 fastest, p7 best quality) |
 | `--fel-preset <preset>` | `medium` | Local x265 preset |
 | `--fel-encoder <local\|modal>` | `local` | Encode the composited BL+EL result locally or offload it to Modal |
 
@@ -241,7 +242,7 @@ See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#hdr10-peak-mapping) for gu
 | Command | Description |
 |---------|-------------|
 | `mkvdovi inspect <INPUT>` | Extract the complete RPU and report suspicious/static/clipped L1 patterns |
-| `mkvdovi composite-pipe --bl <HEVC> --el <HEVC> --rpu <BIN> -w <PX> -H <PX>` | Write raw NLQ-composited frames to stdout for an encoder pipe; dispatched before global dependency checks |
+| `mkvdovi composite-pipe --bl <HEVC> --el <HEVC> --rpu <BIN> -w <PX> -H <PX> [--fps-num N --fps-den N]` | Frame rate defaults to 24000/1001. Write raw NLQ-composited frames to stdout for an encoder pipe; dispatched before global dependency checks |
 
 ### Examples
 
@@ -320,12 +321,17 @@ entirely.
 - `cuda`: with a `--features cuda` build, enables the full GPU path: NVDEC decode through an
   FFmpeg CUDA `AVHWDeviceContext` (falling back to `hevc_cuvid`, then software) plus an
   NVRTC-compiled CUDA kernel that computes the histograms, max-RGB peaks, and per-pixel means on
-  full-resolution frames with a sampling stride (`--downscale` maps to the stride). 10-bit NVDEC
-  frames are analyzed in GPU memory without a host round trip. Bit-identical L1 output vs. the CPU
-  path. On an RTX 4070, 4K sources analyze at 307 fps (HDR10) and 470 fps (HLG) end to end; see
-  [PERFORMANCE.md](PERFORMANCE.md).
-  `--pre-denoise median3` and `--peak-estimator robust` are CPU-only and disable the GPU kernel;
-  any runtime CUDA failure falls back to CPU analysis mid-run. Without the `cuda` build feature,
+  full-resolution frames with a sampling stride (`--downscale` maps to the stride). P010 frames from
+  the FFmpeg CUDA device decoder are analyzed in GPU memory without a host round trip; `hevc_cuvid`
+  frames, 8-bit and 12-bit surfaces are downloaded to host memory first. Bit-identical L1 output vs.
+  the CPU path. On an RTX 4070, 4K sources analyze at about 325 fps (HDR10) and 490 fps (HLG) end to end;
+  see [PERFORMANCE.md](PERFORMANCE.md) and [CUDA_PIPELINE.md](CUDA_PIPELINE.md).
+  `--pre-denoise median3` and `--peak-estimator robust` are CPU-only and disable the GPU kernel.
+  A failed CUDA call while decoding on NVDEC stops the run with an error, because the decoder
+  shares the analyzer's CUDA context (rerun with `--hwaccel none`). Frames rejected before any
+  CUDA work, and GPU failures with software-decoded frames, fall back to host-memory or CPU
+  analysis mid-run. Setting `HDR_ANALYZER_CUDA_HOST_FRAMES` (to any
+  value) forces the download path, for parity checks. Without the `cuda` build feature,
   `--hwaccel cuda` still attempts hardware decode and otherwise behaves as before.
   Release archives are built without the `cuda` feature, so their analyzer uses the CPU path;
   GPU analysis needs a source build (see [INSTALLATION.md](INSTALLATION.md#cuda-analysis-build)).

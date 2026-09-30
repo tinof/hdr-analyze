@@ -1,9 +1,14 @@
 # Performance
 
 This page records analysis throughput for `hdr_analyzer_mvp`, the measurement stage that decodes the
-source and produces per-frame and per-scene L1 statistics. Conversion wall time in `mkvdovi`
-(extracting the video stream, generating and injecting the RPU, muxing) is a separate cost and has not
-been benchmarked yet.
+source and produces per-frame and per-scene L1 statistics. How the GPU path works, and how it was made
+faster, is explained in [CUDA_PIPELINE.md](CUDA_PIPELINE.md).
+
+Conversion wall time in `mkvdovi` (extracting the video stream, generating and injecting the RPU,
+muxing) is a separate cost. One observation, not a benchmark: a 4K HLG episode (8.25 GB, 86,275
+frames) on the machine below, from a local ext4 disk, took 2 min 53 s to analyze (crop probe
+included), 1 s to generate the RPU, 48 s to extract the base layer, 1 min 25 s to inject the RPU and
+49 s to mux.
 
 ## Recorded result: CUDA analysis, September 2026
 
@@ -16,14 +21,15 @@ figure is the second of two runs, from a warm file cache.
 | 0.5.0 (`95ea9a5`), before the changes below | 132 fps | 125 fps | 107–117% of one core |
 | + crop probe on all cores | — | — | — |
 | + grid-stride kernel with warp reductions | 167 fps | 172 fps | 107% |
-| + NVDEC frames analyzed in place | **307 fps** | **470 fps** | 43–64% |
+| + NVDEC frames analyzed in place | 307 fps | 470 fps | 43–64% |
+| + no frame downloads without crop monitoring (final) | **325 fps** | **493 fps** | 43–66% |
 
 Per-frame GPU time from Nsight Systems (`nsys stats --report cuda_gpu_kern_sum,cuda_gpu_mem_time_sum`):
 
 | Per 4K frame | Before | After |
 |---|---:|---:|
 | `analyze_frame` kernel, HDR10 / HLG | 2.43 / 2.55 ms | 0.16–0.18 / 0.33 ms |
-| Download of the decoded frame to host memory | ~2.2–2.5 ms | none; only scene-cut frames (13 of 1,668 HDR10, 33 of 2,976 HLG) |
+| Download of the decoded frame to host memory | ~2.2–2.5 ms | none with `--no-crop`; with crop monitoring, only scene-cut frames (13 of 1,668 HDR10, 33 of 2,976 HLG) |
 | Upload of the same frame back to the GPU | ~2.0–2.3 ms | none (the only uploads left are 3 LUTs at startup) |
 | Result download (18 KB) | 2 copies | 1 copy |
 
@@ -130,6 +136,9 @@ COMMON=(--downscale 1 --sample-rate 1 --peak-estimator max --profile-performance
 
 Notes on these commands:
 
+- The September 2026 throughput table was measured with `--no-crop` added to `COMMON`, so the crop
+  probe (a fixed cost per run) does not skew short clips. Keep the crop on when checking that the two
+  paths agree.
 - The analyzer has no dedicated `none` value. `--hwaccel none` is treated as an unknown type and
   decodes in software, which is the CPU path. Omitting `--hwaccel` gives the same result.
 - `--pre-denoise median3` and `--peak-estimator robust` are CPU-only and turn off the CUDA kernel.
@@ -185,7 +194,8 @@ $L1_DIFF --ours cuda.bin --reference cpu_l1.csv
 ```
 
 When the two paths agree, the minimum and max-RGB average rows report 0 error, and the peak row
-reports less than 0.5 code, because step 2 rounds the CPU peak to a whole code. The Y-luma average row
+reports about half a code at most, because `l1_diff` writes the CPU peak with one decimal and step 2
+rounds it to a whole code. The Y-luma average row
 compares a different quantity against the max-RGB reference and is expected to differ. For a direct
 check of the per-scene values, compare the sidecars:
 

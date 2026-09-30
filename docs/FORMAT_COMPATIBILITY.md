@@ -69,11 +69,15 @@ The analyzer still computes its dynamic `target_nits` optimizer for the madVR `.
 does not use it for L1. HDR10/HLG RPUs take per-scene L1 minimum, max-RGB mean, and maximum from the
 analyzer's `.l1.json` sidecar. `--legacy-madvr-l1` restores the old
 `dovi_tool generate --madvr-file --use-custom-targets` path, where L1 max follows optimizer
-`target_pq` and L1 avg is a placeholder; use it only to reproduce old output.
+`target_pq` and L1 avg is a placeholder; use it only to reproduce old output. It is HDR10-only: HLG
+input with `--legacy-madvr-l1` is refused, because Profile 8.4 needs L1 measured through the 8.4
+decode.
 
 Existing measurements next to the input are reused only when their sidecar validates: scenes start at
-frame 0, are contiguous, keep min ≤ avg ≤ max, cover the input's video frame count, and (version 2)
-name the same file and size. Otherwise `mkvdovi` warns and re-runs the analyzer. Reused measurements
+frame 0, are contiguous, cover the input's video frame count within a small tolerance (MediaInfo
+estimates the count from the duration for some MKVs), and (version 2 and later) name the same file
+and size. A scene outside min ≤ avg ≤ max only produces a warning, because percentile and robust peak
+estimators and `--peak-domain luma` can legitimately produce one. Otherwise `mkvdovi` warns and re-runs the analyzer. Reused measurements
 print their provenance, with a warning when they were analyzed more coarsely than the resolved
 `--analysis-quality`.
 
@@ -105,11 +109,13 @@ Y-luma and max-RGB mean series use identical EMA/temporal smoothing settings and
 serialization. Robust minima remain raw per-frame spatial-percentile measurements.
 
 `mkvdovi` embeds the per-scene values as explicit `dovi_tool generate` shots, so the measured minimum,
-max-RGB mean, and maximum reach the RPU. Sidecar version 2 (current) adds `analyzer_version`,
-`source` (file name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, crop
-disabled), and stores `crop` in full-resolution coordinates (`crop_space: "full"`). `mkvdovi` accepts
-versions 1 and 2. Version 1 carries no identity or full-resolution crop, so only structure and frame
-count are checked and no L5 is derived from it.
+max-RGB mean, and maximum reach the RPU. Sidecar version 2 added `analyzer_version`, `source` (file
+name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, crop disabled), and
+stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 (current) adds
+`analysis.luminance_mapping`: `pq`, or `dovi84-v2` for HLG measured through the full Profile 8.4
+decode. `mkvdovi` accepts versions 1–3. HLG input requires version 3 with `dovi84-v2`, and a `dovi84`
+sidecar is rejected for a non-HLG input. Version 1 carries no identity or full-resolution crop, so
+only structure and frame count are checked and no L5 is derived from it.
 
 ## HDR10+ peak mapping
 

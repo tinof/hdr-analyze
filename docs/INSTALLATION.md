@@ -90,7 +90,7 @@ either `mediainfo` or `ffprobe` are on `PATH`, and it stops if one is missing.
 | `mkvmerge` | Final MKV packaging (part of MKVToolNix) | [mkvtoolnix.download](https://mkvtoolnix.download/) |
 | `dovi_tool` | RPU generation, injection and inspection | [github.com/quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool) |
 | `mediainfo` | Recommended. Source of MaxCLL, MaxFALL and mastering-display luminance for L6, and of mastering primaries for L9 | [mediaarea.net](https://mediaarea.net/en/MediaInfo) |
-| `ffprobe` | Accepted by the startup check in place of MediaInfo. It is used for transfer detection only | Ships with FFmpeg |
+| `ffprobe` | Accepted by the startup check in place of MediaInfo, and used for transfer detection. Also required for Profile 7 FEL compositing, `inspect` and `--verify`, so keep it on `PATH` even when MediaInfo is installed | Ships with FFmpeg |
 | `hdr10plus_tool` | HDR10+ input only | [github.com/quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool) |
 
 Notes:

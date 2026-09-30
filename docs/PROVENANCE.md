@@ -1,6 +1,7 @@
 # Implementation Provenance and Source-Material Boundary
 
-This project generates dynamic HDR metadata (Profile 8.1, CM v4.0, compatible with the Dolby
+This project generates dynamic HDR metadata (Profile 8.1 for PQ sources, Profile 8.4 for HLG
+sources, CM v4.0, compatible with the Dolby
 Vision® format) from the public standards and open-source dependencies listed below. This
 document records where the domain knowledge in this repository comes from, so that the claim
 is auditable rather than asserted.

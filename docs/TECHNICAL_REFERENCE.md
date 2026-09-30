@@ -12,7 +12,10 @@ the front page concise.
 
 ### 1.1. 10-bit luminance and the PQ-domain histogram
 
-- Frames are converted/scaled to **YUV420P10LE** for consistent 10-bit luminance (Y-plane) access.
+- On the CPU path, frames are converted/scaled to **YUV420P10LE** for consistent 10-bit luminance
+  (Y-plane) access. The CUDA path reads P010 (or YUV420P10LE) frames at full resolution with a
+  sampling stride and no scaling, directly in GPU memory for NVDEC frames; it produces the same
+  histograms, sums and maxima. See [CUDA_PIPELINE.md](CUDA_PIPELINE.md).
 - Histogram binning follows the v5 layout:
     -   SDR portion (bins 0-63) and HDR portion (bins 64-255).
     -   The histogram is retained for distribution, scene detection, and madVR compatibility.

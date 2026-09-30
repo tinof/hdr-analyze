@@ -327,7 +327,7 @@ cargo run --release --manifest-path tools/l1_diff/Cargo.toml -- \
 # synthetic truth
 cargo test -p hdr_analyzer_mvp --test synthetic_accuracy
 
-# HLG 8.4 decode vs libplacebo (§8); needs ffmpeg with libx265 + libplacebo (Vulkan), dovi_tool
+# HLG 8.4 decode vs libplacebo (§8); needs ffmpeg with libx265 + libplacebo (Vulkan), dovi_tool, python3
 scripts/validate_hlg_dv84.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda]         # luma, grey ramp
 scripts/validate_hlg_dv84_color.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda]   # max-RGB, colour patches
 
