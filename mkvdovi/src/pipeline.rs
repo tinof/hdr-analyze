@@ -799,12 +799,12 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
 /// Settings that change the artifacts a temp directory holds. Part of the resume fingerprint.
 ///
-/// `hlg_peak_nits=1000` is a frozen token from the removed `--hlg-peak-nits` flag (default
-/// 1000). Keeping it lets interrupted non-HLG runs from v0.4.0 still resume; stale HLG temp
-/// dirs are discarded separately by `resume::is_legacy_hlg_dir`.
+/// The removed `--hlg-peak-nits` flag left no token: the fingerprint also records the mkvdovi
+/// version, so v0.4.0 temp dirs are discarded anyway. Fingerprint-less legacy HLG temp dirs are
+/// discarded separately by `resume::is_legacy_hlg_dir`.
 fn resume_settings(args: &Args) -> String {
     format!(
-        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} hlg_peak_nits=1000 encoder={:?} mdfix={} legacy_madvr_l1={}",
+        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} encoder={:?} mdfix={} legacy_madvr_l1={}",
         args.hwaccel,
         args.analysis_quality,
         args.optimizer_profile,

@@ -6,6 +6,8 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-30
+
 ### Changed
 
 - **HLG now converts to Dolby Vision Profile 8.4 without re-encoding.** `mkvdovi` keeps the HLG
@@ -18,9 +20,23 @@ This document provides a historical record of completed milestones, feature impl
   crate's `Profile84` preset, which `dovi_tool` embeds), clamped to the RPU's source range of PQ
   codes 62–3079. CPU and CUDA share one 1024-entry lookup table. On a lossless grey ramp the curve
   agrees with libplacebo's Dolby Vision renderer to within 3.2 twelve-bit PQ codes.
-- **L1 sidecar version 3** adds `analysis.luminance_mapping` (`"pq"` or `"dovi84-v1"`). `mkvdovi`
-  and `tools/l1_diff` accept versions 1–3. HLG inputs require a version 3 sidecar with the 8.4
-  mapping, so HLG measurements from earlier versions are re-analyzed and never reused.
+- **HLG max-RGB is measured on the full Dolby Vision 8.4 decode.** Each pixel goes through the
+  luma curve, the preset's two order-3 chroma MMR curves and the RPU's YCbCr-to-RGB matrix, and the
+  peak is max(R′, G′, B′), clamped to the same source range (PQ codes 62–3079). CPU and CUDA
+  results are bit-identical. On 52 lossless flat colour patches (six primaries and secondaries at
+  100% and 75% saturation plus grey, four HLG levels) the decode agrees with libplacebo's Dolby
+  Vision render to within 0.59 twelve-bit PQ codes on both paths
+  (`scripts/validate_hlg_dv84_color.sh`).
+- **Behaviour change: HLG now defaults to `--peak-domain max-rgb`**, like PQ. Earlier versions forced
+  luma for HLG. `--peak-domain luma` still selects the luma curve alone. Neutral HLG content reads
+  about 2% higher in max-RGB than in luma, because the preset's chroma MMR tints neutrals slightly
+  blue (grey code 721: luma 2389, max-RGB 2439; libplacebo 2439.1). Saturated highlights can read
+  higher than under the luma domain.
+- **L1 sidecar version 3** adds `analysis.luminance_mapping`: `"pq"`, or for HLG `"dovi84-v2"`
+  (full 8.4 decode, written for every HLG run in either peak domain) or `"dovi84-v1"` (luma-only
+  HLG measurements from pre-release builds). `mkvdovi` and `tools/l1_diff` accept
+  versions 1–3. HLG inputs require a version 3 sidecar with `dovi84-v1` or `dovi84-v2`, so HLG
+  measurements from earlier versions are re-analyzed and never reused.
 - **The analyzer takes the transfer function from the first decoded frame** when the stream-level
   tag is not PQ or HLG. Broadcast HLG (for example BBC iPlayer) signals BT.2020 10-bit in the VUI and
   HLG in the alternative transfer characteristics SEI, and some MKVs carry HLG only in the container
@@ -34,6 +50,8 @@ This document provides a historical record of completed milestones, feature impl
   fails an HLG conversion whose output compatibility ID is not 4.
 - `mkvdovi` refuses `--mdfix` on a Profile 8.4 (HLG base layer) input and `--legacy-madvr-l1` on
   HLG input. Leftover temp directories from the old HLG→PQ path are discarded instead of resumed.
+  Interrupted 0.4.0 conversions start clean, because the resume fingerprint records the mkvdovi
+  version.
 
 ### Removed
 

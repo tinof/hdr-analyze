@@ -6,7 +6,7 @@
 
 HDR-Analyze measures HDR10 and HDR10+ video and converts it to Dolby Vision Profile 8.1 without re-encoding the picture.
 
-HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.4.0.
+HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.5.0.
 
 ## What you get
 
@@ -55,7 +55,7 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 |---|---|---|---|
 | HDR10 | Profile 8.1, CM v4.0 metadata | No | Measurement comparisons published; playback unvalidated |
 | HDR10+ | Profile 8.1, L1 taken from HDR10+ | No | Measurement comparisons published; playback unvalidated |
-| HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 reshaping curve | No | Curve validated against libplacebo; playback unvalidated |
+| HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; playback unvalidated |
 | Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
 | Dolby Vision Profile 7 FEL | Profile 8.1 from composited BL+EL | Yes | Experimental, unvalidated |
 | Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
@@ -89,7 +89,7 @@ Dolby provides its own professional tools for this job. If you already use them 
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
 - There is no Profile 5 output, no lossless FEL path and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
-- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is luma-based and does not model the 8.4 chroma curves.
+- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the 8.4 curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves).
 - Linux ARM64 has no release archive; build it from source.
 - Playback on real displays has not been compared and published.
 
