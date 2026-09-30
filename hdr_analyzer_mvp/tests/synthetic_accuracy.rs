@@ -773,23 +773,33 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
     assert_eq!(sidecar["version"], 3);
-    assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v1");
-    assert_eq!(sidecar["peak_domain"], "luma");
+    assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v2");
+    assert_eq!(sidecar["peak_domain"], "max-rgb");
 
-    // 721 → ~208.5 nits through the 8.4 curve (BT.2100 OOTF would give ~203).
-    let expected_code = dovi84_reference_pq(y_code) * 4095.0;
+    // Luma: 721 → ~208.5 nits through the 8.4 curve (BT.2100 OOTF would give ~203).
+    let expected_luma = dovi84_reference_pq(y_code) * 4095.0;
+    // Max-RGB of the full 8.4 decode: the preset's chroma MMR tints neutral grey slightly blue,
+    // so B' exceeds luma. Reference: libplacebo's Dolby Vision render of this exact sample.
+    let expected_max_rgb = 2439.1;
     let scenes = sidecar["scenes"].as_array().expect("scenes array");
     assert!(!scenes.is_empty());
     for scene in scenes {
         let max_code = scene["max_pq_12bit"].as_f64().expect("scene max");
         assert!(
-            (max_code - expected_code).abs() <= 1.0,
-            "scene max_pq_12bit {max_code} != DV 8.4 reference {expected_code}"
+            (max_code - expected_max_rgb).abs() <= 1.0,
+            "scene max_pq_12bit {max_code} != DV 8.4 max-RGB reference {expected_max_rgb}"
+        );
+        let avg_rgb = scene["avg_max_rgb_pq_12bit"]
+            .as_f64()
+            .expect("scene avg max-RGB");
+        assert!(
+            (avg_rgb - expected_max_rgb).abs() <= 1.0,
+            "scene avg_max_rgb_pq_12bit {avg_rgb} != DV 8.4 max-RGB reference {expected_max_rgb}"
         );
         let avg_code = scene["avg_luma_pq_12bit"].as_f64().expect("scene avg");
         assert!(
-            (avg_code - expected_code).abs() <= 1.0,
-            "scene avg_luma_pq_12bit {avg_code} != DV 8.4 reference {expected_code}"
+            (avg_code - expected_luma).abs() <= 1.0,
+            "scene avg_luma_pq_12bit {avg_code} != DV 8.4 reference {expected_luma}"
         );
     }
 }

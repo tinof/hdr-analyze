@@ -36,7 +36,7 @@ pub enum TransferOverride {
     Auto,
     /// Treat the input as PQ (SMPTE ST 2084).
     Pq,
-    /// Treat the input as HLG (ARIB STD-B67) and measure through the Dolby Vision 8.4 curve.
+    /// Treat the input as HLG (ARIB STD-B67) and measure through the Dolby Vision 8.4 decode.
     Hlg,
 }
 
@@ -131,7 +131,8 @@ pub struct Cli {
     pub peak_source: Option<String>,
 
     /// Domain used by direct peak measurement: max-rgb or luma.
-    /// Defaults to max-rgb for PQ/unspecified input; HLG always uses luma.
+    /// Defaults to max-rgb. For HLG, max-rgb is measured on the full Dolby Vision 8.4 decode
+    /// (luma curve + chroma MMR + RPU matrix); luma uses the 8.4 luma curve alone.
     #[arg(long, value_enum)]
     pub peak_domain: Option<PeakDomain>,
 

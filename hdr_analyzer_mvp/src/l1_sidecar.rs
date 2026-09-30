@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
-/// Version 3 adds `analysis.luminance_mapping` (`"pq"` or `"dovi84-v1"` for HLG measured
-/// through the Dolby Vision Profile 8.4 luma curve). Version 2 added analyzer/source/analysis
+/// Version 3 adds `analysis.luminance_mapping`: `"pq"`, or for HLG measured through the Dolby
+/// Vision Profile 8.4 reconstruction `"dovi84-v2"` (luma curve for luma; luma curve + chroma MMR
+/// + RPU matrix for max-RGB) or the earlier `"dovi84-v1"` (luma curve only, max-RGB equal to
+/// luma). Both HLG values share the schema; consumers accept either. Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
 pub const L1_SIDECAR_VERSION: u32 = 3;
@@ -62,7 +64,7 @@ pub struct AnalysisMetadata {
     pub gpu: bool,
     pub no_crop: bool,
     /// How signal codes were mapped to PQ: `"pq"` (PQ/unspecified input, measured directly)
-    /// or `"dovi84-v1"` (HLG through the DV Profile 8.4 luma curve). Added in version 3.
+    /// or `"dovi84-v2"` (HLG through the DV Profile 8.4 decode). Added in version 3.
     pub luminance_mapping: String,
 }
 
@@ -351,9 +353,9 @@ mod tests {
 
         let json: serde_json::Value = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
         assert_eq!(json["version"], L1_SIDECAR_VERSION);
-        assert_eq!(json["analysis"]["luminance_mapping"], "dovi84-v1");
+        assert_eq!(json["analysis"]["luminance_mapping"], "dovi84-v2");
         let parsed: L1Sidecar = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
-        assert_eq!(parsed.analysis.luminance_mapping, "dovi84-v1");
+        assert_eq!(parsed.analysis.luminance_mapping, "dovi84-v2");
     }
 
     #[test]

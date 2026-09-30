@@ -11,8 +11,10 @@ use std::sync::OnceLock;
 use dolby_vision::rpu::profiles::{profile84::Profile84, DoviProfile};
 use dolby_vision::rpu::rpu_data_mapping::DoviReshapingCurve;
 
-/// `analysis.luminance_mapping` value for HLG measured through the DV 8.4 luma curve.
-pub const DOVI84_MAPPING: &str = "dovi84-v1";
+/// `analysis.luminance_mapping` value for HLG measured through the full DV 8.4 decode: luma
+/// through the luma curve, max-RGB through luma curve + chroma MMR + RPU matrix. The earlier
+/// `"dovi84-v1"` (luma curve only, max-RGB equal to luma) is no longer written.
+pub const DOVI84_MAPPING: &str = "dovi84-v2";
 /// `analysis.luminance_mapping` value for PQ signals measured directly.
 pub const PQ_MAPPING: &str = "pq";
 

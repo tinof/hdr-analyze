@@ -6,7 +6,8 @@
 # injects a Profile 8.4 RPU with dovi_tool, renders it through ffmpeg's libplacebo filter with
 # Dolby Vision applied, and compares each frame's reconstructed PQ luma (BT.2020 weights over the
 # rendered R'G'B') with the per-frame minimum the analyzer writes to its L1 sidecar. The minimum
-# is used because it is not temporally smoothed; on a flat frame it equals the mapped luma.
+# is used because it is not temporally smoothed; with --peak-domain luma it equals the mapped luma
+# of a flat frame. scripts/validate_hlg_dv84_color.sh checks the max-RGB decode.
 #
 # Needs: ffmpeg with libx265, libplacebo and a working Vulkan device; dovi_tool; python3; a built
 # analyzer. Usage:
@@ -48,7 +49,7 @@ ffmpeg -hide_banner -loglevel error -y -init_hw_device vulkan -i "$WORK/ramp84.h
     -vf "libplacebo=apply_dolbyvision=1:color_primaries=bt2020:color_trc=smpte2084:colorspace=gbr:range=pc:tonemapping=clip:gamut_mode=clip:peak_detect=0:format=gbrp16le" \
     -f rawvideo -pix_fmt gbrp16le "$WORK/ref.raw"
 
-"$ANALYZER" -i "$WORK/ramp.mkv" -o "$WORK/ramp.bin" --no-crop --downscale 1 --sample-rate 1 \
+"$ANALYZER" -i "$WORK/ramp.mkv" -o "$WORK/ramp.bin" --no-crop --downscale 1 --sample-rate 1 --peak-domain luma \
     "${HWACCEL_ARGS[@]}" >"$WORK/analyzer.log" 2>&1 || { cat "$WORK/analyzer.log" >&2; exit 1; }
 
 python3 - "$WORK" "$FRAMES" "$TOLERANCE" <<'PY'
@@ -64,7 +65,7 @@ ref_frame = w * h * 2 * 3
 side = json.load(open(f"{work}/ramp.bin.l1.json"))
 assert side["version"] >= 3, "sidecar predates the 8.4 mapping"
 mapping = side["analysis"].get("luminance_mapping")
-assert mapping == "dovi84-v1", f"unexpected luminance_mapping {mapping!r}"
+assert mapping == "dovi84-v2", f"unexpected luminance_mapping {mapping!r}"
 measured = side["frames"]["min_pq_12bit"]
 assert len(measured) == frames, f"sidecar has {len(measured)} frames, expected {frames}"
 worst = 0.0

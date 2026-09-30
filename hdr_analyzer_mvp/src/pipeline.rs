@@ -308,13 +308,7 @@ pub fn run(
     mut input_context: format::context::Input,
 ) -> Result<()> {
     let peak_domain = match video_info.transfer_function {
-        TransferFunction::Hlg => {
-            if cli.peak_domain == Some(PeakDomain::MaxRgb) {
-                eprintln!("Warning: --peak-domain max-rgb is not supported for HLG; using luma.");
-            }
-            PeakDomain::Luma
-        }
-        TransferFunction::Pq | TransferFunction::Unknown => {
+        TransferFunction::Pq | TransferFunction::Hlg | TransferFunction::Unknown => {
             cli.peak_domain.unwrap_or(PeakDomain::MaxRgb)
         }
         TransferFunction::Unsupported(name) => {
@@ -327,7 +321,7 @@ pub fn run(
     match video_info.transfer_function {
         TransferFunction::Hlg => {
             println!(
-                "Detected HLG transfer function. Measuring through the Dolby Vision Profile 8.4 reshaping curve."
+                "Detected HLG transfer function. Measuring through the Dolby Vision Profile 8.4 decode (luma curve, chroma MMR, RPU matrix)."
             );
         }
         TransferFunction::Unknown => {

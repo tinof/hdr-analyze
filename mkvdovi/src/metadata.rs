@@ -628,7 +628,7 @@ fn primary_index_from_label(primaries: &str) -> Option<u8> {
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
 /// Versions 1 to 3 are accepted; version 2 adds provenance and a full-resolution crop, and
-/// version 3 adds `analysis.luminance_mapping` (`"pq"` or [`DOVI84_LUMINANCE_MAPPING`]).
+/// version 3 adds `analysis.luminance_mapping` (`"pq"` or one of [`DOVI84_LUMINANCE_MAPPINGS`]).
 #[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
     pub version: u32,
@@ -664,14 +664,21 @@ pub struct L1SidecarAnalysis {
     pub sample_rate: u32,
     pub gpu: bool,
     pub no_crop: bool,
-    /// How signal codes became PQ luminance: `"pq"` or [`DOVI84_LUMINANCE_MAPPING`] (version 3+).
+    /// How signal codes became PQ luminance: `"pq"` or one of [`DOVI84_LUMINANCE_MAPPINGS`]
+    /// (version 3+).
     #[serde(default)]
     pub luminance_mapping: Option<String>,
 }
 
-/// Sidecar `analysis.luminance_mapping` for HLG sources measured through the Dolby Vision
-/// Profile 8.4 luma reshaping curve, i.e. describing the 8.4 reconstruction.
-pub const DOVI84_LUMINANCE_MAPPING: &str = "dovi84-v1";
+/// Sidecar `analysis.luminance_mapping` values for HLG sources measured through the Dolby Vision
+/// Profile 8.4 reconstruction: `dovi84-v1` (luma curve only; its max-RGB equals luma) and
+/// `dovi84-v2` (max-RGB through luma curve + chroma MMR + RPU matrix). Both describe the 8.4
+/// decode and share the v3 schema, so either is valid L1 for an HLG input.
+pub const DOVI84_LUMINANCE_MAPPINGS: [&str; 2] = ["dovi84-v1", "dovi84-v2"];
+
+fn is_dovi84_mapping(mapping: Option<&str>) -> bool {
+    mapping.is_some_and(|mapping| DOVI84_LUMINANCE_MAPPINGS.contains(&mapping))
+}
 
 impl L1Sidecar {
     /// The version 3 luminance mapping, when present.
@@ -1000,7 +1007,7 @@ fn check_luminance_mapping(
     hlg: bool,
 ) -> std::result::Result<(), SidecarError> {
     let mapping = sidecar.luminance_mapping();
-    let dovi84 = mapping == Some(DOVI84_LUMINANCE_MAPPING);
+    let dovi84 = is_dovi84_mapping(mapping);
     if hlg {
         if sidecar.version < 3 || !dovi84 {
             return Err(SidecarError::LuminanceMappingMismatch(format!(
@@ -1026,7 +1033,7 @@ fn check_luminance_mapping(
 /// Dolby Vision profile for the generated RPU. HLG input becomes Profile 8.4 (the HLG base layer
 /// is kept bit-exact) and needs L1 measured through the 8.4 mapping; everything else is 8.1.
 pub fn dv_profile_for(hdr_type: HdrFormat, sidecar: Option<&L1Sidecar>) -> Result<&'static str> {
-    let dovi84 = sidecar.and_then(L1Sidecar::luminance_mapping) == Some(DOVI84_LUMINANCE_MAPPING);
+    let dovi84 = is_dovi84_mapping(sidecar.and_then(L1Sidecar::luminance_mapping));
     match (hdr_type, sidecar) {
         (HdrFormat::Hlg, None) => {
             anyhow::bail!("HLG input needs measured L1 (an analyzer sidecar) for Profile 8.4")
@@ -1697,7 +1704,7 @@ mod tests {
         let mut sidecar = v2_sidecar_json();
         sidecar["version"] = json!(3);
         sidecar["source"]["transfer_function"] = json!("HLG (ARIB STD-B67)");
-        sidecar["analysis"]["luminance_mapping"] = json!(DOVI84_LUMINANCE_MAPPING);
+        sidecar["analysis"]["luminance_mapping"] = json!("dovi84-v2");
         sidecar
     }
 
@@ -1720,12 +1727,32 @@ mod tests {
 
     #[test]
     fn v3_dovi84_sidecar_is_accepted_only_for_hlg() {
-        let sidecar: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
-        assert_eq!(sidecar.luminance_mapping(), Some("dovi84-v1"));
-        assert!(validate_l1_sidecar(&sidecar, &hlg_expectation()).is_ok());
-        let error = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap_err();
-        assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
-        assert!(error.to_string().contains("re-analysis required"));
+        for mapping in DOVI84_LUMINANCE_MAPPINGS {
+            let mut fixture = v3_hlg_sidecar_json();
+            fixture["analysis"]["luminance_mapping"] = json!(mapping);
+            let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+            assert_eq!(sidecar.luminance_mapping(), Some(mapping));
+            assert!(validate_l1_sidecar(&sidecar, &hlg_expectation()).is_ok());
+            assert_eq!(
+                dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).unwrap(),
+                "8.4"
+            );
+            let error = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap_err();
+            assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
+            assert!(error.to_string().contains("re-analysis required"));
+        }
+    }
+
+    #[test]
+    fn unknown_dovi84_revision_is_rejected_for_hlg() {
+        let mut fixture = v3_hlg_sidecar_json();
+        fixture["analysis"]["luminance_mapping"] = json!("dovi84-v3");
+        let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        assert!(matches!(
+            validate_l1_sidecar(&sidecar, &hlg_expectation()),
+            Err(SidecarError::LuminanceMappingMismatch(_))
+        ));
+        assert!(dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).is_err());
     }
 
     #[test]
