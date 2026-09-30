@@ -10,6 +10,24 @@
 //   [0] sum of luma PQ, fixed point * 2^32
 //   [1] sum of max-RGB PQ, fixed point * 2^32
 //   [2] analyzed pixel count
+// dovi_params layout (f32 words), built by gpu.rs `build_dovi84_params` from
+// analysis::hlg::Dovi84Decoder; used only when dovi84_rgb is set (HLG input):
+//   [0, 1024)       luma term per 10-bit code, coef0 * (Y' - offset0), unclamped
+//   DOVI_MMR_CB     Cb MMR: constant, then coef[order][term] (3 orders x 7 terms)
+//   DOVI_MMR_CR     Cr MMR, same layout
+//   DOVI_YCC        ycc_to_rgb chroma columns: R<-Cb, R<-Cr, G<-Cb, G<-Cr, B<-Cb, B<-Cr
+//   DOVI_CHROMA_OFFSET  Cb, Cr offsets
+//   DOVI_CHROMA_CLAMP   reshaped chroma lo, hi
+//   DOVI_SOURCE_RANGE   max-RGB lo, hi (source_min_pq, source_max_pq) / 4095
+#define DOVI_MMR_TERMS 7
+#define DOVI_MMR_ORDERS 3
+#define DOVI_MMR_WORDS (1 + DOVI_MMR_ORDERS * DOVI_MMR_TERMS)
+#define DOVI_MMR_CB 1024
+#define DOVI_MMR_CR (DOVI_MMR_CB + DOVI_MMR_WORDS)
+#define DOVI_YCC (DOVI_MMR_CR + DOVI_MMR_WORDS)
+#define DOVI_CHROMA_OFFSET (DOVI_YCC + 6)
+#define DOVI_CHROMA_CLAMP (DOVI_CHROMA_OFFSET + 2)
+#define DOVI_SOURCE_RANGE (DOVI_CHROMA_CLAMP + 2)
 #define LUM_BINS 256
 #define HUE_BINS 31
 #define PQ_BINS 4096
@@ -19,12 +37,70 @@
 #define FIXED_POINT_SCALE 4294967296.0
 #define TWO_PI 6.28318530717958647692f
 
+// One chroma component through its single-piece MMR curve. Mirrors
+// Dovi84Decoder::reshape_chroma operation for operation; the _rn intrinsics keep
+// NVRTC from contracting multiply-adds into FMAs, so results match the CPU bit for bit.
+__device__ float dovi84_reshape_chroma(
+    const float* mmr,
+    const float* chroma_clamp,
+    float y,
+    float u,
+    float v
+) {
+    const float yu = __fmul_rn(y, u);
+    const float yv = __fmul_rn(y, v);
+    const float uv = __fmul_rn(u, v);
+    const float yuv = __fmul_rn(yu, v);
+    const float x[DOVI_MMR_TERMS] = {y, u, v, yu, yv, uv, yuv};
+    float s = mmr[0];
+    for (int order = 0; order < DOVI_MMR_ORDERS; order++) {
+        for (int term = 0; term < DOVI_MMR_TERMS; term++) {
+            float p = x[term];
+            if (order >= 1) {
+                p = __fmul_rn(x[term], x[term]);
+            }
+            if (order == 2) {
+                p = __fmul_rn(p, x[term]);
+            }
+            s = __fadd_rn(s, __fmul_rn(mmr[1 + order * DOVI_MMR_TERMS + term], p));
+        }
+    }
+    return fminf(fmaxf(s, chroma_clamp[0]), chroma_clamp[1]);
+}
+
+// max(R', G', B') in PQ of the Dolby Vision Profile 8.4 decode; mirrors
+// Dovi84Decoder::max_rgb_pq.
+__device__ float dovi84_max_rgb_pq(
+    const float* params,
+    unsigned int y_code,
+    unsigned int cb_code,
+    unsigned int cr_code
+) {
+    const float y = __fdiv_rn((float)y_code, 1023.0f);
+    const float u = __fdiv_rn((float)cb_code, 1023.0f);
+    const float v = __fdiv_rn((float)cr_code, 1023.0f);
+    const float* clamp = params + DOVI_CHROMA_CLAMP;
+    const float cb = __fsub_rn(
+        dovi84_reshape_chroma(params + DOVI_MMR_CB, clamp, y, u, v), params[DOVI_CHROMA_OFFSET]);
+    const float cr = __fsub_rn(
+        dovi84_reshape_chroma(params + DOVI_MMR_CR, clamp, y, u, v),
+        params[DOVI_CHROMA_OFFSET + 1]);
+    const float luma = params[y_code];
+    const float* m = params + DOVI_YCC;
+    const float red = __fadd_rn(__fadd_rn(luma, __fmul_rn(m[0], cb)), __fmul_rn(m[1], cr));
+    const float green = __fadd_rn(__fadd_rn(luma, __fmul_rn(m[2], cb)), __fmul_rn(m[3], cr));
+    const float blue = __fadd_rn(__fadd_rn(luma, __fmul_rn(m[4], cb)), __fmul_rn(m[5], cr));
+    const float peak = fmaxf(fmaxf(red, green), blue);
+    return fminf(fmaxf(peak, params[DOVI_SOURCE_RANGE]), params[DOVI_SOURCE_RANGE + 1]);
+}
+
 extern "C" __global__ void analyze_frame(
     const unsigned char* y_plane,
     const unsigned char* u_plane,
     const unsigned char* v_plane,
     const float* transfer_lut,
     const unsigned short* luminance_bin_lut,
+    const float* dovi_params,
     unsigned int* counts,
     unsigned long long* sums,
     int width,
@@ -39,7 +115,7 @@ extern "C" __global__ void analyze_frame(
     int sample_stride,
     int layout,
     int sample_count,
-    int rgb_peak_is_luma,
+    int dovi84_rgb,
     int peak_is_max_rgb
 ) {
     __shared__ unsigned int s_lum[LUM_BINS];
@@ -112,8 +188,8 @@ extern "C" __global__ void analyze_frame(
             }
 
             float rgb_peak_pq;
-            if (rgb_peak_is_luma) {
-                rgb_peak_pq = luma_pq;
+            if (dovi84_rgb) {
+                rgb_peak_pq = dovi84_max_rgb_pq(dovi_params, code, cb_code, cr_code);
             } else {
                 // Same non-constant-luminance approximation as the CPU path:
                 // mix the PQ-encoded signal directly in Y'CbCr space.
