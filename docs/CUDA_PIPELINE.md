@@ -134,9 +134,9 @@ fps (HDR10) and 125 → 172 fps (HLG). The copies now dominated.
   `--no-crop`), fallback crop detection when the probe committed nothing, the host-upload GPU path
   (ineligible frames, `HDR_ANALYZER_CUDA_HOST_FRAMES`) and CPU analysis. Host code must never
   receive an `AV_PIX_FMT_CUDA` frame, because its data pointers are GPU addresses.
-- **Failure handling.** A frame rejected before any CUDA work (for example an empty crop) is
-  downloaded and analyzed from host memory, and the in-place path stays off for the rest of the
-  run. A failed CUDA call is different: `GpuAnalyzer` records it (`context_faulted`), and because the
+- **Failure handling.** A frame rejected before any CUDA work is downloaded and its analysis is
+  retried from host memory (an empty crop fails that check too and ends in CPU analysis), and the
+  in-place path stays off for the rest of the run. A failed CUDA call is different: `GpuAnalyzer` records it (`context_faulted`), and because the
   decoder shares the context, the run stops with an error. It does not try to recover by
   downloading, because FFmpeg's CUDA download can report success after a failed copy, so a
   successful download proves nothing about the context. Rerun with `--hwaccel none` to analyze on the
