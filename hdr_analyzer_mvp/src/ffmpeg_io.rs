@@ -251,8 +251,18 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
     // We only read the color_trc field which is a simple integer value.
     // The pointer dereference is safe because Context guarantees the underlying
     // AVCodecContext is valid for the lifetime of the Context object.
-    let transfer_characteristic =
+    let stream_transfer =
         unsafe { color::TransferCharacteristic::from((*decoder_context.as_ptr()).color_trc) };
+    let frame_transfer = first_frame_transfer(input_path);
+    let transfer_characteristic = resolve_transfer(stream_transfer, frame_transfer);
+    if transfer_characteristic != stream_transfer {
+        println!(
+            "Transfer tag: stream reports {}, decoded frames report {} (alternative-transfer SEI or container colour tag); using {}.",
+            stream_transfer.name().unwrap_or("unspecified"),
+            transfer_characteristic.name().unwrap_or("unspecified"),
+            transfer_characteristic.name().unwrap_or("unspecified"),
+        );
+    }
     let decoder = decoder_context
         .decoder()
         .video()
@@ -330,6 +340,52 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
     Ok((info, input_context))
 }
 
+/// Transfer characteristic of the first decoded frame, from a short separate decode.
+///
+/// FFmpeg's HEVC decoder applies the alternative transfer characteristics SEI (broadcast HLG
+/// often signals BT.2020 in the VUI and HLG in that SEI) and keeps a container colour tag when
+/// the VUI carries none. The stream-level tag misses both, so the frame-level value is preferred.
+fn first_frame_transfer(input_path: &str) -> Option<color::TransferCharacteristic> {
+    let mut input = format::input(input_path).ok()?;
+    let stream = input.streams().best(media::Type::Video)?;
+    let index = stream.index();
+    let mut decoder = codec::context::Context::from_parameters(stream.parameters())
+        .ok()?
+        .decoder()
+        .video()
+        .ok()?;
+    let mut decoded = frame::Video::empty();
+    for (packet_stream, packet) in input.packets() {
+        if packet_stream.index() != index || decoder.send_packet(&packet).is_err() {
+            continue;
+        }
+        if decoder.receive_frame(&mut decoded).is_ok() {
+            return Some(decoded.color_transfer_characteristic());
+        }
+    }
+    decoder.send_eof().ok()?;
+    decoder.receive_frame(&mut decoded).ok()?;
+    Some(decoded.color_transfer_characteristic())
+}
+
+/// Pick the transfer to analyze with: a decoded frame's PQ/HLG tag wins, then the stream's
+/// PQ/HLG tag, then the stream tag as-is (so non-HDR input is still refused).
+fn resolve_transfer(
+    stream: color::TransferCharacteristic,
+    frame: Option<color::TransferCharacteristic>,
+) -> color::TransferCharacteristic {
+    let is_hdr = |transfer: color::TransferCharacteristic| {
+        matches!(
+            TransferFunction::from(transfer),
+            TransferFunction::Pq | TransferFunction::Hlg
+        )
+    };
+    match frame {
+        Some(frame) if is_hdr(frame) => frame,
+        _ => stream,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ptr;
@@ -338,7 +394,26 @@ mod tests {
 
     use ffmpeg_next::util::color::TransferCharacteristic;
 
-    use super::{select_cuda_format, spread_probe_timestamps, TransferFunction};
+    use super::{resolve_transfer, select_cuda_format, spread_probe_timestamps, TransferFunction};
+
+    #[test]
+    fn frame_level_hdr_transfer_overrides_the_stream_tag() {
+        use TransferCharacteristic::*;
+        // Broadcast HLG: VUI says BT.2020 10-bit, the alternative-transfer SEI says HLG.
+        assert_eq!(
+            resolve_transfer(BT2020_10, Some(ARIB_STD_B67)),
+            ARIB_STD_B67
+        );
+        // Container-only colour tag: the stream reads unspecified, frames carry HLG.
+        assert_eq!(
+            resolve_transfer(Unspecified, Some(ARIB_STD_B67)),
+            ARIB_STD_B67
+        );
+        // A non-HDR frame tag never overrides the stream tag.
+        assert_eq!(resolve_transfer(SMPTE2084, Some(Unspecified)), SMPTE2084);
+        assert_eq!(resolve_transfer(BT709, Some(BT709)), BT709);
+        assert_eq!(resolve_transfer(BT2020_10, None), BT2020_10);
+    }
 
     #[test]
     fn transfer_mapping_accepts_only_hdr_curves() {

@@ -6,6 +6,59 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-30
+
+### Changed
+
+- **HLG now converts to Dolby Vision Profile 8.4 without re-encoding.** `mkvdovi` keeps the HLG
+  base layer bit-exact and injects a Profile 8.4 RPU, following the same path as HDR10: analyze
+  (CUDA when available), generate, inject, mux. The old path re-encoded to PQ for Profile 8.1, and
+  its L1 did not match its own output: the analyzer applied the HLG inverse OETF without the BT.2100
+  OOTF, so a 75% HLG signal read 265 nits in L1 but 204 nits in the `zscale`-converted base layer,
+  and `zscale` ignored `--hlg-peak-nits`.
+- **The analyzer measures HLG through the Dolby Vision 8.4 luma reshaping curve** (the `dolby_vision`
+  crate's `Profile84` preset, which `dovi_tool` embeds), clamped to the RPU's source range of PQ
+  codes 62–3079. CPU and CUDA share one 1024-entry lookup table. On a lossless grey ramp the curve
+  agrees with libplacebo's Dolby Vision renderer to within 3.2 twelve-bit PQ codes.
+- **HLG max-RGB is measured on the full Dolby Vision 8.4 decode.** Each pixel goes through the
+  luma curve, the preset's two order-3 chroma MMR curves and the RPU's YCbCr-to-RGB matrix, and the
+  peak is max(R′, G′, B′), clamped to the same source range (PQ codes 62–3079). CPU and CUDA
+  results are bit-identical. On 52 lossless flat colour patches (six primaries and secondaries at
+  100% and 75% saturation plus grey, four HLG levels) the decode agrees with libplacebo's Dolby
+  Vision render to within 0.59 twelve-bit PQ codes on both paths
+  (`scripts/validate_hlg_dv84_color.sh`).
+- **Behaviour change: HLG now defaults to `--peak-domain max-rgb`**, like PQ. Earlier versions forced
+  luma for HLG. `--peak-domain luma` still selects the luma curve alone. Neutral HLG content reads
+  about 2% higher in max-RGB than in luma, because the preset's chroma MMR tints neutrals slightly
+  blue (grey code 721: luma 2389, max-RGB 2439; libplacebo 2439.1). Saturated highlights can read
+  higher than under the luma domain.
+- **L1 sidecar version 3** adds `analysis.luminance_mapping`: `"pq"`, or for HLG `"dovi84-v2"`
+  (full 8.4 decode, written for every HLG run in either peak domain) or `"dovi84-v1"` (luma-only
+  HLG measurements from pre-release builds). `mkvdovi` and `tools/l1_diff` accept
+  versions 1–3. HLG inputs require a version 3 sidecar with `dovi84-v2`, so HLG measurements from
+  earlier versions, including luma-only `dovi84-v1`, are re-analyzed and never reused.
+- **The analyzer takes the transfer function from the first decoded frame** when the stream-level
+  tag is not PQ or HLG. Broadcast HLG (for example BBC iPlayer) signals BT.2020 10-bit in the VUI and
+  HLG in the alternative transfer characteristics SEI, and some MKVs carry HLG only in the container
+  Colour element. The analyzer refused the first case as SDR and measured the second as PQ. FFmpeg
+  applies the SEI to decoded frames, so that case now analyzes as HLG. New `hdr_analyzer_mvp
+  --transfer <auto|pq|hlg>` forces the transfer; `mkvdovi` passes `--transfer hlg` for inputs it
+  classified as HLG, because older FFmpeg libraries (6.1) drop an HLG tag held only in the container.
+- When HLG is tagged only in the MKV colour element (not in the HEVC VUI or SEI), `mkvdovi` writes
+  the HLG transfer into the base layer's VUI with FFmpeg's `hevc_metadata` filter, a lossless header
+  edit. Without it mkvmerge gives the track Dolby Vision compatibility ID 2 (SDR). `--verify` now
+  fails an HLG conversion whose output compatibility ID is not 4.
+- `mkvdovi` refuses `--mdfix` on a Profile 8.4 (HLG base layer) input and `--legacy-madvr-l1` on
+  HLG input. Leftover temp directories from the old HLG→PQ path are discarded instead of resumed.
+  Interrupted 0.4.0 conversions start clean, because the resume fingerprint records the mkvdovi
+  version.
+
+### Removed
+
+- `mkvdovi --hlg-crf`, `--hlg-preset` and `--hlg-peak-nits`, and `hdr_analyzer_mvp
+  --hlg-peak-nits`. The 8.4 RPU fixes the HLG mapping, and nothing is re-encoded. `--encoder` now
+  applies to Profile 7 FEL re-encodes only.
+
 ---
 
 ## [0.4.0] - 2026-09-15

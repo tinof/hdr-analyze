@@ -30,6 +30,7 @@ use crate::analysis::gpu::GpuAnalyzer;
 use crate::analysis::histogram::{
     apply_histogram_ema, apply_histogram_temporal_median, select_peak_pq,
 };
+use crate::analysis::hlg::{DOVI84_MAPPING, PQ_MAPPING};
 use crate::analysis::scene::{
     calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed,
 };
@@ -307,13 +308,7 @@ pub fn run(
     mut input_context: format::context::Input,
 ) -> Result<()> {
     let peak_domain = match video_info.transfer_function {
-        TransferFunction::Hlg => {
-            if cli.peak_domain == Some(PeakDomain::MaxRgb) {
-                eprintln!("Warning: --peak-domain max-rgb is not supported for HLG; using luma.");
-            }
-            PeakDomain::Luma
-        }
-        TransferFunction::Pq | TransferFunction::Unknown => {
+        TransferFunction::Pq | TransferFunction::Hlg | TransferFunction::Unknown => {
             cli.peak_domain.unwrap_or(PeakDomain::MaxRgb)
         }
         TransferFunction::Unsupported(name) => {
@@ -326,13 +321,12 @@ pub fn run(
     match video_info.transfer_function {
         TransferFunction::Hlg => {
             println!(
-                "Detected HLG transfer function. Using native HLG→PQ conversion (peak {:.0} nits).",
-                cli.hlg_peak_nits
+                "Detected HLG transfer function. Measuring through the Dolby Vision Profile 8.4 decode (luma curve, chroma MMR, RPU matrix)."
             );
         }
         TransferFunction::Unknown => {
             println!(
-                "Transfer function unspecified; defaulting to PQ analysis path. Use --hlg-peak-nits if needed."
+                "Transfer function unspecified; defaulting to PQ analysis path. Tag HLG sources as arib-std-b67 to measure them through the Dolby Vision Profile 8.4 curve."
             );
         }
         TransferFunction::Pq | TransferFunction::Unsupported(_) => {}
@@ -427,7 +421,6 @@ pub fn run(
             &FrameAnalysisOptions {
                 denoise_mode: &cli.pre_denoise,
                 transfer_function: video_info.transfer_function,
-                hlg_peak_nits: cli.hlg_peak_nits,
                 peak_domain,
                 min_percentile: cli.min_percentile,
                 peak_estimator: cli.peak_estimator,
@@ -541,6 +534,11 @@ pub fn run(
                 sample_rate: cli.sample_rate.max(1),
                 gpu: gpu_active,
                 no_crop: cli.no_crop,
+                luminance_mapping: match video_info.transfer_function {
+                    TransferFunction::Hlg => DOVI84_MAPPING,
+                    _ => PQ_MAPPING,
+                }
+                .to_owned(),
             },
         },
     )?;
@@ -625,7 +623,7 @@ fn run_native_analysis_pipeline(
         None
     };
     let mut gpu_analyzer = if cuda_requested && gpu_block_reason.is_none() {
-        match GpuAnalyzer::new(analysis_options.transfer_function, cli.hlg_peak_nits) {
+        match GpuAnalyzer::new(analysis_options.transfer_function) {
             Ok(analyzer) => {
                 println!(
                     "CUDA analysis active (NVRTC kernel on full-resolution frames, {}x sampling stride)",

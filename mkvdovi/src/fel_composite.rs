@@ -1398,7 +1398,7 @@ struct Hdr10Metadata {
 
 /// Extract HDR10 static metadata (mastering display + MaxCLL/MaxFALL) from the original file.
 fn extract_hdr10_metadata(original_file: &str) -> Hdr10Metadata {
-    let static_meta = metadata::get_static_metadata(original_file);
+    let static_meta = metadata::get_static_metadata(original_file, false);
     let max_dml = *static_meta.get("max_dml").unwrap_or(&1000.0) as u32;
     let min_dml = static_meta.get("min_dml").unwrap_or(&0.005);
     let max_cll = *static_meta.get("max_cll").unwrap_or(&1000.0) as u32;

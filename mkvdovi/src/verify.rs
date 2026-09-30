@@ -12,16 +12,18 @@ pub fn verify_post_mux(
     measurements: Option<&Path>,
     temp_dir: &Path,
 ) -> bool {
-    verify_post_mux_with_options(input_file, output_file, measurements, temp_dir, None)
+    verify_post_mux_with_options(input_file, output_file, measurements, temp_dir, None, false)
 }
 
 /// Full verification with optional expected CM version for RPU content assertions.
+/// `hlg_source` selects the sidecar expectation (Dolby Vision 8.4 mapped L1 for HLG input).
 pub fn verify_post_mux_with_options(
     input_file: &str,
     output_file: &Path,
     measurements: Option<&Path>,
     temp_dir: &Path,
     expected_cm_version: Option<&str>,
+    hlg_source: bool,
 ) -> bool {
     let mut ok = true;
 
@@ -42,6 +44,27 @@ pub fn verify_post_mux_with_options(
                  Install with: cargo install --path verifier"
                     .yellow()
             );
+        }
+    }
+
+    // Profile 8.4 must be signalled as HLG-compatible (ID 4). mkvmerge derives the ID from the
+    // bitstream, so a missing HLG tag there would silently yield ID 2 (SDR).
+    if hlg_source {
+        match dv_bl_signal_compatibility_id(output_file) {
+            Some(4) => println!("Dolby Vision compatibility ID 4 (HLG)."),
+            Some(id) => {
+                println!(
+                    "{}",
+                    format!("Dolby Vision compatibility ID is {id}; Profile 8.4 needs 4 (HLG).")
+                        .red()
+                );
+                ok = false;
+            }
+            None => println!(
+                "{}",
+                "Could not read the Dolby Vision compatibility ID with ffprobe; skipping that check."
+                    .yellow()
+            ),
         }
     }
 
@@ -152,9 +175,10 @@ pub fn verify_post_mux_with_options(
         }
     }
     if let (Some(meas_path), Some(rpu)) = (measurements, rpu_frames) {
-        if let Ok((sidecar, _advisories)) =
-            metadata::load_l1_sidecar(meas_path, &metadata::SidecarExpectation::default())
-        {
+        if let Ok((sidecar, _advisories)) = metadata::load_l1_sidecar(
+            meas_path,
+            &metadata::SidecarExpectation::default().with_hlg(hlg_source),
+        ) {
             if sidecar.frame_count() != rpu {
                 println!(
                     "{}",
@@ -313,6 +337,28 @@ fn get_duration_from_file(path: &Path) -> Option<f64> {
 
 fn run_logged_command(cmd: &mut Command, log_path: &Path) -> bool {
     matches!(run_command(cmd, log_path), Ok(true))
+}
+
+/// `dv_bl_signal_compatibility_id` of the first video stream's Dolby Vision configuration record.
+fn dv_bl_signal_compatibility_id(output_file: &Path) -> Option<u8> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_streams",
+            "-of",
+            "default=nw=1",
+        ])
+        .arg(output_file)
+        .output()
+        .ok()?;
+    String::from_utf8(output.stdout)
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("dv_bl_signal_compatibility_id="))
+        .and_then(|value| value.trim().parse().ok())
 }
 
 #[cfg(test)]

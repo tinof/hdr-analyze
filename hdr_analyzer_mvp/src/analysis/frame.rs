@@ -4,7 +4,7 @@ use madvr_parse::MadVRFrame;
 use rayon::prelude::*;
 
 use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq};
-use crate::analysis::hlg::hlg_signal_to_nits;
+use crate::analysis::hlg::{dovi84_decoder, dovi84_pq_lut};
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
@@ -22,7 +22,6 @@ const SIGMA_EXACTNESS_GATE: f64 = 0.25 / 4095.0;
 pub struct FrameAnalysisOptions<'a> {
     pub denoise_mode: &'a str,
     pub transfer_function: TransferFunction,
-    pub hlg_peak_nits: f64,
     pub peak_domain: PeakDomain,
     pub min_percentile: f64,
     pub peak_estimator: PeakEstimator,
@@ -365,6 +364,7 @@ pub fn analyze_native_frame_cropped(
     let cy_start = y_start / 2;
     let cx_end = x_end.div_ceil(2);
     let cy_end = y_end.div_ceil(2);
+    let dovi84 = dovi84_decoder();
 
     // Parallel accumulation across 4:2:0 chroma rows. Rayon creates one
     // accumulator per fold partition, so the fine histogram is reused across
@@ -389,6 +389,10 @@ pub fn analyze_native_frame_cropped(
                         & 0x03FF;
                 let cb = (f64::from(cb_code) - 512.0) / 896.0;
                 let cr = (f64::from(cr_code) - 512.0) / 896.0;
+                let dovi84_chroma = match options.transfer_function {
+                    TransferFunction::Hlg => Some(dovi84.chroma(cb_code, cr_code)),
+                    _ => None,
+                };
 
                 for y in [cy * 2, cy * 2 + 1] {
                     if y < y_start || y >= y_end {
@@ -410,24 +414,23 @@ pub fn analyze_native_frame_cropped(
                         let y_signal = (f64::from(y_code) - 64.0) / 876.0;
                         let luma_pq = match options.transfer_function {
                             TransferFunction::Hlg => {
-                                let nits = hlg_signal_to_nits(
-                                    y_signal.clamp(0.0, 1.0),
-                                    options.hlg_peak_nits,
-                                );
-                                nits_to_pq(nits)
+                                f64::from(dovi84_pq_lut()[usize::from(y_code).min(1023)])
                             }
                             _ => y_signal,
                         }
                         .clamp(0.0, 1.0);
                         accumulator.max_luma_pq = accumulator.max_luma_pq.max(luma_pq);
 
-                        let red = y_signal + 1.4746 * cr;
-                        let blue = y_signal + 1.8814 * cb;
-                        let green = (y_signal - 0.2627 * red - 0.0593 * blue) / 0.6780;
-                        let rgb_peak = red.max(green).max(blue).clamp(0.0, 1.0);
-                        let max_rgb_pq = match options.transfer_function {
-                            TransferFunction::Hlg => luma_pq,
-                            _ => rgb_peak,
+                        let max_rgb_pq = match &dovi84_chroma {
+                            // Full DV 8.4 decode (luma curve + chroma MMR + RPU matrix),
+                            // in f32 so the CUDA kernel reproduces it bit for bit.
+                            Some(chroma) => f64::from(dovi84.max_rgb_pq(y_code, chroma)),
+                            None => {
+                                let red = y_signal + 1.4746 * cr;
+                                let blue = y_signal + 1.8814 * cb;
+                                let green = (y_signal - 0.2627 * red - 0.0593 * blue) / 0.6780;
+                                red.max(green).max(blue).clamp(0.0, 1.0)
+                            }
                         };
                         accumulator.max_rgb_pq = accumulator.max_rgb_pq.max(max_rgb_pq);
                         accumulator.sum_luma_pq += luma_pq;

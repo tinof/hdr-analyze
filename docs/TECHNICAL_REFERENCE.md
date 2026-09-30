@@ -60,9 +60,13 @@ per-pixel luminance operations that text-based analysis cannot express.
 # Background and research notes
 
 The sections below summarize research into HDR10 analysis and native HLG support. They record
-ideas and references, not current behavior. `mkvdovi` measures the HLG source with
-the analyzer, then re-encodes the video to PQ for Profile 8.1 output. The encoded PQ picture is not
-measured again.
+ideas and references, not current behavior. Current HLG behavior: `mkvdovi` keeps the HLG stream
+and writes Dolby Vision Profile 8.4, and the analyzer measures HLG through the 8.4 decode: the luma
+reshaping curve for luma, and the full reconstruction (luma curve, chroma MMR curves, RPU
+YCbCr-to-RGB matrix) for max-RGB, clamped to the RPU's declared source range (see
+[FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md)). Section 3 predates that design; its BT.2100
+formulas are kept as background. The implemented mapping follows the 8.4 RPU instead of the BT.2100
+OOTF, because a Dolby Vision decoder reconstructs PQ through the RPU curves.
 
 ## 2. Advanced HDR10 Analysis Techniques
 

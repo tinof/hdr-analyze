@@ -6,11 +6,11 @@
 
 HDR-Analyze measures HDR10 and HDR10+ video and converts it to Dolby Vision Profile 8.1 without re-encoding the picture.
 
-HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.4.0.
+HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.5.0.
 
 ## What you get
 
-- HDR10 and HDR10+ files become Profile 8.1 MKVs with the video stream copied, not re-encoded. HLG and Profile 7 FEL sources take a re-encode path (see the table below).
+- HDR10 and HDR10+ files become Profile 8.1 MKVs, and HLG files become Profile 8.4 MKVs. In both cases the video stream is copied, not re-encoded. Only Profile 7 FEL sources take a re-encode path (see the table below).
 - An open-source analysis engine that measures decoded pixels and writes per-scene L1 plus L2, L6, L9 and L11 metadata. `dovi_tool` generates and injects the RPU.
 - Direct analysis of the compressed source. You do not need a ProRes or raw intermediate.
 - Optional NVDEC decode and CUDA analysis, at approximately 12× the analysis throughput of this project's CPU path on the tested configuration ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
@@ -55,7 +55,7 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 |---|---|---|---|
 | HDR10 | Profile 8.1, CM v4.0 metadata | No | Measurement comparisons published; playback unvalidated |
 | HDR10+ | Profile 8.1, L1 taken from HDR10+ | No | Measurement comparisons published; playback unvalidated |
-| HLG | Profile 8.1 after HLG to PQ conversion | Yes | Works, less validated |
+| HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; playback unvalidated |
 | Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
 | Dolby Vision Profile 7 FEL | Profile 8.1 from composited BL+EL | Yes | Experimental, unvalidated |
 | Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
@@ -76,7 +76,7 @@ CPU and GPU agreement shows the two paths are consistent. It says nothing about 
 
 Dolby provides its own professional tools for this job. If you already use them and the workflow suits you, keep using it. HDR-Analyze exists for other situations:
 
-- You have HDR10 or HDR10+ files and want Profile 8.1 output from a command-line conversion.
+- You have HDR10, HDR10+ or HLG files and want Dolby Vision output (Profile 8.1, or 8.4 for HLG) from a command-line conversion.
 - Reading and changing the analysis code matters to you, down to how each metadata value is computed.
 - Your source is a delivered HEVC file and you would rather not export an intermediate first.
 - You have an NVIDIA GPU and want to use it for the measurement pass.
@@ -89,7 +89,7 @@ Dolby provides its own professional tools for this job. If you already use them 
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
 - There is no Profile 5 output, no lossless FEL path and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
-- HLG is converted to PQ, so the HLG signal is not preserved.
+- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the 8.4 curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves).
 - Linux ARM64 has no release archive; build it from source.
 - Playback on real displays has not been compared and published.
 

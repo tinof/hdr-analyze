@@ -4,13 +4,13 @@
 
 The project keeps three questions apart. This report answers the first.
 
-- Measurement accuracy: does the analyzer read the pixels correctly? Synthetic truth (§1) and aligned comparisons against Dolby-authored embedded L1 and `cm_analyze` on identical pixels (§2 to §5, §7) cover it. §6 lists the limits these comparisons found.
+- Measurement accuracy: does the analyzer read the pixels correctly? Synthetic truth (§1), aligned comparisons against Dolby-authored embedded L1 and `cm_analyze` on identical pixels (§2 to §5, §7), and the HLG decode against libplacebo (§8) cover it. §6 lists the limits these comparisons found.
 - Output metadata correctness: is the final RPU well formed and consistent with the file it was muxed into? `mkvdovi --verify` checks the RPU extracted from the output (frame count, L1 ordering, L6, L9, L11, L254). In this report, the HDR10+ to L1 row of §7 Finding 2 scores generated L1 against a reference. A final-RPU regression corpus is tracked as WS6 in the [roadmap](../ROADMAP.md).
 - Playback quality: does the result look right on an identified playback chain? No controlled playback comparisons have been made. The playback test procedure is tracked as WS6 in the [roadmap](../ROADMAP.md).
 
 Generating output in the CM v4.0 metadata format does not mean the analysis reproduces Dolby's algorithm.
 
-**Analyzer version:** hdr_analyzer_mvp 0.3.0 · **Date:** 2026-07-06 (§1 to §6), 2026-07-08 (§7) · **Rule:** accuracy is
+**Analyzer version:** hdr_analyzer_mvp 0.3.0 · **Date:** 2026-07-06 (§1 to §6), 2026-07-08 (§7), 2026-09-30 (§8, 0.5.0) · **Rule:** accuracy is
 *measured, never asserted*. This report exists so that no accuracy claim in this project ever
 outruns its evidence. Reproduction commands are at the bottom.
 
@@ -77,8 +77,8 @@ and the gap is purely definitional:
 **Consequence:** Y′ is exact *as a luma measurement* but is not the same quantity as DV L1 max.
 PQ direct peaks therefore now default to max-RGB; `--peak-domain luma` retains Y′ for diagnostics
 and compatibility. The implicit peak source is direct `max` in max-RGB domain, including under the
-balanced/aggressive profiles; explicit histogram peak sources and APL remain Y-based. HLG forces
-luma until per-channel scene-to-display conversion is implemented.
+balanced/aggressive profiles; explicit histogram peak sources and APL remain Y-based. HLG also
+defaults to max-RGB, measured on the full Dolby Vision 8.4 decode (§8).
 
 ### 3. cm_analyze on the identical base layer (full 2908 frames, 34 shots)
 
@@ -266,6 +266,44 @@ asset's 1/34 under-detection. Caveat for the record: the
 Title B stream signals a non-default chroma siting; both cm runs used cm's default siting.
 The env-gated `real_content_consistency` integration test passed against a 15-second Title A cut.
 
+### 8. HLG: Dolby Vision 8.4 decode vs libplacebo (2026-09-30)
+
+HLG is measured through the Profile 8.4 decode that a Dolby Vision decoder applies with the RPU
+`mkvdovi` injects (the `dolby_vision` crate's `Profile84` preset). The reference is libplacebo's
+Dolby Vision render through ffmpeg's `libplacebo` filter, on lossless flat test patterns with a
+Profile 8.4 RPU injected by `dovi_tool`. Each frame is compared with the analyzer's per-frame
+sidecar minimum, which is not temporally smoothed and on a flat frame equals the frame's value in
+the chosen peak domain. Tolerance is 4 twelve-bit PQ codes.
+
+| Script | Patterns | Domain | Worst error (12-bit PQ codes) |
+|---|---|---|---|
+| `scripts/validate_hlg_dv84.sh` | Grey ramp, one 10-bit luma code per frame, 64–1008 | `--peak-domain luma` (8.4 luma curve) | 3.16 |
+| `scripts/validate_hlg_dv84_color.sh` | 52 patches: R, G, B, Y, C, M at 100% and 75% saturation plus grey, HLG levels 0.25 / 0.5 / 0.75 / 1.0 | max-RGB (full 8.4 decode) | 0.59 on CPU and on `--hwaccel cuda` |
+
+- The 8.4 preset's chroma MMR curves tint neutrals slightly blue, so neutral HLG reads about 2%
+  higher in max-RGB than in luma: grey code 721 gives luma 2389 and max-RGB 2439 (libplacebo
+  2439.1).
+- Reference precision: with FBOs, libplacebo keeps intermediates in half float, which adds up to
+  about 5 codes of error on saturated colours. The colour script therefore renders with
+  `disable_fbos=1` and packed `rgba64le` output.
+- Superwhite: libplacebo plateaus near 1000 nits for the brightest HLG codes. That is its display
+  tone mapping (IPT intensity clipped to the source peak it takes from the RPU's L1 max_pq, or
+  source_max_pq 3079 when L1 is absent), not Dolby Vision decoder behaviour. Rendered with L1
+  max_pq 4095, grey code 940 decodes to PQ 3155, the model's value. The colour script injects L1
+  max_pq 4095 for this reason. The analyzer still clamps luma and max-RGB to the RPU's declared
+  source range [62, 3079] on purpose, so L1 stays within that range (superwhite codes from 943 up
+  would otherwise decode to PQ 4095); the reference is compared with the same clamp.
+- 100% magenta at HLG level 1.0 lies outside BT.2020 (B′ > 1, G′ < 0); both sides clamp it to 3079.
+- Real content: 100 frames of the brightest scene of a BBC HLG sample (4K, frames 1999–2098,
+  losslessly re-encoded), rendered through libplacebo's DV path as above. Per-frame max-RGB agrees
+  with the render's max(R, G, B) within 6.7 codes (median 0.4); the scene maxima are 3044 against
+  3044.7. The four frames above 3 codes differ where libplacebo interpolates chroma and the analyzer
+  takes the co-sited 4:2:0 sample. Converting the render to 10-bit 4:2:0 PQ and analyzing that
+  instead reads about 12 codes higher, but the converted file's own YUV already decodes 12 codes
+  above the render, so that offset comes from the RGB-to-YUV conversion, not from the HLG measurement.
+- CPU and `--hwaccel cuda` produce identical sidecars and byte-identical measurement files on the
+  full 2-minute 4K HLG sample at `--downscale 1 --sample-rate 1`.
+
 ## Reproduction
 
 ```bash
@@ -288,6 +326,10 @@ cargo run --release --manifest-path tools/l1_diff/Cargo.toml -- \
 
 # synthetic truth
 cargo test -p hdr_analyzer_mvp --test synthetic_accuracy
+
+# HLG 8.4 decode vs libplacebo (§8); needs ffmpeg with libx265 + libplacebo (Vulkan), dovi_tool
+scripts/validate_hlg_dv84.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda]         # luma, grey ramp
+scripts/validate_hlg_dv84_color.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda]   # max-RGB, colour patches
 
 # real-content round (§7): sample prep on the analysis host
 mkvmerge -o sample.mkv --no-audio --no-subtitles --split parts:00:20:00-00:22:00 SOURCE.mkv

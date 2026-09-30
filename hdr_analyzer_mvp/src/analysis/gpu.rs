@@ -18,7 +18,7 @@ use crate::analysis::frame::{AnalyzedFrame, FrameAnalysisOptions};
 #[cfg(any(feature = "cuda", test))]
 use crate::analysis::histogram::nits_to_pq;
 #[cfg(any(feature = "cuda", test))]
-use crate::analysis::hlg::hlg_signal_to_nits;
+use crate::analysis::hlg::{dovi84_decoder, dovi84_pq_lut, MMR_MAX_ORDER, MMR_TERMS};
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
 
@@ -41,32 +41,69 @@ const SUM_WORDS: usize = 3;
 #[cfg(feature = "cuda")]
 const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
 
+// `dovi_params` layout; must match the DOVI_* defines in kernels.cu.
 #[cfg(any(feature = "cuda", test))]
-fn pq_for_code(code: i32, transfer_function: TransferFunction, hlg_peak_nits: f64) -> f64 {
-    let norm = (((code - 64) as f64) / 876.0).clamp(0.0, 1.0);
+const DOVI_MMR_WORDS: usize = 1 + MMR_MAX_ORDER * MMR_TERMS;
+#[cfg(any(feature = "cuda", test))]
+const DOVI_MMR_CB: usize = 1024;
+#[cfg(any(feature = "cuda", test))]
+const DOVI_MMR_CR: usize = DOVI_MMR_CB + DOVI_MMR_WORDS;
+#[cfg(any(feature = "cuda", test))]
+const DOVI_YCC: usize = DOVI_MMR_CR + DOVI_MMR_WORDS;
+#[cfg(any(feature = "cuda", test))]
+const DOVI_CHROMA_OFFSET: usize = DOVI_YCC + 6;
+#[cfg(any(feature = "cuda", test))]
+const DOVI_CHROMA_CLAMP: usize = DOVI_CHROMA_OFFSET + 2;
+#[cfg(any(feature = "cuda", test))]
+const DOVI_SOURCE_RANGE: usize = DOVI_CHROMA_CLAMP + 2;
+#[cfg(any(feature = "cuda", test))]
+const DOVI_PARAM_WORDS: usize = DOVI_SOURCE_RANGE + 2;
+
+#[cfg(any(feature = "cuda", test))]
+fn pq_for_code(code: i32, transfer_function: TransferFunction) -> f64 {
     match transfer_function {
-        TransferFunction::Hlg => nits_to_pq(hlg_signal_to_nits(norm, hlg_peak_nits)),
-        _ => norm,
+        TransferFunction::Hlg => f64::from(dovi84_pq_lut()[code.clamp(0, 1023) as usize]),
+        _ => ((code - 64) as f64) / 876.0,
     }
     .clamp(0.0, 1.0)
 }
 
 #[cfg(any(feature = "cuda", test))]
-fn build_transfer_lut(transfer_function: TransferFunction, hlg_peak_nits: f64) -> Vec<f32> {
+fn build_transfer_lut(transfer_function: TransferFunction) -> Vec<f32> {
     (0..1024)
-        .map(|code| pq_for_code(code, transfer_function, hlg_peak_nits) as f32)
+        .map(|code| pq_for_code(code, transfer_function) as f32)
         .collect()
 }
 
+/// Flatten the shared Profile 8.4 decoder into the kernel's `dovi_params` buffer.
 #[cfg(any(feature = "cuda", test))]
-fn build_luminance_bin_lut(transfer_function: TransferFunction, hlg_peak_nits: f64) -> Vec<u16> {
+fn build_dovi84_params() -> Vec<f32> {
+    let decoder = dovi84_decoder();
+    let mut params = Vec::with_capacity(DOVI_PARAM_WORDS);
+    params.extend_from_slice(&decoder.luma_term);
+    for curve in &decoder.mmr {
+        params.push(curve.constant);
+        for order in &curve.coef {
+            params.extend_from_slice(order);
+        }
+    }
+    params.extend_from_slice(&decoder.ycc_chroma);
+    params.extend_from_slice(&decoder.chroma_offset);
+    params.extend_from_slice(&decoder.chroma_clamp);
+    params.extend_from_slice(&decoder.source_range);
+    debug_assert_eq!(params.len(), DOVI_PARAM_WORDS);
+    params
+}
+
+#[cfg(any(feature = "cuda", test))]
+fn build_luminance_bin_lut(transfer_function: TransferFunction) -> Vec<u16> {
     // Must match the v5 binning constants in analyze_native_frame_cropped exactly.
     let sdr_peak_pq = nits_to_pq(100.0);
     let sdr_step = sdr_peak_pq / 64.0;
     let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
     (0..1024)
         .map(|code| {
-            let pq = pq_for_code(code, transfer_function, hlg_peak_nits);
+            let pq = pq_for_code(code, transfer_function);
             let bin = if pq < sdr_peak_pq {
                 (pq / sdr_step).floor() as usize
             } else {
@@ -100,6 +137,7 @@ mod backend {
         kernel: CudaFunction,
         transfer_lut: CudaSlice<f32>,
         luminance_bin_lut: CudaSlice<u16>,
+        dovi_params: CudaSlice<f32>,
         counts: CudaSlice<u32>,
         sums: CudaSlice<u64>,
         y_plane: Option<CudaSlice<u8>>,
@@ -158,7 +196,7 @@ mod backend {
             ))
         }
 
-        pub fn new(transfer_function: TransferFunction, hlg_peak_nits: f64) -> Result<Self> {
+        pub fn new(transfer_function: TransferFunction) -> Result<Self> {
             // cudarc's dynamic loader panics when a library is wholly absent. Probe with
             // libloading first so `--hwaccel cuda` can reliably fall back to CPU.
             let (cuda_driver, nvrtc) = Self::load_cuda_libraries()?;
@@ -174,11 +212,14 @@ mod backend {
                 .load_function("analyze_frame")
                 .map_err(|err| anyhow!("failed to load analyze_frame kernel: {err:?}"))?;
             let transfer_lut = stream
-                .clone_htod(&build_transfer_lut(transfer_function, hlg_peak_nits))
+                .clone_htod(&build_transfer_lut(transfer_function))
                 .map_err(|err| anyhow!("failed to upload transfer LUT: {err:?}"))?;
             let luminance_bin_lut = stream
-                .clone_htod(&build_luminance_bin_lut(transfer_function, hlg_peak_nits))
+                .clone_htod(&build_luminance_bin_lut(transfer_function))
                 .map_err(|err| anyhow!("failed to upload luminance-bin LUT: {err:?}"))?;
+            let dovi_params = stream
+                .clone_htod(&build_dovi84_params())
+                .map_err(|err| anyhow!("failed to upload DV 8.4 decode parameters: {err:?}"))?;
             let counts = stream
                 .alloc_zeros::<u32>(COUNT_WORDS)
                 .map_err(|err| anyhow!("failed to allocate CUDA count buffer: {err:?}"))?;
@@ -193,6 +234,7 @@ mod backend {
                 kernel,
                 transfer_lut,
                 luminance_bin_lut,
+                dovi_params,
                 counts,
                 sums,
                 y_plane: None,
@@ -306,7 +348,7 @@ mod backend {
             let crop_y = crop_rect.y as i32;
             let crop_width = crop_rect.width as i32;
             let crop_height = crop_rect.height as i32;
-            let rgb_peak_is_luma = i32::from(options.transfer_function == TransferFunction::Hlg);
+            let dovi84_rgb = i32::from(options.transfer_function == TransferFunction::Hlg);
             let peak_is_max_rgb = i32::from(options.peak_domain == PeakDomain::MaxRgb);
             let cfg = LaunchConfig {
                 grid_dim: ((sample_count as u32).div_ceil(256), 1, 1),
@@ -320,6 +362,7 @@ mod backend {
                 .arg(self.v_plane.as_ref().expect("V/sentinel plane uploaded"))
                 .arg(&self.transfer_lut)
                 .arg(&self.luminance_bin_lut)
+                .arg(&self.dovi_params)
                 .arg(&mut self.counts)
                 .arg(&mut self.sums)
                 .arg(&width)
@@ -334,7 +377,7 @@ mod backend {
                 .arg(&stride)
                 .arg(&layout)
                 .arg(&sample_count)
-                .arg(&rgb_peak_is_luma)
+                .arg(&dovi84_rgb)
                 .arg(&peak_is_max_rgb);
             unsafe { launch.launch(cfg) }
                 .map_err(|err| anyhow!("CUDA analysis launch failed: {err:?}"))?;
@@ -432,7 +475,7 @@ pub struct GpuAnalyzer;
 
 #[cfg(not(feature = "cuda"))]
 impl GpuAnalyzer {
-    pub fn new(_transfer_function: TransferFunction, _hlg_peak_nits: f64) -> Result<Self> {
+    pub fn new(_transfer_function: TransferFunction) -> Result<Self> {
         Err(anyhow!(
             "CUDA analysis is unavailable because this binary was built without --features cuda"
         ))
@@ -457,7 +500,7 @@ mod tests {
 
     #[test]
     fn pq_lut_matches_limited_range_contract() {
-        let lut = build_transfer_lut(TransferFunction::Pq, 1000.0);
+        let lut = build_transfer_lut(TransferFunction::Pq);
         assert_eq!(lut.len(), 1024);
         assert_eq!(lut[0], 0.0);
         assert_eq!(lut[64], 0.0);
@@ -468,18 +511,90 @@ mod tests {
 
     #[test]
     fn hlg_lut_is_monotonic_and_peak_limited() {
-        let lut = build_transfer_lut(TransferFunction::Hlg, 1000.0);
-        assert!(lut.windows(2).all(|pair| pair[0] <= pair[1]));
-        assert!((f64::from(lut[940]) - nits_to_pq(1000.0)).abs() < 1.0e-6);
+        let lut = build_transfer_lut(TransferFunction::Hlg);
+        // The DV 8.4 curve has a ~3e-7 PQ seam at the 910/911 piece boundary.
+        assert!(lut
+            .windows(2)
+            .all(|pair| f64::from(pair[1]) >= f64::from(pair[0]) - 1.0e-6));
+        let source_max = (3079.0_f64 / 4095.0) as f32;
+        assert_eq!(lut[940], source_max);
+        assert_eq!(lut[1023], source_max);
+        assert!(lut.iter().all(|&pq| pq <= source_max));
+    }
+
+    #[test]
+    fn hlg_transfer_lut_equals_dovi84_lut_bit_exactly() {
+        let lut = build_transfer_lut(TransferFunction::Hlg);
+        let reference = dovi84_pq_lut();
+        assert_eq!(lut.len(), reference.len());
+        for (code, (&gpu, &cpu)) in lut.iter().zip(reference.iter()).enumerate() {
+            assert_eq!(gpu.to_bits(), cpu.to_bits(), "code {code}");
+        }
+    }
+
+    /// Line-by-line transcription of `dovi84_max_rgb_pq` in kernels.cu, reading the flat
+    /// parameter buffer by the kernel's offsets.
+    fn kernel_max_rgb_pq(params: &[f32], y_code: u16, cb_code: u16, cr_code: u16) -> f32 {
+        let reshape = |mmr: &[f32], y: f32, u: f32, v: f32| {
+            let (yu, yv, uv) = (y * u, y * v, u * v);
+            let x = [y, u, v, yu, yv, uv, yu * v];
+            let mut s = mmr[0];
+            for order in 0..MMR_MAX_ORDER {
+                for (term, &value) in x.iter().enumerate() {
+                    let mut p = value;
+                    if order >= 1 {
+                        p = value * value;
+                    }
+                    if order == 2 {
+                        p *= value;
+                    }
+                    s += mmr[1 + order * MMR_TERMS + term] * p;
+                }
+            }
+            s.max(params[DOVI_CHROMA_CLAMP])
+                .min(params[DOVI_CHROMA_CLAMP + 1])
+        };
+        let (y, u, v) = (
+            f32::from(y_code) / 1023.0,
+            f32::from(cb_code) / 1023.0,
+            f32::from(cr_code) / 1023.0,
+        );
+        let cb = reshape(&params[DOVI_MMR_CB..], y, u, v) - params[DOVI_CHROMA_OFFSET];
+        let cr = reshape(&params[DOVI_MMR_CR..], y, u, v) - params[DOVI_CHROMA_OFFSET + 1];
+        let luma = params[usize::from(y_code)];
+        let m = &params[DOVI_YCC..];
+        let red = luma + m[0] * cb + m[1] * cr;
+        let green = luma + m[2] * cb + m[3] * cr;
+        let blue = luma + m[4] * cb + m[5] * cr;
+        red.max(green)
+            .max(blue)
+            .max(params[DOVI_SOURCE_RANGE])
+            .min(params[DOVI_SOURCE_RANGE + 1])
+    }
+
+    #[test]
+    fn dovi84_kernel_params_reproduce_the_cpu_decoder_bit_exactly() {
+        let params = build_dovi84_params();
+        assert_eq!(params.len(), DOVI_PARAM_WORDS);
+        let decoder = dovi84_decoder();
+        for y in (0..1024_u16).step_by(7) {
+            for cb in (0..1024_u16).step_by(31) {
+                for cr in (0..1024_u16).step_by(29) {
+                    let cpu = decoder.max_rgb_pq(y, &decoder.chroma(cb, cr));
+                    let kernel = kernel_max_rgb_pq(&params, y, cb, cr);
+                    assert_eq!(cpu.to_bits(), kernel.to_bits(), "codes ({y}, {cb}, {cr})");
+                }
+            }
+        }
     }
 
     #[test]
     fn luminance_bin_lut_uses_exact_cpu_boundaries() {
-        let bins = build_luminance_bin_lut(TransferFunction::Pq, 1000.0);
+        let bins = build_luminance_bin_lut(TransferFunction::Pq);
         let sdr_peak_pq = nits_to_pq(100.0);
         let sdr_step = sdr_peak_pq / 64.0;
         for (code, &bin) in bins.iter().enumerate() {
-            let pq = pq_for_code(code as i32, TransferFunction::Pq, 1000.0);
+            let pq = pq_for_code(code as i32, TransferFunction::Pq);
             if pq < sdr_peak_pq {
                 assert_eq!(usize::from(bin), (pq / sdr_step).floor() as usize);
             }

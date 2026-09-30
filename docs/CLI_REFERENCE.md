@@ -58,7 +58,7 @@ hdr_analyzer_mvp "video.mkv"
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--peak-domain <max-rgb\|luma>` | `max-rgb` (PQ), `luma` (HLG) | Domain used for direct peak measurement. HLG forces luma because per-channel scene-to-display conversion is not implemented |
+| `--peak-domain <max-rgb\|luma>` | `max-rgb` | Domain used for direct peak measurement. For HLG, `max-rgb` uses the full Dolby Vision 8.4 decode and `luma` the 8.4 luma curve alone |
 | `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source |
 | `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or synthetic-calibrated grain correction |
 | `--peak-percentile <0-100>` | `99.99` | Fine 4096-bin percentile used by `--peak-estimator percentile` |
@@ -70,6 +70,7 @@ hdr_analyzer_mvp "video.mkv"
 
 - `max`: direct max from `--peak-domain` (most responsive to noise). For PQ, `max-rgb` decodes
   limited-range BT.2020 NCL and takes the maximum R′/G′/B′ PQ signal; `luma` retains the legacy Y′ peak.
+  For HLG, `max-rgb` takes the maximum R′/G′/B′ of the 8.4 decode (see [HLG](#hlg)).
 - `histogram99`: 99th percentile (recommended, reduces noise impact).
 - `histogram999`: 99.9th percentile (most conservative).
 
@@ -92,9 +93,20 @@ validation.
 
 ### HLG
 
+HLG (ARIB STD-B67) input is detected from the stream and needs no flag. It is mapped to PQ through
+the Dolby Vision Profile 8.4 decode, clamped to the 8.4 source range (PQ codes 62–3079, about
+0–1000 nits), on both the CPU and CUDA paths (bit-identical). Luma statistics use the 8.4 luma
+reshaping curve. Max-RGB (the default peak domain, and the max-RGB mean) reconstructs each pixel
+through the luma curve, the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix, then takes
+max(R′, G′, B′). Neutral content therefore reads about 2% higher in max-RGB than in luma: the 8.4
+preset's chroma curves tint neutrals slightly blue. `--peak-domain luma` restores the luma-only
+peak. The sidecar records `analysis.luminance_mapping: "dovi84-v2"` for every HLG run (`mkvdovi`
+re-analyzes older luma-only `"dovi84-v1"` sidecars). The former `--hlg-peak-nits` flag was
+removed: the 8.4 RPU fixes the mapping.
+
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--hlg-peak-nits <nits>` | `1000` | Peak luminance used when analyzing auto-detected HLG (ARIB STD-B67) content |
+| `--transfer <auto\|pq\|hlg>` | `auto` | Transfer to analyze with. `auto` uses the stream tag, or the first decoded frame's tag when that is PQ/HLG (catches HLG signalled via the alternative-transfer SEI). `hlg`/`pq` force it; `mkvdovi` passes `--transfer hlg` for inputs it classified as HLG, because some FFmpeg versions drop an HLG tag held only in the MKV colour element |
 
 ### Performance & diagnostics
 
@@ -144,8 +156,8 @@ hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --optimizer-profile conservative --
 # Retain the legacy direct Y-luma peak for PQ input
 hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --peak-source max --peak-domain luma
 
-# Native HLG, override assumed peak
-hdr_analyzer_mvp -i "hlg.mkv" -o "out.bin" --hlg-peak-nits 1200
+# HLG source: max-RGB of the Dolby Vision 8.4 decode (no extra flag)
+hdr_analyzer_mvp -i "hlg.mkv" -o "out.bin"
 
 # Disable seek-based probing and use the first usable in-stream crop
 hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --crop-probes 0
@@ -161,7 +173,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin" --downsca
 
 ## `mkvdovi`
 
-Orchestrates the full HDR10/HDR10+/HLG/Profile 7 → Dolby Vision Profile 8.1 (CM v4.0) conversion. Internally
+Orchestrates the full HDR10/HDR10+/Profile 7 → Dolby Vision Profile 8.1 and HLG → Profile 8.4 (CM v4.0) conversion. Internally
 calls `dovi_tool`, `mkvmerge`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately
 (see [README Prerequisites](../README.md#prerequisites)).
 
@@ -192,9 +204,9 @@ mkvdovi "input.mkv"     # process a specific file
 | `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
 | `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation |
-| `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); GPU analysis in the spawned analyzer, NVENC for FEL/HLG re-encodes |
+| `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); GPU analysis in the spawned analyzer (HDR10, HLG and `--mdfix`), NVENC for FEL re-encodes |
 | `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
-| `--encoder <libx265\|videotoolbox>` | `libx265` | Encoder for HLG→PQ conversion (`videotoolbox` ≈ 10× faster on Apple Silicon) |
+| `--encoder <libx265\|videotoolbox>` | `libx265` | Software/VideoToolbox encoder for Profile 7 FEL re-encodes (`videotoolbox` ≈ 10× faster on Apple Silicon) |
 
 ### HDR10+ peak mapping
 
@@ -215,14 +227,6 @@ See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#hdr10-peak-mapping) for gu
 | `--reference-mode <true\|false>` | `false` | L11 reference mode (critical/studio viewing) |
 | `--source-primaries <0\|1\|2>` | auto | L9 source primaries: `0=P3-D65, 1=BT.709, 2=BT.2020` (auto-detected from MediaInfo if unset) |
 | `--trim-targets <csv>` | `100,600,1000` | Nits values for the DV L2 trim pass (neutral compatibility trims, not a panel calibration) |
-
-### HLG encode tuning
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--hlg-crf <N>` | `17` | CRF for HLG→PQ conversion |
-| `--hlg-preset <preset>` | `medium` | x265 preset for HLG→PQ |
-| `--hlg-peak-nits <nits>` | `1000` | Nominal HLG peak luminance (cd/m²) |
 
 ### Profile 7 FEL encode tuning
 
@@ -247,7 +251,7 @@ mkvdovi "input.mkv" --keep-source --verify    # recommended first run
 mkvdovi "input.mkv" --content-type sport      # high-motion content
 mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9
 mkvdovi "input.mkv" --source-primaries 0      # force P3-D65
-mkvdovi "input.mkv" --encoder videotoolbox    # fast HLG→PQ on Apple Silicon
+mkvdovi "input.mkv" --encoder videotoolbox    # fast FEL re-encode on Apple Silicon
 mkvdovi inspect "input.DV.mkv"                 # inspect source RPU metadata
 mkvdovi "input.DV.mkv" --mdfix                 # write input.mdfix.DV.mkv
 mkvdovi "profile7-fel.mkv" --fel-crf 16        # composite FEL locally
@@ -304,7 +308,7 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
 - `--analysis-quality auto` (the default) additionally resolves to `accurate` only when CUDA is
   active **and** the spawned `hdr_analyzer_mvp` advertises `+cuda` in `--version`; otherwise
   `balanced`. This avoids accidentally running full-res CPU analysis with a non-CUDA analyzer build.
-- NVENC selection for FEL/HLG re-encodes is guarded by an `ffmpeg -encoders` probe for
+- NVENC selection for FEL re-encodes is guarded by an `ffmpeg -encoders` probe for
   `hevc_nvenc`; if missing, mkvdovi warns and falls back to the configured software encoder
   instead of failing mid-encode.
 
@@ -330,7 +334,7 @@ entirely.
 ### Converter (encoding via mkvdovi)
 
 - **macOS Apple Silicon**: `--encoder videotoolbox` enables `hevc_videotoolbox` for accelerated
-  HLG→PQ conversion.
+  Profile 7 FEL re-encodes.
 - **Other platforms**: default `libx265` (software) for maximum compatibility and quality.
 
 ---

@@ -54,7 +54,7 @@ trims are a separate, higher-risk tone-mapping problem.
 Key facts:
 
 - PQ direct peaks default to limited-range BT.2020 NCL **max-RGB**. `--peak-domain luma` retains the
-  legacy Y′ peak; HLG remains luma-based. `--peak-estimator robust` enables the synthetic-calibrated
+  legacy Y′ peak. HLG also defaults to max-RGB, measured on the full Dolby Vision 8.4 decode. `--peak-estimator robust` enables the synthetic-calibrated
   grain correction; `max` remains the estimator default because the first real-content acceptance
   round did not reach the predeclared parity envelope. Histogram percentile sources and APL remain
   Y-based.

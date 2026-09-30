@@ -56,9 +56,11 @@ DOCUMENTATION_UPDATE_SUMMARY.md
 docs/VIDEOTOOLBOX_OPTIMIZATION_SUMMARY.md
 AGENTS.md
 
-# Local agent/tooling state
+# Local agent/tooling state (the shared Claude Code hook config is committed)
 .agent/
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 .codex/
 
 # Local scratch/checkouts

@@ -102,9 +102,9 @@ cargo run -p mkvdovi -- --help
     ```bash
     cargo run -p hdr_analyzer_mvp --release -- "video.mkv" -o "video_measurements.bin"
     ```
--   **HLG Content (Native Path)**:
+-   **HLG Content** (measured through the Dolby Vision 8.4 curve; no extra flag):
     ```bash
-    cargo run -p hdr_analyzer_mvp --release -- "video_hlg.mkv" -o "video_hlg_measurements.bin" --hlg-peak-nits 1000
+    cargo run -p hdr_analyzer_mvp --release -- "video_hlg.mkv" -o "video_hlg_measurements.bin"
     ```
 
 ### Running Tests

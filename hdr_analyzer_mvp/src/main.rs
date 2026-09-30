@@ -45,10 +45,6 @@ fn main() -> Result<()> {
             .map_err(|err| anyhow::anyhow!("Failed to configure Rayon thread pool: {err}"))?;
     }
 
-    if cli.hlg_peak_nits <= 0.0 {
-        return Err(anyhow::anyhow!("--hlg-peak-nits must be greater than 0"));
-    }
-
     if !(0.0..=100.0).contains(&cli.min_percentile) {
         return Err(anyhow::anyhow!(
             "--min-percentile must be between 0 and 100"
@@ -66,7 +62,21 @@ fn main() -> Result<()> {
         input_path
     );
 
-    let (video_info, input_context) = get_native_video_info(&input_path)?;
+    let (mut video_info, input_context) = get_native_video_info(&input_path)?;
+    let forced = match cli.transfer {
+        cli::TransferOverride::Auto => None,
+        cli::TransferOverride::Pq => Some(ffmpeg_io::TransferFunction::Pq),
+        cli::TransferOverride::Hlg => Some(ffmpeg_io::TransferFunction::Hlg),
+    };
+    if let Some(forced) = forced {
+        if forced != video_info.transfer_function {
+            println!(
+                "Transfer function forced by --transfer: {forced} (detected {}).",
+                video_info.transfer_function
+            );
+        }
+        video_info.transfer_function = forced;
+    }
     println!(
         "Video resolution: {}x{}",
         video_info.width, video_info.height

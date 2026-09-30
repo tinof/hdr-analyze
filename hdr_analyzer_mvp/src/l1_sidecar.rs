@@ -9,9 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
-/// Version 2 added analyzer/source/analysis provenance and moved `crop` to full-resolution
-/// source coordinates (`crop_space: "full"`). Version 1 stored the crop in analysis space.
-pub const L1_SIDECAR_VERSION: u32 = 2;
+/// Version 3 adds `analysis.luminance_mapping`: `"pq"`, or for HLG measured through the Dolby
+/// Vision Profile 8.4 reconstruction `"dovi84-v2"` (luma curve for luma; luma curve + chroma MMR
+/// + RPU matrix for max-RGB) or the earlier `"dovi84-v1"` (luma curve only, max-RGB equal to
+/// luma). Both HLG values share the schema; consumers accept either. Version 2 added analyzer/source/analysis
+/// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
+/// Version 1 stored the crop in analysis space.
+pub const L1_SIDECAR_VERSION: u32 = 3;
 
 /// Coordinate space of `L1Sidecar::crop` since version 2.
 pub const CROP_SPACE_FULL: &str = "full";
@@ -59,6 +63,9 @@ pub struct AnalysisMetadata {
     /// True when the CUDA kernel analyzed the whole run (a mid-run CPU fallback reports false).
     pub gpu: bool,
     pub no_crop: bool,
+    /// How signal codes were mapped to PQ: `"pq"` (PQ/unspecified input, measured directly)
+    /// or `"dovi84-v2"` (HLG through the DV Profile 8.4 decode). Added in version 3.
+    pub luminance_mapping: String,
 }
 
 /// Provenance recorded alongside the L1 statistics.
@@ -227,7 +234,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v2_sidecar_records_provenance_and_full_resolution_crop() {
+    fn v3_sidecar_records_provenance_and_full_resolution_crop() {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("m.bin");
         let scenes = vec![MadVRScene {
@@ -261,6 +268,7 @@ mod tests {
                 sample_rate: 1,
                 gpu: false,
                 no_crop: false,
+                luminance_mapping: crate::analysis::hlg::PQ_MAPPING.into(),
             },
         };
         let path = write_l1_sidecar(
@@ -284,7 +292,8 @@ mod tests {
         .unwrap();
 
         let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-        assert_eq!(json["version"], 2);
+        assert_eq!(json["version"], 3);
+        assert_eq!(json["analysis"]["luminance_mapping"], "pq");
         assert_eq!(json["crop_space"], "full");
         assert_eq!(json["crop"]["y"], 280);
         assert_eq!(json["source"]["size_bytes"], 1234);
@@ -293,6 +302,60 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn hlg_sidecar_round_trips_dovi84_luminance_mapping() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("hlg.bin");
+        let scenes = vec![MadVRScene {
+            start: 0,
+            end: 0,
+            ..Default::default()
+        }];
+        let frames = vec![MadVRFrame::default()];
+        let measurements = vec![FrameL1Measurement::default()];
+        let provenance = SidecarProvenance {
+            source: SourceMetadata {
+                file_name: "hlg.mkv".into(),
+                size_bytes: 1,
+                width: 1920,
+                height: 1080,
+                transfer_function: "HLG (ARIB STD-B67)".into(),
+            },
+            analysis: AnalysisMetadata {
+                downscale: 1,
+                sample_rate: 1,
+                gpu: false,
+                no_crop: true,
+                luminance_mapping: crate::analysis::hlg::DOVI84_MAPPING.into(),
+            },
+        };
+        let path = write_l1_sidecar(
+            &output,
+            &scenes,
+            &frames,
+            &measurements,
+            0.1,
+            "none",
+            PeakDomain::Luma,
+            PeakEstimator::Max,
+            99.9,
+            CropRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            &provenance,
+        )
+        .unwrap();
+
+        let json: serde_json::Value = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
+        assert_eq!(json["version"], L1_SIDECAR_VERSION);
+        assert_eq!(json["analysis"]["luminance_mapping"], "dovi84-v2");
+        let parsed: L1Sidecar = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
+        assert_eq!(parsed.analysis.luminance_mapping, "dovi84-v2");
     }
 
     #[test]
