@@ -553,6 +553,11 @@ fn set_automatic_thread_count(context: &mut codec::context::Context) {
     }
 }
 
+/// `AV_CUDA_USE_PRIMARY_CONTEXT` from hwcontext_cuda.h (public API, value stable since
+/// FFmpeg 4.4). Defined here because ffmpeg-sys binds that header only when the CUDA
+/// headers are present at build time.
+const AV_CUDA_USE_PRIMARY_CONTEXT: i32 = 1;
+
 unsafe extern "C" fn select_cuda_format(
     _context: *mut ffmpeg::ffi::AVCodecContext,
     formats: *const ffmpeg::ffi::AVPixelFormat,
@@ -621,13 +626,16 @@ fn open_cuda_hwdevice_decoder(parameters: &codec::Parameters) -> Result<codec::d
         let codec_context = context.as_mut_ptr();
         (*codec_context).get_format = Some(select_cuda_format);
 
+        // Share the device's primary context with the CUDA analyzer, so decoded surfaces
+        // can be analyzed in place (`GpuAnalyzer::analyze_device`). The analyzer is created
+        // first and sets the primary-context flags FFmpeg requires for this.
         let mut device_context = ptr::null_mut();
         let status = ffmpeg::ffi::av_hwdevice_ctx_create(
             &mut device_context,
             ffmpeg::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
             ptr::null(),
             ptr::null_mut(),
-            0,
+            AV_CUDA_USE_PRIMARY_CONTEXT,
         );
         if status < 0 || device_context.is_null() {
             if !device_context.is_null() {
