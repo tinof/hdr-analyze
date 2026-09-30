@@ -5,15 +5,65 @@ source and produces per-frame and per-scene L1 statistics. Conversion wall time 
 (extracting the video stream, generating and injecting the RPU, muxing) is a separate cost and has not
 been benchmarked yet.
 
-## Recorded result
+## Recorded result: CUDA analysis, September 2026
+
+End-to-end throughput is frames ÷ wall-clock time of the whole analyzer run, measured with
+`--no-crop` so the fixed crop-probe cost (reported separately) does not dominate a short clip. Each
+figure is the second of two runs, from a warm file cache.
+
+| Build | 4K HDR10 clip | 4K HLG clip | Analyzer CPU use |
+|---|---:|---:|---:|
+| 0.5.0 (`95ea9a5`), before the changes below | 132 fps | 125 fps | 107–117% of one core |
+| + crop probe on all cores | — | — | — |
+| + grid-stride kernel with warp reductions | 167 fps | 172 fps | 107% |
+| + NVDEC frames analyzed in place | **307 fps** | **470 fps** | 43–64% |
+
+Per-frame GPU time from Nsight Systems (`nsys stats --report cuda_gpu_kern_sum,cuda_gpu_mem_time_sum`):
+
+| Per 4K frame | Before | After |
+|---|---:|---:|
+| `analyze_frame` kernel, HDR10 / HLG | 2.43 / 2.55 ms | 0.18 / 0.33 ms |
+| Download of the decoded frame to host memory | ~2.2–2.5 ms | only at scene cuts |
+| Upload of the same frame back to the GPU | ~2.0–2.3 ms | none |
+
+The HLG kernel costs more than the HDR10 one because every pixel goes through the Profile 8.4 chroma
+MMR decode for max-RGB. The HLG clip also decodes faster: its bitrate is a third of the HDR10 clip's.
+
+The crop-probe change does not affect `--no-crop` runs, so it has no row values. Whole run with the
+crop probe on, before → after all three changes: HDR10 76.4 s → 16.2 s, HLG
+39.0 s → 9.7 s. The probe decodes 7 short runs, each from the preceding keyframe; it used to decode on
+one core. The probe change alone took these runs to 25.1 s and 26.3 s.
+
+L1 output of every build in the table is identical: the `.l1.json` crop, scenes and frames and the
+`.bin` file compare equal, on both clips, and also with `--downscale 2`, with `--sample-rate 3`, with
+the host-download path forced (`HDR_ANALYZER_CUDA_HOST_FRAMES=1`), and on an 8-bit source (which the
+kernel cannot read, so it falls back to CPU analysis as before).
+
+| Field | Value |
+|---|---|
+| CPU | 13th Gen Intel Core i5-13400F |
+| GPU and driver | NVIDIA GeForce RTX 4070, driver 616.92 |
+| NVRTC | 12.x (`libnvrtc.so.12`, loaded first) |
+| FFmpeg libraries | 6.1.1 (Ubuntu `libavcodec60` 7:6.1.1-3ubuntu5) |
+| Operating system | Ubuntu 24.04.4 LTS on WSL2 (kernel 6.6.87.2) |
+| HDR10 clip | HEVC Main 10, PQ, 3840×2160, 63.9 Mb/s, 66.8 s, 1,668 frames analyzed |
+| HLG clip | HEVC Main 10, HLG, 3840×2160, 19.1 Mb/s, 119.8 s, 2,976 frames analyzed |
+| Decode path | NVDEC through FFmpeg `AVHWDeviceContext` |
+| `--downscale` / `--sample-rate` | 1 / 1 |
+| Crop | Off for the throughput runs; on for the crop-probe times and the parity runs |
+| Peak estimator | `max` |
+| Source storage | Local ext4 disk |
+
+## Earlier result: July 2026
 
 | Path | Throughput | Hardware | Source | L1 output |
 |---|---:|---|---|---|
 | CPU analysis | 17 fps | Not recorded | 4K | Reference |
 | CUDA analysis (`--features cuda`, `--hwaccel cuda`) | 213 fps | NVIDIA RTX 4070 | 4K | Bit-identical to the CPU path |
 
-The CUDA path ran at approximately 12× the throughput of the CPU path on this configuration. The
-measurement was taken in July 2026 with the CUDA backend merged in commit `51ebd6c` (crate version
+The 213 fps figure is the "Analysis" stage rate printed by `--profile-performance`, which excludes
+decoding and the host copies. Frames ÷ wall time on the same kind of source was about 125–135 fps with
+that build. The measurement was taken with the CUDA backend merged in commit `51ebd6c` (crate version
 0.3.0, committed after the `v0.3.0` tag). The figure was first written down in commit `ed7d061`. The
 exact commit that was timed was not recorded.
 
@@ -21,9 +71,9 @@ Bit-identical L1 output shows that the CPU and CUDA implementations agree with e
 show that either one is accurate. Accuracy against synthetic truth and reference analyzers is covered
 in [VALIDATION.md](VALIDATION.md).
 
-## Not recorded
+### Not recorded for the July run
 
-The run above was not documented well enough to reproduce. These fields were not captured:
+The July run was not documented well enough to reproduce. These fields were not captured:
 
 | Field | Value |
 |---|---|
@@ -44,8 +94,7 @@ The run above was not documented well enough to reproduce. These fields were not
 | Total conversion time | Not recorded |
 | Temporary storage used | Not recorded |
 
-Treat the 17 and 213 fps figures as one observation on one machine until a run with these fields
-filled in replaces them.
+Treat the 17 and 213 fps figures as one observation on one machine.
 
 ## How to reproduce
 
