@@ -4,7 +4,7 @@ use madvr_parse::MadVRFrame;
 use rayon::prelude::*;
 
 use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq};
-use crate::analysis::hlg::hlg_signal_to_nits;
+use crate::analysis::hlg::dovi84_pq_lut;
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
@@ -22,7 +22,6 @@ const SIGMA_EXACTNESS_GATE: f64 = 0.25 / 4095.0;
 pub struct FrameAnalysisOptions<'a> {
     pub denoise_mode: &'a str,
     pub transfer_function: TransferFunction,
-    pub hlg_peak_nits: f64,
     pub peak_domain: PeakDomain,
     pub min_percentile: f64,
     pub peak_estimator: PeakEstimator,
@@ -410,11 +409,7 @@ pub fn analyze_native_frame_cropped(
                         let y_signal = (f64::from(y_code) - 64.0) / 876.0;
                         let luma_pq = match options.transfer_function {
                             TransferFunction::Hlg => {
-                                let nits = hlg_signal_to_nits(
-                                    y_signal.clamp(0.0, 1.0),
-                                    options.hlg_peak_nits,
-                                );
-                                nits_to_pq(nits)
+                                f64::from(dovi84_pq_lut()[usize::from(y_code).min(1023)])
                             }
                             _ => y_signal,
                         }

@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use serde_json::Value;
 
-use crate::cli::{AnalysisQuality, Args, CmVersion, DoviInput, Encoder, HwAccel, PeakSource};
+use crate::cli::{AnalysisQuality, Args, CmVersion, DoviInput, HwAccel, PeakSource};
 use crate::external::{self, run_command_with_progress, run_command_with_spinner, ToolVersion};
 use crate::fel_composite;
 use crate::metadata::{self, HdrFormat};
@@ -69,6 +69,18 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // different fingerprint is discarded.
     let fingerprint = resume::Fingerprint::for_input(input_path, resume_settings(args)).ok();
     let mut resuming = resume_enabled && temp_dir.exists();
+    if resuming && resume::is_legacy_hlg_dir(&temp_dir) {
+        // Only the removed HLG-to-PQ (Profile 8.1) path wrote HLG_to_PQ.mkv. Its PQ base layer and
+        // 8.1 RPU do not fit the Profile 8.4 conversion that replaced it, whatever the fingerprint
+        // says (v0.4.0 already wrote fingerprints for those directories).
+        progress::print_info(&format!(
+            "Leftover temp dir '{}' comes from the removed HLG-to-PQ (Profile 8.1) conversion; starting clean.",
+            temp_dir.display()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        temp_dir = dir.join(&temp_dir_name);
+        resuming = false;
+    }
     if resuming {
         let status = fingerprint
             .as_ref()
@@ -180,7 +192,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // Compute total steps based on the detected format
     let mut total_steps: u8 = match hdr_type {
         HdrFormat::Hdr10Plus => 7, // detect, extract HEVC, extract meta, config, RPU, inject, mux
-        HdrFormat::Hlg => 8,       // detect, analyze, HLG→PQ, config, RPU, extract BL, inject, mux
+        HdrFormat::Hlg => 7,       // detect, analyze, config, RPU, extract BL, inject, mux
         HdrFormat::Hdr10WithMeasurements => 6, // detect, config, RPU, extract BL, inject, mux
         HdrFormat::Hdr10Unsupported => 7, // detect, analyze, config, RPU, extract BL, inject, mux
         HdrFormat::DolbyVisionMel => 7,
@@ -303,6 +315,12 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 return Ok(false);
             }
 
+            // A Profile 8.4 base layer is HLG; rebuilding it would put a PQ (8.1) RPU on it.
+            if metadata::has_hlg_transfer(input_file) {
+                progress::print_error("Profile 8.4 (HLG base layer) --mdfix is not supported yet.");
+                return Ok(false);
+            }
+
             progress::print_info(
                 "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
             );
@@ -324,38 +342,16 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             }
             hdr_type = HdrFormat::Hdr10WithMeasurements;
         }
-        HdrFormat::Hlg => {
-            // HLG Logic
-            current_step += 1;
-            progress::print_step(
-                current_step,
-                total_steps,
-                &format!(
-                    "Generating measurements (HLG, --hlg-peak-nits={})...",
-                    args.hlg_peak_nits
-                ),
-            );
-
-            let mut extra_args = vec![
-                "--hlg-peak-nits".to_string(),
-                args.hlg_peak_nits.to_string(),
-            ];
-            add_optimizer_args(&mut extra_args, args);
-
-            measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
-            if measurements_file.is_none() {
+        HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
+            // HLG goes to Profile 8.4: the base layer is the untouched source, and L1 must be
+            // measured through the Dolby Vision 8.4 luma mapping (sidecar v3, dovi84-v1).
+            let hlg = hdr_type == HdrFormat::Hlg;
+            if hlg && args.legacy_madvr_l1 {
+                progress::print_error(
+                    "--legacy-madvr-l1 is not supported for HLG input: Profile 8.4 needs L1 measured through the Dolby Vision 8.4 mapping.",
+                );
                 return Ok(false);
             }
-
-            // Convert HLG -> PQ for Base Layer
-            current_step += 1;
-            progress::print_step(current_step, total_steps, "Converting HLG to PQ...");
-            match convert_hlg_to_pq(input_file, &temp_dir, args, resume_enabled) {
-                Ok(path) => bl_source_file = path,
-                Err(_) => return Ok(false),
-            }
-        }
-        HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported => {
             // Reuse existing measurements only when their L1 sidecar is valid for this input
             // (or the user explicitly asked for the legacy optimizer-target path). Every
             // candidate is tried in turn, so a stale shared file cannot shadow a valid one.
@@ -369,7 +365,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 let expect = metadata::SidecarExpectation::for_input(
                     input_path,
                     metadata::get_frame_count(input_file),
-                );
+                )
+                .with_hlg(hlg);
                 let mut reused = false;
                 for existing in candidates {
                     match metadata::load_l1_sidecar(&existing, &expect) {
@@ -394,6 +391,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             };
 
             if reuse {
+                if hlg {
+                    // HLG's step count assumes a fresh analysis.
+                    total_steps -= 1;
+                }
                 progress::print_info("Using existing measurements file.");
                 if args.boost_experimental {
                     progress::print_warn(
@@ -406,7 +407,15 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                     total_steps += 1;
                 }
                 current_step += 1;
-                progress::print_step(current_step, total_steps, "Generating measurements...");
+                progress::print_step(
+                    current_step,
+                    total_steps,
+                    if hlg {
+                        "Generating measurements (HLG via the Dolby Vision 8.4 mapping)..."
+                    } else {
+                        "Generating measurements..."
+                    },
+                );
 
                 let mut extra_args = Vec::new();
                 if args.boost_experimental {
@@ -415,6 +424,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                         .extend(["--optimizer-profile".to_string(), "aggressive".to_string()]);
                 } else {
                     add_optimizer_args(&mut extra_args, args);
+                }
+                if hlg {
+                    // MediaInfo classified the input as HLG; the analyzer's linked FFmpeg may not
+                    // see the tag (e.g. HLG only in the MKV colour element), so state it.
+                    extra_args.extend(["--transfer".to_string(), "hlg".to_string()]);
                 }
                 measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
                 if measurements_file.is_none() {
@@ -437,7 +451,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     );
 
     // Static Metadata
-    let static_meta = metadata::get_static_metadata(input_file);
+    let static_meta = metadata::get_static_metadata(input_file, hdr_type == HdrFormat::Hlg);
 
     // Build CM v4.0 config if enabled
     let cm_v40_config = if args.cm_version == CmVersion::V40 {
@@ -501,12 +515,20 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 "--legacy-madvr-l1: L1 max comes from optimizer targets and L1 avg is a placeholder, not measured values.",
             );
         } else if l1_sidecar.is_none() {
-            // Freshly produced by the analyzer in this run: validate structure only.
-            match metadata::load_l1_sidecar(measurements, &metadata::SidecarExpectation::default())
-            {
+            // Freshly produced by the analyzer in this run: validate structure and, for HLG, the
+            // luminance mapping (an older analyzer binary would measure without it).
+            let expect =
+                metadata::SidecarExpectation::default().with_hlg(hdr_type == HdrFormat::Hlg);
+            match metadata::load_l1_sidecar(measurements, &expect) {
                 Ok((sidecar, advisories)) => {
                     print_sidecar_advisories(&advisories);
                     l1_sidecar = Some(sidecar);
+                }
+                Err(error) if hdr_type == HdrFormat::Hlg => {
+                    progress::print_error(&format!(
+                        "The analyzer's L1 sidecar cannot be used for Profile 8.4 ({error}). The analyzer did not measure through the Dolby Vision 8.4 HLG mapping, so it is probably an older build: `hdr_analyzer_mvp --help` must list `--transfer`."
+                    ));
+                    return Ok(false);
                 }
                 Err(error) => {
                     progress::print_error(&format!(
@@ -535,8 +557,24 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
     }
 
+    let dv_profile = match metadata::dv_profile_for(hdr_type, l1_sidecar.as_ref()) {
+        Ok(profile) => profile,
+        Err(error) => {
+            progress::print_error(&format!(
+                "Cannot choose the Dolby Vision profile: {error:#}"
+            ));
+            return Ok(false);
+        }
+    };
+    if dv_profile != "8.1" {
+        progress::print_info(&format!(
+            "Generating Dolby Vision Profile {dv_profile} (base layer kept bit-exact)."
+        ));
+    }
+
     metadata::generate_extra_json(
         &extra_json_path,
+        dv_profile,
         &static_meta,
         &final_trims,
         cm_v40_config.as_ref(),
@@ -590,11 +628,19 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 "0:v:0",
                 "-c:v",
                 "copy",
-                "-f",
-                "hevc",
-                "-y",
-                bl_hevc.to_str().unwrap(),
             ]);
+            if hdr_type == HdrFormat::Hlg && metadata::hlg_bitstream_lacks_transfer(input_file) {
+                // Lossless SPS/VUI edit (slices untouched): without an HLG tag in the bitstream
+                // mkvmerge would give the Profile 8.4 track compatibility ID 2 (SDR) instead of 4.
+                progress::print_info(
+                    "HLG is tagged only in the container; writing the HLG transfer into the HEVC VUI.",
+                );
+                ffmpeg_cmd.args([
+                    "-bsf:v",
+                    "hevc_metadata=colour_primaries=9:transfer_characteristics=18:matrix_coefficients=9",
+                ]);
+            }
+            ffmpeg_cmd.args(["-f", "hevc", "-y", bl_hevc.to_str().unwrap()]);
 
             let bl_total = fs::metadata(&bl_source_file).ok().map(|m| m.len());
             if !run_command_with_progress(
@@ -708,6 +754,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             measurements_file_path.as_deref(),
             &temp_dir,
             expected_cm,
+            hdr_type == HdrFormat::Hlg,
         );
         if !ok {
             progress::print_error("Inconsistencies detected during verification.");
@@ -751,9 +798,13 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 }
 
 /// Settings that change the artifacts a temp directory holds. Part of the resume fingerprint.
+///
+/// `hlg_peak_nits=1000` is a frozen token from the removed `--hlg-peak-nits` flag (default
+/// 1000). Keeping it lets interrupted non-HLG runs from v0.4.0 still resume; stale HLG temp
+/// dirs are discarded separately by `resume::is_legacy_hlg_dir`.
 fn resume_settings(args: &Args) -> String {
     format!(
-        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} hlg_peak_nits={} encoder={:?} mdfix={} legacy_madvr_l1={}",
+        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} hlg_peak_nits=1000 encoder={:?} mdfix={} legacy_madvr_l1={}",
         args.hwaccel,
         args.analysis_quality,
         args.optimizer_profile,
@@ -765,7 +816,6 @@ fn resume_settings(args: &Args) -> String {
         args.source_primaries,
         args.trim_targets,
         args.peak_source,
-        args.hlg_peak_nits,
         args.encoder,
         args.mdfix,
         args.legacy_madvr_l1,
@@ -1407,147 +1457,6 @@ fn extract_hdr10plus_metadata(
         return Ok(Some(json_out));
     }
     Ok(None)
-}
-
-fn convert_hlg_to_pq(input: &str, temp_dir: &Path, args: &Args, resume: bool) -> Result<PathBuf> {
-    let out_path = temp_dir.join("HLG_to_PQ.mkv");
-    if resume && resume::is_complete(&out_path) {
-        progress::print_info("Reusing HLG\u{2192}PQ base layer from a previous run.");
-        return Ok(out_path);
-    }
-    let log_path = temp_dir.join("ffmpeg_hlg2pq.log");
-
-    let static_meta = metadata::get_static_metadata(input);
-    let max_dml = *static_meta.get("max_dml").unwrap_or(&1000.0) as u32;
-    let min_dml = static_meta.get("min_dml").unwrap_or(&0.005);
-    let max_cll = *static_meta.get("max_cll").unwrap_or(&1000.0) as u32;
-    let max_fall = *static_meta.get("max_fall").unwrap_or(&400.0) as u32;
-
-    let min_dml_int = (min_dml * 10000.0) as u32;
-    let max_dml_int = max_dml * 10000;
-
-    let master_display = format!(
-        "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L({},{})",
-        max_dml_int, min_dml_int
-    );
-
-    let x265_params = format!(
-        "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:master-display={}:max-cll={},{}:hdr-opt=1:repeat-headers=1",
-        master_display, max_cll, max_fall
-    );
-
-    let npl = args.hlg_peak_nits;
-    let vf = format!(
-        "zscale=transferin=arib-std-b67:transfer=smpte2084:primaries=bt2020:matrix=bt2020nc:rangein=tv:range=tv:npl={},format=yuv420p10le",
-        npl
-    );
-
-    let mut cmd = Command::new("ffmpeg");
-    cmd.args([
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-stats",
-        "-i",
-        input,
-        "-y",
-        "-map",
-        "0:v:0",
-        "-an",
-        "-sn",
-        "-vf",
-        &vf,
-    ]);
-
-    if args.hwaccel == HwAccel::Cuda && external::ffmpeg_has_encoder("hevc_nvenc") {
-        cmd.args([
-            "-c:v",
-            "hevc_nvenc",
-            "-preset",
-            "p7",
-            "-tune",
-            "hq",
-            "-rc",
-            "constqp",
-            "-qp",
-            "19",
-            "-pix_fmt",
-            "yuv420p10le",
-            "-profile:v",
-            "main10",
-        ]);
-
-        cmd.args([
-            "-color_primaries",
-            "bt2020",
-            "-color_trc",
-            "smpte2084",
-            "-colorspace",
-            "bt2020nc",
-            "-color_range",
-            "tv",
-        ]);
-    } else {
-        if args.hwaccel == HwAccel::Cuda {
-            progress::print_warn(
-                "ffmpeg lacks hevc_nvenc; using the configured software encoder instead.",
-            );
-        }
-        match args.encoder {
-            Encoder::Libx265 => {
-                cmd.args([
-                    "-c:v",
-                    "libx265",
-                    "-preset",
-                    &args.hlg_preset,
-                    "-crf",
-                    &args.hlg_crf.to_string(),
-                    "-pix_fmt",
-                    "yuv420p10le",
-                    "-profile:v",
-                    "main10",
-                    "-x265-params",
-                    &x265_params,
-                ]);
-            }
-            Encoder::HevcVideotoolbox => {
-                cmd.args([
-                    "-c:v",
-                    "hevc_videotoolbox",
-                    "-allow_sw",
-                    "1",
-                    "-profile:v",
-                    "main10",
-                    "-pix_fmt",
-                    "p010le",
-                    "-color_primaries",
-                    "bt2020",
-                    "-color_trc",
-                    "smpte2084",
-                    "-colorspace",
-                    "bt2020nc",
-                    "-q:v",
-                    "65",
-                ]);
-            }
-        }
-    }
-
-    cmd.arg(out_path.to_str().unwrap());
-
-    if run_command_with_progress(
-        &mut cmd,
-        &log_path,
-        "Converting HLG to PQ (encoding)",
-        &out_path,
-        None,
-        args.stall_timeout,
-    )? && out_path.exists()
-    {
-        resume::mark_done(&out_path)?;
-        return Ok(out_path);
-    }
-    anyhow::bail!("HLG to PQ conversion failed")
 }
 
 fn generate_rpu(

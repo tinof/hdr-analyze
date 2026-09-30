@@ -101,6 +101,18 @@ pub fn is_complete(artifact: &Path) -> bool {
     fs::metadata(artifact).map(|m| m.len() > 0).unwrap_or(false) && marker_path(artifact).exists()
 }
 
+/// Base layer the removed HLG-to-PQ re-encode (Profile 8.1) wrote into the temp directory.
+const LEGACY_HLG_TO_PQ: &str = "HLG_to_PQ.mkv";
+
+/// True when `temp_dir` was left by the removed HLG-to-PQ Profile 8.1 path: it holds an
+/// `HLG_to_PQ.mkv` (or its sentinel) and an 8.1 `RPU.bin`, which must never be resumed now that
+/// HLG converts to Profile 8.4. v0.4.0 fingerprinted these directories, so callers must check this
+/// before, and independently of, the fingerprint status.
+pub fn is_legacy_hlg_dir(temp_dir: &Path) -> bool {
+    let artifact = temp_dir.join(LEGACY_HLG_TO_PQ);
+    artifact.exists() || marker_path(&artifact).exists()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +172,21 @@ mod tests {
 
         assert!(is_complete(&artifact));
         assert!(marker_path(&artifact).exists());
+    }
+
+    #[test]
+    fn legacy_hlg_dir_is_detected_by_its_pq_base_layer_or_sentinel() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_legacy_hlg_dir(dir.path()));
+
+        fs::write(dir.path().join("BL.hevc"), b"payload").unwrap();
+        assert!(!is_legacy_hlg_dir(dir.path()));
+
+        let sentinel_only = tempfile::tempdir().unwrap();
+        mark_done(&sentinel_only.path().join("HLG_to_PQ.mkv")).unwrap();
+        assert!(is_legacy_hlg_dir(sentinel_only.path()));
+
+        fs::write(dir.path().join("HLG_to_PQ.mkv"), b"partial").unwrap();
+        assert!(is_legacy_hlg_dir(dir.path()));
     }
 }

@@ -10,7 +10,7 @@ analyzer accuracy and remaining technical gaps, see [CM_ANALYZE_PARITY.md](CM_AN
 |-------|--------|--------------------|----------|
 | HDR10 | Profile 8.1, CM v4.0, L1 from analyzer measurements | No | Measurement comparisons published; playback unvalidated |
 | HDR10+ | Profile 8.1, L1 from source HDR10+ metadata | No | Measurement comparisons published; playback unvalidated |
-| HLG | Profile 8.1 after HLG to PQ conversion | Yes: libx265, `hevc_videotoolbox` or `hevc_nvenc` | Works, less validated |
+| HLG | Profile 8.4, HLG base layer kept, L1 through the 8.4 reshaping curve | No | Curve validated against libplacebo; playback unvalidated |
 | Dolby Vision Profile 7 MEL | Profile 8.1, metadata-only enhancement layer discard | No | Works |
 | Dolby Vision Profile 7 FEL | Profile 8.1 from a BL+EL composite | Yes: composite, then re-encode | Experimental, compositor accuracy unverified |
 | Dolby Vision Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata, source kept | No | Works, not a guaranteed improvement over authored metadata |
@@ -24,17 +24,23 @@ Not supported: Profile 5 output, lossless FEL to Profile 8 conversion, and XML m
   analysis only when extraction runs but yields no metadata (the stream carries no dynamic metadata,
   or the extraction step exits with an error or writes an empty file). `hdr10plus_tool` is not
   checked at startup, and if it cannot be started the file fails instead of falling back.
-- HLG: the analyzer first measures the original HLG stream, mapping it to PQ with
-  `--hlg-peak-nits`. The pipeline then converts the video from HLG to PQ with `zscale` and encodes
-  it with libx265 or `hevc_videotoolbox` (`--encoder`), or with `hevc_nvenc` under `--hwaccel cuda`
-  when FFmpeg has it. The encoded PQ picture is not measured again, so L1 describes the analyzer's
-  PQ mapping of the source rather than the encoder output.
+- HLG: the base layer is copied unchanged and the output is Dolby Vision Profile 8.4 (HLG
+  backward-compatible). A Profile 8.4 RPU carries a fixed reshaping curve (the `dolby_vision` crate's
+  `Profile84` preset, which `dovi_tool generate` embeds) that a Dolby Vision decoder uses to turn the
+  HLG signal into PQ. `hdr_analyzer_mvp` measures the HLG stream through that same curve, clamped to
+  the RPU's declared source range (PQ codes 62–3079, about 0–1000 nits), so L1 describes what the
+  decoder reconstructs. The sidecar records this as `analysis.luminance_mapping: "dovi84-v1"`
+  (sidecar version 3), and `mkvdovi` never reuses HLG measurements without it. GPU analysis
+  (`--hwaccel cuda`) works for HLG exactly as for HDR10. Broadcast HLG that signals BT.2020 in the
+  VUI and HLG in the alternative transfer characteristics SEI (BBC iPlayer style) is handled: the
+  analyzer reads the transfer from decoded frames, and the output still gets Dolby Vision
+  compatibility ID 4 (HLG).
 - Profile 7 FEL: the base and enhancement layers are composited in software and re-encoded, then a
   new Profile 8.1 RPU is generated. See [experimental/README.md](experimental/README.md).
 
 HDR10, HDR10+, Profile 7 MEL and `--mdfix` picture data is never filtered or re-encoded. Conversion
-quality for those paths depends on metadata accuracy and the display's mapping. HLG and Profile 7 FEL
-change pixels.
+quality for those paths depends on metadata accuracy and the display's mapping. HLG picture data is
+also copied unchanged. Only Profile 7 FEL changes pixels.
 
 ### Analyzer input contract
 
@@ -171,10 +177,18 @@ experimental non-neutral trim derivation remains opt-in roadmap work. Note that 
 parses Level 253 extension metadata blocks, the `dolby_vision` crate (3.4.0) used in-process (for inspect
 sampling and FEL NLQ parsing) does not yet support L253 blocks; support will be updated when the crate releases it.
 
-### HLG caveat
+### HLG caveats
 
-HLG→PQ output is tagged as BT.2020, but its x265 `master-display` coordinates are currently hardcoded
-to P3. Correct BT.2020 mastering coordinates are tracked under P5 in the roadmap.
+- Profile 8.4 playback support is narrower than 8.1. Devices without 8.4 support play the HLG base
+  layer.
+- HLG L1 is measured on luma through the 8.4 luma curve. The 8.4 chroma (MMR) curves are not
+  modelled, so saturated highlights can read lower than a max-RGB measurement would.
+- The curve was checked against libplacebo's Dolby Vision renderer on a lossless grey ramp: within
+  3.2 twelve-bit PQ codes over HLG codes 64–1008. HLG sources rarely carry mastering metadata, so L6
+  usually falls back to 1000 / 0.005 nits and MaxCLL 1000 / MaxFALL 400, which matches the 8.4
+  source range.
+- Legacy temp directories from the removed HLG→PQ re-encode path (they contain `HLG_to_PQ.mkv`) are
+  discarded, not resumed.
 
 ## Post-mux verification
 

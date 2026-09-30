@@ -28,6 +28,18 @@ pub enum PeakDomain {
     Luma,
 }
 
+/// Transfer function to analyze with.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum TransferOverride {
+    /// Detect from the stream and the first decoded frame.
+    #[default]
+    Auto,
+    /// Treat the input as PQ (SMPTE ST 2084).
+    Pq,
+    /// Treat the input as HLG (ARIB STD-B67) and measure through the Dolby Vision 8.4 curve.
+    Hlg,
+}
+
 // --- Command Line Interface ---
 #[derive(Parser)]
 #[command(name = "hdr_analyzer_mvp")]
@@ -54,6 +66,11 @@ pub struct Cli {
     /// Examples: "cuda" (for NVIDIA), "vaapi" (for Linux/AMD/Intel), "videotoolbox" (for macOS).
     #[arg(long)]
     pub hwaccel: Option<String>,
+
+    /// Transfer function: auto (detect), pq or hlg. Overrides detection for inputs whose tags
+    /// the linked FFmpeg cannot see (e.g. HLG signalled only in the MKV colour element).
+    #[arg(long, value_enum, default_value_t = TransferOverride::Auto)]
+    pub transfer: TransferOverride,
 
     /// madVR measurement file version to write (5 or 6). Default: 5
     #[arg(long, default_value_t = 5)]
@@ -157,10 +174,6 @@ pub struct Cli {
     /// EMA alpha for target_nits smoothing (0.0-1.0). Lower = more smoothing. Default: 0.2
     #[arg(long, default_value_t = 0.2)]
     pub smoother_alpha: f64,
-
-    /// Peak luminance (nits) used when analyzing HLG content (default: 1000.0)
-    #[arg(long, default_value_t = 1000.0)]
-    pub hlg_peak_nits: f64,
 
     /// Header MaxCLL source: max (direct max), histogram99 (99th percentile), histogram999 (99.9th percentile)
     /// Only affects header.maxcll; per-frame peaks use --peak-source.

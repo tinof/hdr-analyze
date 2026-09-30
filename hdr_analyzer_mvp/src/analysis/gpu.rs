@@ -18,7 +18,7 @@ use crate::analysis::frame::{AnalyzedFrame, FrameAnalysisOptions};
 #[cfg(any(feature = "cuda", test))]
 use crate::analysis::histogram::nits_to_pq;
 #[cfg(any(feature = "cuda", test))]
-use crate::analysis::hlg::hlg_signal_to_nits;
+use crate::analysis::hlg::dovi84_pq_lut;
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
 
@@ -42,31 +42,30 @@ const SUM_WORDS: usize = 3;
 const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
 
 #[cfg(any(feature = "cuda", test))]
-fn pq_for_code(code: i32, transfer_function: TransferFunction, hlg_peak_nits: f64) -> f64 {
-    let norm = (((code - 64) as f64) / 876.0).clamp(0.0, 1.0);
+fn pq_for_code(code: i32, transfer_function: TransferFunction) -> f64 {
     match transfer_function {
-        TransferFunction::Hlg => nits_to_pq(hlg_signal_to_nits(norm, hlg_peak_nits)),
-        _ => norm,
+        TransferFunction::Hlg => f64::from(dovi84_pq_lut()[code.clamp(0, 1023) as usize]),
+        _ => ((code - 64) as f64) / 876.0,
     }
     .clamp(0.0, 1.0)
 }
 
 #[cfg(any(feature = "cuda", test))]
-fn build_transfer_lut(transfer_function: TransferFunction, hlg_peak_nits: f64) -> Vec<f32> {
+fn build_transfer_lut(transfer_function: TransferFunction) -> Vec<f32> {
     (0..1024)
-        .map(|code| pq_for_code(code, transfer_function, hlg_peak_nits) as f32)
+        .map(|code| pq_for_code(code, transfer_function) as f32)
         .collect()
 }
 
 #[cfg(any(feature = "cuda", test))]
-fn build_luminance_bin_lut(transfer_function: TransferFunction, hlg_peak_nits: f64) -> Vec<u16> {
+fn build_luminance_bin_lut(transfer_function: TransferFunction) -> Vec<u16> {
     // Must match the v5 binning constants in analyze_native_frame_cropped exactly.
     let sdr_peak_pq = nits_to_pq(100.0);
     let sdr_step = sdr_peak_pq / 64.0;
     let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
     (0..1024)
         .map(|code| {
-            let pq = pq_for_code(code, transfer_function, hlg_peak_nits);
+            let pq = pq_for_code(code, transfer_function);
             let bin = if pq < sdr_peak_pq {
                 (pq / sdr_step).floor() as usize
             } else {
@@ -158,7 +157,7 @@ mod backend {
             ))
         }
 
-        pub fn new(transfer_function: TransferFunction, hlg_peak_nits: f64) -> Result<Self> {
+        pub fn new(transfer_function: TransferFunction) -> Result<Self> {
             // cudarc's dynamic loader panics when a library is wholly absent. Probe with
             // libloading first so `--hwaccel cuda` can reliably fall back to CPU.
             let (cuda_driver, nvrtc) = Self::load_cuda_libraries()?;
@@ -174,10 +173,10 @@ mod backend {
                 .load_function("analyze_frame")
                 .map_err(|err| anyhow!("failed to load analyze_frame kernel: {err:?}"))?;
             let transfer_lut = stream
-                .clone_htod(&build_transfer_lut(transfer_function, hlg_peak_nits))
+                .clone_htod(&build_transfer_lut(transfer_function))
                 .map_err(|err| anyhow!("failed to upload transfer LUT: {err:?}"))?;
             let luminance_bin_lut = stream
-                .clone_htod(&build_luminance_bin_lut(transfer_function, hlg_peak_nits))
+                .clone_htod(&build_luminance_bin_lut(transfer_function))
                 .map_err(|err| anyhow!("failed to upload luminance-bin LUT: {err:?}"))?;
             let counts = stream
                 .alloc_zeros::<u32>(COUNT_WORDS)
@@ -432,7 +431,7 @@ pub struct GpuAnalyzer;
 
 #[cfg(not(feature = "cuda"))]
 impl GpuAnalyzer {
-    pub fn new(_transfer_function: TransferFunction, _hlg_peak_nits: f64) -> Result<Self> {
+    pub fn new(_transfer_function: TransferFunction) -> Result<Self> {
         Err(anyhow!(
             "CUDA analysis is unavailable because this binary was built without --features cuda"
         ))
@@ -457,7 +456,7 @@ mod tests {
 
     #[test]
     fn pq_lut_matches_limited_range_contract() {
-        let lut = build_transfer_lut(TransferFunction::Pq, 1000.0);
+        let lut = build_transfer_lut(TransferFunction::Pq);
         assert_eq!(lut.len(), 1024);
         assert_eq!(lut[0], 0.0);
         assert_eq!(lut[64], 0.0);
@@ -468,18 +467,34 @@ mod tests {
 
     #[test]
     fn hlg_lut_is_monotonic_and_peak_limited() {
-        let lut = build_transfer_lut(TransferFunction::Hlg, 1000.0);
-        assert!(lut.windows(2).all(|pair| pair[0] <= pair[1]));
-        assert!((f64::from(lut[940]) - nits_to_pq(1000.0)).abs() < 1.0e-6);
+        let lut = build_transfer_lut(TransferFunction::Hlg);
+        // The DV 8.4 curve has a ~3e-7 PQ seam at the 910/911 piece boundary.
+        assert!(lut
+            .windows(2)
+            .all(|pair| f64::from(pair[1]) >= f64::from(pair[0]) - 1.0e-6));
+        let source_max = (3079.0_f64 / 4095.0) as f32;
+        assert_eq!(lut[940], source_max);
+        assert_eq!(lut[1023], source_max);
+        assert!(lut.iter().all(|&pq| pq <= source_max));
+    }
+
+    #[test]
+    fn hlg_transfer_lut_equals_dovi84_lut_bit_exactly() {
+        let lut = build_transfer_lut(TransferFunction::Hlg);
+        let reference = dovi84_pq_lut();
+        assert_eq!(lut.len(), reference.len());
+        for (code, (&gpu, &cpu)) in lut.iter().zip(reference.iter()).enumerate() {
+            assert_eq!(gpu.to_bits(), cpu.to_bits(), "code {code}");
+        }
     }
 
     #[test]
     fn luminance_bin_lut_uses_exact_cpu_boundaries() {
-        let bins = build_luminance_bin_lut(TransferFunction::Pq, 1000.0);
+        let bins = build_luminance_bin_lut(TransferFunction::Pq);
         let sdr_peak_pq = nits_to_pq(100.0);
         let sdr_step = sdr_peak_pq / 64.0;
         for (code, &bin) in bins.iter().enumerate() {
-            let pq = pq_for_code(code as i32, TransferFunction::Pq, 1000.0);
+            let pq = pq_for_code(code as i32, TransferFunction::Pq);
             if pq < sdr_peak_pq {
                 assert_eq!(usize::from(bin), (pq / sdr_step).floor() as usize);
             }

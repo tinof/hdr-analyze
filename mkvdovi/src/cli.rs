@@ -89,18 +89,6 @@ pub struct Args {
     #[arg(long)]
     pub drop_tags: bool,
 
-    /// CRF to use when converting HLG to PQ (default: 17).
-    #[arg(long, default_value_t = 17)]
-    pub hlg_crf: u8,
-
-    /// x265 preset to use for HLG->PQ (default: medium).
-    #[arg(long, default_value = "medium")]
-    pub hlg_preset: String,
-
-    /// Nominal peak luminance for HLG content in cd/m² (default: 1000).
-    #[arg(long, default_value_t = 1000)]
-    pub hlg_peak_nits: u32,
-
     /// Quality parameter for Profile 7 FEL re-encoding (default: 18).
     /// Used as CRF for libx265 local encode, or QP for hevc_nvenc (Modal/CUDA).
     #[arg(long, default_value_t = 18)]
@@ -194,7 +182,7 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = DoviInput::Auto)]
     pub dovi_input: DoviInput,
 
-    /// Encoder to use for HLG to PQ conversion (libx265 or hevc_videotoolbox).
+    /// Software/VideoToolbox encoder for Profile 7 FEL re-encodes (libx265 or hevc_videotoolbox).
     #[arg(long, value_enum, default_value_t = Encoder::Libx265)]
     pub encoder: Encoder,
 

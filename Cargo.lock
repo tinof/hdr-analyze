@@ -488,6 +488,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "cudarc",
+ "dolby_vision",
  "ffmpeg-next",
  "indicatif 0.18.3",
  "libloading 0.9.0",

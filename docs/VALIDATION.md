@@ -78,7 +78,8 @@ and the gap is purely definitional:
 PQ direct peaks therefore now default to max-RGB; `--peak-domain luma` retains Y′ for diagnostics
 and compatibility. The implicit peak source is direct `max` in max-RGB domain, including under the
 balanced/aggressive profiles; explicit histogram peak sources and APL remain Y-based. HLG forces
-luma until per-channel scene-to-display conversion is implemented.
+luma, measured through the Dolby Vision 8.4 luma reshaping curve; the 8.4 chroma curves are not
+modelled.
 
 ### 3. cm_analyze on the identical base layer (full 2908 frames, 34 shots)
 

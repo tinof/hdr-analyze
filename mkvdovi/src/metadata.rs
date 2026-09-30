@@ -251,13 +251,81 @@ fn append_mediainfo_video_hints(json: &Value, hints: &mut String) {
     }
 }
 
+/// True when MediaInfo/ffprobe transfer hints name HLG (ARIB STD-B67).
+fn hints_indicate_hlg(hints: &str) -> bool {
+    let hints = hints.to_uppercase();
+    hints.contains("HLG") || hints.contains("ARIB")
+}
+
+/// True when the input's video track uses (or declares compatibility with) the HLG transfer,
+/// e.g. the base layer of a Dolby Vision Profile 8.4 file. MediaInfo first, ffprobe fallback.
+/// Transfer tag of the first decoded video frame as ffprobe reports it. It reflects the HEVC
+/// VUI plus the alternative transfer characteristics SEI, not the MKV colour element.
+pub fn first_frame_color_transfer(input_file: &str) -> Option<String> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-read_intervals",
+            "%+#1",
+            "-show_entries",
+            "frame=color_transfer",
+            "-of",
+            "default=nw=1:nk=1",
+            input_file,
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()?
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_owned)
+}
+
+/// True for an HLG input whose HEVC bitstream does not signal HLG itself, neither in the VUI nor
+/// through the alternative transfer SEI (for example HLG tagged only in the MKV colour element).
+/// mkvmerge derives the Dolby Vision compatibility ID from the bitstream, so such a stream needs
+/// its VUI rewritten to keep ID 4 (HLG). Returns false when ffprobe is unavailable.
+pub fn hlg_bitstream_lacks_transfer(input_file: &str) -> bool {
+    first_frame_color_transfer(input_file).is_some_and(|transfer| transfer != "arib-std-b67")
+}
+
+pub fn has_hlg_transfer(input_file: &str) -> bool {
+    let mut hints = String::new();
+    if let Ok(json) = get_mediainfo_json(input_file) {
+        append_mediainfo_video_hints(&json, &mut hints);
+    }
+    if hints_indicate_hlg(&hints) {
+        return true;
+    }
+    get_ffprobe_json(input_file).is_ok_and(|json| {
+        json.get("streams")
+            .and_then(Value::as_array)
+            .is_some_and(|streams| {
+                streams.iter().any(|stream| {
+                    stream
+                        .get("color_transfer")
+                        .and_then(Value::as_str)
+                        .is_some_and(hints_indicate_hlg)
+                })
+            })
+    })
+}
+
 fn classify_hdr_hints(hints: &str, measurements: bool) -> Option<HdrFormat> {
     let hints = hints.to_uppercase();
 
     if hints.contains("SMPTE ST 2094 APP 4") || hints.contains("HDR10+") {
         return Some(HdrFormat::Hdr10Plus);
     }
-    if hints.contains("HLG") || hints.contains("ARIB") {
+    if hints_indicate_hlg(&hints) {
         return Some(HdrFormat::Hlg);
     }
     if hints.contains("HDR10")
@@ -316,7 +384,10 @@ fn hdr_format_from_rpu(kind: RpuFormatKind) -> HdrFormat {
     }
 }
 
-pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
+/// Static HDR metadata for L6, with defaults (1000 / 0.005 / 1000 / 400 nits) for missing values.
+/// HLG sources normally carry no mastering-display or light-level metadata, and the defaults match
+/// the Profile 8.4 source range, so `hlg_source` turns the missing-value warnings into info lines.
+pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String, f64> {
     let mut meta: HashMap<String, f64> = HashMap::new();
 
     // Try MediaInfo
@@ -437,6 +508,13 @@ pub fn get_static_metadata(input_file: &str) -> HashMap<String, f64> {
     ];
     for &(key, default, label) in fallbacks {
         if !meta.contains_key(key) {
+            if hlg_source {
+                crate::progress::print_info(&format!(
+                    "{label} not in source metadata (usual for HLG); using default {default:.4} nits for L6."
+                ));
+                meta.insert(key.to_string(), default);
+                continue;
+            }
             eprintln!(
                 "WARNING: {} not found in source metadata; using default {:.4} nits for the Dolby Vision L6 block. \
                  Use mediainfo to verify the source has mastering display / light-level metadata.",
@@ -549,7 +627,8 @@ fn primary_index_from_label(primaries: &str) -> Option<u8> {
 }
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
-/// Versions 1 and 2 are accepted; version 2 adds provenance and a full-resolution crop.
+/// Versions 1 to 3 are accepted; version 2 adds provenance and a full-resolution crop, and
+/// version 3 adds `analysis.luminance_mapping` (`"pq"` or [`DOVI84_LUMINANCE_MAPPING`]).
 #[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
     pub version: u32,
@@ -574,6 +653,9 @@ pub struct L1SidecarSource {
     pub size_bytes: u64,
     pub width: u32,
     pub height: u32,
+    /// Transfer function the analyzer detected, e.g. `"HLG (ARIB STD-B67)"` (version 2+).
+    #[serde(default)]
+    pub transfer_function: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -582,6 +664,30 @@ pub struct L1SidecarAnalysis {
     pub sample_rate: u32,
     pub gpu: bool,
     pub no_crop: bool,
+    /// How signal codes became PQ luminance: `"pq"` or [`DOVI84_LUMINANCE_MAPPING`] (version 3+).
+    #[serde(default)]
+    pub luminance_mapping: Option<String>,
+}
+
+/// Sidecar `analysis.luminance_mapping` for HLG sources measured through the Dolby Vision
+/// Profile 8.4 luma reshaping curve, i.e. describing the 8.4 reconstruction.
+pub const DOVI84_LUMINANCE_MAPPING: &str = "dovi84-v1";
+
+impl L1Sidecar {
+    /// The version 3 luminance mapping, when present.
+    pub fn luminance_mapping(&self) -> Option<&str> {
+        self.analysis
+            .as_ref()
+            .and_then(|analysis| analysis.luminance_mapping.as_deref())
+    }
+
+    /// True when the sidecar says it was measured from an HLG source.
+    fn source_is_hlg(&self) -> bool {
+        self.source
+            .as_ref()
+            .and_then(|source| source.transfer_function.as_deref())
+            .is_some_and(|transfer| transfer.to_uppercase().contains("HLG"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -674,6 +780,8 @@ pub enum SidecarError {
     UnsupportedVersion(u32),
     #[error("L1 sidecar is invalid: {0}")]
     Invalid(String),
+    #[error("L1 sidecar {0} (re-analysis required)")]
+    LuminanceMappingMismatch(String),
 }
 
 /// What the caller knows about the input the sidecar must describe. Leave fields `None` for a
@@ -684,6 +792,9 @@ pub struct SidecarExpectation {
     pub file_name: Option<String>,
     pub size_bytes: Option<u64>,
     pub frames: Option<u64>,
+    /// The input is HLG: the sidecar must be version 3+, measured from an HLG source through the
+    /// Dolby Vision 8.4 mapping. When false, a Dolby Vision 8.4 mapped sidecar is rejected.
+    pub hlg: bool,
 }
 
 impl SidecarExpectation {
@@ -695,7 +806,14 @@ impl SidecarExpectation {
                 .map(|name| name.to_string_lossy().into_owned()),
             size_bytes: fs::metadata(input).ok().map(|meta| meta.len()),
             frames,
+            hlg: false,
         }
+    }
+
+    /// Set whether the input is HLG (see [`SidecarExpectation::hlg`]).
+    pub fn with_hlg(mut self, hlg: bool) -> Self {
+        self.hlg = hlg;
+        self
     }
 }
 
@@ -809,9 +927,10 @@ pub fn validate_l1_sidecar(
     sidecar: &L1Sidecar,
     expect: &SidecarExpectation,
 ) -> std::result::Result<Vec<String>, SidecarError> {
-    if !matches!(sidecar.version, 1 | 2) {
+    if !matches!(sidecar.version, 1..=3) {
         return Err(SidecarError::UnsupportedVersion(sidecar.version));
     }
+    check_luminance_mapping(sidecar, expect.hlg)?;
     let invalid = |reason: String| Err(SidecarError::Invalid(reason));
     let Some(first) = sidecar.scenes.first() else {
         return invalid("no scenes".into());
@@ -874,8 +993,59 @@ pub fn validate_l1_sidecar(
     Ok(advisories)
 }
 
+/// HLG measurements are only valid when taken through the Dolby Vision 8.4 mapping (sidecar v3+),
+/// and that mapping is wrong for any PQ input.
+fn check_luminance_mapping(
+    sidecar: &L1Sidecar,
+    hlg: bool,
+) -> std::result::Result<(), SidecarError> {
+    let mapping = sidecar.luminance_mapping();
+    let dovi84 = mapping == Some(DOVI84_LUMINANCE_MAPPING);
+    if hlg {
+        if sidecar.version < 3 || !dovi84 {
+            return Err(SidecarError::LuminanceMappingMismatch(format!(
+                "v{} (mapping {}) was measured without the Dolby Vision 8.4 HLG mapping",
+                sidecar.version,
+                mapping.unwrap_or("none")
+            )));
+        }
+        if !sidecar.source_is_hlg() {
+            return Err(SidecarError::LuminanceMappingMismatch(
+                "does not record an HLG source transfer function".into(),
+            ));
+        }
+    } else if dovi84 {
+        return Err(SidecarError::LuminanceMappingMismatch(
+            "was measured through the Dolby Vision 8.4 HLG mapping, but the input is not HLG"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Dolby Vision profile for the generated RPU. HLG input becomes Profile 8.4 (the HLG base layer
+/// is kept bit-exact) and needs L1 measured through the 8.4 mapping; everything else is 8.1.
+pub fn dv_profile_for(hdr_type: HdrFormat, sidecar: Option<&L1Sidecar>) -> Result<&'static str> {
+    let dovi84 = sidecar.and_then(L1Sidecar::luminance_mapping) == Some(DOVI84_LUMINANCE_MAPPING);
+    match (hdr_type, sidecar) {
+        (HdrFormat::Hlg, None) => {
+            anyhow::bail!("HLG input needs measured L1 (an analyzer sidecar) for Profile 8.4")
+        }
+        (HdrFormat::Hlg, Some(sidecar)) if !dovi84 => anyhow::bail!(
+            "HLG input needs L1 measured through the Dolby Vision 8.4 mapping, but the sidecar mapping is {}",
+            sidecar.luminance_mapping().unwrap_or("none")
+        ),
+        (HdrFormat::Hlg, Some(_)) => Ok("8.4"),
+        (_, Some(_)) if dovi84 => anyhow::bail!(
+            "L1 measured through the Dolby Vision 8.4 HLG mapping cannot describe a non-HLG input"
+        ),
+        _ => Ok("8.1"),
+    }
+}
+
 pub fn generate_extra_json(
     output_path: &Path,
+    profile: &str,
     metadata: &HashMap<String, f64>,
     trim_targets: &[u32],
     cm_v40_config: Option<&CmV40Config>,
@@ -894,7 +1064,7 @@ pub fn generate_extra_json(
     let max_fall = required("max_fall")?;
 
     let mut json_content = json!({
-        "profile": "8.1",
+        "profile": profile,
         "level6": {
             "max_display_mastering_luminance": max_dml as u32,
             "min_display_mastering_luminance": (min_dml * 10000.0) as u32,
@@ -1154,6 +1324,7 @@ mod tests {
 
         generate_extra_json(
             output.path(),
+            "8.1",
             &metadata,
             &[100, 600, 1000],
             Some(&config),
@@ -1175,8 +1346,8 @@ mod tests {
         let output = tempfile::NamedTempFile::new().unwrap();
         let metadata = HashMap::new();
 
-        let error =
-            generate_extra_json(output.path(), &metadata, &[], None, None, None).unwrap_err();
+        let error = generate_extra_json(output.path(), "8.1", &metadata, &[], None, None, None)
+            .unwrap_err();
 
         assert!(error.to_string().contains("min_dml"));
     }
@@ -1213,7 +1384,16 @@ mod tests {
             ..Default::default()
         };
 
-        generate_extra_json(output.path(), &metadata, &[], None, None, Some(&sidecar)).unwrap();
+        generate_extra_json(
+            output.path(),
+            "8.1",
+            &metadata,
+            &[],
+            None,
+            None,
+            Some(&sidecar),
+        )
+        .unwrap();
 
         let json: Value = serde_json::from_reader(File::open(output.path()).unwrap()).unwrap();
         assert_eq!(json["length"], 334);
@@ -1278,6 +1458,7 @@ mod tests {
             file_name: Some("input.mkv".into()),
             size_bytes: Some(42),
             frames: Some(20),
+            hlg: false,
         };
         assert!(validate_l1_sidecar(&sidecar, &expect).unwrap().is_empty());
         assert!(sidecar
@@ -1292,6 +1473,7 @@ mod tests {
             file_name: Some("input.mkv".into()),
             size_bytes: Some(43),
             frames: None,
+            hlg: false,
         };
         assert!(matches!(
             validate_l1_sidecar(&sidecar, &expect),
@@ -1331,13 +1513,13 @@ mod tests {
             ));
         }
         let future = L1Sidecar {
-            version: 3,
+            version: 4,
             scenes: vec![scene(0, 1, 0, 1, 2)],
             ..Default::default()
         };
         assert!(matches!(
             validate_l1_sidecar(&future, &SidecarExpectation::default()),
-            Err(SidecarError::UnsupportedVersion(3))
+            Err(SidecarError::UnsupportedVersion(4))
         ));
     }
 
@@ -1500,5 +1682,128 @@ mod tests {
             parse_mediainfo_duration_seconds(&json!("3438032")),
             Some(3438.032)
         );
+    }
+
+    fn v1_sidecar_json() -> Value {
+        json!({
+            "version": 1,
+            "scenes": [{"start": 0, "end": 4, "min_pq_12bit": 0, "avg_luma_pq_12bit": 10,
+                        "avg_max_rgb_pq_12bit": 12, "max_pq_12bit": 100}]
+        })
+    }
+
+    /// A version 3 sidecar as the analyzer writes it for an HLG source.
+    fn v3_hlg_sidecar_json() -> Value {
+        let mut sidecar = v2_sidecar_json();
+        sidecar["version"] = json!(3);
+        sidecar["source"]["transfer_function"] = json!("HLG (ARIB STD-B67)");
+        sidecar["analysis"]["luminance_mapping"] = json!(DOVI84_LUMINANCE_MAPPING);
+        sidecar
+    }
+
+    fn hlg_expectation() -> SidecarExpectation {
+        SidecarExpectation::default().with_hlg(true)
+    }
+
+    #[test]
+    fn v1_and_v2_sidecars_validate_for_pq_but_not_for_hlg() {
+        for fixture in [v1_sidecar_json(), v2_sidecar_json()] {
+            let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+            assert!(sidecar.luminance_mapping().is_none());
+            assert!(validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).is_ok());
+            assert!(matches!(
+                validate_l1_sidecar(&sidecar, &hlg_expectation()),
+                Err(SidecarError::LuminanceMappingMismatch(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn v3_dovi84_sidecar_is_accepted_only_for_hlg() {
+        let sidecar: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
+        assert_eq!(sidecar.luminance_mapping(), Some("dovi84-v1"));
+        assert!(validate_l1_sidecar(&sidecar, &hlg_expectation()).is_ok());
+        let error = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap_err();
+        assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
+        assert!(error.to_string().contains("re-analysis required"));
+    }
+
+    #[test]
+    fn v3_pq_sidecar_is_accepted_for_pq_and_rejected_for_hlg() {
+        let mut fixture = v2_sidecar_json();
+        fixture["version"] = json!(3);
+        fixture["analysis"]["luminance_mapping"] = json!("pq");
+        let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        assert!(validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).is_ok());
+        assert!(matches!(
+            validate_l1_sidecar(&sidecar, &hlg_expectation()),
+            Err(SidecarError::LuminanceMappingMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn hlg_sidecar_must_record_an_hlg_source() {
+        let mut fixture = v3_hlg_sidecar_json();
+        fixture["source"]["transfer_function"] = json!("PQ (SMPTE 2084)");
+        let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        assert!(matches!(
+            validate_l1_sidecar(&sidecar, &hlg_expectation()),
+            Err(SidecarError::LuminanceMappingMismatch(reason)) if reason.contains("HLG source")
+        ));
+    }
+
+    #[test]
+    fn dv_profile_follows_the_source_transfer() {
+        let hlg: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
+        let pq: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+
+        assert_eq!(dv_profile_for(HdrFormat::Hlg, Some(&hlg)).unwrap(), "8.4");
+        assert!(dv_profile_for(HdrFormat::Hlg, Some(&pq)).is_err());
+        assert!(dv_profile_for(HdrFormat::Hlg, None).is_err());
+
+        for format in [
+            HdrFormat::Hdr10Plus,
+            HdrFormat::Hdr10WithMeasurements,
+            HdrFormat::Hdr10Unsupported,
+        ] {
+            assert_eq!(dv_profile_for(format, None).unwrap(), "8.1");
+            assert_eq!(dv_profile_for(format, Some(&pq)).unwrap(), "8.1");
+            assert!(dv_profile_for(format, Some(&hlg)).is_err());
+        }
+    }
+
+    #[test]
+    fn extra_json_carries_the_requested_profile() {
+        let output = tempfile::NamedTempFile::new().unwrap();
+        let metadata = HashMap::from([
+            ("min_dml".to_string(), 0.005),
+            ("max_dml".to_string(), 1000.0),
+            ("max_cll".to_string(), 1000.0),
+            ("max_fall".to_string(), 400.0),
+        ]);
+        let sidecar: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
+
+        generate_extra_json(
+            output.path(),
+            "8.4",
+            &metadata,
+            &[],
+            None,
+            None,
+            Some(&sidecar),
+        )
+        .unwrap();
+
+        let json: Value = serde_json::from_reader(File::open(output.path()).unwrap()).unwrap();
+        assert_eq!(json["profile"], "8.4");
+    }
+
+    #[test]
+    fn hlg_hints_are_recognized() {
+        assert!(hints_indicate_hlg("arib-std-b67"));
+        assert!(hints_indicate_hlg(
+            "Dolby Vision, Version 1.0, Profile 8.4, dvhe.08.06, BL+RPU, HLG compatible"
+        ));
+        assert!(!hints_indicate_hlg("PQ\nSMPTE ST 2086, HDR10 compatible"));
     }
 }

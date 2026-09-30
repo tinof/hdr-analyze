@@ -40,13 +40,25 @@ const W: usize = 320;
 const H: usize = 180;
 const FRAMES: usize = 48;
 
-/// Encode arbitrary limited-range planes as lossless yuv420p10le.
+/// Encode arbitrary limited-range planes as lossless PQ-tagged yuv420p10le.
 fn encode_yuv_plane_clip(
     dir: &std::path::Path,
     label: &str,
     y_plane: &[u16],
     cb_plane: &[u16],
     cr_plane: &[u16],
+) -> std::path::PathBuf {
+    encode_tagged_yuv_plane_clip(dir, label, y_plane, cb_plane, cr_plane, "smpte2084")
+}
+
+/// Encode arbitrary limited-range planes as lossless yuv420p10le with the given transfer tag.
+fn encode_tagged_yuv_plane_clip(
+    dir: &std::path::Path,
+    label: &str,
+    y_plane: &[u16],
+    cb_plane: &[u16],
+    cr_plane: &[u16],
+    color_trc: &str,
 ) -> std::path::PathBuf {
     assert_eq!(y_plane.len(), W * H);
     assert_eq!(cb_plane.len(), W * H / 4);
@@ -69,7 +81,7 @@ fn encode_yuv_plane_clip(
             "-color_primaries",
             "bt2020",
             "-color_trc",
-            "smpte2084",
+            color_trc,
             "-colorspace",
             "bt2020nc",
             "-color_range",
@@ -81,7 +93,7 @@ fn encode_yuv_plane_clip(
             "-color_primaries",
             "bt2020",
             "-color_trc",
-            "smpte2084",
+            color_trc,
             "-colorspace",
             "bt2020nc",
             "-color_range",
@@ -687,4 +699,97 @@ fn raised_black_minimum_preserves_floor_and_rejects_sparse_dark_noise() {
             .all(|code| *code == 0),
         "absolute minimum must expose the dark speckle"
     );
+}
+
+/// DV Profile 8.4 luma curve at a 10-bit code, re-derived independently of the analyzer
+/// from the `dolby_vision` crate's Profile 8.4 constants (coefficients int + frac/2^23).
+fn dovi84_reference_pq(code: u16) -> f64 {
+    const INT: [[f64; 3]; 8] = [
+        [-1.0, 1.0, -3.0],
+        [-1.0, 1.0, -2.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, 0.0],
+        [0.0, -2.0, 1.0],
+        [6.0, -14.0, 8.0],
+        [13.0, -30.0, 16.0],
+        [28.0, -62.0, 34.0],
+    ];
+    const FRAC: [[f64; 3]; 8] = [
+        [7978928.0, 8332855.0, 4889184.0],
+        [8269552.0, 5186604.0, 3909327.0],
+        [1317527.0, 5338528.0, 7440486.0],
+        [2119979.0, 2065496.0, 2288524.0],
+        [7982780.0, 5409990.0, 1585336.0],
+        [3460436.0, 3197328.0, 615464.0],
+        [3921968.0, 6820672.0, 5546752.0],
+        [1947392.0, 1244640.0, 6094272.0],
+    ];
+    const PIVOTS: [f64; 9] = [63.0, 132.0, 362.0, 618.0, 874.0, 911.0, 927.0, 935.0, 942.0];
+    let s = f64::from(code) / 1023.0;
+    let k = (0..8).rev().find(|&k| s >= PIVOTS[k] / 1023.0).unwrap_or(0);
+    let c: Vec<f64> = (0..3)
+        .map(|j| INT[k][j] + FRAC[k][j] / 8_388_608.0)
+        .collect();
+    let y = (c[0] + c[1] * s + c[2] * s * s).clamp(PIVOTS[0] / 1023.0, PIVOTS[8] / 1023.0);
+    ((y - 0.0625) * 9574.0 / 8192.0).clamp(62.0 / 4095.0, 3079.0 / 4095.0)
+}
+
+#[test]
+fn hlg_flat_frame_measures_through_dovi84_curve() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let y_code = 721_u16;
+    let clip = encode_tagged_yuv_plane_clip(
+        dir.path(),
+        "hlg_721",
+        &vec![y_code; W * H],
+        &vec![512; W * H / 4],
+        &vec![512; W * H / 4],
+        "arib-std-b67",
+    );
+    let bin = dir.path().join("hlg_721.bin");
+    let output = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+        .arg(&clip)
+        .arg("-o")
+        .arg(&bin)
+        .args(["--peak-source", "max", "--disable-optimizer", "--no-crop"])
+        .output()
+        .expect("run analyzer");
+    assert!(
+        output.status.success(),
+        "analyzer failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Dolby Vision Profile 8.4"),
+        "HLG detection message missing"
+    );
+
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
+            .expect("parse L1 sidecar");
+    assert_eq!(sidecar["version"], 3);
+    assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v1");
+    assert_eq!(sidecar["peak_domain"], "luma");
+
+    // 721 → ~208.5 nits through the 8.4 curve (BT.2100 OOTF would give ~203).
+    let expected_code = dovi84_reference_pq(y_code) * 4095.0;
+    let scenes = sidecar["scenes"].as_array().expect("scenes array");
+    assert!(!scenes.is_empty());
+    for scene in scenes {
+        let max_code = scene["max_pq_12bit"].as_f64().expect("scene max");
+        assert!(
+            (max_code - expected_code).abs() <= 1.0,
+            "scene max_pq_12bit {max_code} != DV 8.4 reference {expected_code}"
+        );
+        let avg_code = scene["avg_luma_pq_12bit"].as_f64().expect("scene avg");
+        assert!(
+            (avg_code - expected_code).abs() <= 1.0,
+            "scene avg_luma_pq_12bit {avg_code} != DV 8.4 reference {expected_code}"
+        );
+    }
 }

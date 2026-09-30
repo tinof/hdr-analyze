@@ -39,7 +39,7 @@ jobs:
             | Tool | Description |
             |------|-------------|
             | `hdr_analyzer_mvp` | HDR10/HLG frame analyzer and measurement generator |
-            | `mkvdovi` | HDR10/HDR10+/HLG to Profile 8.1 converter (CM v4.0 metadata) |
+            | `mkvdovi` | HDR10/HDR10+ to Profile 8.1 and HLG to Profile 8.4 converter (CM v4.0 metadata) |
             | `verifier` | madVR measurement file verification utility |
             
             ### 📦 Download

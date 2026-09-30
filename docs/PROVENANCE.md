@@ -70,6 +70,7 @@ are those of v5.6.4 and are not guaranteed to carry forward.
 | Dynamic metadata semantics (L1 etc.) | SMPTE ST 2094-10 (published SMPTE standard) |
 | PQ transfer function | SMPTE ST 2084 / ITU-R BT.2100 |
 | HLG transfer function | ARIB STD-B67 / ITU-R BT.2100 |
+| Profile 8.4 HLG reshaping curve | MIT-licensed [`dolby_vision`](https://crates.io/crates/dolby_vision) crate (`Profile84` preset, from iPhone-recorded 8.4 RPUs); evaluation checked against libplacebo's renderer |
 | Tone-mapping reference (planned trims) | ITU-R BT.2390 (EETF) |
 | Static HDR metadata (MaxCLL/MaxFALL) | CTA-861 |
 | madVR measurement file format | MIT-licensed [`madvr_parse`](https://crates.io/crates/madvr_parse) by quietvoid |
