@@ -32,8 +32,8 @@ Not supported: Profile 5 output, lossless FEL to Profile 8 conversion, and XML m
   the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix). Both are clamped to the RPU's
   declared source range (PQ codes 62–3079, about 0–1000 nits), so L1 describes what the decoder
   reconstructs. The sidecar records this as `analysis.luminance_mapping: "dovi84-v2"` (sidecar
-  version 3; `"dovi84-v1"` marks older luma-only measurements, which `mkvdovi` still accepts), and
-  `mkvdovi` never reuses HLG measurements without one of the two. GPU analysis
+  version 3). `mkvdovi` reuses HLG measurements only with that value; older luma-only
+  `"dovi84-v1"` sidecars from pre-release builds are re-analyzed. GPU analysis
   (`--hwaccel cuda`) works for HLG exactly as for HDR10. Broadcast HLG that signals BT.2020 in the
   VUI and HLG in the alternative transfer characteristics SEI (BBC iPlayer style) is handled: the
   analyzer reads the transfer from decoded frames, and the output still gets Dolby Vision

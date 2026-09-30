@@ -35,8 +35,8 @@ This document provides a historical record of completed milestones, feature impl
 - **L1 sidecar version 3** adds `analysis.luminance_mapping`: `"pq"`, or for HLG `"dovi84-v2"`
   (full 8.4 decode, written for every HLG run in either peak domain) or `"dovi84-v1"` (luma-only
   HLG measurements from pre-release builds). `mkvdovi` and `tools/l1_diff` accept
-  versions 1–3. HLG inputs require a version 3 sidecar with `dovi84-v1` or `dovi84-v2`, so HLG
-  measurements from earlier versions are re-analyzed and never reused.
+  versions 1–3. HLG inputs require a version 3 sidecar with `dovi84-v2`, so HLG measurements from
+  earlier versions, including luma-only `dovi84-v1`, are re-analyzed and never reused.
 - **The analyzer takes the transfer function from the first decoded frame** when the stream-level
   tag is not PQ or HLG. Broadcast HLG (for example BBC iPlayer) signals BT.2020 10-bit in the VUI and
   HLG in the alternative transfer characteristics SEI, and some MKVs carry HLG only in the container

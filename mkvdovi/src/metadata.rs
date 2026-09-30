@@ -670,14 +670,15 @@ pub struct L1SidecarAnalysis {
     pub luminance_mapping: Option<String>,
 }
 
-/// Sidecar `analysis.luminance_mapping` values for HLG sources measured through the Dolby Vision
-/// Profile 8.4 reconstruction: `dovi84-v1` (luma curve only; its max-RGB equals luma) and
-/// `dovi84-v2` (max-RGB through luma curve + chroma MMR + RPU matrix). Both describe the 8.4
-/// decode and share the v3 schema, so either is valid L1 for an HLG input.
-pub const DOVI84_LUMINANCE_MAPPINGS: [&str; 2] = ["dovi84-v1", "dovi84-v2"];
+/// Sidecar `analysis.luminance_mapping` value required for HLG sources: max-RGB through the full
+/// Dolby Vision Profile 8.4 reconstruction (luma curve + chroma MMR + RPU matrix). The earlier
+/// `dovi84-v1` (luma curve only, max-RGB equal to luma) came from pre-release builds and
+/// under-measures saturated highlights, so it is re-analyzed rather than reused.
+pub const DOVI84_LUMINANCE_MAPPING: &str = "dovi84-v2";
 
-fn is_dovi84_mapping(mapping: Option<&str>) -> bool {
-    mapping.is_some_and(|mapping| DOVI84_LUMINANCE_MAPPINGS.contains(&mapping))
+/// Any Dolby Vision 8.4 HLG mapping revision; none of them is valid L1 for a PQ input.
+fn is_dovi84_family(mapping: Option<&str>) -> bool {
+    mapping.is_some_and(|mapping| mapping.starts_with("dovi84-"))
 }
 
 impl L1Sidecar {
@@ -1007,9 +1008,14 @@ fn check_luminance_mapping(
     hlg: bool,
 ) -> std::result::Result<(), SidecarError> {
     let mapping = sidecar.luminance_mapping();
-    let dovi84 = is_dovi84_mapping(mapping);
     if hlg {
-        if sidecar.version < 3 || !dovi84 {
+        if mapping == Some("dovi84-v1") {
+            return Err(SidecarError::LuminanceMappingMismatch(
+                "uses the pre-release luma-only Dolby Vision 8.4 mapping (dovi84-v1), which under-measures saturated highlights"
+                    .into(),
+            ));
+        }
+        if sidecar.version < 3 || mapping != Some(DOVI84_LUMINANCE_MAPPING) {
             return Err(SidecarError::LuminanceMappingMismatch(format!(
                 "v{} (mapping {}) was measured without the Dolby Vision 8.4 HLG mapping",
                 sidecar.version,
@@ -1021,7 +1027,7 @@ fn check_luminance_mapping(
                 "does not record an HLG source transfer function".into(),
             ));
         }
-    } else if dovi84 {
+    } else if is_dovi84_family(mapping) {
         return Err(SidecarError::LuminanceMappingMismatch(
             "was measured through the Dolby Vision 8.4 HLG mapping, but the input is not HLG"
                 .into(),
@@ -1033,7 +1039,8 @@ fn check_luminance_mapping(
 /// Dolby Vision profile for the generated RPU. HLG input becomes Profile 8.4 (the HLG base layer
 /// is kept bit-exact) and needs L1 measured through the 8.4 mapping; everything else is 8.1.
 pub fn dv_profile_for(hdr_type: HdrFormat, sidecar: Option<&L1Sidecar>) -> Result<&'static str> {
-    let dovi84 = is_dovi84_mapping(sidecar.and_then(L1Sidecar::luminance_mapping));
+    let mapping = sidecar.and_then(L1Sidecar::luminance_mapping);
+    let dovi84 = mapping == Some(DOVI84_LUMINANCE_MAPPING);
     match (hdr_type, sidecar) {
         (HdrFormat::Hlg, None) => {
             anyhow::bail!("HLG input needs measured L1 (an analyzer sidecar) for Profile 8.4")
@@ -1043,7 +1050,7 @@ pub fn dv_profile_for(hdr_type: HdrFormat, sidecar: Option<&L1Sidecar>) -> Resul
             sidecar.luminance_mapping().unwrap_or("none")
         ),
         (HdrFormat::Hlg, Some(_)) => Ok("8.4"),
-        (_, Some(_)) if dovi84 => anyhow::bail!(
+        (_, Some(_)) if is_dovi84_family(mapping) => anyhow::bail!(
             "L1 measured through the Dolby Vision 8.4 HLG mapping cannot describe a non-HLG input"
         ),
         _ => Ok("8.1"),
@@ -1727,20 +1734,36 @@ mod tests {
 
     #[test]
     fn v3_dovi84_sidecar_is_accepted_only_for_hlg() {
-        for mapping in DOVI84_LUMINANCE_MAPPINGS {
-            let mut fixture = v3_hlg_sidecar_json();
-            fixture["analysis"]["luminance_mapping"] = json!(mapping);
-            let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
-            assert_eq!(sidecar.luminance_mapping(), Some(mapping));
-            assert!(validate_l1_sidecar(&sidecar, &hlg_expectation()).is_ok());
-            assert_eq!(
-                dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).unwrap(),
-                "8.4"
-            );
-            let error = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap_err();
-            assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
-            assert!(error.to_string().contains("re-analysis required"));
-        }
+        let mut fixture = v3_hlg_sidecar_json();
+        fixture["analysis"]["luminance_mapping"] = json!(DOVI84_LUMINANCE_MAPPING);
+        let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        assert_eq!(sidecar.luminance_mapping(), Some(DOVI84_LUMINANCE_MAPPING));
+        assert!(validate_l1_sidecar(&sidecar, &hlg_expectation()).is_ok());
+        assert_eq!(
+            dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).unwrap(),
+            "8.4"
+        );
+        let error = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap_err();
+        assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
+        assert!(error.to_string().contains("re-analysis required"));
+        assert!(dv_profile_for(HdrFormat::Hdr10Unsupported, Some(&sidecar)).is_err());
+    }
+
+    #[test]
+    fn luma_only_dovi84_v1_sidecar_is_reanalyzed_for_hlg_and_rejected_for_pq() {
+        let mut fixture = v3_hlg_sidecar_json();
+        fixture["analysis"]["luminance_mapping"] = json!("dovi84-v1");
+        let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        let error = validate_l1_sidecar(&sidecar, &hlg_expectation()).unwrap_err();
+        assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
+        assert!(error.to_string().contains("luma-only"));
+        assert!(error.to_string().contains("re-analysis required"));
+        assert!(dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).is_err());
+        assert!(matches!(
+            validate_l1_sidecar(&sidecar, &SidecarExpectation::default()),
+            Err(SidecarError::LuminanceMappingMismatch(_))
+        ));
+        assert!(dv_profile_for(HdrFormat::Hdr10Unsupported, Some(&sidecar)).is_err());
     }
 
     #[test]

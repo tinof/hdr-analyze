@@ -38,9 +38,12 @@ const YCC_COEF_SCALE: f64 = 8192.0;
 /// pivot; convert to PQ with the DM `ycc_to_rgb_offset0`/`coef0` of `Profile84::dm_data()`.
 ///
 /// The result is finally clamped to the RPU's declared source range
-/// `[source_min_pq, source_max_pq] / 4095` (62..3079, about 0.005..1000 nits). This clamp
-/// was established empirically against libplacebo's Dolby Vision renderer, which plateaus
-/// at the declared source range for superwhite codes instead of extrapolating the curve.
+/// `[source_min_pq, source_max_pq] / 4095` (62..3079, about 0.005..1000 nits). This is a policy
+/// choice that keeps L1 inside the range the 8.4 RPU declares, not a property of the curve:
+/// nominal peak white (code 940) decodes to about 3155 (~1150 nits), and superwhite codes above
+/// the last pivot would extrapolate towards 10,000 nits. So any scene reaching peak white reports
+/// L1 max 3079. (libplacebo's apparent plateau at this level is its display tone mapping to a
+/// peak taken from L1 max_pq, or from source_max_pq when L1 is absent.)
 ///
 /// The curve pieces meet with a tiny seam (about 3e-7 PQ, 0.001 of a 12-bit code) at
 /// code 910/911; this is a property of the RPU coefficients and is kept verbatim.
@@ -139,8 +142,10 @@ pub struct Dovi84Chroma {
 /// round-trips linear light through the RPU's `rgb_to_lms` and its own LMS->BT.2020 matrix;
 /// their product is identity to within 1.4e-4, below 0.1 of a 12-bit code for in-range
 /// values, so it is omitted. The resulting max-RGB is clamped to the same declared source
-/// range as the luma table ([`dovi84_luma_to_pq`]), so a neutral pixel reads alike in both
-/// peak domains and superwhite never exceeds the RPU's `source_max_pq`.
+/// range as the luma table ([`dovi84_luma_to_pq`]), so superwhite never exceeds the RPU's
+/// `source_max_pq` in either peak domain. Only at those clamped ends does a neutral pixel read
+/// alike in both domains: mid-tones differ (code 721 is 2389 as luma, 2439 as max-RGB), because
+/// the 8.4 chroma curves and matrix do not map neutral input to exactly neutral R'G'B'.
 ///
 /// Arithmetic is plain `f32` multiply/add in a fixed order, so the CUDA kernel
 /// (`kernels.cu`, which uses non-contracting `__fmul_rn`/`__fadd_rn`) reproduces it bit for bit.

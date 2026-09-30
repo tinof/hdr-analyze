@@ -100,8 +100,8 @@ reshaping curve. Max-RGB (the default peak domain, and the max-RGB mean) reconst
 through the luma curve, the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix, then takes
 max(R′, G′, B′). Neutral content therefore reads about 2% higher in max-RGB than in luma: the 8.4
 preset's chroma curves tint neutrals slightly blue. `--peak-domain luma` restores the luma-only
-peak. The sidecar records `analysis.luminance_mapping: "dovi84-v2"` for every HLG run (`"dovi84-v1"`
-marks older luma-only measurements; `mkvdovi` accepts both). The former `--hlg-peak-nits` flag was
+peak. The sidecar records `analysis.luminance_mapping: "dovi84-v2"` for every HLG run (`mkvdovi`
+re-analyzes older luma-only `"dovi84-v1"` sidecars). The former `--hlg-peak-nits` flag was
 removed: the 8.4 RPU fixes the mapping.
 
 | Flag | Default | Description |

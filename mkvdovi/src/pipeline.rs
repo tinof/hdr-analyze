@@ -344,7 +344,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
         HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
             // HLG goes to Profile 8.4: the base layer is the untouched source, and L1 must be
-            // measured through the Dolby Vision 8.4 mapping (sidecar v3, dovi84-v1 or dovi84-v2).
+            // measured through the Dolby Vision 8.4 mapping (sidecar v3, dovi84-v2).
             let hlg = hdr_type == HdrFormat::Hlg;
             if hlg && args.legacy_madvr_l1 {
                 progress::print_error(
