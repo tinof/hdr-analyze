@@ -100,8 +100,11 @@ pub fn probe_crop(input_path: &str, probe_count: u32, downscale: u32) -> Result<
         start => start,
     };
     let stream_duration = video_stream.duration();
-    let decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
+    let mut decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
         .context("failed to create crop probe decoder context")?;
+    // Each probe decodes from the preceding keyframe; with long GOPs that is hundreds of 4K
+    // frames, and libavcodec defaults to a single thread.
+    set_automatic_thread_count(&mut decoder_context);
 
     let duration = if stream_duration != ffmpeg::ffi::AV_NOPTS_VALUE && stream_duration > 0 {
         stream_duration
