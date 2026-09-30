@@ -1,15 +1,21 @@
 // Single-launch HDR frame analysis kernel.
 //
-// counts layout (u32 words):
+// One result buffer, cleared by one memset and downloaded by one copy.
+// u32 words:
 //   [0, 256)          v5 luminance histogram (binned via luminance_bin_lut)
 //   [256, 287)        hue histogram (31 bins over the full hue circle)
 //   [287, 287+4096)   4096-bin PQ histogram in the selected peak domain
 //   [4383]            max luma PQ observed (f32 bit pattern)
 //   [4384]            max max-RGB PQ observed (f32 bit pattern)
-// sums layout (u64 words):
+//   [4385]            padding, so the u64 sums are 8-byte aligned
+// u64 words from u32 word SUMS_WORD (4386):
 //   [0] sum of luma PQ, fixed point * 2^32
 //   [1] sum of max-RGB PQ, fixed point * 2^32
 //   [2] analyzed pixel count
+//
+// Only integer counts, u64 fixed-point sums and non-negative f32 bit-pattern maxima are
+// combined across threads, and all of them are order-independent, so the launch shape
+// (grid-stride loop, warp reductions) never changes the result.
 // dovi_params layout (f32 words), built by gpu.rs `build_dovi84_params` from
 // analysis::hlg::Dovi84Decoder; used only when dovi84_rgb is set (HLG input):
 //   [0, 1024)       luma term per 10-bit code, coef0 * (Y' - offset0), unclamped
@@ -34,8 +40,37 @@
 #define PQ_HIST_BASE (LUM_BINS + HUE_BINS)
 #define MAX_LUMA_WORD (PQ_HIST_BASE + PQ_BINS)
 #define MAX_RGB_WORD (MAX_LUMA_WORD + 1)
-#define FIXED_POINT_SCALE 4294967296.0
+#define SUMS_WORD (MAX_RGB_WORD + 2)
+// 2^32 as f32. x * 2^32 is an exact exponent shift for finite x in [0, 1], so truncating
+// it with __float2ull_rz equals the former (unsigned long long)((double)x * 2^32).
+#define FIXED_POINT_SCALE 4294967296.0f
 #define TWO_PI 6.28318530717958647692f
+#define FULL_WARP 0xffffffffu
+
+__device__ __forceinline__ unsigned long long fixed_point(float x) {
+    return __float2ull_rz(__fmul_rn(x, FIXED_POINT_SCALE));
+}
+
+__device__ __forceinline__ unsigned long long warp_sum_u64(unsigned long long value) {
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        value += __shfl_xor_sync(FULL_WARP, value, offset);
+    }
+    return value;
+}
+
+__device__ __forceinline__ unsigned int warp_sum_u32(unsigned int value) {
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        value += __shfl_xor_sync(FULL_WARP, value, offset);
+    }
+    return value;
+}
+
+__device__ __forceinline__ unsigned int warp_max_u32(unsigned int value) {
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        value = max(value, __shfl_xor_sync(FULL_WARP, value, offset));
+    }
+    return value;
+}
 
 // One chroma component through its single-piece MMR curve. Mirrors
 // Dovi84Decoder::reshape_chroma operation for operation; the _rn intrinsics keep
@@ -101,8 +136,7 @@ extern "C" __global__ void analyze_frame(
     const float* transfer_lut,
     const unsigned short* luminance_bin_lut,
     const float* dovi_params,
-    unsigned int* counts,
-    unsigned long long* sums,
+    unsigned int* results,
     int width,
     int height,
     int y_stride,
@@ -145,8 +179,20 @@ extern "C" __global__ void analyze_frame(
     }
     __syncthreads();
 
-    const int sample_index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (sample_index < sample_count) {
+    // Per-thread partials, reduced per warp and then per block after the loop. A grid of
+    // a few blocks per SM strides over the samples, so the shared-histogram clear and
+    // flush run a few hundred times per frame instead of once per 256 samples.
+    unsigned long long t_sum_luma = 0ull;
+    unsigned long long t_sum_rgb = 0ull;
+    unsigned int t_count = 0u;
+    unsigned int t_max_luma = 0u;
+    unsigned int t_max_rgb = 0u;
+
+    const long long grid_step = (long long)gridDim.x * blockDim.x;
+    for (long long index = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+         index < sample_count;
+         index += grid_step) {
+        const int sample_index = (int)index;
         const int sample_width = (crop_width + sample_stride - 1) / sample_stride;
         const int sx = sample_index % sample_width;
         const int sy = sample_index / sample_width;
@@ -161,7 +207,7 @@ extern "C" __global__ void analyze_frame(
             const unsigned int code = layout == 1 ? (raw_y >> 6) & 1023u : raw_y & 1023u;
             const float luma_pq = transfer_lut[code];
             atomicAdd(&s_lum[luminance_bin_lut[code]], 1u);
-            atomicMax(&s_max_luma, __float_as_uint(luma_pq));
+            t_max_luma = max(t_max_luma, __float_as_uint(luma_pq));
 
             // Co-sited 4:2:0 chroma sample for this pixel's 2x2 quad.
             const int cx = x >> 1;
@@ -202,7 +248,7 @@ extern "C" __global__ void analyze_frame(
                 const float peak = fmaxf(red, fmaxf(green, blue));
                 rgb_peak_pq = fminf(fmaxf(peak, 0.0f), 1.0f);
             }
-            atomicMax(&s_max_rgb, __float_as_uint(rgb_peak_pq));
+            t_max_rgb = max(t_max_rgb, __float_as_uint(rgb_peak_pq));
 
             const float peak_pq = peak_is_max_rgb ? rgb_peak_pq : luma_pq;
             int pq_bin = (int)(peak_pq * (float)(PQ_BINS - 1) + 0.5f);
@@ -214,9 +260,9 @@ extern "C" __global__ void analyze_frame(
             }
             atomicAdd(&s_pq[pq_bin], 1u);
 
-            atomicAdd(&s_sum_luma, (unsigned long long)((double)luma_pq * FIXED_POINT_SCALE));
-            atomicAdd(&s_sum_rgb, (unsigned long long)((double)rgb_peak_pq * FIXED_POINT_SCALE));
-            atomicAdd(&s_count, 1u);
+            t_sum_luma += fixed_point(luma_pq);
+            t_sum_rgb += fixed_point(rgb_peak_pq);
+            t_count += 1u;
 
             // One hue sample per chroma sample (only the even-even pixel of each quad).
             if ((x & 1) == 0 && (y & 1) == 0) {
@@ -236,21 +282,37 @@ extern "C" __global__ void analyze_frame(
             }
         }
     }
+
+    // blockDim.x is a multiple of 32 and every thread reaches this point, so all lanes of
+    // each warp take part in the shuffles; lanes without samples contribute zeros.
+    t_sum_luma = warp_sum_u64(t_sum_luma);
+    t_sum_rgb = warp_sum_u64(t_sum_rgb);
+    t_count = warp_sum_u32(t_count);
+    t_max_luma = warp_max_u32(t_max_luma);
+    t_max_rgb = warp_max_u32(t_max_rgb);
+    if ((threadIdx.x & 31) == 0 && t_count != 0) {
+        atomicAdd(&s_sum_luma, t_sum_luma);
+        atomicAdd(&s_sum_rgb, t_sum_rgb);
+        atomicAdd(&s_count, t_count);
+        atomicMax(&s_max_luma, t_max_luma);
+        atomicMax(&s_max_rgb, t_max_rgb);
+    }
     __syncthreads();
 
+    unsigned long long* sums = (unsigned long long*)(results + SUMS_WORD);
     for (int bin = threadIdx.x; bin < LUM_BINS; bin += blockDim.x) {
         if (s_lum[bin] != 0) {
-            atomicAdd(&counts[bin], s_lum[bin]);
+            atomicAdd(&results[bin], s_lum[bin]);
         }
     }
     for (int bin = threadIdx.x; bin < HUE_BINS; bin += blockDim.x) {
         if (s_hue[bin] != 0) {
-            atomicAdd(&counts[LUM_BINS + bin], s_hue[bin]);
+            atomicAdd(&results[LUM_BINS + bin], s_hue[bin]);
         }
     }
     for (int bin = threadIdx.x; bin < PQ_BINS; bin += blockDim.x) {
         if (s_pq[bin] != 0) {
-            atomicAdd(&counts[PQ_HIST_BASE + bin], s_pq[bin]);
+            atomicAdd(&results[PQ_HIST_BASE + bin], s_pq[bin]);
         }
     }
     if (threadIdx.x == 0) {
@@ -259,7 +321,7 @@ extern "C" __global__ void analyze_frame(
             atomicAdd(&sums[1], s_sum_rgb);
             atomicAdd(&sums[2], (unsigned long long)s_count);
         }
-        atomicMax(&counts[MAX_LUMA_WORD], s_max_luma);
-        atomicMax(&counts[MAX_RGB_WORD], s_max_rgb);
+        atomicMax(&results[MAX_LUMA_WORD], s_max_luma);
+        atomicMax(&results[MAX_RGB_WORD], s_max_rgb);
     }
 }

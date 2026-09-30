@@ -34,12 +34,25 @@ const PQ_HIST_BASE: usize = LUMINANCE_BINS + HUE_BINS;
 const MAX_LUMA_WORD: usize = PQ_HIST_BASE + PQ_BINS;
 #[cfg(feature = "cuda")]
 const MAX_RGB_WORD: usize = MAX_LUMA_WORD + 1;
-#[cfg(feature = "cuda")]
-const COUNT_WORDS: usize = MAX_RGB_WORD + 1;
-#[cfg(feature = "cuda")]
+// Result buffer layout; must match kernels.cu. The u64 sums start at u32 word SUMS_WORD,
+// one padding word after the counts so they are 8-byte aligned.
+#[cfg(any(feature = "cuda", test))]
+const SUMS_WORD: usize = 4386;
+#[cfg(any(feature = "cuda", test))]
 const SUM_WORDS: usize = 3;
+#[cfg(any(feature = "cuda", test))]
+const RESULT_WORDS: usize = SUMS_WORD + 2 * SUM_WORDS;
+#[cfg(feature = "cuda")]
+const _: () = assert!(SUMS_WORD == MAX_RGB_WORD + 2 && SUMS_WORD % 2 == 0);
 #[cfg(feature = "cuda")]
 const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
+/// Threads per block, a multiple of the warp size (the kernel's warp reductions rely on it).
+#[cfg(feature = "cuda")]
+const BLOCK_THREADS: u32 = 256;
+/// Grid-stride blocks per SM: enough resident warps to hide latency while the per-block
+/// shared-histogram clear and flush stay a small fraction of the work.
+#[cfg(feature = "cuda")]
+const BLOCKS_PER_SM: u32 = 8;
 
 // `dovi_params` layout; must match the DOVI_* defines in kernels.cu.
 #[cfg(any(feature = "cuda", test))]
@@ -58,6 +71,20 @@ const DOVI_CHROMA_CLAMP: usize = DOVI_CHROMA_OFFSET + 2;
 const DOVI_SOURCE_RANGE: usize = DOVI_CHROMA_CLAMP + 2;
 #[cfg(any(feature = "cuda", test))]
 const DOVI_PARAM_WORDS: usize = DOVI_SOURCE_RANGE + 2;
+
+/// The u64 sums the kernel writes after the counts, read back from the u32 result words.
+#[cfg(any(feature = "cuda", test))]
+fn result_sums(results: &[u32]) -> [u64; SUM_WORDS] {
+    std::array::from_fn(|index| {
+        let low = results[SUMS_WORD + 2 * index];
+        let high = results[SUMS_WORD + 2 * index + 1];
+        if cfg!(target_endian = "little") {
+            u64::from(low) | (u64::from(high) << 32)
+        } else {
+            (u64::from(low) << 32) | u64::from(high)
+        }
+    })
+}
 
 #[cfg(any(feature = "cuda", test))]
 fn pq_for_code(code: i32, transfer_function: TransferFunction) -> f64 {
@@ -118,6 +145,7 @@ fn build_luminance_bin_lut(transfer_function: TransferFunction) -> Vec<u16> {
 mod backend {
     use std::sync::Arc;
 
+    use cudarc::driver::sys::CUdevice_attribute;
     use cudarc::driver::{
         CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg,
     };
@@ -138,8 +166,9 @@ mod backend {
         transfer_lut: CudaSlice<f32>,
         luminance_bin_lut: CudaSlice<u16>,
         dovi_params: CudaSlice<f32>,
-        counts: CudaSlice<u32>,
-        sums: CudaSlice<u64>,
+        results: CudaSlice<u32>,
+        results_host: Vec<u32>,
+        max_blocks: u32,
         y_plane: Option<CudaSlice<u8>>,
         u_plane: Option<CudaSlice<u8>>,
         v_plane: Option<CudaSlice<u8>>,
@@ -220,12 +249,13 @@ mod backend {
             let dovi_params = stream
                 .clone_htod(&build_dovi84_params())
                 .map_err(|err| anyhow!("failed to upload DV 8.4 decode parameters: {err:?}"))?;
-            let counts = stream
-                .alloc_zeros::<u32>(COUNT_WORDS)
-                .map_err(|err| anyhow!("failed to allocate CUDA count buffer: {err:?}"))?;
-            let sums = stream
-                .alloc_zeros::<u64>(SUM_WORDS)
-                .map_err(|err| anyhow!("failed to allocate CUDA sum buffer: {err:?}"))?;
+            let results = stream
+                .alloc_zeros::<u32>(RESULT_WORDS)
+                .map_err(|err| anyhow!("failed to allocate CUDA result buffer: {err:?}"))?;
+            let sm_count = context
+                .attribute(CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
+                .map_err(|err| anyhow!("failed to query the CUDA SM count: {err:?}"))?;
+            let max_blocks = u32::try_from(sm_count).unwrap_or(1).max(1) * BLOCKS_PER_SM;
 
             Ok(Self {
                 _cuda_driver: cuda_driver,
@@ -235,8 +265,9 @@ mod backend {
                 transfer_lut,
                 luminance_bin_lut,
                 dovi_params,
-                counts,
-                sums,
+                results,
+                results_host: vec![0; RESULT_WORDS],
+                max_blocks,
                 y_plane: None,
                 u_plane: None,
                 v_plane: None,
@@ -321,11 +352,8 @@ mod backend {
             }
 
             self.stream
-                .memset_zeros(&mut self.counts)
-                .map_err(|err| anyhow!("failed to clear CUDA count buffer: {err:?}"))?;
-            self.stream
-                .memset_zeros(&mut self.sums)
-                .map_err(|err| anyhow!("failed to clear CUDA sum buffer: {err:?}"))?;
+                .memset_zeros(&mut self.results)
+                .map_err(|err| anyhow!("failed to clear CUDA result buffer: {err:?}"))?;
 
             let stride = sample_stride.max(1) as i32;
             let sample_width = (crop_rect.width as i32 + stride - 1) / stride;
@@ -351,8 +379,14 @@ mod backend {
             let dovi84_rgb = i32::from(options.transfer_function == TransferFunction::Hlg);
             let peak_is_max_rgb = i32::from(options.peak_domain == PeakDomain::MaxRgb);
             let cfg = LaunchConfig {
-                grid_dim: ((sample_count as u32).div_ceil(256), 1, 1),
-                block_dim: (256, 1, 1),
+                grid_dim: (
+                    (sample_count as u32)
+                        .div_ceil(BLOCK_THREADS)
+                        .min(self.max_blocks),
+                    1,
+                    1,
+                ),
+                block_dim: (BLOCK_THREADS, 1, 1),
                 shared_mem_bytes: 0,
             };
             let mut launch = self.stream.launch_builder(&self.kernel);
@@ -363,8 +397,7 @@ mod backend {
                 .arg(&self.transfer_lut)
                 .arg(&self.luminance_bin_lut)
                 .arg(&self.dovi_params)
-                .arg(&mut self.counts)
-                .arg(&mut self.sums)
+                .arg(&mut self.results)
                 .arg(&width)
                 .arg(&height)
                 .arg(&y_stride)
@@ -382,14 +415,12 @@ mod backend {
             unsafe { launch.launch(cfg) }
                 .map_err(|err| anyhow!("CUDA analysis launch failed: {err:?}"))?;
 
-            let counts = self
-                .stream
-                .clone_dtoh(&self.counts)
-                .map_err(|err| anyhow!("failed to download CUDA analysis counts: {err:?}"))?;
-            let sums = self
-                .stream
-                .clone_dtoh(&self.sums)
-                .map_err(|err| anyhow!("failed to download CUDA analysis sums: {err:?}"))?;
+            // Synchronous: a pageable destination makes cudarc wait for the stream.
+            self.stream
+                .memcpy_dtoh(&self.results, &mut self.results_host)
+                .map_err(|err| anyhow!("failed to download CUDA analysis results: {err:?}"))?;
+            let counts = &self.results_host[..SUMS_WORD];
+            let sums = result_sums(&self.results_host);
 
             let pixel_count = sums[2];
             let mut lum_histogram = vec![0.0f64; LUMINANCE_BINS];
@@ -585,6 +616,39 @@ mod tests {
                     assert_eq!(cpu.to_bits(), kernel.to_bits(), "codes ({y}, {cb}, {cr})");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn result_sums_read_the_kernels_u64_words() {
+        let mut results = vec![0u32; RESULT_WORDS];
+        let expected = [u64::MAX - 5, 1u64 << 32, 8_294_400];
+        for (index, value) in expected.iter().enumerate() {
+            let bytes = value.to_ne_bytes();
+            let offset = SUMS_WORD + 2 * index;
+            results[offset] = u32::from_ne_bytes(bytes[..4].try_into().unwrap());
+            results[offset + 1] = u32::from_ne_bytes(bytes[4..].try_into().unwrap());
+        }
+        assert_eq!(result_sums(&results), expected);
+    }
+
+    #[test]
+    fn f32_fixed_point_matches_the_former_f64_conversion() {
+        // The kernel now computes truncate(x * 2^32) in f32; the scale is a power of two,
+        // so the product is exact and equals the old f64 path for every x in [0, 1].
+        let check = |x: f32| {
+            let old = (f64::from(x) * 4_294_967_296.0) as u64;
+            let new = (x * 4_294_967_296.0_f32) as u64;
+            assert_eq!(old, new, "x = {x:e}");
+        };
+        for x in [0.0, f32::MIN_POSITIVE, 1.0e-30, 0.5, 0.999_999_94, 1.0] {
+            check(x);
+        }
+        for lut in [
+            build_transfer_lut(TransferFunction::Pq),
+            build_transfer_lut(TransferFunction::Hlg),
+        ] {
+            lut.into_iter().for_each(check);
         }
     }
 
