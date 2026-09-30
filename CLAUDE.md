@@ -35,6 +35,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Security/dependency checks also run: `cargo audit`, and `cargo deny check` for `advisories` (allowed to fail, `continue-on-error`) and `bans licenses sources` (must pass). Exceptions live in `deny.toml` (incl. ignored `RUSTSEC-2025-0119` for `indicatif`, and `WTFPL` allowed for `ffmpeg-next`).
 - Pre-commit hooks (`.pre-commit-config.yaml`): **on commit** = fmt check + clippy deny-warnings; **on push** = `cargo test --workspace -q`.
 
+## Claude Code feedback loop (committed in `.claude/`)
+
+- **Per edit:** rust-analyzer (the `rust-analyzer-lsp` plugin) pushes diagnostics after each Edit/Write, including `cargo check` flycheck results (type and borrow errors, tagged `(rustc)`). It needs the rustup component: `rustup component add rust-analyzer`. Without it, `~/.cargo/bin/rust-analyzer` is only the rustup proxy, the LSP server crashes with exit code 1, and no diagnostics arrive.
+- **End of turn:** `.claude/hooks/rust-check.sh` (wired in `.claude/settings.json`). PostToolUse records touched `.rs`/Cargo/lint-config files. The Stop hook then rustfmts those files without reporting, and runs `cargo clippy --workspace --all-targets` (plus `--manifest-path tools/<crate>/Cargo.toml` for a touched tool crate). It feeds back only errors from any file and warnings in touched files. Turns without Rust edits never start cargo. After 3 feedback rounds it tells the user and stays quiet until the next Rust edit. State lives in `${TMPDIR:-/tmp}/claude-rust-check/<session_id>/`. An incremental run takes about 2–4 s on the `/mnt/c` checkout. Tests are not run here; they stay on pre-push.
+
 ## Real entrypoints and boundaries
 
 - `hdr_analyzer_mvp/src/main.rs`: CLI parse + validation; orchestrates via `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg, gpu) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `l1_sidecar.rs`, `writer.rs`. Input contract: only PQ/HLG transfers are analyzed (`TransferFunction::Unsupported` covers tagged SDR curves, incl. BT2020_10/12); samples are assumed limited-range BT.2020 NCL, with warnings for other range/matrix tags.
