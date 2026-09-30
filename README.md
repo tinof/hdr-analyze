@@ -6,7 +6,7 @@
 
 HDR-Analyze measures HDR10, HDR10+ and HLG video and converts it to Dolby Vision (Profile 8.1, or 8.4 for HLG) without re-encoding the picture.
 
-HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.5.0.
+HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.5.1.
 
 ## What you get
 

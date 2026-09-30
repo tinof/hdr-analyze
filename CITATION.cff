@@ -5,7 +5,7 @@ authors:
     given-names: "Konstantinos"
     # orcid: "https://orcid.org/0000-0000-0000-0000" # Optional: Add your ORCID if you have one
 title: "HDR-Analyze: independent HDR analysis and Dolby Vision metadata generation"
-version: 0.5.0
+version: 0.5.1
 # doi: 10.5281/zenodo.1234  # Optional: Get a DOI via Zenodo/GitHub integration
 date-released: 2026-09-30
 url: "https://github.com/tinof/hdr-analyze"

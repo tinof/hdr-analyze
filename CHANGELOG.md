@@ -6,6 +6,8 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-30
+
 ### Performance
 
 - **CUDA analysis is about 2.5–3.9× faster end to end.** On an RTX 4070 with 4K sources, frames ÷
