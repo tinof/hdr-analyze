@@ -58,7 +58,7 @@ hdr_analyzer_mvp "video.mkv"
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--peak-domain <max-rgb\|luma>` | `max-rgb` (PQ), `luma` (HLG) | Domain used for direct peak measurement. HLG forces luma because the 8.4 chroma (MMR) reshaping is not modelled |
+| `--peak-domain <max-rgb\|luma>` | `max-rgb` | Domain used for direct peak measurement. For HLG, `max-rgb` uses the full Dolby Vision 8.4 decode and `luma` the 8.4 luma curve alone |
 | `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source |
 | `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or synthetic-calibrated grain correction |
 | `--peak-percentile <0-100>` | `99.99` | Fine 4096-bin percentile used by `--peak-estimator percentile` |
@@ -70,6 +70,7 @@ hdr_analyzer_mvp "video.mkv"
 
 - `max`: direct max from `--peak-domain` (most responsive to noise). For PQ, `max-rgb` decodes
   limited-range BT.2020 NCL and takes the maximum R′/G′/B′ PQ signal; `luma` retains the legacy Y′ peak.
+  For HLG, `max-rgb` takes the maximum R′/G′/B′ of the 8.4 decode (see [HLG](#hlg)).
 - `histogram99`: 99th percentile (recommended, reduces noise impact).
 - `histogram999`: 99.9th percentile (most conservative).
 
@@ -92,11 +93,16 @@ validation.
 
 ### HLG
 
-HLG (ARIB STD-B67) input is detected from the stream and needs no flag. Each 10-bit luma code is
-mapped to PQ through the Dolby Vision Profile 8.4 luma reshaping curve, clamped to the 8.4 source
-range (PQ codes 62–3079, about 0–1000 nits), on both the CPU and CUDA paths. The sidecar records
-`analysis.luminance_mapping: "dovi84-v1"`. The former `--hlg-peak-nits` flag was removed: the 8.4
-RPU fixes the mapping.
+HLG (ARIB STD-B67) input is detected from the stream and needs no flag. It is mapped to PQ through
+the Dolby Vision Profile 8.4 decode, clamped to the 8.4 source range (PQ codes 62–3079, about
+0–1000 nits), on both the CPU and CUDA paths (bit-identical). Luma statistics use the 8.4 luma
+reshaping curve. Max-RGB (the default peak domain, and the max-RGB mean) reconstructs each pixel
+through the luma curve, the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix, then takes
+max(R′, G′, B′). Neutral content therefore reads about 2% higher in max-RGB than in luma: the 8.4
+preset's chroma curves tint neutrals slightly blue. `--peak-domain luma` restores the luma-only
+peak. The sidecar records `analysis.luminance_mapping: "dovi84-v2"` for every HLG run (`"dovi84-v1"`
+marks older luma-only measurements; `mkvdovi` accepts both). The former `--hlg-peak-nits` flag was
+removed: the 8.4 RPU fixes the mapping.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -150,7 +156,7 @@ hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --optimizer-profile conservative --
 # Retain the legacy direct Y-luma peak for PQ input
 hdr_analyzer_mvp -i "video.mkv" -o "out.bin" --peak-source max --peak-domain luma
 
-# HLG source: measured through the Dolby Vision 8.4 curve (no extra flag)
+# HLG source: max-RGB of the Dolby Vision 8.4 decode (no extra flag)
 hdr_analyzer_mvp -i "hlg.mkv" -o "out.bin"
 
 # Disable seek-based probing and use the first usable in-stream crop
