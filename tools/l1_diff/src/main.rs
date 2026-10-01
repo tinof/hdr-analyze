@@ -1,7 +1,7 @@
 //! Compare hdr_analyzer_mvp measurements against reference Dolby Vision L1 metadata.
 //!
 //! Reference input is a CSV with header `frame,min_pq,max_pq,avg_pq` where PQ values
-//! are 12-bit codes (0..4095), e.g. extracted from `dovi_tool export -d all=rpu.json`
+//! are 12-bit codes (0..4095; `max_pq` may carry decimals), e.g. extracted from `dovi_tool export -d all=rpu.json`
 //! (dovi_tool 2.3.3+ `export --levels level1` writes a much smaller per-frame L1 CSV;
 //! check its header against the one above before use).
 //!
@@ -9,6 +9,10 @@
 //! 1. Direct peaks may be max-RGB or Y-luma (`--peak-domain`); DV L1 max is max-RGB derived.
 //! 2. For Profile 7 FEL sources, reference L1 describes the composed BL+EL picture,
 //!    while measurements taken on the BL alone see a 10-bit subset of that signal.
+//!
+//! Without limits the tool only reports. The `--max-*` options turn it into a gate: any
+//! breach is listed and the exit status is nonzero. `--export-reference` writes an analyzer
+//! run as a reference CSV, for regression references and CPU/GPU comparisons.
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -44,8 +48,13 @@ struct Args {
     ours: PathBuf,
 
     /// Reference L1 CSV: frame,min_pq,max_pq,avg_pq (12-bit PQ codes)
-    #[arg(long)]
-    reference: PathBuf,
+    #[arg(long, required_unless_present = "export_reference")]
+    reference: Option<PathBuf>,
+
+    /// Write our run as a reference CSV (minimum, peak with three decimals, max-RGB average)
+    /// and exit without scoring. Needs the L1 sidecar.
+    #[arg(long, value_name = "CSV", conflicts_with = "reference")]
+    export_reference: Option<PathBuf>,
 
     /// Analyzer L1 JSON sidecar. Defaults to <ours>.l1.json.
     #[arg(long)]
@@ -64,12 +73,89 @@ struct Args {
     /// Optional per-frame delta dump as CSV
     #[arg(long)]
     csv: Option<PathBuf>,
+
+    /// Fail when |bias| of the peak exceeds this many 12-bit PQ codes. All limits apply to the
+    /// series that is scored: per shot with --per-shot, per frame otherwise.
+    #[arg(long, value_name = "CODES")]
+    max_peak_bias: Option<f64>,
+
+    /// Fail when the largest absolute peak error exceeds this many codes.
+    #[arg(long, value_name = "CODES")]
+    max_peak_error: Option<f64>,
+
+    /// Fail when |bias| of the minimum exceeds this many codes. Needs the L1 sidecar.
+    #[arg(long, value_name = "CODES")]
+    max_min_bias: Option<f64>,
+
+    /// Fail when the largest absolute minimum error exceeds this many codes. Needs the L1 sidecar.
+    #[arg(long, value_name = "CODES")]
+    max_min_error: Option<f64>,
+
+    /// Fail when |bias| of the max-RGB average (the Dolby Vision L1 average) exceeds this many
+    /// codes. The Y-luma average is reported but never gated. Needs the L1 sidecar.
+    #[arg(long, value_name = "CODES")]
+    max_avg_bias: Option<f64>,
+
+    /// Fail when the largest absolute max-RGB average error exceeds this many codes. Needs the
+    /// L1 sidecar.
+    #[arg(long, value_name = "CODES")]
+    max_avg_error: Option<f64>,
+
+    /// Fail when more than this many scene cuts differ from --scenes (reference cuts we miss
+    /// plus cuts of ours the reference lacks, ±1 frame).
+    #[arg(long, value_name = "COUNT", requires = "scenes")]
+    max_scene_mismatches: Option<usize>,
+}
+
+/// Signed bias and largest absolute error of one scored metric, in 12-bit PQ codes.
+#[derive(Clone, Copy, Debug)]
+struct MetricSummary {
+    bias: f64,
+    max_error: f64,
+}
+
+/// Describe every limit the metric breaks. A missing limit is not checked.
+fn limit_breaches(
+    name: &str,
+    summary: MetricSummary,
+    max_bias: Option<f64>,
+    max_error: Option<f64>,
+) -> Vec<String> {
+    let mut breaches = Vec::new();
+    if let Some(limit) = max_bias {
+        if summary.bias.abs() > limit || summary.bias.is_nan() {
+            breaches.push(format!(
+                "{name}: bias {:+.2} codes exceeds the limit of ±{limit}",
+                summary.bias
+            ));
+        }
+    }
+    if let Some(limit) = max_error {
+        if summary.max_error > limit || summary.max_error.is_nan() {
+            breaches.push(format!(
+                "{name}: largest error {:.2} codes exceeds the limit of {limit}",
+                summary.max_error
+            ));
+        }
+    }
+    breaches
+}
+
+/// Count cuts with no partner within ±1 frame: (reference cuts we miss, cuts only we have).
+fn scene_mismatches(reference: &[i64], ours: &[i64]) -> (usize, usize) {
+    let unmatched = |from: &[i64], against: &[i64]| {
+        from.iter()
+            .filter(|cut| !against.iter().any(|other| (other - **cut).abs() <= 1))
+            .count()
+    };
+    (unmatched(reference, ours), unmatched(ours, reference))
 }
 
 struct RefL1 {
     frame: usize,
     min_pq: u16,
-    max_pq: u16,
+    /// Whole codes in Dolby Vision exports; `--export-reference` keeps three decimals.
+    max_pq: f64,
     avg_pq: u16,
 }
 
@@ -244,7 +330,7 @@ fn stats(deltas: &[f64]) -> Stats {
     }
 }
 
-fn print_metric(name: &str, ref_codes: &[f64], our_codes: &[f64], unit: &str) {
+fn print_metric(name: &str, ref_codes: &[f64], our_codes: &[f64], unit: &str) -> MetricSummary {
     let signed: Vec<f64> = ref_codes
         .iter()
         .zip(our_codes)
@@ -265,6 +351,10 @@ fn print_metric(name: &str, ref_codes: &[f64], our_codes: &[f64], unit: &str) {
         s.mean, s.median, s.p95, s.max
     );
     println!("  worst per-{unit} difference in nits: {worst_nits:.1}");
+    MetricSummary {
+        bias,
+        max_error: s.max,
+    }
 }
 
 /// Score one metric, per-frame by default or per-shot when a shotlist is given.
@@ -274,7 +364,7 @@ fn score(
     our_codes: &[f64],
     shots: Option<&[Range<usize>]>,
     mode: ShotAggregate,
-) {
+) -> MetricSummary {
     match shots {
         Some(shots) => {
             let ref_shots = aggregate_shots(ref_codes, shots, mode);
@@ -284,7 +374,7 @@ fn score(
                 &ref_shots,
                 &our_shots,
                 "shot",
-            );
+            )
         }
         None => print_metric(name, ref_codes, our_codes, "frame"),
     }
@@ -302,7 +392,35 @@ fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| default_sidecar_path(&args.ours));
     let sidecar = read_sidecar(&sidecar_path, sidecar_required)?;
-    let reference = parse_reference(&args.reference)?;
+
+    if let Some(path) = &args.export_reference {
+        let Some(sidecar) = &sidecar else {
+            bail!(
+                "--export-reference needs the L1 sidecar ({} not found)",
+                sidecar_path.display()
+            );
+        };
+        return export_reference(path, &ours, sidecar);
+    }
+    let sidecar_limits = [
+        args.max_min_bias,
+        args.max_min_error,
+        args.max_avg_bias,
+        args.max_avg_error,
+    ];
+    if sidecar.is_none() && sidecar_limits.iter().any(Option::is_some) {
+        bail!(
+            "--max-min-* and --max-avg-* need the L1 sidecar ({} not found)",
+            sidecar_path.display()
+        );
+    }
+
+    let reference_path = args.reference.as_ref().context("--reference is required")?;
+    let reference = parse_reference(reference_path)?;
+    if reference.is_empty() {
+        bail!("reference CSV {} has no frames", reference_path.display());
+    }
+    let mut breaches = Vec::new();
 
     println!("=== l1_diff: analyzer output vs reference DV L1 ===");
     println!(
@@ -324,7 +442,7 @@ fn main() -> Result<()> {
     }
     println!(
         "reference: {} ({} frames)",
-        args.reference.display(),
+        reference_path.display(),
         reference.len()
     );
     println!("\nCaveats: (1) compare DV L1 max against max-RGB direct-peak output;");
@@ -366,30 +484,42 @@ fn main() -> Result<()> {
             .iter()
             .map(|code| f64::from(*code))
             .collect();
-        score(
+        let summary = score(
             "Minimum (robust active-area min_pq)",
             &ref_min,
             &our_min,
             shots,
             ShotAggregate::Min,
         );
+        breaches.extend(limit_breaches(
+            "minimum",
+            summary,
+            args.max_min_bias,
+            args.max_min_error,
+        ));
     } else {
         println!("Minimum: unavailable without an L1 sidecar.");
     }
 
-    let ref_max: Vec<f64> = reference.iter().map(|r| r.max_pq as f64).collect();
+    let ref_max: Vec<f64> = reference.iter().map(|r| r.max_pq).collect();
     let our_max: Vec<f64> = ours
         .frames
         .iter()
         .map(|f| f.peak_pq_2020 * 4095.0)
         .collect();
-    score(
+    let summary = score(
         "Peak (L1 max_pq)",
         &ref_max,
         &our_max,
         shots,
         ShotAggregate::Max,
     );
+    breaches.extend(limit_breaches(
+        "peak",
+        summary,
+        args.max_peak_bias,
+        args.max_peak_error,
+    ));
 
     let ref_avg: Vec<f64> = reference.iter().map(|r| r.avg_pq as f64).collect();
     if let Some(sidecar) = &sidecar {
@@ -412,13 +542,19 @@ fn main() -> Result<()> {
             .iter()
             .map(|code| f64::from(*code))
             .collect();
-        score(
+        let summary = score(
             "Average (max-RGB mean)",
             &ref_avg,
             &our_avg_max_rgb,
             shots,
             ShotAggregate::Mean,
         );
+        breaches.extend(limit_breaches(
+            "max-RGB average",
+            summary,
+            args.max_avg_bias,
+            args.max_avg_error,
+        ));
     } else {
         let our_avg: Vec<f64> = ours
             .frames
@@ -444,10 +580,15 @@ fn main() -> Result<()> {
             .map(|l| l.trim().parse().context("scene frame"))
             .collect::<Result<_>>()?;
         let our_cuts: Vec<i64> = ours.scenes.iter().map(|s| s.start as i64).collect();
-        let matched = ref_cuts
-            .iter()
-            .filter(|r| our_cuts.iter().any(|o| (o - **r).abs() <= 1))
-            .count();
+        let (missed, extra) = scene_mismatches(&ref_cuts, &our_cuts);
+        let matched = ref_cuts.len() - missed;
+        if let Some(limit) = args.max_scene_mismatches {
+            if missed + extra > limit {
+                breaches.push(format!(
+                    "scene cuts: {missed} reference cuts missed and {extra} extra cuts exceed the limit of {limit}"
+                ));
+            }
+        }
         println!("\nScene cuts (±1 frame tolerance):");
         println!("  reference: {}   ours: {}", ref_cuts.len(), our_cuts.len());
         println!(
@@ -497,6 +638,44 @@ fn main() -> Result<()> {
         println!("\nPer-frame deltas written to {}", csv_path.display());
     }
 
+    if !breaches.is_empty() {
+        println!("\nLimits exceeded:");
+        for breach in &breaches {
+            println!("  {breach}");
+        }
+        bail!("{} limit(s) exceeded", breaches.len());
+    }
+
+    Ok(())
+}
+
+/// Write our run in the reference CSV layout. The peak keeps three decimals, so scoring the
+/// same run against its own export reports no error.
+fn export_reference(path: &Path, ours: &MadVRMeasurements, sidecar: &L1Sidecar) -> Result<()> {
+    let frames = &sidecar.frames;
+    if frames.min_pq_12bit.len() != ours.frames.len()
+        || frames.avg_max_rgb_pq_12bit.len() != ours.frames.len()
+    {
+        bail!(
+            "sidecar frame count differs from the measurement file ({} frames)",
+            ours.frames.len()
+        );
+    }
+    let mut out = String::from("frame,min_pq,max_pq,avg_pq\n");
+    for (index, frame) in ours.frames.iter().enumerate() {
+        out.push_str(&format!(
+            "{index},{},{:.3},{}\n",
+            frames.min_pq_12bit[index],
+            frame.peak_pq_2020 * 4095.0,
+            frames.avg_max_rgb_pq_12bit[index],
+        ));
+    }
+    fs::write(path, out).with_context(|| format!("writing {}", path.display()))?;
+    println!(
+        "Reference CSV written to {} ({} frames)",
+        path.display(),
+        ours.frames.len()
+    );
     Ok(())
 }
 
@@ -555,6 +734,53 @@ mod tests {
             aggregate_shots(&series, &shots, ShotAggregate::Mean),
             vec![3.0, 14.0 / 3.0]
         );
+    }
+
+    #[test]
+    fn limits_pass_at_the_boundary_and_without_limits() {
+        let summary = MetricSummary {
+            bias: -0.5,
+            max_error: 1.0,
+        };
+        assert!(limit_breaches("peak", summary, Some(0.5), Some(1.0)).is_empty());
+        assert!(limit_breaches("peak", summary, None, None).is_empty());
+    }
+
+    #[test]
+    fn bias_limit_applies_to_the_absolute_value() {
+        for bias in [0.6, -0.6] {
+            let summary = MetricSummary {
+                bias,
+                max_error: 0.0,
+            };
+            let breaches = limit_breaches("minimum", summary, Some(0.5), Some(1.0));
+            assert_eq!(breaches.len(), 1, "bias {bias}");
+            assert!(breaches[0].starts_with("minimum: bias"));
+        }
+    }
+
+    #[test]
+    fn error_limit_and_nan_are_breaches() {
+        let summary = MetricSummary {
+            bias: 0.0,
+            max_error: 1.5,
+        };
+        let breaches = limit_breaches("max-RGB average", summary, Some(0.5), Some(1.0));
+        assert_eq!(breaches.len(), 1);
+        assert!(breaches[0].starts_with("max-RGB average: largest error"));
+
+        let nan = MetricSummary {
+            bias: f64::NAN,
+            max_error: f64::NAN,
+        };
+        assert_eq!(limit_breaches("peak", nan, Some(0.5), Some(1.0)).len(), 2);
+    }
+
+    #[test]
+    fn scene_mismatches_counts_missed_and_extra_cuts() {
+        assert_eq!(scene_mismatches(&[0, 24, 48], &[0, 25, 48]), (0, 0));
+        assert_eq!(scene_mismatches(&[0, 24, 48], &[0, 48, 60]), (1, 1));
+        assert_eq!(scene_mismatches(&[0, 24], &[0, 24, 30, 40]), (0, 2));
     }
 
     #[test]

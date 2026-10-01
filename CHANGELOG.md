@@ -6,6 +6,28 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Added
+
+- **L1 regression gate in CI.** `scripts/ci/l1-regression-gate.sh` generates a six-shot synthetic
+  clip (grain, saturated colour, small specular, ramp, fade, one-frame flash), analyzes it as PQ
+  and as HLG, and scores the result against the references in `tools/l1_diff/corpus`. A change
+  that moves L1 fails the job until the references are rewritten with `--update` and reviewed.
+- **`tools/l1_diff` can fail.** `--max-peak-bias`, `--max-peak-error`, `--max-min-bias`,
+  `--max-min-error`, `--max-avg-bias`, `--max-avg-error` (12-bit PQ codes; the average limits
+  apply to the max-RGB average) and `--max-scene-mismatches` list every breach and return a
+  nonzero exit status. Before, the tool only printed statistics. `--export-reference` writes an
+  analyzer run as a reference CSV; the reference peak column may carry decimals. CI now lints and
+  tests the tool, which is outside the workspace.
+- **CPU/CUDA parity check.** `scripts/cuda-parity.sh` encodes the synthetic clip as PQ and HLG
+  HEVC, analyzes each with and without CUDA, and fails unless the measurement files are
+  byte-identical, the sidecars agree and the CUDA run reports `gpu: true`. Hosted CI has no GPU,
+  so run it on a CUDA host before a change to the analysis or decode path
+  (`hdr_analyzer_mvp/tests/cuda_parity.rs`, skipped without its environment variables).
+- **Final-RPU baseline.** `scripts/rpu-baseline.sh capture` converts inputs with
+  `mkvdovi --keep-source --verify` and stores the RPU extracted from the muxed file with a
+  manifest of input identity and tool versions. `compare` fails on any difference outside
+  Level 1 and reports Level 1 differences as numbers (`--require-identical-l1` makes them fail).
+
 ## [0.5.1] - 2026-10-01
 
 ### Performance

@@ -199,6 +199,15 @@ To inspect the final Dolby Vision MKV file:
     cargo build --release --manifest-path tools/l1_diff/Cargo.toml
     tools/l1_diff/target/release/l1_diff --ours video_measurements.bin --reference reference_l1.csv
     ```
+    Add `--max-peak-bias`, `--max-peak-error` and the matching `--max-min-*` / `--max-avg-*`
+    options (12-bit PQ codes) to make a breach a nonzero exit status.
+3.  Run the L1 regression gate that CI runs (needs `ffmpeg`, `python3`, `jq`):
+    ```bash
+    scripts/ci/l1-regression-gate.sh
+    ```
+    It fails when the analyzer's L1 output for the synthetic clip in `tools/l1_diff/corpus`
+    moves. If your change is meant to move L1, run it with `--update`, commit the rewritten
+    references, and explain the difference in the pull request.
 
 ## Submitting Changes
 
