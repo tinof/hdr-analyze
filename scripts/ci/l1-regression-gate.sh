@@ -60,10 +60,18 @@ for transfer in pq hlg; do
     esac
     clip=$work/$transfer.mkv
     bin=$work/$transfer.bin
-    python3 "$corpus/make_corpus.py" | ffmpeg -hide_banner -loglevel error -y \
-        -f rawvideo -pix_fmt yuv420p10le -video_size 320x180 -framerate 24 -i - \
-        -c:v ffv1 -color_primaries bt2020 -color_trc "$trc" -colorspace bt2020nc \
-        -color_range tv "$clip"
+    # The colour tags go on the input as well. With output-only tags a current FFmpeg converts
+    # the untagged input and changes chroma samples; FFmpeg 6.1 does not. The round trip below
+    # proves the clip holds the generator's samples whichever FFmpeg encoded it.
+    tags=(-color_primaries bt2020 -color_trc "$trc" -colorspace bt2020nc -color_range tv)
+    python3 "$corpus/make_corpus.py" > "$work/source.yuv"
+    ffmpeg -hide_banner -loglevel error -y \
+        -f rawvideo -pix_fmt yuv420p10le -video_size 320x180 -framerate 24 "${tags[@]}" \
+        -i "$work/source.yuv" -c:v ffv1 "${tags[@]}" "$clip"
+    ffmpeg -hide_banner -loglevel error -y -i "$clip" -f rawvideo -pix_fmt yuv420p10le \
+        "$work/decoded.yuv"
+    cmp -s "$work/source.yuv" "$work/decoded.yuv" \
+        || { echo "error: the $transfer clip is not a lossless copy of the corpus" >&2; exit 2; }
 
     "$ANALYZER" "$clip" -o "$bin" --transfer "$transfer" --downscale 1 --disable-optimizer \
         > "$work/$transfer.log" 2>&1 \
