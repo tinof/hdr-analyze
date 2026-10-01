@@ -451,7 +451,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     );
 
     // Static Metadata
-    let static_meta = metadata::get_static_metadata(input_file, hdr_type == HdrFormat::Hlg);
+    // MaxCLL / MaxFALL are resolved after the L1 sidecar is loaded: measured values fill what the
+    // source does not state.
+    let hlg_source = hdr_type == HdrFormat::Hlg;
+    let mut static_meta = metadata::read_static_metadata(input_file);
+    metadata::apply_static_defaults(&mut static_meta, &["max_dml", "min_dml"], hlg_source);
 
     // Build CM v4.0 config if enabled
     let cm_v40_config = if args.cm_version == CmVersion::V40 {
@@ -572,6 +576,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         ));
     }
 
+    for message in metadata::resolve_light_levels(&mut static_meta, l1_sidecar.as_ref(), hlg_source)
+    {
+        progress::print_info(&message);
+    }
+
     let previous_config = fs::read(&extra_json_path).ok();
     metadata::generate_extra_json(
         &extra_json_path,
@@ -595,6 +604,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         for artifact in &stale {
             resume::invalidate(artifact)?;
         }
+        // A muxed output from that run carries the old RPU too.
+        let _ = fs::remove_file(temp_dir.join("mux.done"));
     }
 
     // --- Generate RPU ---

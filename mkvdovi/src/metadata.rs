@@ -388,6 +388,26 @@ fn hdr_format_from_rpu(kind: RpuFormatKind) -> HdrFormat {
 /// HLG sources normally carry no mastering-display or light-level metadata, and the defaults match
 /// the Profile 8.4 source range, so `hlg_source` turns the missing-value warnings into info lines.
 pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String, f64> {
+    let mut meta = read_static_metadata(input_file);
+    apply_static_defaults(
+        &mut meta,
+        &["max_dml", "min_dml", "max_cll", "max_fall"],
+        hlg_source,
+    );
+    meta
+}
+
+/// Store a source-stated MaxCLL / MaxFALL. Zero means "unknown" in CTA-861.3, so it is not a
+/// stated value and never replaces one.
+fn insert_light_level(meta: &mut HashMap<String, f64>, key: &str, value: f64) {
+    if value > 0.0 {
+        meta.insert(key.to_string(), value);
+    }
+}
+
+/// Static HDR metadata the source states (MediaInfo, then a Details.txt override for
+/// MaxCLL/MaxFALL), without defaults for what is missing.
+pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
     let mut meta: HashMap<String, f64> = HashMap::new();
 
     // Try MediaInfo
@@ -440,12 +460,12 @@ pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String
                     // MaxCLL
                     if let Some(val) = track.get("MaxCLL") {
                         if let Some(f) = val.as_f64() {
-                            meta.insert("max_cll".to_string(), f);
+                            insert_light_level(&mut meta, "max_cll", f);
                         } else if let Some(s) = val.as_str() {
                             let re = Regex::new(r"([0-9.]+)").unwrap();
                             if let Some(caps) = re.captures(s) {
                                 if let Ok(v) = caps[1].parse::<f64>() {
-                                    meta.insert("max_cll".to_string(), v);
+                                    insert_light_level(&mut meta, "max_cll", v);
                                 }
                             }
                         }
@@ -454,12 +474,12 @@ pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String
                     // MaxFALL
                     if let Some(val) = track.get("MaxFALL") {
                         if let Some(f) = val.as_f64() {
-                            meta.insert("max_fall".to_string(), f);
+                            insert_light_level(&mut meta, "max_fall", f);
                         } else if let Some(s) = val.as_str() {
                             let re = Regex::new(r"([0-9.]+)").unwrap();
                             if let Some(caps) = re.captures(s) {
                                 if let Ok(v) = caps[1].parse::<f64>() {
-                                    meta.insert("max_fall".to_string(), v);
+                                    insert_light_level(&mut meta, "max_fall", v);
                                 }
                             }
                         }
@@ -478,20 +498,24 @@ pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String
             if let Some(caps) = re_cll.captures(&content) {
                 let s = caps[1].replace(',', ".");
                 if let Ok(v) = s.parse::<f64>() {
-                    meta.insert("max_cll".to_string(), v);
+                    insert_light_level(&mut meta, "max_cll", v);
                 }
             }
             if let Some(caps) = re_fall.captures(&content) {
                 let s = caps[1].replace(',', ".");
                 if let Ok(v) = s.parse::<f64>() {
-                    meta.insert("max_fall".to_string(), v);
+                    insert_light_level(&mut meta, "max_fall", v);
                 }
             }
         }
     }
 
-    // Warn for any values that could not be sourced from file metadata, then apply fallbacks.
-    // These warnings matter: the display will build its tone-mapping from these values.
+    meta
+}
+
+/// Warn for each of `keys` that could not be sourced from file metadata, then apply its fallback.
+/// These warnings matter: the display will build its tone-mapping from these values.
+pub fn apply_static_defaults(meta: &mut HashMap<String, f64>, keys: &[&str], hlg_source: bool) {
     let fallbacks: &[(&str, f64, &str)] = &[
         (
             "max_dml",
@@ -507,7 +531,7 @@ pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String
         ("max_fall", 400.0, "MaxFALL (L6)"),
     ];
     for &(key, default, label) in fallbacks {
-        if !meta.contains_key(key) {
+        if keys.contains(&key) && !meta.contains_key(key) {
             if hlg_source {
                 crate::progress::print_info(&format!(
                     "{label} not in source metadata (usual for HLG); using default {default:.4} nits for L6."
@@ -523,8 +547,69 @@ pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String
             meta.insert(key.to_string(), default);
         }
     }
+}
 
-    meta
+/// Fill a MaxCLL / MaxFALL the source does not state: the analyzer's measured value when the
+/// sidecar has a usable one, the default otherwise. Source-stated values are never changed.
+/// A filled value is adjusted so MaxFALL <= MaxCLL holds against a source-stated counterpart.
+/// Returns the info lines to print.
+pub fn resolve_light_levels(
+    meta: &mut HashMap<String, f64>,
+    sidecar: Option<&L1Sidecar>,
+    hlg_source: bool,
+) -> Vec<String> {
+    let source_cll = meta.contains_key("max_cll");
+    let source_fall = meta.contains_key("max_fall");
+    if source_cll && source_fall {
+        return Vec::new();
+    }
+
+    let mut messages = Vec::new();
+    let measured = match sidecar.map(L1Sidecar::measured_light_levels) {
+        Some(Ok(measured)) => measured,
+        Some(Err(reason)) => {
+            messages.push(format!(
+                "No measured MaxCLL/MaxFALL for L6: {reason}. Using defaults."
+            ));
+            MeasuredLightLevels::default()
+        }
+        None => MeasuredLightLevels::default(),
+    };
+    if let Some(note) = measured.note {
+        messages.push(note);
+    }
+    for (key, label, value) in [
+        ("max_cll", "MaxCLL", measured.max_cll),
+        ("max_fall", "MaxFALL", measured.max_fall),
+    ] {
+        if meta.contains_key(key) {
+            continue;
+        }
+        if let Some(nits) = value {
+            // The top of the Profile 8.4 range (PQ code 3079) is 1000.9 nits and rounds to 1001,
+            // one above the 1000-nit mastering peak the RPU declares.
+            let nits = if hlg_source { nits.min(1000) } else { nits };
+            messages.push(format!(
+                "{label} not in source metadata; using the measured {nits} nits for L6."
+            ));
+            meta.insert(key.to_string(), f64::from(nits));
+        }
+    }
+    apply_static_defaults(meta, &["max_cll", "max_fall"], hlg_source);
+
+    let (cll, fall) = (meta["max_cll"], meta["max_fall"]);
+    if fall > cll {
+        if source_cll {
+            messages.push(format!(
+                "MaxFALL lowered to the source MaxCLL ({cll:.0} nits) for L6."
+            ));
+            meta.insert("max_fall".to_string(), cll);
+        } else {
+            messages.push(format!("MaxCLL raised to MaxFALL ({fall:.0} nits) for L6."));
+            meta.insert("max_cll".to_string(), fall);
+        }
+    }
+    messages
 }
 
 fn parse_mastering_display_color_primaries(
@@ -646,6 +731,25 @@ pub struct L1Sidecar {
     pub crop: Option<L1SidecarCrop>,
     #[serde(default)]
     pub frames: Option<L1SidecarFrames>,
+    /// Content MaxCLL / MaxFALL measured by the analyzer (max-RGB runs of newer version 4
+    /// analyzers only).
+    #[serde(default)]
+    pub light_level: Option<L1SidecarLightLevel>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct L1SidecarLightLevel {
+    pub max_cll_nits: u32,
+    pub max_fall_nits: u32,
+}
+
+/// The sidecar light levels that are safe to put into L6.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct MeasuredLightLevels {
+    pub max_cll: Option<u32>,
+    pub max_fall: Option<u32>,
+    /// Why one of the two is withheld.
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -720,6 +824,48 @@ pub struct L1SidecarFrames {
 }
 
 impl L1Sidecar {
+    /// MaxCLL / MaxFALL usable for L6, or why the sidecar has none. Both need every frame
+    /// analyzed (a skipped frame can hide a flash). MaxCLL also needs every pixel: a sampling
+    /// stride can miss a small highlight, while a frame average is sound at any stride.
+    pub fn measured_light_levels(&self) -> std::result::Result<MeasuredLightLevels, String> {
+        let Some(levels) = self.light_level else {
+            return Err(
+                "the measurements carry no content light levels (older analyzer or luma peak domain; delete them to re-analyze)"
+                    .into(),
+            );
+        };
+        let (cll, fall) = (levels.max_cll_nits, levels.max_fall_nits);
+        if !(1..=10_000).contains(&cll) || !(1..=10_000).contains(&fall) || fall > cll {
+            return Err(format!(
+                "the sidecar light levels are invalid (MaxCLL {cll}, MaxFALL {fall})"
+            ));
+        }
+        let Some(analysis) = &self.analysis else {
+            return Err("the sidecar does not record its sampling".into());
+        };
+        if analysis.sample_rate != 1 {
+            return Err(format!(
+                "the analysis skipped frames (sample-rate {})",
+                analysis.sample_rate
+            ));
+        }
+        if analysis.downscale != 1 {
+            return Ok(MeasuredLightLevels {
+                max_cll: None,
+                max_fall: Some(fall),
+                note: Some(format!(
+                    "MaxCLL is not taken from the measurements: analysis at downscale {} can miss small highlights (--analysis-quality accurate measures it).",
+                    analysis.downscale
+                )),
+            });
+        }
+        Ok(MeasuredLightLevels {
+            max_cll: Some(cll),
+            max_fall: Some(fall),
+            note: None,
+        })
+    }
+
     /// Number of frames the sidecar covers (last scene end + 1).
     pub fn frame_count(&self) -> u64 {
         self.scenes
@@ -1879,6 +2025,136 @@ mod tests {
 
         let json: Value = serde_json::from_reader(File::open(output.path()).unwrap()).unwrap();
         assert_eq!(json["profile"], "8.4");
+    }
+
+    fn light_level_sidecar(cll: u32, fall: u32, downscale: u32, sample_rate: u32) -> L1Sidecar {
+        L1Sidecar {
+            version: L1_SIDECAR_MAX_VERSION,
+            analysis: Some(L1SidecarAnalysis {
+                downscale,
+                sample_rate,
+                gpu: false,
+                no_crop: false,
+                luminance_mapping: Some("pq".into()),
+            }),
+            light_level: Some(L1SidecarLightLevel {
+                max_cll_nits: cll,
+                max_fall_nits: fall,
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn light_levels(meta: &HashMap<String, f64>) -> (f64, f64) {
+        (meta["max_cll"], meta["max_fall"])
+    }
+
+    #[test]
+    fn measured_light_levels_fill_what_the_source_does_not_state() {
+        let sidecar = light_level_sidecar(743, 96, 1, 1);
+
+        let mut silent = HashMap::new();
+        let messages = resolve_light_levels(&mut silent, Some(&sidecar), true);
+        assert_eq!(light_levels(&silent), (743.0, 96.0));
+        assert_eq!(messages.len(), 2);
+
+        // Source-stated values win, field by field.
+        let mut stated = HashMap::from([
+            ("max_cll".to_string(), 997.0),
+            ("max_fall".to_string(), 91.0),
+        ]);
+        assert!(resolve_light_levels(&mut stated, Some(&sidecar), false).is_empty());
+        assert_eq!(light_levels(&stated), (997.0, 91.0));
+
+        let mut partial = HashMap::from([("max_cll".to_string(), 997.0)]);
+        resolve_light_levels(&mut partial, Some(&sidecar), false);
+        assert_eq!(light_levels(&partial), (997.0, 96.0));
+    }
+
+    #[test]
+    fn hlg_max_cll_is_capped_at_the_declared_mastering_peak() {
+        let sidecar = light_level_sidecar(1001, 39, 1, 1);
+
+        let mut hlg = HashMap::new();
+        resolve_light_levels(&mut hlg, Some(&sidecar), true);
+        assert_eq!(light_levels(&hlg), (1000.0, 39.0));
+
+        let mut pq = HashMap::new();
+        resolve_light_levels(&mut pq, Some(&sidecar), false);
+        assert_eq!(light_levels(&pq), (1001.0, 39.0));
+    }
+
+    #[test]
+    fn filled_light_levels_never_contradict_a_source_value() {
+        let sidecar = light_level_sidecar(743, 96, 1, 1);
+
+        // Source MaxCLL below the measured MaxFALL: the filled MaxFALL is lowered.
+        let mut low_cll = HashMap::from([("max_cll".to_string(), 50.0)]);
+        resolve_light_levels(&mut low_cll, Some(&sidecar), false);
+        assert_eq!(light_levels(&low_cll), (50.0, 50.0));
+
+        // Source MaxFALL above the measured MaxCLL: the filled MaxCLL is raised.
+        let mut high_fall = HashMap::from([("max_fall".to_string(), 900.0)]);
+        resolve_light_levels(&mut high_fall, Some(&sidecar), false);
+        assert_eq!(light_levels(&high_fall), (900.0, 900.0));
+    }
+
+    #[test]
+    fn unusable_sidecar_light_levels_fall_back_to_defaults() {
+        let defaults = (1000.0, 400.0);
+        let no_block = L1Sidecar {
+            light_level: None,
+            ..light_level_sidecar(1, 1, 1, 1)
+        };
+        for sidecar in [
+            no_block,
+            light_level_sidecar(743, 96, 1, 3), // frames skipped
+            light_level_sidecar(96, 743, 1, 1), // MaxFALL above MaxCLL
+            light_level_sidecar(0, 0, 1, 1),    // unknown
+            light_level_sidecar(20_000, 96, 1, 1), // beyond PQ
+        ] {
+            assert!(sidecar.measured_light_levels().is_err());
+            let mut meta = HashMap::new();
+            let messages = resolve_light_levels(&mut meta, Some(&sidecar), true);
+            assert_eq!(light_levels(&meta), defaults);
+            assert!(messages[0].contains("Using defaults"), "{messages:?}");
+        }
+
+        // No sidecar (HDR10+, Dolby Vision input): defaults, no extra message.
+        let mut meta = HashMap::new();
+        assert!(resolve_light_levels(&mut meta, None, true).is_empty());
+        assert_eq!(light_levels(&meta), defaults);
+    }
+
+    #[test]
+    fn subsampled_analysis_supplies_max_fall_but_not_max_cll() {
+        let sidecar = light_level_sidecar(743, 96, 2, 1);
+        let measured = sidecar.measured_light_levels().unwrap();
+        assert_eq!((measured.max_cll, measured.max_fall), (None, Some(96)));
+
+        let mut meta = HashMap::new();
+        resolve_light_levels(&mut meta, Some(&sidecar), true);
+        assert_eq!(light_levels(&meta), (1000.0, 96.0));
+    }
+
+    #[test]
+    fn zero_light_levels_are_not_source_values() {
+        let mut meta = HashMap::from([("max_cll".to_string(), 800.0)]);
+        insert_light_level(&mut meta, "max_cll", 0.0);
+        insert_light_level(&mut meta, "max_fall", 0.0);
+        assert_eq!(meta.get("max_cll"), Some(&800.0));
+        assert!(!meta.contains_key("max_fall"));
+    }
+
+    #[test]
+    fn sidecar_light_level_block_is_optional() {
+        let mut fixture = current_sidecar_json();
+        let without: L1Sidecar = serde_json::from_value(fixture.clone()).unwrap();
+        assert!(without.light_level.is_none());
+
+        fixture["light_level"] = json!({"max_cll_nits": 743, "max_fall_nits": 96});
+        let with: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        assert_eq!(with.light_level.unwrap().max_cll_nits, 743);
     }
 
     #[test]

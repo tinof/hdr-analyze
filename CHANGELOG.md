@@ -20,10 +20,19 @@ This document provides a historical record of completed milestones, feature impl
   the measurements file to re-analyze.
 - On resume, `mkvdovi` regenerates the RPU when the generation settings differ from the
   interrupted run (for example after a re-analysis changed L1). Before, an RPU that was already
-  complete in the temp directory was reused whatever the measurements now said.
+  complete in the temp directory was reused whatever the measurements now said. A muxed output
+  left by that run is rebuilt as well.
 
 ### Added
 
+- **Measured MaxCLL/MaxFALL in L6.** The analyzer writes the content light levels (CTA-861.3,
+  active image area, frame average in linear light) to the L1 sidecar as `light_level`, and
+  `mkvdovi` uses them for a MaxCLL or MaxFALL the source does not state (or states as 0). This
+  mainly affects HLG, which carries no light-level metadata and so far got the defaults
+  1000 / 400. Source-stated values are unchanged. MaxCLL needs full-resolution analysis and both
+  need every frame analyzed; otherwise the defaults stay
+  ([`docs/FORMAT_COMPATIBILITY.md`](docs/FORMAT_COMPATIBILITY.md)). The block is an optional
+  addition to sidecar version 4.
 - **L1 regression gate in CI.** `scripts/ci/l1-regression-gate.sh` generates a six-shot synthetic
   clip (grain, saturated colour, small specular, ramp, fade, one-frame flash), analyzes it as PQ
   and as HLG, and scores the result against the references in `tools/l1_diff/corpus`. A change

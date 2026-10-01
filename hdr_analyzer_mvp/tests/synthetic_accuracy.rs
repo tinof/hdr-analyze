@@ -802,4 +802,14 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
             "scene avg_luma_pq_12bit {avg_code} != DV 8.4 reference {expected_luma}"
         );
     }
+
+    // A flat frame: MaxCLL and MaxFALL are both the patch's max-RGB light level.
+    let expected_nits = pq_to_nits(expected_max_rgb / 4095.0);
+    for field in ["max_cll_nits", "max_fall_nits"] {
+        let nits = sidecar["light_level"][field].as_f64().expect(field);
+        assert!(
+            (nits - expected_nits).abs() <= 1.0,
+            "light_level.{field} {nits} != {expected_nits:.1} nits"
+        );
+    }
 }
