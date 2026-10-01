@@ -4,7 +4,9 @@
 //! launch per analyzed frame produces the v5 luminance histogram, hue histogram,
 //! a 4096-bin PQ histogram in the selected peak domain, true per-pixel luma /
 //! max-RGB means, and domain peaks. Only a few KB of results are downloaded per
-//! frame. The grain-robust (`robust`) peak estimator needs the cross-quad diff
+//! frame. NVDEC frames in the shared primary context are analyzed in place
+//! (`analyze_device`); other frames are uploaded from host memory (`analyze`).
+//! The grain-robust (`robust`) peak estimator needs the cross-quad diff
 //! histogram and stays CPU-only; the pipeline never routes it here.
 
 use anyhow::{anyhow, Result};
@@ -34,12 +36,25 @@ const PQ_HIST_BASE: usize = LUMINANCE_BINS + HUE_BINS;
 const MAX_LUMA_WORD: usize = PQ_HIST_BASE + PQ_BINS;
 #[cfg(feature = "cuda")]
 const MAX_RGB_WORD: usize = MAX_LUMA_WORD + 1;
-#[cfg(feature = "cuda")]
-const COUNT_WORDS: usize = MAX_RGB_WORD + 1;
-#[cfg(feature = "cuda")]
+// Result buffer layout; must match kernels.cu. The u64 sums start at u32 word SUMS_WORD,
+// one padding word after the counts so they are 8-byte aligned.
+#[cfg(any(feature = "cuda", test))]
+const SUMS_WORD: usize = 4386;
+#[cfg(any(feature = "cuda", test))]
 const SUM_WORDS: usize = 3;
+#[cfg(any(feature = "cuda", test))]
+const RESULT_WORDS: usize = SUMS_WORD + 2 * SUM_WORDS;
+#[cfg(feature = "cuda")]
+const _: () = assert!(SUMS_WORD == MAX_RGB_WORD + 2 && SUMS_WORD % 2 == 0);
 #[cfg(feature = "cuda")]
 const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
+/// Threads per block, a multiple of the warp size (the kernel's warp reductions rely on it).
+#[cfg(feature = "cuda")]
+const BLOCK_THREADS: u32 = 256;
+/// Grid-stride blocks per SM: enough resident warps to hide latency while the per-block
+/// shared-histogram clear and flush stay a small fraction of the work.
+#[cfg(feature = "cuda")]
+const BLOCKS_PER_SM: u32 = 8;
 
 // `dovi_params` layout; must match the DOVI_* defines in kernels.cu.
 #[cfg(any(feature = "cuda", test))]
@@ -58,6 +73,20 @@ const DOVI_CHROMA_CLAMP: usize = DOVI_CHROMA_OFFSET + 2;
 const DOVI_SOURCE_RANGE: usize = DOVI_CHROMA_CLAMP + 2;
 #[cfg(any(feature = "cuda", test))]
 const DOVI_PARAM_WORDS: usize = DOVI_SOURCE_RANGE + 2;
+
+/// The u64 sums the kernel writes after the counts, read back from the u32 result words.
+#[cfg(any(feature = "cuda", test))]
+fn result_sums(results: &[u32]) -> [u64; SUM_WORDS] {
+    std::array::from_fn(|index| {
+        let low = results[SUMS_WORD + 2 * index];
+        let high = results[SUMS_WORD + 2 * index + 1];
+        if cfg!(target_endian = "little") {
+            u64::from(low) | (u64::from(high) << 32)
+        } else {
+            (u64::from(low) << 32) | u64::from(high)
+        }
+    })
+}
 
 #[cfg(any(feature = "cuda", test))]
 fn pq_for_code(code: i32, transfer_function: TransferFunction) -> f64 {
@@ -118,10 +147,12 @@ fn build_luminance_bin_lut(transfer_function: TransferFunction) -> Vec<u16> {
 mod backend {
     use std::sync::Arc;
 
+    use cudarc::driver::sys::{self, CUctx_flags, CUdevice_attribute, CUresult};
     use cudarc::driver::{
-        CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg,
+        CudaContext, CudaFunction, CudaSlice, CudaStream, DevicePtr, LaunchConfig, PushKernelArg,
     };
     use cudarc::nvrtc::compile_ptx;
+    use ffmpeg_next::ffi;
     use libloading::Library;
     use madvr_parse::MadVRFrame;
 
@@ -129,6 +160,72 @@ mod backend {
     use crate::analysis::frame::FramePeakStats;
     use crate::cli::{PeakDomain, PeakEstimator};
     use crate::l1_sidecar::FrameL1Measurement;
+
+    /// Leading fields of FFmpeg's `AVCUDADeviceContext` (hwcontext_cuda.h), unchanged since
+    /// FFmpeg 4. Mirrored locally because ffmpeg-sys only binds that header when the CUDA
+    /// headers are present at build time.
+    #[repr(C)]
+    struct CudaDeviceContextHead {
+        cuda_ctx: sys::CUcontext,
+        stream: sys::CUstream,
+    }
+
+    /// Device pointers and pitches of one frame's planes as the kernel reads them.
+    struct Planes {
+        y: u64,
+        u: u64,
+        v: u64,
+        y_stride: i32,
+        u_stride: i32,
+        v_stride: i32,
+        layout: i32,
+        width: i32,
+        height: i32,
+    }
+
+    fn check(result: CUresult, call: &str) -> Result<()> {
+        if result == CUresult::CUDA_SUCCESS {
+            Ok(())
+        } else {
+            Err(anyhow!("{call} failed: {result:?}"))
+        }
+    }
+
+    /// Make device 0's primary context usable by both cudarc and FFmpeg's NVDEC decoder.
+    ///
+    /// FFmpeg opens the decoder with `AV_CUDA_USE_PRIMARY_CONTEXT`, which requires the primary
+    /// context to carry exactly `CU_CTX_SCHED_BLOCKING_SYNC`, and CUDA only allows setting
+    /// the flags while the context is inactive. This must therefore run before cudarc
+    /// retains the context, and `GpuAnalyzer::new` must run before the decoder is opened.
+    fn prepare_primary_context() -> Result<()> {
+        let wanted = CUctx_flags::CU_CTX_SCHED_BLOCKING_SYNC as u32;
+        // SAFETY: plain driver API calls on out-parameters owned by this frame; the driver
+        // library was loaded and validated by `load_cuda_libraries`.
+        unsafe {
+            check(sys::cuInit(0), "cuInit")?;
+            let mut device = 0;
+            check(sys::cuDeviceGet(&mut device, 0), "cuDeviceGet")?;
+            let mut flags = 0u32;
+            let mut active = 0i32;
+            check(
+                sys::cuDevicePrimaryCtxGetState(device, &mut flags, &mut active),
+                "cuDevicePrimaryCtxGetState",
+            )?;
+            if flags == wanted {
+                return Ok(());
+            }
+            if active != 0 {
+                return Err(anyhow!(
+                    "the CUDA primary context is already active with flags {flags:#x}, \
+                     which the shared NVDEC decoder cannot use"
+                ));
+            }
+            check(
+                sys::cuDevicePrimaryCtxSetFlags_v2(device, wanted),
+                "cuDevicePrimaryCtxSetFlags",
+            )
+        }
+    }
 
     pub struct GpuAnalyzer {
         _cuda_driver: Library,
@@ -138,8 +235,10 @@ mod backend {
         transfer_lut: CudaSlice<f32>,
         luminance_bin_lut: CudaSlice<u16>,
         dovi_params: CudaSlice<f32>,
-        counts: CudaSlice<u32>,
-        sums: CudaSlice<u64>,
+        results: CudaSlice<u32>,
+        results_host: Vec<u32>,
+        max_blocks: u32,
+        faulted: bool,
         y_plane: Option<CudaSlice<u8>>,
         u_plane: Option<CudaSlice<u8>>,
         v_plane: Option<CudaSlice<u8>>,
@@ -200,6 +299,7 @@ mod backend {
             // cudarc's dynamic loader panics when a library is wholly absent. Probe with
             // libloading first so `--hwaccel cuda` can reliably fall back to CPU.
             let (cuda_driver, nvrtc) = Self::load_cuda_libraries()?;
+            prepare_primary_context()?;
             let context = CudaContext::new(0)
                 .map_err(|err| anyhow!("failed to open CUDA device 0: {err:?}"))?;
             let stream = context.default_stream();
@@ -220,12 +320,13 @@ mod backend {
             let dovi_params = stream
                 .clone_htod(&build_dovi84_params())
                 .map_err(|err| anyhow!("failed to upload DV 8.4 decode parameters: {err:?}"))?;
-            let counts = stream
-                .alloc_zeros::<u32>(COUNT_WORDS)
-                .map_err(|err| anyhow!("failed to allocate CUDA count buffer: {err:?}"))?;
-            let sums = stream
-                .alloc_zeros::<u64>(SUM_WORDS)
-                .map_err(|err| anyhow!("failed to allocate CUDA sum buffer: {err:?}"))?;
+            let results = stream
+                .alloc_zeros::<u32>(RESULT_WORDS)
+                .map_err(|err| anyhow!("failed to allocate CUDA result buffer: {err:?}"))?;
+            let sm_count = context
+                .attribute(CUdevice_attribute::CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
+                .map_err(|err| anyhow!("failed to query the CUDA SM count: {err:?}"))?;
+            let max_blocks = u32::try_from(sm_count).unwrap_or(1).max(1) * BLOCKS_PER_SM;
 
             Ok(Self {
                 _cuda_driver: cuda_driver,
@@ -235,8 +336,10 @@ mod backend {
                 transfer_lut,
                 luminance_bin_lut,
                 dovi_params,
-                counts,
-                sums,
+                results,
+                results_host: vec![0; RESULT_WORDS],
+                max_blocks,
+                faulted: false,
                 y_plane: None,
                 u_plane: None,
                 v_plane: None,
@@ -267,6 +370,156 @@ mod backend {
             Ok(())
         }
 
+        fn reject_cpu_only(options: &FrameAnalysisOptions<'_>) -> Result<()> {
+            if options.peak_estimator == PeakEstimator::Robust {
+                return Err(anyhow!(
+                    "the grain-robust peak estimator is CPU-only (needs the cross-quad diff histogram)"
+                ));
+            }
+            Ok(())
+        }
+
+        fn device_address(slot: &Option<CudaSlice<u8>>, stream: &CudaStream) -> u64 {
+            slot.as_ref().map_or(0, |slice| slice.device_ptr(stream).0)
+        }
+
+        /// Why an NVDEC frame cannot be analyzed in place, or `None` when it can.
+        pub fn device_frame_ineligibility(&self, frame: &frame::Video) -> Option<&'static str> {
+            self.device_planes(frame).err()
+        }
+
+        /// The plane pointers of an `AV_PIX_FMT_CUDA` frame, plus FFmpeg's CUDA stream.
+        ///
+        /// Accepted only for a P010 surface in this analyzer's own CUDA context: a frame from
+        /// another context (hevc_cuvid, a reinitialized decoder) holds pointers that are not
+        /// valid here and goes through the host-download path instead.
+        fn device_planes(
+            &self,
+            frame: &frame::Video,
+        ) -> std::result::Result<(Planes, sys::CUstream), &'static str> {
+            // SAFETY: `frame` owns a live AVFrame; the pointer is only read below.
+            let raw = unsafe { frame.as_ptr() };
+            // SAFETY: `raw` is a live AVFrame. For AV_PIX_FMT_CUDA frames FFmpeg guarantees a
+            // valid hw_frames_ctx whose AVHWFramesContext and AVHWDeviceContext outlive the
+            // frame; every pointer is null-checked before it is dereferenced. The plane
+            // pointers are only read as integers, never dereferenced on the host.
+            unsafe {
+                if (*raw).format != ffi::AVPixelFormat::AV_PIX_FMT_CUDA as i32 {
+                    return Err("not a CUDA frame");
+                }
+                let frames_ref = (*raw).hw_frames_ctx;
+                if frames_ref.is_null() || (*frames_ref).data.is_null() {
+                    return Err("the frame has no CUDA frames context");
+                }
+                let frames = (*frames_ref).data as *const ffi::AVHWFramesContext;
+                if (*frames).sw_format != ffi::AVPixelFormat::AV_PIX_FMT_P010LE {
+                    return Err("the decoder surface is not P010 (8-bit or 12-bit source)");
+                }
+                let device = (*frames).device_ctx;
+                if device.is_null()
+                    || (*device).type_ != ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA
+                    || (*device).hwctx.is_null()
+                {
+                    return Err("the frame has no CUDA device context");
+                }
+                let cuda = (*device).hwctx as *const CudaDeviceContextHead;
+                if (*cuda).cuda_ctx != self.stream.context().cu_ctx() {
+                    return Err("the decoder runs in a different CUDA context");
+                }
+                let (width, height) = ((*raw).width, (*raw).height);
+                let (y_stride, uv_stride) = ((*raw).linesize[0], (*raw).linesize[1]);
+                let (y, uv) = ((*raw).data[0] as u64, (*raw).data[1] as u64);
+                if y == 0 || uv == 0 {
+                    return Err("the frame is missing a plane");
+                }
+                // P010: 2 bytes per luma sample, interleaved 2-byte Cb/Cr at half width.
+                if width <= 0 || height <= 0 || y_stride < width * 2 || uv_stride < width * 2 {
+                    return Err("unexpected P010 plane geometry");
+                }
+                Ok((
+                    Planes {
+                        y,
+                        u: uv,
+                        v: 0,
+                        y_stride,
+                        u_stride: uv_stride,
+                        v_stride: 0,
+                        layout: 1,
+                        width,
+                        height,
+                    },
+                    (*cuda).stream,
+                ))
+            }
+        }
+
+        /// Analyze an NVDEC frame where the decoder left it, without a host round trip.
+        ///
+        /// The caller keeps `frame` referenced until this returns; the result download at the
+        /// end synchronizes the kernel that reads it.
+        pub fn analyze_device(
+            &mut self,
+            frame: &frame::Video,
+            crop_rect: &CropRect,
+            sample_stride: u32,
+            options: &FrameAnalysisOptions<'_>,
+        ) -> Result<AnalyzedFrame> {
+            Self::reject_cpu_only(options)?;
+            let (planes, producer) = self
+                .device_planes(frame)
+                .map_err(|reason| anyhow!("NVDEC frame not usable in place: {reason}"))?;
+            let sample_count = Self::sample_count(crop_rect, sample_stride)?;
+            let result = self.wait_for_producer(producer).and_then(|()| {
+                self.launch_and_collect(&planes, crop_rect, sample_stride, sample_count, options)
+            });
+            self.record_fault(result)
+        }
+
+        /// FFmpeg's default producer stream is NULL, the legacy default stream: this analyzer
+        /// launches on it too, so the kernel is ordered after NVDEC's surface copy. A non-NULL
+        /// producer stream is synchronized explicitly.
+        fn wait_for_producer(&self, producer: sys::CUstream) -> Result<()> {
+            if producer.is_null() {
+                return Ok(());
+            }
+            self.stream
+                .context()
+                .bind_to_thread()
+                .map_err(|err| anyhow!("failed to bind the CUDA context: {err:?}"))?;
+            // SAFETY: `producer` is FFmpeg's live stream in this same context.
+            check(
+                unsafe { sys::cuStreamSynchronize(producer) },
+                "cuStreamSynchronize",
+            )
+        }
+
+        /// Whether a CUDA call has failed. The NVDEC decoder shares this context, so after a
+        /// fault neither its frames nor a download of them can be trusted: FFmpeg's CUDA
+        /// transfer can report success after a failed copy.
+        pub fn context_faulted(&self) -> bool {
+            self.faulted
+        }
+
+        /// Every error from the CUDA part of an analysis is a CUDA API failure; validation
+        /// that precedes it (options, frame format, crop) returns before this point.
+        fn record_fault<T>(&mut self, result: Result<T>) -> Result<T> {
+            if result.is_err() {
+                self.faulted = true;
+            }
+            result
+        }
+
+        fn sample_count(crop_rect: &CropRect, sample_stride: u32) -> Result<i32> {
+            let stride = sample_stride.max(1) as i32;
+            let sample_width = (crop_rect.width as i32 + stride - 1) / stride;
+            let sample_height = (crop_rect.height as i32 + stride - 1) / stride;
+            let sample_count = sample_width.saturating_mul(sample_height);
+            if sample_count <= 0 {
+                return Err(anyhow!("crop rectangle produced no samples"));
+            }
+            Ok(sample_count)
+        }
+
         pub fn analyze(
             &mut self,
             frame: &frame::Video,
@@ -274,11 +527,7 @@ mod backend {
             sample_stride: u32,
             options: &FrameAnalysisOptions<'_>,
         ) -> Result<AnalyzedFrame> {
-            if options.peak_estimator == PeakEstimator::Robust {
-                return Err(anyhow!(
-                    "the grain-robust peak estimator is CPU-only (needs the cross-quad diff histogram)"
-                ));
-            }
+            Self::reject_cpu_only(options)?;
 
             let layout = match frame.format() {
                 format::Pixel::YUV420P10LE => 0i32,
@@ -289,7 +538,14 @@ mod backend {
                     ));
                 }
             };
+            let sample_count = Self::sample_count(crop_rect, sample_stride)?;
+            let result = self.upload_host_planes(frame, layout).and_then(|planes| {
+                self.launch_and_collect(&planes, crop_rect, sample_stride, sample_count, options)
+            });
+            self.record_fault(result)
+        }
 
+        fn upload_host_planes(&mut self, frame: &frame::Video, layout: i32) -> Result<Planes> {
             let y_host = frame.data(0);
             let u_host = frame.data(1);
             let v_host = if layout == 0 { frame.data(2) } else { &[] };
@@ -312,38 +568,46 @@ mod backend {
                     &mut self.v_capacity,
                     v_host,
                 )?;
-            } else if self.v_plane.is_none() {
-                self.v_plane =
-                    Some(self.stream.alloc_zeros::<u8>(1).map_err(|err| {
-                        anyhow!("failed to allocate CUDA sentinel plane: {err:?}")
-                    })?);
-                self.v_capacity = 1;
             }
 
-            self.stream
-                .memset_zeros(&mut self.counts)
-                .map_err(|err| anyhow!("failed to clear CUDA count buffer: {err:?}"))?;
-            self.stream
-                .memset_zeros(&mut self.sums)
-                .map_err(|err| anyhow!("failed to clear CUDA sum buffer: {err:?}"))?;
+            // Uploads, launch and download all run on `self.stream`, so passing raw addresses
+            // (outside cudarc's per-slice event tracking) keeps them ordered.
+            Ok(Planes {
+                y: Self::device_address(&self.y_plane, &self.stream),
+                u: Self::device_address(&self.u_plane, &self.stream),
+                // P010 has no separate V plane; the kernel never reads it for layout 1.
+                v: if layout == 0 {
+                    Self::device_address(&self.v_plane, &self.stream)
+                } else {
+                    0
+                },
+                y_stride: frame.stride(0) as i32,
+                u_stride: frame.stride(1) as i32,
+                v_stride: if layout == 0 {
+                    frame.stride(2) as i32
+                } else {
+                    0
+                },
+                layout,
+                width: frame.width() as i32,
+                height: frame.height() as i32,
+            })
+        }
 
+        /// The CUDA part of an analysis: launch, download, synchronize, then parse on the host.
+        fn launch_and_collect(
+            &mut self,
+            planes: &Planes,
+            crop_rect: &CropRect,
+            sample_stride: u32,
+            sample_count: i32,
+            options: &FrameAnalysisOptions<'_>,
+        ) -> Result<AnalyzedFrame> {
             let stride = sample_stride.max(1) as i32;
-            let sample_width = (crop_rect.width as i32 + stride - 1) / stride;
-            let sample_height = (crop_rect.height as i32 + stride - 1) / stride;
-            let sample_count = sample_width.saturating_mul(sample_height);
-            if sample_count <= 0 {
-                return Err(anyhow!("crop rectangle produced no samples"));
-            }
+            self.stream
+                .memset_zeros(&mut self.results)
+                .map_err(|err| anyhow!("failed to clear CUDA result buffer: {err:?}"))?;
 
-            let width = frame.width() as i32;
-            let height = frame.height() as i32;
-            let y_stride = frame.stride(0) as i32;
-            let u_stride = frame.stride(1) as i32;
-            let v_stride = if layout == 0 {
-                frame.stride(2) as i32
-            } else {
-                0
-            };
             let crop_x = crop_rect.x as i32;
             let crop_y = crop_rect.y as i32;
             let crop_width = crop_rect.width as i32;
@@ -351,45 +615,52 @@ mod backend {
             let dovi84_rgb = i32::from(options.transfer_function == TransferFunction::Hlg);
             let peak_is_max_rgb = i32::from(options.peak_domain == PeakDomain::MaxRgb);
             let cfg = LaunchConfig {
-                grid_dim: ((sample_count as u32).div_ceil(256), 1, 1),
-                block_dim: (256, 1, 1),
+                grid_dim: (
+                    (sample_count as u32)
+                        .div_ceil(BLOCK_THREADS)
+                        .min(self.max_blocks),
+                    1,
+                    1,
+                ),
+                block_dim: (BLOCK_THREADS, 1, 1),
                 shared_mem_bytes: 0,
             };
             let mut launch = self.stream.launch_builder(&self.kernel);
             launch
-                .arg(self.y_plane.as_ref().expect("Y plane uploaded"))
-                .arg(self.u_plane.as_ref().expect("U/UV plane uploaded"))
-                .arg(self.v_plane.as_ref().expect("V/sentinel plane uploaded"))
+                .arg(&planes.y)
+                .arg(&planes.u)
+                .arg(&planes.v)
                 .arg(&self.transfer_lut)
                 .arg(&self.luminance_bin_lut)
                 .arg(&self.dovi_params)
-                .arg(&mut self.counts)
-                .arg(&mut self.sums)
-                .arg(&width)
-                .arg(&height)
-                .arg(&y_stride)
-                .arg(&u_stride)
-                .arg(&v_stride)
+                .arg(&mut self.results)
+                .arg(&planes.width)
+                .arg(&planes.height)
+                .arg(&planes.y_stride)
+                .arg(&planes.u_stride)
+                .arg(&planes.v_stride)
                 .arg(&crop_x)
                 .arg(&crop_y)
                 .arg(&crop_width)
                 .arg(&crop_height)
                 .arg(&stride)
-                .arg(&layout)
+                .arg(&planes.layout)
                 .arg(&sample_count)
                 .arg(&dovi84_rgb)
                 .arg(&peak_is_max_rgb);
             unsafe { launch.launch(cfg) }
                 .map_err(|err| anyhow!("CUDA analysis launch failed: {err:?}"))?;
 
-            let counts = self
-                .stream
-                .clone_dtoh(&self.counts)
-                .map_err(|err| anyhow!("failed to download CUDA analysis counts: {err:?}"))?;
-            let sums = self
-                .stream
-                .clone_dtoh(&self.sums)
-                .map_err(|err| anyhow!("failed to download CUDA analysis sums: {err:?}"))?;
+            self.stream
+                .memcpy_dtoh(&self.results, &mut self.results_host)
+                .map_err(|err| anyhow!("failed to download CUDA analysis results: {err:?}"))?;
+            // A copy into pageable memory normally completes before returning, but CUDA does
+            // not promise it; the results, and the caller's frame, are only safe after this.
+            self.stream
+                .synchronize()
+                .map_err(|err| anyhow!("CUDA analysis did not complete: {err:?}"))?;
+            let counts = &self.results_host[..SUMS_WORD];
+            let sums = result_sums(&self.results_host);
 
             let pixel_count = sums[2];
             let mut lum_histogram = vec![0.0f64; LUMINANCE_BINS];
@@ -492,6 +763,24 @@ impl GpuAnalyzer {
             "CUDA analysis is unavailable because this binary was built without --features cuda"
         ))
     }
+
+    pub fn device_frame_ineligibility(&self, _frame: &frame::Video) -> Option<&'static str> {
+        Some("this binary was built without --features cuda")
+    }
+
+    pub fn context_faulted(&self) -> bool {
+        false
+    }
+
+    pub fn analyze_device(
+        &mut self,
+        frame: &frame::Video,
+        crop_rect: &CropRect,
+        sample_stride: u32,
+        options: &FrameAnalysisOptions<'_>,
+    ) -> Result<AnalyzedFrame> {
+        self.analyze(frame, crop_rect, sample_stride, options)
+    }
 }
 
 #[cfg(test)]
@@ -585,6 +874,39 @@ mod tests {
                     assert_eq!(cpu.to_bits(), kernel.to_bits(), "codes ({y}, {cb}, {cr})");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn result_sums_read_the_kernels_u64_words() {
+        let mut results = vec![0u32; RESULT_WORDS];
+        let expected = [u64::MAX - 5, 1u64 << 32, 8_294_400];
+        for (index, value) in expected.iter().enumerate() {
+            let bytes = value.to_ne_bytes();
+            let offset = SUMS_WORD + 2 * index;
+            results[offset] = u32::from_ne_bytes(bytes[..4].try_into().unwrap());
+            results[offset + 1] = u32::from_ne_bytes(bytes[4..].try_into().unwrap());
+        }
+        assert_eq!(result_sums(&results), expected);
+    }
+
+    #[test]
+    fn f32_fixed_point_matches_the_former_f64_conversion() {
+        // The kernel now computes truncate(x * 2^32) in f32; the scale is a power of two,
+        // so the product is exact and equals the old f64 path for every x in [0, 1].
+        let check = |x: f32| {
+            let old = (f64::from(x) * 4_294_967_296.0) as u64;
+            let new = (x * 4_294_967_296.0_f32) as u64;
+            assert_eq!(old, new, "x = {x:e}");
+        };
+        for x in [0.0, f32::MIN_POSITIVE, 1.0e-30, 0.5, 0.999_999_94, 1.0] {
+            check(x);
+        }
+        for lut in [
+            build_transfer_lut(TransferFunction::Pq),
+            build_transfer_lut(TransferFunction::Hlg),
+        ] {
+            lut.into_iter().for_each(check);
         }
     }
 

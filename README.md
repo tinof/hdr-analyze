@@ -4,16 +4,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-blue.svg)](https://github.com/rust-lang/rust)
 
-HDR-Analyze measures HDR10 and HDR10+ video and converts it to Dolby Vision Profile 8.1 without re-encoding the picture.
+HDR-Analyze measures HDR10, HDR10+ and HLG video and converts it to Dolby Vision (Profile 8.1, or 8.4 for HLG) without re-encoding the picture.
 
-HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.5.0.
+HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.5.1.
 
 ## What you get
 
 - HDR10 and HDR10+ files become Profile 8.1 MKVs, and HLG files become Profile 8.4 MKVs. In both cases the video stream is copied, not re-encoded. Only Profile 7 FEL sources take a re-encode path (see the table below).
 - An open-source analysis engine that measures decoded pixels and writes per-scene L1 plus L2, L6, L9 and L11 metadata. `dovi_tool` generates and injects the RPU.
 - Direct analysis of the compressed source. You do not need a ProRes or raw intermediate.
-- Optional NVDEC decode and CUDA analysis, at approximately 12× the analysis throughput of this project's CPU path on the tested configuration ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
+- Optional NVDEC decode and CUDA analysis that works on the decoded frames in GPU memory: about 325 fps (4K HDR10) and 490 fps (4K HLG) end to end on an RTX 4070 ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
 - Published validation against synthetic references and Dolby-generated metadata, including an open gap on grainy content ([docs/VALIDATION.md](docs/VALIDATION.md)).
 
 It also reuses existing HDR10+ metadata, audits RPUs with `mkvdovi inspect`, rebuilds metadata on existing Dolby Vision files with `--mdfix`, and runs on the CPU under Linux, macOS and Windows.
@@ -58,13 +58,13 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 | HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; playback unvalidated |
 | Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
 | Dolby Vision Profile 7 FEL | Profile 8.1 from composited BL+EL | Yes | Experimental, unvalidated |
-| Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
+| Profile 8.1 or MEL with `--mdfix` (Profile 8.4 is refused) | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
 
 Flag-level detail is in [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md) and [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
 
 ## Performance and validation
 
-On an RTX 4070 with a 4K source, CUDA analysis ran at 213 fps against 17 fps for the CPU path, with identical L1 output. Several test conditions were not recorded; [docs/PERFORMANCE.md](docs/PERFORMANCE.md) lists them and gives a reproduction recipe.
+On an RTX 4070, CUDA analysis of 4K sources runs at about 325 fps (HDR10) and 490 fps (HLG), counted as frames ÷ wall time of the whole analyzer run, with L1 output identical to earlier builds. [docs/PERFORMANCE.md](docs/PERFORMANCE.md) records the test conditions and gives a reproduction recipe, and [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md) explains how the GPU path reaches these rates.
 
 On synthetic patterns, measured peaks land within 0.25 of one 12-bit PQ code. On an asset with Dolby-generated reference metadata, max-RGB peaks read 12.8 codes high on average. HDR10+-derived L1 matched Dolby's v4 analyzer with a per-shot median error of 1 code (max 17), and scene detection matched 13 of 14 authored cuts while emitting 24 cuts in total.
 
@@ -102,6 +102,7 @@ These files ship in each release archive next to this README. They are also [onl
 - [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md): conversion paths, HDR10+ mapping, `--verify`
 - [docs/VALIDATION.md](docs/VALIDATION.md): accuracy measurements and method
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md): benchmark record and how to reproduce it
+- [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md): how the GPU path works and how it was made fast
 - [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md): known analysis gaps
 - [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md): analyzer internals
 - [docs/PROVENANCE.md](docs/PROVENANCE.md): what the implementation is derived from

@@ -100,8 +100,11 @@ pub fn probe_crop(input_path: &str, probe_count: u32, downscale: u32) -> Result<
         start => start,
     };
     let stream_duration = video_stream.duration();
-    let decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
+    let mut decoder_context = codec::context::Context::from_parameters(video_stream.parameters())
         .context("failed to create crop probe decoder context")?;
+    // Each probe decodes from the preceding keyframe; with long GOPs that is hundreds of 4K
+    // frames, and libavcodec defaults to a single thread.
+    set_automatic_thread_count(&mut decoder_context);
 
     let duration = if stream_duration != ffmpeg::ffi::AV_NOPTS_VALUE && stream_duration > 0 {
         stream_duration
@@ -169,39 +172,58 @@ pub fn probe_crop(input_path: &str, probe_count: u32, downscale: u32) -> Result<
         let mut decoded_after_target = 0usize;
         let mut candidate = None;
 
-        'packets: for (stream, packet) in input_context.packets() {
-            if stream.index() != stream_index {
-                continue;
-            }
-
-            decoder
-                .send_packet(&packet)
-                .context("failed to send crop probe packet to decoder")?;
-
-            while decoder.receive_frame(&mut decoded_frame).is_ok() {
-                if decoded_frame
+        {
+            // Returns true once this probe is finished: a usable frame, or the frame limit.
+            let mut consider = |decoded: &frame::Video| -> Result<bool> {
+                if decoded
                     .timestamp()
                     .is_some_and(|timestamp| timestamp < target)
                 {
-                    continue;
+                    return Ok(false);
                 }
 
                 decoded_after_target += 1;
                 let analysis_frame = if let Some(ref mut scaler) = scaler {
                     scaler
-                        .run(&decoded_frame, &mut scaled_frame)
+                        .run(decoded, &mut scaled_frame)
                         .context("failed to scale crop probe frame")?;
                     &scaled_frame
                 } else {
-                    &decoded_frame
+                    decoded
                 };
 
                 if is_frame_usable_for_crop(analysis_frame) {
                     candidate = Some(detect_crop(analysis_frame));
-                    break 'packets;
+                    return Ok(true);
                 }
-                if decoded_after_target >= MAX_DECODED_FRAMES_PER_PROBE {
-                    break 'packets;
+                Ok(decoded_after_target >= MAX_DECODED_FRAMES_PER_PROBE)
+            };
+
+            let mut finished = false;
+            'packets: for (stream, packet) in input_context.packets() {
+                if stream.index() != stream_index {
+                    continue;
+                }
+
+                decoder
+                    .send_packet(&packet)
+                    .context("failed to send crop probe packet to decoder")?;
+
+                while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                    if consider(&decoded_frame)? {
+                        finished = true;
+                        break 'packets;
+                    }
+                }
+            }
+
+            // End of file: the decoder still holds its last frames (reordering delay, and more
+            // with frame threading) until it is drained. The next probe's flush resets it.
+            if !finished && decoder.send_eof().is_ok() {
+                while decoder.receive_frame(&mut decoded_frame).is_ok() {
+                    if consider(&decoded_frame)? {
+                        break;
+                    }
                 }
             }
         }
@@ -550,6 +572,11 @@ fn set_automatic_thread_count(context: &mut codec::context::Context) {
     }
 }
 
+/// `AV_CUDA_USE_PRIMARY_CONTEXT` from hwcontext_cuda.h (public API, value stable since
+/// FFmpeg 4.4). Defined here because ffmpeg-sys binds that header only when the CUDA
+/// headers are present at build time.
+const AV_CUDA_USE_PRIMARY_CONTEXT: i32 = 1;
+
 unsafe extern "C" fn select_cuda_format(
     _context: *mut ffmpeg::ffi::AVCodecContext,
     formats: *const ffmpeg::ffi::AVPixelFormat,
@@ -618,13 +645,16 @@ fn open_cuda_hwdevice_decoder(parameters: &codec::Parameters) -> Result<codec::d
         let codec_context = context.as_mut_ptr();
         (*codec_context).get_format = Some(select_cuda_format);
 
+        // Share the device's primary context with the CUDA analyzer, so decoded surfaces
+        // can be analyzed in place (`GpuAnalyzer::analyze_device`). The analyzer is created
+        // first and sets the primary-context flags FFmpeg requires for this.
         let mut device_context = ptr::null_mut();
         let status = ffmpeg::ffi::av_hwdevice_ctx_create(
             &mut device_context,
             ffmpeg::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
             ptr::null(),
             ptr::null_mut(),
-            0,
+            AV_CUDA_USE_PRIMARY_CONTEXT,
         );
         if status < 0 || device_context.is_null() {
             if !device_context.is_null() {

@@ -6,6 +6,42 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-01
+
+### Performance
+
+- **CUDA analysis is about 2.5–3.9× faster end to end.** On an RTX 4070 with 4K sources, frames ÷
+  wall time went from 132 to about 325 fps (HDR10) and from 125 to about 490 fps (HLG), and the analyzer's CPU
+  use fell from about one full core to under two thirds of one. L1 output is identical to 0.5.0.
+  Measurements and conditions are in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+  - NVDEC frames are analyzed where the decoder leaves them. Before, every frame was downloaded to
+    host memory and uploaded again (~4.5 ms per 4K frame). The decoder and the analyzer now share
+    the device's primary CUDA context; a frame is downloaded only for scene-cut crop sampling,
+    fallback crop detection or CPU analysis. 8-bit and 12-bit sources fall back to CPU analysis as
+    before; frames from another CUDA context keep the download path. `HDR_ANALYZER_CUDA_HOST_FRAMES=1` forces it for comparisons.
+  - The analysis kernel takes 0.18 ms per 4K frame instead of 2.43 ms (HDR10; HLG 0.33 ms instead of
+    2.55 ms): a grid-stride loop with warp reductions replaces up to 32,400 blocks per 4K frame that each cleared and
+    flushed 4,383 shared histogram bins, and the fixed-point sums use exact f32 instead of f64.
+  - The crop probe decodes on all cores. It used libavcodec's default of one thread, which cost up
+    to a minute per run on long-GOP 4K sources. At the end of the file it now drains the decoder,
+    so short clips keep the frames a decoder holds back.
+  - **Behaviour change:** a failed CUDA call while decoding on NVDEC now stops the analysis with an
+    error instead of falling back, because the decoder shares the CUDA context and its later frames
+    can no longer be trusted. Rerun with `--hwaccel none`.
+  - How it works and how it was measured: [`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md).
+
+### Fixed
+
+- **`mkvdovi --verify` could hang forever on long files.** The helper that runs short external tools
+  kept their output pipes open without reading them, so a tool that printed more than 64 KB blocked.
+  The verifier hit this on a 1,263-scene episode. The same bug left those tools' log files empty;
+  they now contain the tools' output.
+- **Release binaries no longer depend on the build machine's CPU.** `.cargo/config.toml` sets
+  `-C target-cpu=native` for local builds, and the release workflow did not override it, so the
+  published binaries (releases up to 0.5.0) were compiled for whatever CPU the GitHub runner had and
+  could stop with an illegal-instruction error on a different CPU. The release and CI workflows
+  now build for the default baseline CPU. Source builds are unchanged.
+
 ## [0.5.0] - 2026-09-30
 
 ### Changed

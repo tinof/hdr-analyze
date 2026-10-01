@@ -43,7 +43,7 @@ trims are a separate, higher-risk tone-mapping problem.
 
 | Stage | Implementation | Current output |
 |-------|----------------|----------------|
-| Per-frame analysis | `hdr_analyzer_mvp/src/analysis/frame.rs` | Direct/percentile/grain-robust peak, true Y/max-RGB means, robust 4096-bin minimum, 256-bin luma histogram, 31-bin hue histogram |
+| Per-frame analysis | `hdr_analyzer_mvp/src/analysis/frame.rs` (CPU), `analysis/gpu.rs` + `analysis/kernels.cu` (CUDA), `analysis/hlg.rs` (HLG through the Profile 8.4 decode) | Direct/percentile/grain-robust peak, true Y/max-RGB means, robust 4096-bin minimum, 256-bin luma histogram, 31-bin hue histogram |
 | Peak selection | `analysis/frame.rs`, `analysis/histogram.rs` | Direct `max` (default), opt-in fine-histogram percentile or grain-robust max-RGB, or Y-based P99/P99.9 peak |
 | Active area | `crop.rs`, `ffmpeg_io.rs`, `pipeline.rs` | Multi-position crop probe with low-signal rejection, tolerance clustering, and conservative variable-AR union |
 | Scene detection | `analysis/scene.rs` | Histogram-distance cuts and minimum scene length |
@@ -59,7 +59,8 @@ Key facts:
   round did not reach the predeclared parity envelope. Histogram percentile sources and APL remain
   Y-based.
 - `avg_pq` is a full-precision per-pixel Y-luma mean over the active area. The sidecar also records a
-  measured max-RGB mean so validation can compare domains without changing the RPU definition.
+  measured max-RGB mean; the RPU's L1 average is that per-scene max-RGB mean, and the Y-luma mean
+  stays in the `.bin` and sidecar for diagnostics.
 - The analyzer measures a robust active-area minimum from a 4096-bin fine-PQ histogram after
   selected denoising. It defaults to P0.1; `--min-percentile 0` selects the absolute minimum.
 - `madvr_parse::MadVRFrame` has no minimum field, and `dovi_tool` hardcodes `min_pq = 0` for madVR
@@ -82,7 +83,7 @@ Key facts:
 
 | Level | Current state | Remaining gap | Roadmap |
 |-------|---------------|---------------|---------|
-| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias from +92.6 to +80.4 and from +74.4 to +66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms; HLG max-RGB | P2 / WS1 |
+| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias from +92.6 to +80.4 and from +74.4 to +66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms | P2 / WS1 |
 | **L1 avg** | Per-scene max-RGB mean delivered in the RPU (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar | Revisit when new validation evidence exists; cm v4's "avg" is an anchored constant, not a mean | WS1 |
 | **L1 min** | Noise-rejected active-area minimum delivered per scene in the RPU | Maintain validation coverage | WS1 |
 | **L4** | None; optimizer smooths madVR `target_nits`, not L1 | Shot-anchored L1 and optional temporal filtering | WS2 |
@@ -133,8 +134,8 @@ The robust minimum remains an unsmoothed spatial-percentile measurement.
 The sidecar minimum is P0.1 by default over the active area after selected denoising. Scene minimum is
 the minimum of the already noise-rejected per-frame values, so a real raised-black excursion remains
 visible while isolated dark pixels do not dominate. Synthetic tests cover a uniform 0.05-nit floor,
-sparse dark contamination, and the `--min-percentile 0` absolute-minimum control. This measured value
-is intentionally not wired into RPU generation yet.
+sparse dark contamination, and the `--min-percentile 0` absolute-minimum control. `mkvdovi` writes
+this measured value into each scene's L1 minimum.
 
 ### Active area and temporal stability
 
@@ -142,7 +143,7 @@ Multi-position crop probing fixes the former first-frame failure mode. Variable-
 currently use a conservative union so picture is never cut. Per-scene crop application remains a
 follow-up because changing the sample area can itself create measurement discontinuities.
 
-Scene cuts already exist, but L1 remains per-frame. Shot aggregation and optional L4-style anchoring
+L1 is emitted per scene, but there is no shot anchoring or L4-style temporal filtering yet. Shot aggregation and optional L4-style anchoring
 must be compared against reference shot boundaries and checked for pumping around cuts and fades.
 
 ### Trims

@@ -173,6 +173,21 @@ fn resolve_crop_rect(
     }
 }
 
+/// The frame in host memory: `decoded` itself, or its NVDEC surface downloaded once into
+/// `transferred` on first use. Never hand an `AV_PIX_FMT_CUDA` frame to host-side code.
+fn host_view<'a>(
+    decoded: &'a frame::Video,
+    transferred: &'a mut Option<frame::Video>,
+) -> Result<&'a frame::Video> {
+    if decoded.format() != format::Pixel::CUDA {
+        return Ok(decoded);
+    }
+    if transferred.is_none() {
+        *transferred = Some(transfer_hardware_frame(decoded)?);
+    }
+    Ok(transferred.as_ref().expect("transferred above"))
+}
+
 /// Sample crop stability at an accepted scene cut. Cuts landing on black/low-signal
 /// frames are counted as skipped instead of polluting the variable-AR telemetry.
 fn sample_scene_cut_crop(
@@ -703,6 +718,15 @@ fn run_native_analysis_pipeline(
     let mut last_l1_measurement: Option<FrameL1Measurement> = None;
     let mut last_peak_stats: Option<FramePeakStats> = None;
 
+    // In-place analysis of NVDEC frames (see GpuAnalyzer::analyze_device). The environment
+    // override forces the host-download path, for parity checks against in-place analysis.
+    let mut device_frames_blocked: Option<&'static str> =
+        std::env::var_os("HDR_ANALYZER_CUDA_HOST_FRAMES")
+            .map(|_| "HDR_ANALYZER_CUDA_HOST_FRAMES is set");
+    let mut device_path_reported = false;
+    let mut device_frames = 0u64;
+    let mut host_downloads = 0u64;
+
     let start_time = Instant::now();
 
     // Create progress bar
@@ -745,12 +769,8 @@ fn run_native_analysis_pipeline(
         let should_analyze = frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
 
         let (analyzed_frame, l1_measurement, peak_stats) = if should_analyze {
-            let transferred = if decoded_frame.format() == format::Pixel::CUDA {
-                Some(transfer_hardware_frame(decoded_frame)?)
-            } else {
-                None
-            };
-            let host_frame = transferred.as_ref().unwrap_or(decoded_frame);
+            // NVDEC frames are downloaded only when the host needs their pixels.
+            let mut transferred: Option<frame::Video> = None;
 
             let analysis_start = if cli.profile_performance {
                 Some(Instant::now())
@@ -761,9 +781,66 @@ fn run_native_analysis_pipeline(
             let mut gpu_output = None;
             let mut gpu_failed = false;
             if let Some(analyzer) = gpu_analyzer.as_mut() {
-                let rect = resolve_crop_rect(&mut crop_rect_opt, &mut crop_monitor, host_frame);
-                match analyzer.analyze(host_frame, &rect, downscale, analysis_options) {
+                let in_place = decoded_frame.format() == format::Pixel::CUDA
+                    && match device_frames_blocked
+                        .or_else(|| analyzer.device_frame_ineligibility(decoded_frame))
+                    {
+                        None => true,
+                        Some(reason) => {
+                            if !device_path_reported {
+                                println!(
+                                    "\nCUDA analysis downloads NVDEC frames to host memory: {reason}"
+                                );
+                                device_path_reported = true;
+                            }
+                            false
+                        }
+                    };
+                if in_place && !device_path_reported {
+                    println!("\nCUDA analysis on NVDEC device frames (no host round trip)");
+                    device_path_reported = true;
+                }
+                let rect = match crop_rect_opt {
+                    Some(rect) => rect,
+                    None => resolve_crop_rect(
+                        &mut crop_rect_opt,
+                        &mut crop_monitor,
+                        host_view(decoded_frame, &mut transferred)?,
+                    ),
+                };
+                let result = if in_place {
+                    device_frames += 1;
+                    match analyzer.analyze_device(decoded_frame, &rect, downscale, analysis_options)
+                    {
+                        Err(error) if !analyzer.context_faulted() => {
+                            // Rejected before any CUDA work, so the context is healthy and the
+                            // frame can still be downloaded and analyzed from host memory.
+                            eprintln!(
+                                "\nNVDEC frame {frame_count} was not analyzed in place ({error:#}); downloading frames to host memory from now on"
+                            );
+                            device_frames_blocked = Some("in-place analysis was rejected");
+                            let host = host_view(decoded_frame, &mut transferred)?;
+                            analyzer.analyze(host, &rect, downscale, analysis_options)
+                        }
+                        other => other,
+                    }
+                } else {
+                    let host = host_view(decoded_frame, &mut transferred)?;
+                    analyzer.analyze(host, &rect, downscale, analysis_options)
+                };
+                match result {
                     Ok(result) => gpu_output = Some((result, rect)),
+                    // A failed CUDA call can leave the context the NVDEC decoder shares unusable,
+                    // and FFmpeg's CUDA download can then report success for a failed copy. No
+                    // later frame can be trusted, so stop instead of falling back.
+                    Err(error)
+                        if analyzer.context_faulted()
+                            && decoded_frame.format() == format::Pixel::CUDA =>
+                    {
+                        return Err(error.context(format!(
+                            "CUDA analysis failed at frame {frame_count}; the NVDEC decoder shares this CUDA context, so the run stops. Rerun with --hwaccel none to analyze on the CPU"
+                        )));
+                    }
                     Err(error) => {
                         eprintln!(
                             "\nCUDA analysis failed at frame {frame_count} ({error:#}); switching to CPU analysis"
@@ -785,6 +862,7 @@ fn run_native_analysis_pipeline(
             let (frame_result, rect) = if let Some((result, rect)) = gpu_output {
                 (result, rect)
             } else {
+                let host_frame = host_view(decoded_frame, &mut transferred)?;
                 let needs_scaling =
                     host_frame.format() != format::Pixel::YUV420P10LE || downscale > 1;
                 let analysis_frame: &frame::Video = if needs_scaling {
@@ -803,12 +881,6 @@ fn run_native_analysis_pipeline(
             if let Some(start) = analysis_start {
                 analysis_duration += start.elapsed();
             }
-
-            let cut_sample_frame: &frame::Video = if used_gpu || !used_scaled {
-                host_frame
-            } else {
-                &scaled_frame
-            };
 
             // Scene detection on analyzed frames
             if let Some(ref prev_hist) = previous_histogram {
@@ -830,8 +902,20 @@ fn run_native_analysis_pipeline(
                 {
                     scene_cuts.push(frame_count);
                     last_cut_frame = frame_count;
-                    sample_scene_cut_crop(&mut crop_monitor, rect, cut_sample_frame);
+                    // Without crop monitoring (--no-crop) nothing reads the pixels, so an NVDEC
+                    // frame is not downloaded.
+                    if crop_monitor.is_some() {
+                        let cut_sample_frame: &frame::Video = if used_gpu || !used_scaled {
+                            host_view(decoded_frame, &mut transferred)?
+                        } else {
+                            &scaled_frame
+                        };
+                        sample_scene_cut_crop(&mut crop_monitor, rect, cut_sample_frame);
+                    }
                 }
+            }
+            if transferred.is_some() {
+                host_downloads += 1;
             }
             previous_histogram = Some(frame_result.frame.lum_histogram.clone());
             last_analyzed_frame = Some(copy_frame(&frame_result.frame));
@@ -881,6 +965,12 @@ fn run_native_analysis_pipeline(
 
     // Finalize progress display
     pb.finish_with_message("Complete");
+
+    if device_frames > 0 {
+        println!(
+            "CUDA in-place analysis: {device_frames} NVDEC frames; {host_downloads} downloaded to host memory (crop sampling or fallback)"
+        );
+    }
 
     if let Some(monitor) = crop_monitor {
         monitor.report();
