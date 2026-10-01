@@ -48,6 +48,30 @@ jobs:
       - name: cargo test (locked)
         run: cargo test --workspace --verbose
 
+  l1-regression:
+    name: L1 regression gate
+    runs-on: ubuntu-24.04
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            tools/l1_diff -> target
+      - uses: ./.github/actions/setup-ffmpeg
+      - name: Install the FFmpeg CLI (encodes the synthetic clip)
+        run: sudo apt-get install -y --no-install-recommends ffmpeg
+      # tools/l1_diff is outside the workspace, so the lint and test jobs do not cover it.
+      - name: l1_diff fmt, clippy, test
+        run: |
+          cargo fmt --manifest-path tools/l1_diff/Cargo.toml -- --check
+          cargo clippy --manifest-path tools/l1_diff/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path tools/l1_diff/Cargo.toml
+      - name: Score the synthetic corpus against the committed references
+        run: scripts/ci/l1-regression-gate.sh
+
   build:
     name: Build (xplat)
     runs-on: ${{ matrix.os }}

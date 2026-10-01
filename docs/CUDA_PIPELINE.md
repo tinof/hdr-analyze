@@ -182,6 +182,41 @@ fixed-point sums, and maxima of non-negative f32 values compared as bit patterns
 launch shape changes the order of those combinations, never their result. Keep it that way: a
 floating-point sum across threads would make the output depend on scheduling.
 
+## Automated parity gate
+
+`scripts/cuda-parity.sh` compares CPU analysis with CUDA analysis of the same build. Run it on the
+GPU host before every PR that touches `hdr_analyzer_mvp/src/analysis/`, `kernels.cu` or
+`ffmpeg_io.rs`. Hosted CI has no GPU, so nothing else runs this check.
+
+The script encodes the synthetic clip from `tools/l1_diff/corpus/make_corpus.py` (640x360, 144
+frames, six shots) as HEVC Main10 twice, once tagged PQ and once tagged HLG. It then runs
+`hdr_analyzer_mvp/tests/cuda_parity.rs` against a debug build with the `cuda` feature. For each
+clip, with crop detection and with `--no-crop`, the test runs `--hwaccel none` and `--hwaccel cuda`
+(both `--downscale 1 --disable-optimizer`) and requires:
+
+- byte-identical `.bin` files;
+- equal `crop`, `scenes` and `frames` in the two `.l1.json` sidecars;
+- `analysis.gpu` false for the CPU run and true for the CUDA run, so a CPU fallback fails the test;
+- `analysis.luminance_mapping` `pq` for the PQ clip and `dovi84-v2` for the HLG clip.
+
+The script fails when `nvidia-smi`, `python3` or an `ffmpeg` with `libx265` is missing, and the
+test fails when the analyzer was built without the `cuda` feature. `--pq <file>` and `--hlg <file>`
+replace a generated clip with a real HEVC 10-bit sample. Run with those options after a change to
+frame geometry or crop handling. A plain `cargo test` skips the test, because the clip variables
+are not set.
+
+What it does not prove:
+
+- The generated clips are small and synthetic, with no letterbox bars. They do not cover 4K
+  frames, real crops, odd pitches, or 8-bit and 12-bit sources.
+- It compares the CPU path with the GPU path of one build. It does not compare a build with the
+  previous build, so a change that moves both paths the same way passes. The manual check above
+  and `tools/l1_diff` cover that.
+- Only `--downscale 1` is compared. With `--downscale 2` or `4` the GPU samples the full-resolution
+  frame with a stride and the CPU resizes it, so the two outputs are not expected to match.
+- `--sample-rate` above 1, the forced download path (`HDR_ANALYZER_CUDA_HOST_FRAMES`) and CUDA
+  failures are not exercised.
+
 ## Rules for future changes
 
 - Keep the result-buffer layout (`SUMS_WORD` and the counts before it) and the `dovi_params` layout

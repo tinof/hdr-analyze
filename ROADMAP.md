@@ -12,7 +12,7 @@ Status meanings: **Open** has not shipped; **Partial** has useful pieces in plac
 the stated outcome; **Core complete** meets the original gate but retains named follow-up work;
 **Deferred** is intentionally not scheduled. Items with no follow-up left move to the changelog.
 
-## Current status (updated 2026-09-15)
+## Current status (updated 2026-10-01)
 
 The v0.3.0 release shipped the `mkvdolby` → `mkvdovi` rename, published measured accuracy in
 [`docs/VALIDATION.md`](docs/VALIDATION.md), and made PQ direct peaks default to BT.2020 NCL max-RGB.
@@ -22,6 +22,18 @@ contract, and FEL chroma fixes (see [`CHANGELOG.md`](CHANGELOG.md)).
 
 An external review on 2026-09-15 re-audited this inventory against the code. Its findings are folded
 into the tables and priorities below.
+
+v0.5.0 converts HLG to Profile 8.4 without re-encoding and measures HLG max-RGB on the full 8.4
+decode. v0.5.1 made CUDA analysis 2.5–3.9× faster with identical L1 output. Two consequences for
+the work below:
+
+- On a CUDA host `--analysis-quality auto` resolves to `accurate`, but `--peak-estimator robust`
+  and `--pre-denoise median3` run on the CPU only. A new estimator has to run on both backends
+  with identical results, or the hosts that use the fast path never get it.
+- Every measurement change is now checked by two gates before it merges: the L1 regression gate
+  in CI (`scripts/ci/l1-regression-gate.sh`) and, for changes to the analysis or decode path, the
+  local CPU/CUDA parity check (`scripts/cuda-parity.sh`). Hosted CI has no GPU, so the second one
+  is run by hand on a CUDA host.
 
 ## Development principles
 
@@ -44,8 +56,9 @@ into the tables and priorities below.
 | Priority | Work | IDs |
 |----------|------|-----|
 | **First milestone** | Dependable HDR10/HDR10+ → Profile 8.1: source-derived L1 on every path, L5 delivery, measurement and resume provenance, stronger completeness checks, input contract. Code landed 2026-09-15; a real-content end-to-end run is required before release. Source retention was reviewed and the current default (delete a non-DV source after success) is **kept by decision**. | P0, P1, P3, P7, E6, E7 |
-| **Second** | Final-RPU regression corpus and a written Shield/TV playback test procedure | WS6, E1 |
-| **Third** | Grain handling with spatial support and temporal persistence, robust shot aggregation, scene-boundary quality | WS1, WS2 |
+| **Second** | Regression gates: `l1_diff` limits in CI, CPU/CUDA parity check, final-RPU baseline capture. Landed 2026-10-01. | E1, WS0 |
+| **Third** | Grain handling with spatial support and temporal persistence, robust shot aggregation, unbiased scene averages, scene-boundary quality. Designed for CPU and CUDA together. A new estimator ships opt-in and becomes the default only after the `cm_analyze` v2 gate, the final-RPU comparison and a matched playback test all pass. | WS1, WS2 |
+| **Then** | Final-RPU regression corpus and a written Shield/TV playback test procedure. The corpus can grow while the third item is in progress; the playback procedure needs its candidate. | WS6 |
 | **Fourth** | Independent validation of FEL compositing; explicit FEL-discard mode | F1, F2 |
 | **Research track** | Small FEL metadata-fit feasibility experiment | R1 |
 | **Conditional** | Profile 5 through an established encoder, only if matched playback tests justify it | R2, WS5 |
@@ -57,7 +70,7 @@ scene detection (E4), and broader hardware acceleration (E5). Neutral trims stay
 
 | ID | Status | Work |
 |----|--------|------|
-| **P0** | **Core complete** | Measured per-scene L1 (minimum, max-RGB mean, maximum) reaches the RPU as explicit `dovi_tool generate` shots and bypasses optimizer targets. A missing, invalid, or mismatched sidecar re-runs analysis. The old `--madvr-file --use-custom-targets` generation, where L1 max follows optimizer `target_pq` and L1 avg is a placeholder, is reachable only through `--legacy-madvr-l1`. Remaining: a real-content run confirming the extracted RPU matches the sidecar. |
+| **P0** | **Core complete** | Measured per-scene L1 (minimum, max-RGB mean, maximum) reaches the RPU as explicit `dovi_tool generate` shots and bypasses optimizer targets. A missing, invalid, or mismatched sidecar re-runs analysis. The old `--madvr-file --use-custom-targets` generation, where L1 max follows optimizer `target_pq` and L1 avg is a placeholder, is reachable only through `--legacy-madvr-l1`. Checked 2026-10-01 on the final RPU of one real HDR10 clip (33 scenes), three real HLG clips (96 scenes) and the synthetic HDR10 clip: every scene's L1 equals the sidecar after `dovi_tool`'s spec limits (minimum at most 12, maximum at least 2081, average at least 819). |
 | **P1** | **Partial** | Source-honest generation is the default. Open: decide whether full-resolution every-frame analysis becomes the CPU default. Today `auto` resolves to `accurate` only with CUDA analysis and to `balanced` otherwise; measure the CPU cost first. |
 | **P3** | **Core complete** | L5 offsets come from the committed full-resolution crop (sidecar v2); sampled source L5 keeps precedence for Dolby Vision inputs. Open: changing aspect ratios need per-scene offsets, treated as a separate validation problem. |
 | **P4** | **Deferred** | Opt-in `--target-nits` display-targeted workflow wired into optimizer behavior. |
@@ -72,9 +85,9 @@ The detailed gap table and validation method live in
 
 | ID | Status | Work |
 |----|--------|------|
-| **WS0** | **Core complete** | `tools/l1_diff`, synthetic ground-truth tests, embedded-L1 comparison, and licensed `cm_analyze` scoring have shipped. Grow the corpus and add an automated `l1_diff` regression gate; the utility is currently excluded from workspace CI. |
-| **WS1** | **Partial** | Measurement core, measured-minimum delivery, and the max-RGB-mean average domain have shipped. Open: a grain-robust peak. Raw max-RGB reads +92.6 / +74.4 codes hot against `cm_analyze` v2; the opt-in robust estimator reached +80.4 / +66.4 and missed its promotion gate ([VALIDATION.md §7](docs/VALIDATION.md)). Investigate spatial support and temporal persistence together while preserving genuine small speculars; do not enable the current robust estimator by default. Also open: true target-gamut peaks and HLG max-RGB (would need the Profile 8.4 chroma MMR curves). |
-| **WS2** | **Partial** | Initial shot aggregation shipped: the shot maximum is the maximum of its frame peaks, so one retained grain spike can set a whole shot. Open: robust aggregation (investigated with WS1), an optional L4-style temporal filter, and hybrid scene detection promoted only after it beats histogram-only against reference boundaries. |
+| **WS0** | **Core complete** | `tools/l1_diff`, synthetic ground-truth tests, embedded-L1 comparison, and licensed `cm_analyze` scoring have shipped. `l1_diff` takes limits (`--max-peak-bias`, `--max-peak-error` and the same for minimum and max-RGB average) and exits nonzero on a breach; CI runs it on a generated six-shot PQ and HLG clip against committed references. Open: grow the corpus. |
+| **WS1** | **Partial** | Measurement core, measured-minimum delivery, and the max-RGB-mean average domain have shipped. Open: a grain-robust peak. Raw max-RGB reads +92.6 / +74.4 codes hot against `cm_analyze` v2; the opt-in robust estimator reached +80.4 / +66.4 and missed its promotion gate ([VALIDATION.md §7](docs/VALIDATION.md)). Investigate spatial support and temporal persistence together while preserving genuine small speculars; do not enable the current robust estimator by default. The new estimator must run on CPU and CUDA with identical output (integer counts, fixed-point sums, order-independent reductions; see [`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md)), which also removes today's CPU-only restriction on `robust` and `median3`. Its frozen synthetic gate must include what temporal persistence can wrongly remove: a small specular, a one-frame flash, a highlight on the first or last frame of a shot, a 2–3 frame specular and a fade. HLG max-RGB shipped in v0.5.0. Also open: true target-gamut peaks. |
+| **WS2** | **Partial** | Initial shot aggregation shipped: the shot maximum is the maximum of its frame peaks, so one retained grain spike can set a whole shot. The scene average is the mean of per-frame averages that have passed a forward-only EMA (`--hist-bin-ema-beta`, default 0.1, reset at each cut), so it leans toward the first frames of the scene: on the regression clip's 24-frame fade it reads 893 codes where the frame mean is about 1571, and a one-frame flash leaks into the frames after it. Static shots are unaffected (within about 10 codes of `cm_analyze` v2). Open: scene averages from unsmoothed frame values, robust aggregation (investigated with WS1), an optional L4-style temporal filter, and hybrid scene detection promoted only after it beats histogram-only against reference boundaries. |
 | **WS4** | **Deferred; experimental** | Optional L2/L8 trims from an open tone-mapping baseline such as ITU-R BT.2390. Neutral trims remain the default unless blinded A/B testing demonstrates an improvement. |
 | **WS5** | **Open; conditional** | CM metadata XML export. Worthwhile only if the external Profile 5 authoring route (R2) is chosen. |
 | **WS6** | **Open** | Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes, rapid cuts, and changing aspect ratios. Checks run on the RPU extracted from the muxed file. Add a Shield/TV playback procedure comparing matched material from the same master, recording player, firmware, TV picture mode, and HDMI path. |
@@ -92,7 +105,7 @@ The detailed gap table and validation method live in
 
 | ID | Status | Work |
 |----|--------|------|
-| **E1** | **Partial** | Expand the benchmark corpus and wire `tools/l1_diff` or `tools/compare_baseline` into CI as a numerical regression gate (feeds WS6). Synthetic accuracy already runs in workspace CI. |
+| **E1** | **Core complete** | `tools/l1_diff` runs in CI as a numerical regression gate (`scripts/ci/l1-regression-gate.sh`, references in `tools/l1_diff/corpus`); `scripts/cuda-parity.sh` checks CPU against CUDA output on a GPU host; `scripts/rpu-baseline.sh` captures and compares final RPUs. Synthetic accuracy runs in workspace CI. Open: expand the corpus (feeds WS6); a self-hosted GPU runner would automate the parity check. |
 | **E2** | **Partial** | Seven-position crop probing, low-signal rejection, modal voting, and variable-AR union shipped in PR [#4](https://github.com/tinof/hdr-analyze/pull/4), closing issue [#3](https://github.com/tinof/hdr-analyze/issues/3). Per-scene crop application remains a continuity-sensitive follow-up. |
 | **E3** | **Open** | Add `mkvdovi --dry-run`, `--keep-temp`, and `--keep-logs`. |
 | **E4** | **Deferred** | Replace the `--scene-metric hybrid` histogram-only placeholder with histogram + optical-flow fusion and validate it against WS0 references. |

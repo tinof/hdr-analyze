@@ -304,6 +304,53 @@ the chosen peak domain. Tolerance is 4 twelve-bit PQ codes.
 - CPU and `--hwaccel cuda` produce identical sidecars and byte-identical measurement files on the
   full 2-minute 4K HLG sample at `--downscale 1 --sample-rate 1`.
 
+## Final-RPU baseline
+
+`scripts/rpu-baseline.sh` records what `mkvdovi` finally writes, so a later build can be compared
+with it. The measurements above check the analyzer's numbers; this checks the RPU inside the muxed
+`.DV.mkv`.
+
+```bash
+# capture with the installed build (extra mkvdovi flags go after --)
+scripts/rpu-baseline.sh capture ~/mkvdovi-work/rpu-baseline/v0.5.1 sample.mkv [more.mkv ...]
+# capture the same inputs with a candidate build
+MKVDOVI=target/release/mkvdovi scripts/rpu-baseline.sh capture /tmp/candidate sample.mkv
+# compare one input
+scripts/rpu-baseline.sh compare ~/mkvdovi-work/rpu-baseline/v0.5.1/sample /tmp/candidate/sample
+```
+
+`capture` links each input into a scratch directory under the output directory, runs
+`mkvdovi --keep-source --verify` there, extracts the RPU from the resulting `.DV.mkv` and exports
+it with `dovi_tool export`. The input and its directory are not touched, and measurements lying
+next to the input are not reused, so the analysis always comes from the build under test. Per
+input it stores `RPU.bin`, `rpu.json.gz`, `scenes.txt`, the `dovi_tool info` summary, the mkvdovi
+log, the analyzer's `.l1.json` sidecar, and `manifest.json` (input name, size and sha256, capture
+time, repo commit, versions of mkvdovi, hdr_analyzer_mvp, dovi_tool, mkvmerge, ffmpeg and
+mediainfo, the mkvdovi command line, the RPU frame count). Inputs above 2 GiB are identified by
+size, mtime and the sha256 of the first 64 MiB; the manifest says which method was used. A missing
+tool, a failed conversion or verification, or an empty RPU ends the run with a non-zero status.
+
+Baselines are derived from media and are not committed. Keep them outside the repository, one
+directory per released version (on the CUDA dev host: `~/mkvdovi-work/rpu-baseline/v0.5.1/`, with
+the synthetic PQ input under `inputs/`). The analysis settings depend on the host (`--hwaccel auto`
+and `--analysis-quality auto`), so capture baseline and candidate on the same host with the same
+flags.
+
+`compare` checks, in this order: equal frame counts, equal scene-cut flags, and identical content
+outside Level 1 (profile, header, mapping and reshaping data, L2, L5, L6, L9, L11, L254 and every
+other block). The Level 1 payload and the per-frame `rpu_data_crc32`, which covers it, are left out
+of that check. Level 1 is scored: for min, avg and max it prints the number of changed frames, the
+mean signed difference and the largest absolute difference in 12-bit PQ codes. Exit status 0 means
+nothing outside L1 differs, 1 means a difference, 2 means a usage or tool error.
+
+The rule:
+
+- A change that is meant to alter L1 is approved by reviewing the `compare` L1 score in the pull
+  request. Paste the output for every baseline input.
+- Any difference outside L1 is a regression. This includes scene-cut positions and the frame count.
+- A change that must not alter the output (a refactor, a performance change) is compared with
+  `--require-identical-l1`, which makes any L1 difference a failure too.
+
 ## Reproduction
 
 ```bash

@@ -166,9 +166,13 @@ The core validation foundation is shipped:
 - [VALIDATION.md](VALIDATION.md) records comparisons against synthetic truth, embedded retail-style
   L1, and licensed `cm_analyze` output on identical pixels.
 
-Remaining validation work is to grow the redistributable corpus and run a small numerical L1
-regression automatically. `tools/l1_diff` and `tools/compare_baseline` are currently excluded from the
-workspace, so ordinary `cargo test --workspace` does not execute either utility.
+A small numerical L1 regression runs in CI: `scripts/ci/l1-regression-gate.sh` analyzes a
+generated six-shot clip (`tools/l1_diff/corpus`, PQ and HLG) and scores it with `l1_diff` limits
+against committed references. The references are the analyzer's own earlier output, so the gate
+detects change; it does not measure accuracy. `tools/l1_diff` and `tools/compare_baseline` stay
+excluded from the workspace, so `cargo test --workspace` does not execute either utility; the CI
+gate job lints and tests `l1_diff` itself. Remaining validation work is to grow the
+redistributable corpus.
 
 For every accuracy change:
 

@@ -180,22 +180,16 @@ run against it:
 ```bash
 L1_DIFF=tools/l1_diff/target/release/l1_diff
 
-# 1. Dump the CPU run per frame (l1_diff needs a reference, so feed it zeros).
-n=$(jq '.frames.min_pq_12bit | length' cpu.bin.l1.json)
-{ echo frame,min_pq,max_pq,avg_pq; seq 0 $((n - 1)) | sed 's/$/,0,0,0/'; } > zeros.csv
-$L1_DIFF --ours cpu.bin --reference zeros.csv --csv cpu_frames.csv > /dev/null
+# 1. Write the CPU run as the reference (minimum, peak, max-RGB average).
+$L1_DIFF --ours cpu.bin --export-reference cpu_l1.csv
 
-# 2. Keep min, max and max-RGB average as the reference.
-awk -F, 'NR == 1 { print "frame,min_pq,max_pq,avg_pq"; next }
-         { printf "%s,%s,%d,%s\n", $1, $3, $5 + 0.5, $8 }' cpu_frames.csv > cpu_l1.csv
-
-# 3. Score the CUDA run.
-$L1_DIFF --ours cuda.bin --reference cpu_l1.csv
+# 2. Score the CUDA run. The limits make any difference a nonzero exit status.
+$L1_DIFF --ours cuda.bin --reference cpu_l1.csv \
+  --max-peak-error 0.001 --max-min-error 0 --max-avg-error 0
 ```
 
-When the two paths agree, the minimum and max-RGB average rows report 0 error, and the peak row
-reports about half a code at most, because `l1_diff` writes the CPU peak with one decimal and step 2
-rounds it to a whole code. The Y-luma average row
+When the two paths agree, the minimum, peak and max-RGB average rows report 0 error (the reference
+keeps the peak to three decimals, hence the 0.001 limit). The Y-luma average row
 compares a different quantity against the max-RGB reference and is expected to differ. For a direct
 check of the per-scene values, compare the sidecars:
 
