@@ -6,7 +6,7 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
-## [0.5.1] - 2026-09-30
+## [0.5.1] - 2026-10-01
 
 ### Performance
 
@@ -36,6 +36,11 @@ This document provides a historical record of completed milestones, feature impl
   kept their output pipes open without reading them, so a tool that printed more than 64 KB blocked.
   The verifier hit this on a 1,263-scene episode. The same bug left those tools' log files empty;
   they now contain the tools' output.
+- **Release binaries no longer depend on the build machine's CPU.** `.cargo/config.toml` sets
+  `-C target-cpu=native` for local builds, and the release workflow did not override it, so the
+  published binaries (releases up to 0.5.0) were compiled for whatever CPU the GitHub runner had and
+  could stop with an illegal-instruction error on a different CPU. The release and CI workflows
+  now build for the default baseline CPU. Source builds are unchanged.
 
 ## [0.5.0] - 2026-09-30
 

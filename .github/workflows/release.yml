@@ -14,6 +14,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # .cargo/config.toml sets `-C target-cpu=native` for local builds. A RUSTFLAGS variable,
+  # even an empty one, replaces it, so release binaries target the default baseline CPU
+  # instead of whatever CPU this runner has (which crashes on other machines).
+  RUSTFLAGS: ""
 
 jobs:
   create-release:

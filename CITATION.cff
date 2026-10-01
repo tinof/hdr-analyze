@@ -7,7 +7,7 @@ authors:
 title: "HDR-Analyze: independent HDR analysis and Dolby Vision metadata generation"
 version: 0.5.1
 # doi: 10.5281/zenodo.1234  # Optional: Get a DOI via Zenodo/GitHub integration
-date-released: 2026-09-30
+date-released: 2026-10-01
 url: "https://github.com/tinof/hdr-analyze"
 preferred-citation:
   type: software
