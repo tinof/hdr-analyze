@@ -12,7 +12,7 @@ All defaults below are taken directly from `--help`; run `<binary> --help` to co
 
 Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file plus an
 analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics and
-provenance (sidecar version 3: analyzer version, input identity, sampling settings, full-resolution
+provenance (sidecar version 4: analyzer version, input identity, sampling settings, full-resolution
 crop, and `analysis.luminance_mapping`). Inputs tagged with a non-HDR transfer are refused.
 
 ```bash
@@ -63,7 +63,7 @@ hdr_analyzer_mvp "video.mkv"
 | `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or synthetic-calibrated grain correction |
 | `--peak-percentile <0-100>` | `99.99` | Fine 4096-bin percentile used by `--peak-estimator percentile` |
 | `--header-peak-source <max\|histogram99\|histogram999>` | none | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
-| `--hist-bin-ema-beta <0.0-1.0>` | `0.1` | EMA smoothing for histogram bins (lower = more smoothing, 0 = disabled) |
+| `--hist-bin-ema-beta <0.0-1.0>` | `0.1` | EMA smoothing for histogram bins and the `.bin` frame average (lower = more smoothing, 0 = disabled). Does not affect the L1 sidecar averages. |
 | `--hist-temporal-median <N>` | `0` | Temporal median filter window in frames (3 = good for aggressive smoothing) |
 | `--pre-denoise <nlmeans\|median3\|off>` | `off` | Pre-analysis Y-plane denoising (`median3` good for grain; `nlmeans` reserved) |
 | `--min-percentile <0-100>` | `0.1` | Lower percentile used for the noise-rejected active-area minimum, in percent; `0` selects the absolute minimum |
@@ -85,9 +85,9 @@ An explicit histogram peak source therefore opts out of max-RGB peak selection.
 
 The analyzer computes the average directly from active-area pixels rather than reconstructing it
 from 256 histogram bins. The JSON sidecar records per-frame robust minimum, Y-luma mean, and
-max-RGB mean as 12-bit PQ codes, plus scene aggregates and the crop/denoise settings. Both average
-domains receive the same configured EMA/temporal smoothing with per-scene resets; the spatially
-noise-rejected minimum is not temporally smoothed. `mkvdovi` writes each scene's minimum from
+max-RGB mean as 12-bit PQ codes, plus scene aggregates and the crop/denoise settings. Neither
+average domain nor the spatially noise-rejected minimum is temporally smoothed in the sidecar; the
+configured EMA/temporal smoothing applies to the histograms and the `.bin` frame average only. `mkvdovi` writes each scene's minimum from
 the sidecar into the generated L1 block as `min_pq`. The per-frame values stay in the sidecar for
 validation.
 

@@ -189,9 +189,9 @@ fn read_sidecar(path: &Path, required: bool) -> Result<Option<L1Sidecar>> {
     };
     let sidecar: L1Sidecar = serde_json::from_reader(file)
         .with_context(|| format!("parsing sidecar {}", path.display()))?;
-    // Versions 2 and 3 only add provenance (full-resolution crop, luminance mapping);
-    // the L1 data layout is unchanged.
-    if !matches!(sidecar.version, 1..=3) {
+    // Versions 2 and 3 only add provenance (full-resolution crop, luminance mapping); version 4
+    // stores unfiltered averages. The L1 data layout is unchanged.
+    if !matches!(sidecar.version, 1..=4) {
         bail!(
             "unsupported L1 sidecar version {} in {}",
             sidecar.version,

@@ -720,6 +720,7 @@ mod backend {
                 },
                 l1: FrameL1Measurement {
                     min_pq,
+                    avg_luma_pq: avg_pq,
                     avg_max_rgb_pq,
                 },
                 // Grain statistics (sigma / n_eff / robust correction) need the CPU

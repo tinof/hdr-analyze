@@ -627,8 +627,9 @@ fn primary_index_from_label(primaries: &str) -> Option<u8> {
 }
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
-/// Versions 1 to 3 are accepted; version 2 adds provenance and a full-resolution crop, and
-/// version 3 adds `analysis.luminance_mapping` (`"pq"` or one of [`DOVI84_LUMINANCE_MAPPINGS`]).
+/// Versions 1 to 4 are accepted; version 2 adds provenance and a full-resolution crop,
+/// version 3 adds `analysis.luminance_mapping` (`"pq"` or one of [`DOVI84_LUMINANCE_MAPPINGS`]),
+/// and version 4 stores unfiltered averages (same layout).
 #[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
     pub version: u32,
@@ -669,6 +670,13 @@ pub struct L1SidecarAnalysis {
     #[serde(default)]
     pub luminance_mapping: Option<String>,
 }
+
+/// Newest sidecar version this build reads.
+pub const L1_SIDECAR_MAX_VERSION: u32 = 4;
+
+/// From this version on the sidecar averages are unfiltered frame means; older sidecars are
+/// reused with an advisory warning.
+pub const L1_SIDECAR_UNFILTERED_AVERAGES_VERSION: u32 = 4;
 
 /// Sidecar `analysis.luminance_mapping` value required for HLG sources: max-RGB through the full
 /// Dolby Vision Profile 8.4 reconstruction (luma curve + chroma MMR + RPU matrix). The earlier
@@ -935,7 +943,7 @@ pub fn validate_l1_sidecar(
     sidecar: &L1Sidecar,
     expect: &SidecarExpectation,
 ) -> std::result::Result<Vec<String>, SidecarError> {
-    if !matches!(sidecar.version, 1..=3) {
+    if !matches!(sidecar.version, 1..=L1_SIDECAR_MAX_VERSION) {
         return Err(SidecarError::UnsupportedVersion(sidecar.version));
     }
     check_luminance_mapping(sidecar, expect.hlg)?;
@@ -960,6 +968,12 @@ pub fn validate_l1_sidecar(
         }
     }
     let mut advisories = ordering_advisories(sidecar);
+    if sidecar.version < L1_SIDECAR_UNFILTERED_AVERAGES_VERSION {
+        advisories.push(format!(
+            "L1 sidecar v{} stores averages that were smoothed over time, so the L1 average of a scene that changes (a fade, a flash) can read wrong. To re-measure, delete the measurements file and run again with an hdr_analyzer_mvp from this version.",
+            sidecar.version
+        ));
+    }
     let covered = sidecar.frame_count();
     if let Some(frames) = &sidecar.frames {
         if frames.min_pq_12bit.len() as u64 != covered {
@@ -1434,6 +1448,13 @@ mod tests {
         }
     }
 
+    /// The version 2 fixture stamped with the newest version, for tests about other properties.
+    fn current_sidecar_json() -> Value {
+        let mut sidecar = v2_sidecar_json();
+        sidecar["version"] = json!(L1_SIDECAR_MAX_VERSION);
+        sidecar
+    }
+
     fn v2_sidecar_json() -> Value {
         json!({
             "version": 2,
@@ -1466,8 +1487,8 @@ mod tests {
     }
 
     #[test]
-    fn v2_sidecar_matching_the_input_validates() {
-        let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+    fn current_sidecar_matching_the_input_validates_without_advisories() {
+        let sidecar: L1Sidecar = serde_json::from_value(current_sidecar_json()).unwrap();
         let expect = SidecarExpectation {
             file_name: Some("input.mkv".into()),
             size_bytes: Some(42),
@@ -1478,6 +1499,18 @@ mod tests {
         assert!(sidecar
             .provenance_summary()
             .contains("crop 3840x1600+0+280"));
+    }
+
+    #[test]
+    fn sidecar_with_smoothed_averages_is_reused_with_an_advisory() {
+        for version in [1, 2, 3] {
+            let mut json = v2_sidecar_json();
+            json["version"] = json!(version);
+            let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
+            let advisories = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap();
+            assert_eq!(advisories.len(), 1, "version {version}");
+            assert!(advisories[0].contains("smoothed over time"));
+        }
     }
 
     #[test]
@@ -1527,20 +1560,20 @@ mod tests {
             ));
         }
         let future = L1Sidecar {
-            version: 4,
+            version: 5,
             scenes: vec![scene(0, 1, 0, 1, 2)],
             ..Default::default()
         };
         assert!(matches!(
             validate_l1_sidecar(&future, &SidecarExpectation::default()),
-            Err(SidecarError::UnsupportedVersion(4))
+            Err(SidecarError::UnsupportedVersion(5))
         ));
     }
 
     #[test]
     fn avg_above_max_is_an_advisory_not_an_error() {
         let sidecar = L1Sidecar {
-            version: 2,
+            version: L1_SIDECAR_MAX_VERSION,
             scenes: vec![scene(0, 9, 1, 3000, 2900), scene(10, 19, 1, 5, 40)],
             ..Default::default()
         };
@@ -1556,7 +1589,7 @@ mod tests {
             .map(|index| scene(index * 10, index * 10 + 9, 1, 50, 40))
             .collect();
         let sidecar = L1Sidecar {
-            version: 2,
+            version: L1_SIDECAR_MAX_VERSION,
             scenes,
             ..Default::default()
         };
@@ -1572,7 +1605,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let measurements = dir.path().join("title_measurements.bin");
         fs::write(&measurements, b"").unwrap();
-        let mut sidecar = v2_sidecar_json();
+        let mut sidecar = current_sidecar_json();
         sidecar["scenes"][1]["avg_max_rgb_pq_12bit"] = json!(3000);
         sidecar["scenes"][1]["max_pq_12bit"] = json!(2900);
         fs::write(
@@ -1588,7 +1621,7 @@ mod tests {
 
     #[test]
     fn sidecar_frame_count_within_tolerance_validates_with_advisory() {
-        let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
+        let sidecar: L1Sidecar = serde_json::from_value(current_sidecar_json()).unwrap();
         for frames in [18, 21, 22] {
             let expect = SidecarExpectation {
                 frames: Some(frames),

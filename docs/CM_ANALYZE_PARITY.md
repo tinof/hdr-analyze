@@ -127,9 +127,11 @@ are not consumed by the Dolby Vision v5 conversion path.
 ### Average and minimum
 
 The analyzer accumulates Y-luma and max-RGB PQ sums and the processed-pixel count in the same Rayon
-reduction as the histogram. Histogram smoothing no longer reconstructs an average from bin centers;
-it applies identical EMA/temporal smoothing to both full-precision mean series with scene resets.
-The robust minimum remains an unsmoothed spatial-percentile measurement.
+reduction as the histogram. The averages are not reconstructed from histogram bin centers. The L1 sidecar stores both means
+unfiltered, per frame and per scene (sidecar version 4). Until version 3 each frame mean passed the
+histogram EMA first, which pulled a scene average toward the scene's first frames
+([VALIDATION.md](VALIDATION.md) §9). Only the madVR `.bin` frame average is still smoothed, with
+scene resets. The robust minimum is an unsmoothed spatial-percentile measurement.
 
 The sidecar minimum is P0.1 by default over the active area after selected denoising. Scene minimum is
 the minimum of the already noise-rejected per-frame values, so a real raised-black excursion remains

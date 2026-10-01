@@ -304,6 +304,37 @@ the chosen peak domain. Tolerance is 4 twelve-bit PQ codes.
 - CPU and `--hwaccel cuda` produce identical sidecars and byte-identical measurement files on the
   full 2-minute 4K HLG sample at `--downscale 1 --sample-rate 1`.
 
+### 9. Scene averages without temporal smoothing (2026-10-01)
+
+Until sidecar version 3 each frame average passed a forward-only EMA (`--hist-bin-ema-beta`,
+default 0.1, reset at every cut) before the scene mean was taken. The scene average therefore
+leaned toward the first frames of the scene. On the synthetic regression clip
+(`tools/l1_diff/corpus`), whose frames are flat so the true mean is known:
+
+| Shot | True scene mean | Version 3 | Version 4 |
+|---|---|---|---|
+| 24-frame fade, 168 to 2973 | 1569 | 893 | 1569 |
+| Dim scene (869) with one flash frame (3674) | 986 | 953 | 986 |
+
+Version 4 stores the unfiltered frame means. Effect on the final RPU of real clips, 0.5.1 against
+the new build, same host and flags (`scripts/rpu-baseline.sh compare`). In every clip the scene
+cuts, L1 minimum, L1 maximum and everything outside Level 1 are identical; only the L1 average
+moves:
+
+| Clip | Scenes | Scenes whose sidecar average moved by more than 10 codes | Largest change (12-bit PQ codes) |
+|---|---|---|---|
+| HDR10 demo, daylight (2860 frames) | 33 | 8 | +80 |
+| HLG fireworks (2934 frames) | 51 | 35 | -665 |
+| HLG short sample (320 frames) | 11 | 8 | +278 |
+| HLG drama episode cut (2976 frames) | 34 | 2 | -33 |
+
+Fireworks change most because every burst is a scene that brightens or fades. In the RPU the
+largest change is smaller where `dovi_tool` raises the average to its floor of 819.
+
+Not re-measured: the comparison of scene averages with `cm_analyze` v2 in §7 (+9.5 codes) was made
+with the smoothed averages. The licensed reference output is not on the development host, so that
+figure has not been repeated for version 4.
+
 ## Final-RPU baseline
 
 `scripts/rpu-baseline.sh` records what `mkvdovi` finally writes, so a later build can be compared

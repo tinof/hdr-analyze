@@ -6,6 +6,22 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Fixed
+
+- **The L1 average of a scene that changes over time was wrong.** Each frame's average passed a
+  forward-only smoothing filter before the scene mean was taken, so the scene average leaned
+  toward the first frames of the scene: a 24-frame fade from PQ code 168 to 2973 read 893 where
+  the frame mean is 1569, and a one-frame flash leaked into the frames after it. The L1 sidecar
+  now stores the unfiltered frame means (**sidecar version 4**, same layout), and `mkvdovi` writes
+  the scene average from those. Scenes that do not change over time keep their average. On real clips only the L1 average in
+  the final RPU moves; fireworks and other brightening or fading scenes move most
+  ([`docs/VALIDATION.md`](docs/VALIDATION.md) §9). The madVR `.bin` is byte-identical to 0.5.1.
+- `mkvdovi` reuses a version 1–3 sidecar with a warning that its averages were smoothed. Delete
+  the measurements file to re-analyze.
+- On resume, `mkvdovi` regenerates the RPU when the generation settings differ from the
+  interrupted run (for example after a re-analysis changed L1). Before, an RPU that was already
+  complete in the temp directory was reused whatever the measurements now said.
+
 ### Added
 
 - **L1 regression gate in CI.** `scripts/ci/l1-regression-gate.sh` generates a six-shot synthetic
