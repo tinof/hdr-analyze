@@ -168,7 +168,11 @@ fn check_parity(label: &str, clip: &Path, mapping: &str, no_crop: bool) {
         .map_or(0, Vec::len);
     assert!(frame_count > 0, "{label}: the clip produced no frames");
 
-    let differences: Vec<String> = ["crop", "scenes", "frames"]
+    assert!(
+        !cpu.sidecar["light_level"].is_null(),
+        "{label}: cpu sidecar has no `light_level`"
+    );
+    let differences: Vec<String> = ["crop", "light_level", "scenes", "frames"]
         .into_iter()
         .flat_map(|section| {
             section_differences(section, &cpu.sidecar[section], &gpu.sidecar[section])

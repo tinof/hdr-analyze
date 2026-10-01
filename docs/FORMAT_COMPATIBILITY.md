@@ -115,7 +115,10 @@ max-RGB mean, and maximum reach the RPU. Sidecar version 2 added `analyzer_versi
 name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, crop disabled), and
 stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 adds
 `analysis.luminance_mapping`: `pq`, or `dovi84-v2` for HLG measured through the full Profile 8.4
-decode. Version 4 (current) has the same layout and stores unfiltered averages. `mkvdovi` accepts
+decode. Version 4 (current) has the same layout and stores unfiltered averages. Max-RGB runs also
+write `light_level` (`max_cll_nits`, `max_fall_nits`): the content light levels of CTA-861.3 over
+the active image area, with the frame average taken in linear light. The block is optional, so a
+version 4 sidecar written before it existed stays valid. `mkvdovi` accepts
 versions 1–4; it reuses a sidecar below version 4 with a warning that its averages were smoothed
 over time (delete the measurements to re-analyze). HLG input requires version 3 or later with `dovi84-v2`, and a `dovi84`
 sidecar is rejected for a non-HLG input. Version 1 carries no identity or full-resolution crop, so
@@ -180,10 +183,18 @@ mkvdovi "input.mkv" --source-primaries 0
 | **L1** | HDR10/HLG: per-scene minimum, max-RGB mean, and maximum from the analyzer's L1 sidecar. HDR10+: derived from source scenes |
 | **L2** | Neutral compatibility trims for 100/600/1000-nit targets |
 | **L5** | HDR10/HLG: offsets from the committed crop. Dolby Vision inputs: sampled source L5. Full-frame content: `dovi_tool` zero default |
-| **L6** | Static mastering-display metadata and MaxCLL/MaxFALL, read with MediaInfo; warned defaults when MediaInfo is absent or a field is missing |
+| **L6** | Static mastering-display metadata and MaxCLL/MaxFALL, read with MediaInfo. HDR10/HLG: a MaxCLL or MaxFALL the source does not state (or states as 0) is taken from the analyzer's measurement (see below). Otherwise warned defaults when MediaInfo is absent or a field is missing |
 | **L9** | Mastering-display primaries, preferring MediaInfo mastering metadata over container primaries; warned BT.2020 fallback (also used when MediaInfo is absent) and CLI override |
 | **L11** | Content type and reference mode (`movies` / `false` by default) |
 | **L254** | Default CM v4.0 algorithm metadata added by `dovi_tool` |
+
+Measured MaxCLL/MaxFALL: source-stated values always win, field by field. The sidecar's
+`light_level` fills a missing field only when every frame was analyzed (`--analysis-quality fast`
+skips frames and keeps the defaults). MaxCLL also needs full-resolution analysis
+(`--analysis-quality accurate`, the default with GPU analysis); at half resolution only MaxFALL is
+taken, because a sampling stride can miss a small highlight. A filled value is adjusted so that
+MaxFALL does not exceed MaxCLL; a source-stated value is never changed. A sidecar without the block
+(older analyzer, `--peak-domain luma`, or `--pre-denoise median3`) keeps the defaults: delete the measurements to re-analyze.
 
 `mkvdovi` does not synthesize L3 offsets or creative L8 trims. L2 values are neutral (`2048`), and
 experimental non-neutral trim derivation remains opt-in roadmap work. Note that while `dovi_tool` 2.3.4
@@ -206,8 +217,11 @@ sampling and FEL NLQ parsing) does not yet support L253 blocks; support will be 
   max-RGB to the RPU's declared range on purpose, so L1 never exceeds what the RPU declares.
   libplacebo's apparent plateau near 1000 nits for these codes is its display tone mapping (it clips
   to the L1 max_pq, or to source_max_pq 3079 when L1 is absent), not Dolby Vision decoder behaviour.
-- HLG sources rarely carry mastering metadata, so L6 usually falls back to 1000 / 0.005 nits and
-  MaxCLL 1000 / MaxFALL 400, which matches the 8.4 source range.
+- HLG sources rarely carry mastering metadata, so the L6 mastering display usually falls back to
+  1000 / 0.005 nits, which matches the 8.4 source range. MaxCLL and MaxFALL come from the
+  analyzer's measurement of the 8.4 decode, capped at 1000 nits (the top of the range, PQ code
+  3079, is 1000.9 nits and would round to 1001); only when that is
+  unavailable do they fall back to 1000 / 400.
 - Legacy temp directories from the removed HLG→PQ re-encode path (they contain `HLG_to_PQ.mkv`) are
   discarded, not resumed.
 

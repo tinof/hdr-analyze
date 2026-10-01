@@ -15,7 +15,7 @@ use ffmpeg_next::format;
 use ffmpeg_next::frame;
 
 #[cfg(feature = "cuda")]
-use crate::analysis::frame::{high_percentile_pq, low_percentile_pq};
+use crate::analysis::frame::{high_percentile_pq, low_percentile_pq, mean_nits_from_pq_hist};
 use crate::analysis::frame::{AnalyzedFrame, FrameAnalysisOptions};
 #[cfg(any(feature = "cuda", test))]
 use crate::analysis::histogram::nits_to_pq;
@@ -722,6 +722,8 @@ mod backend {
                     min_pq,
                     avg_luma_pq: avg_pq,
                     avg_max_rgb_pq,
+                    max_rgb_pq,
+                    fall_nits: mean_nits_from_pq_hist(&pq_hist),
                 },
                 // Grain statistics (sigma / n_eff / robust correction) need the CPU
                 // cross-quad diff histogram; report neutral values on the GPU path.

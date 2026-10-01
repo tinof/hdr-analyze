@@ -1,9 +1,11 @@
+use std::sync::LazyLock;
+
 use anyhow::Result;
 use ffmpeg_next::frame;
 use madvr_parse::MadVRFrame;
 use rayon::prelude::*;
 
-use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq};
+use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq, pq_to_nits};
 use crate::analysis::hlg::{dovi84_decoder, dovi84_pq_lut};
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
@@ -94,6 +96,29 @@ pub(crate) fn high_percentile_pq(histogram: &[u64], percentile: f64) -> f64 {
         .iter()
         .position(|count| *count > 0)
         .map_or(0.0, |bin| bin as f64 / (histogram.len() - 1) as f64)
+}
+
+/// Nits of each 12-bit PQ histogram bin.
+static PQ_BIN_NITS: LazyLock<Vec<f64>> = LazyLock::new(|| {
+    (0..PQ_HIST_BINS)
+        .map(|bin| pq_to_nits(bin as f64 / (PQ_HIST_BINS - 1) as f64))
+        .collect()
+});
+
+/// Frame-average light level in nits from the 4096-bin PQ histogram: the mean in linear light,
+/// which the PQ-domain mean under-reads. CPU and CUDA both build this histogram from integer
+/// counts, so the result is identical on either path.
+pub(crate) fn mean_nits_from_pq_hist(histogram: &[u64]) -> f64 {
+    let total: u64 = histogram.iter().sum();
+    if total == 0 {
+        return 0.0;
+    }
+    let sum: f64 = histogram
+        .iter()
+        .zip(PQ_BIN_NITS.iter())
+        .map(|(&count, &nits)| count as f64 * nits)
+        .sum();
+    sum / total as f64
 }
 
 fn pq_code(pq: f64) -> usize {
@@ -515,6 +540,8 @@ pub fn analyze_native_frame_cropped(
             min_pq,
             avg_luma_pq: avg_pq,
             avg_max_rgb_pq,
+            max_rgb_pq: accumulator.max_rgb_pq,
+            fall_nits: mean_nits_from_pq_hist(accumulator.pq_hist.as_ref()),
         },
         peak_stats: FramePeakStats {
             selected_peak_pq,
@@ -652,6 +679,24 @@ mod tests {
         assert_eq!(low_percentile_pq(&histogram, 0.0), 2.0 / 4095.0);
         assert_eq!(low_percentile_pq(&histogram, 0.1), 51.0 / 4095.0);
         assert_eq!(low_percentile_pq(&[0; PQ_HIST_BINS], 0.1), 0.0);
+    }
+
+    #[test]
+    fn mean_nits_averages_in_linear_light() {
+        assert_eq!(mean_nits_from_pq_hist(&[0; PQ_HIST_BINS]), 0.0);
+
+        // 12-bit PQ 2081 is about 100 nits and 3079 about 1000 nits.
+        let mut histogram = [0u64; PQ_HIST_BINS];
+        histogram[3079] = 10;
+        let peak = pq_to_nits(3079.0 / 4095.0);
+        assert!((mean_nits_from_pq_hist(&histogram) - peak).abs() < 1e-9);
+
+        histogram[2081] = 30;
+        let expected = (10.0 * peak + 30.0 * pq_to_nits(2081.0 / 4095.0)) / 40.0;
+        assert!((mean_nits_from_pq_hist(&histogram) - expected).abs() < 1e-9);
+        // The PQ-domain mean would give far less than the linear mean.
+        let pq_mean = (10.0 * 3079.0 + 30.0 * 2081.0) / 40.0 / 4095.0;
+        assert!(pq_to_nits(pq_mean) < 0.6 * expected);
     }
 }
 
