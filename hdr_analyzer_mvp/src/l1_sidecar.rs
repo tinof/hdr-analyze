@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
+/// Version 4 changes what the averages are: `avg_luma_pq_12bit` and `avg_max_rgb_pq_12bit`
+/// (per frame and per scene) are the unfiltered per-frame means. Up to version 3 each frame mean
+/// had passed the histogram EMA / temporal median first, so a scene average leaned toward the
+/// scene's first frames (fades and flashes read wrong). The layout is unchanged.
 /// Version 3 adds `analysis.luminance_mapping`: `"pq"`, or for HLG measured through the Dolby
 /// Vision Profile 8.4 reconstruction `"dovi84-v2"` (luma curve for luma; luma curve + chroma MMR
 /// + RPU matrix for max-RGB) or the earlier `"dovi84-v1"` (luma curve only, max-RGB equal to
@@ -16,7 +20,7 @@ use crate::crop::CropRect;
 /// reusing them (`metadata::DOVI84_LUMINANCE_MAPPING`). Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
-pub const L1_SIDECAR_VERSION: u32 = 3;
+pub const L1_SIDECAR_VERSION: u32 = 4;
 
 /// Coordinate space of `L1Sidecar::crop` since version 2.
 pub const CROP_SPACE_FULL: &str = "full";
@@ -24,6 +28,9 @@ pub const CROP_SPACE_FULL: &str = "full";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameL1Measurement {
     pub min_pq: f64,
+    /// Unfiltered frame mean of Y-luma PQ. `MadVRFrame::avg_pq` starts equal and is then smoothed.
+    pub avg_luma_pq: f64,
+    /// Unfiltered frame mean of max-RGB PQ.
     pub avg_max_rgb_pq: f64,
 }
 
@@ -164,9 +171,9 @@ pub fn write_l1_sidecar(
                 .iter()
                 .map(|measurement| pq_to_12bit(measurement.min_pq))
                 .collect(),
-            avg_luma_pq_12bit: frames
+            avg_luma_pq_12bit: measurements
                 .iter()
-                .map(|frame| pq_to_12bit(frame.avg_pq))
+                .map(|measurement| pq_to_12bit(measurement.avg_luma_pq))
                 .collect(),
             avg_max_rgb_pq_12bit: measurements
                 .iter()
@@ -204,8 +211,11 @@ fn build_scene_metadata(
         .iter()
         .map(|measurement| measurement.min_pq)
         .fold(1.0, f64::min);
-    let avg_luma_pq =
-        scene_frames.iter().map(|frame| frame.avg_pq).sum::<f64>() / scene_frames.len() as f64;
+    let avg_luma_pq = scene_measurements
+        .iter()
+        .map(|measurement| measurement.avg_luma_pq)
+        .sum::<f64>()
+        / scene_measurements.len() as f64;
     let avg_max_rgb_pq = scene_measurements
         .iter()
         .map(|measurement| measurement.avg_max_rgb_pq)
@@ -235,7 +245,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v3_sidecar_records_provenance_and_full_resolution_crop() {
+    fn sidecar_records_provenance_and_full_resolution_crop() {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("m.bin");
         let scenes = vec![MadVRScene {
@@ -293,7 +303,13 @@ mod tests {
         .unwrap();
 
         let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-        assert_eq!(json["version"], 3);
+        assert_eq!(json["version"], 4);
+        // The measurements are zero and the (smoothed) madVR frame averages are 0.2 and 0.3:
+        // the per-frame sidecar series must come from the measurements.
+        assert_eq!(
+            json["frames"]["avg_luma_pq_12bit"],
+            serde_json::json!([0, 0])
+        );
         assert_eq!(json["analysis"]["luminance_mapping"], "pq");
         assert_eq!(json["crop_space"], "full");
         assert_eq!(json["crop"]["y"], 280);
@@ -368,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn scene_min_uses_minimum_of_robust_frame_measurements() {
+    fn scene_stats_use_unfiltered_measurements_not_smoothed_frame_averages() {
         let scene = MadVRScene {
             start: 0,
             end: 1,
@@ -389,17 +405,20 @@ mod tests {
         let measurements = vec![
             FrameL1Measurement {
                 min_pq: 0.1,
+                avg_luma_pq: 0.25,
                 avg_max_rgb_pq: 0.3,
             },
             FrameL1Measurement {
                 min_pq: 0.15,
+                avg_luma_pq: 0.45,
                 avg_max_rgb_pq: 0.5,
             },
         ];
 
         let metadata = build_scene_metadata(&scene, &frames, &measurements).unwrap();
         assert_eq!(metadata.min_pq_12bit, pq_to_12bit(0.1));
-        assert_eq!(metadata.avg_luma_pq_12bit, pq_to_12bit(0.3));
+        // `MadVRFrame::avg_pq` (0.2, 0.4) is the smoothed .bin value and must not be used.
+        assert_eq!(metadata.avg_luma_pq_12bit, pq_to_12bit(0.35));
         assert_eq!(metadata.avg_max_rgb_pq_12bit, pq_to_12bit(0.4));
         assert_eq!(metadata.max_pq_12bit, pq_to_12bit(0.8));
     }

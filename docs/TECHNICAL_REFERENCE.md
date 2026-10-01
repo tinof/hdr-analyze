@@ -23,8 +23,8 @@ the front page concise.
   `[0,1]` before mapping into the v5 histogram bins (aligns with practical HDR10 limited-range
   content).
 - Y-luma and max-RGB PQ sums plus the processed-pixel count are accumulated at full precision in the
-  same Rayon reduction as the histogram. The Y average feeds scene statistics and MaxFALL; both
-  domains receive identical scene-aware smoothing and are recorded in the L1 sidecar.
+  same Rayon reduction as the histogram. The Y average feeds scene statistics and MaxFALL in the `.bin`
+  after scene-aware smoothing; the L1 sidecar records both domains unfiltered.
 - A separate 1024-bin code-level histogram produces the active-area lower-percentile minimum after
   denoising. P0.1 is the default and P0 is the absolute-minimum diagnostic mode.
 - Rayon fold accumulators reuse each fine histogram across a worker partition rather than allocating

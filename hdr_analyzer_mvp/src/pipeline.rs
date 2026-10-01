@@ -426,7 +426,7 @@ pub fn run(
         }
     };
 
-    let (mut scenes, mut frames, mut l1_measurements, frame_peak_stats, crop, gpu_active) =
+    let (mut scenes, mut frames, l1_measurements, frame_peak_stats, crop, gpu_active) =
         run_native_analysis_pipeline(
             cli,
             video_info,
@@ -450,15 +450,10 @@ pub fn run(
 
     fix_scene_end_frames(&mut scenes, frames.len());
 
-    // Apply histogram and both full-precision-average smoothing series with scene-aware resets.
+    // Smooth the histograms and the madVR frame averages with scene-aware resets. The L1
+    // measurements stay unfiltered.
     if cli.hist_bin_ema_beta > 0.0 || cli.hist_temporal_median > 0 {
-        apply_histogram_smoothing_pass(
-            &scenes,
-            &mut frames,
-            &mut l1_measurements,
-            cli,
-            peak_domain,
-        )?;
+        apply_histogram_smoothing_pass(&scenes, &mut frames, cli, peak_domain)?;
     }
 
     precompute_scene_stats(&mut scenes, &frames);
@@ -1094,18 +1089,9 @@ fn smooth_average(
 fn apply_histogram_smoothing_pass(
     scenes: &[MadVRScene],
     frames: &mut [MadVRFrame],
-    l1_measurements: &mut [FrameL1Measurement],
     cli: &Cli,
     peak_domain: PeakDomain,
 ) -> Result<()> {
-    if frames.len() != l1_measurements.len() {
-        anyhow::bail!(
-            "L1 smoothing frame count mismatch: {} frames, {} measurements",
-            frames.len(),
-            l1_measurements.len()
-        );
-    }
-
     println!(
         "Applying histogram smoothing (EMA beta={}, temporal median window={})...",
         cli.hist_bin_ema_beta, cli.hist_temporal_median
@@ -1139,17 +1125,11 @@ fn apply_histogram_smoothing_pass(
         let mut ema_state = vec![0.0; 256];
         let mut temporal_history: VecDeque<Vec<f64>> = VecDeque::with_capacity(temporal_window);
         let mut luma_avg_ema_state: Option<f64> = None;
-        let mut max_rgb_avg_ema_state: Option<f64> = None;
         let mut luma_avg_history: VecDeque<f64> = VecDeque::with_capacity(temporal_window);
-        let mut max_rgb_avg_history: VecDeque<f64> = VecDeque::with_capacity(temporal_window);
 
-        for (frame, l1_measurement) in frames[start_idx..end_idx]
-            .iter_mut()
-            .zip(l1_measurements[start_idx..end_idx].iter_mut())
-        {
+        for frame in frames[start_idx..end_idx].iter_mut() {
             let direct_max_pq = frame.peak_pq_2020;
             let direct_luma_avg_pq = frame.avg_pq;
-            let direct_max_rgb_avg_pq = l1_measurement.avg_max_rgb_pq;
 
             if ema_beta > 0.0 {
                 apply_histogram_ema(&mut frame.lum_histogram, &mut ema_state, ema_beta);
@@ -1171,19 +1151,14 @@ fn apply_histogram_smoothing_pass(
 
             frame.peak_pq_2020 = select_peak_pq(&frame.lum_histogram, direct_max_pq, peak_source);
 
-            // Smooth both true per-pixel average domains identically. The first
-            // frame of every scene initializes each EMA without zero-state bias.
+            // Only the madVR frame average is smoothed (it feeds the .bin and the optimizer).
+            // The L1 sidecar keeps the unfiltered per-frame means in `FrameL1Measurement`: a
+            // forward-only EMA pulls a scene mean toward the scene's first frames. The first
+            // frame of every scene initializes the EMA without zero-state bias.
             frame.avg_pq = smooth_average(
                 direct_luma_avg_pq,
                 &mut luma_avg_ema_state,
                 &mut luma_avg_history,
-                ema_beta,
-                temporal_window,
-            );
-            l1_measurement.avg_max_rgb_pq = smooth_average(
-                direct_max_rgb_avg_pq,
-                &mut max_rgb_avg_ema_state,
-                &mut max_rgb_avg_history,
                 ema_beta,
                 temporal_window,
             );
@@ -1222,20 +1197,6 @@ fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn average_smoothing_is_identical_across_domains() {
-        let mut luma_ema = None;
-        let mut max_rgb_ema = None;
-        let mut luma_history = VecDeque::new();
-        let mut max_rgb_history = VecDeque::new();
-
-        for value in [0.1, 0.4, 0.2, 0.8] {
-            let luma = smooth_average(value, &mut luma_ema, &mut luma_history, 0.1, 3);
-            let max_rgb = smooth_average(value, &mut max_rgb_ema, &mut max_rgb_history, 0.1, 3);
-            assert_eq!(luma, max_rgb);
-        }
-    }
 
     #[test]
     fn average_smoothing_has_no_scene_initialization_bias() {

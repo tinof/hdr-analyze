@@ -95,6 +95,14 @@ pub fn mark_done(artifact: &Path) -> std::io::Result<()> {
     fs::write(marker_path(artifact), b"")
 }
 
+/// Withdraw the completion sentinel so the producing step runs again.
+pub fn invalidate(artifact: &Path) -> std::io::Result<()> {
+    match fs::remove_file(marker_path(artifact)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 /// True when `artifact` exists, is non-empty, and has a completion sentinel — i.e. it was
 /// produced by a step that ran to completion and is safe to reuse.
 pub fn is_complete(artifact: &Path) -> bool {
@@ -172,6 +180,11 @@ mod tests {
 
         assert!(is_complete(&artifact));
         assert!(marker_path(&artifact).exists());
+
+        invalidate(&artifact).unwrap();
+        assert!(!is_complete(&artifact));
+        // Withdrawing a sentinel that is not there is not an error.
+        invalidate(&artifact).unwrap();
     }
 
     #[test]

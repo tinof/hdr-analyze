@@ -105,15 +105,19 @@ means, and per-scene min/avg/max values as 12-bit PQ codes. Scene minimum is the
 noise-rejected per-frame minima. Use `--min-percentile <percent>` to change the default P0.1 lower
 percentile; `--min-percentile 0` requests the absolute minimum.
 
-Y-luma and max-RGB mean series use identical EMA/temporal smoothing settings and scene resets before
-serialization. Robust minima remain raw per-frame spatial-percentile measurements.
+The Y-luma and max-RGB means in the sidecar are unfiltered: each frame value is that frame's mean
+and each scene value is the mean of its frames (version 4). The histogram EMA and temporal median
+apply only to the histograms and the frame average in the madVR `.bin`. Robust minima are raw
+per-frame spatial-percentile measurements.
 
 `mkvdovi` embeds the per-scene values as explicit `dovi_tool generate` shots, so the measured minimum,
 max-RGB mean, and maximum reach the RPU. Sidecar version 2 added `analyzer_version`, `source` (file
 name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, crop disabled), and
-stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 (current) adds
+stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 adds
 `analysis.luminance_mapping`: `pq`, or `dovi84-v2` for HLG measured through the full Profile 8.4
-decode. `mkvdovi` accepts versions 1–3. HLG input requires version 3 with `dovi84-v2`, and a `dovi84`
+decode. Version 4 (current) has the same layout and stores unfiltered averages. `mkvdovi` accepts
+versions 1–4; it reuses a sidecar below version 4 with a warning that its averages were smoothed
+over time (delete the measurements to re-analyze). HLG input requires version 3 or later with `dovi84-v2`, and a `dovi84`
 sidecar is rejected for a non-HLG input. Version 1 carries no identity or full-resolution crop, so
 only structure and frame count are checked and no L5 is derived from it.
 

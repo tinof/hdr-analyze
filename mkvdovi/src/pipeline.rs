@@ -572,6 +572,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         ));
     }
 
+    let previous_config = fs::read(&extra_json_path).ok();
     metadata::generate_extra_json(
         &extra_json_path,
         dv_profile,
@@ -582,6 +583,19 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         l1_sidecar.as_ref(),
     )?;
     progress::print_info("Configuration written.");
+    // The resume fingerprint does not cover the measurements. An RPU built from an earlier
+    // configuration (for example before a re-analysis changed L1) must not be reused.
+    if resume_enabled && previous_config != fs::read(&extra_json_path).ok() {
+        let stale = [temp_dir.join("RPU.bin"), temp_dir.join("BL_RPU.hevc")];
+        if stale.iter().any(|artifact| resume::is_complete(artifact)) {
+            progress::print_warn(
+                "The generation settings differ from the interrupted run; regenerating the RPU instead of reusing it.",
+            );
+        }
+        for artifact in &stale {
+            resume::invalidate(artifact)?;
+        }
+    }
 
     // --- Generate RPU ---
     current_step += 1;
