@@ -35,6 +35,18 @@ the work below:
   local CPU/CUDA parity check (`scripts/cuda-parity.sh`). Hosted CI has no GPU, so the second one
   is run by hand on a CUDA host.
 
+## Progress log
+
+Newest first. One line per step that changed the state of a roadmap item; details are in the
+pull request and in [`CHANGELOG.md`](CHANGELOG.md).
+
+| Date | Step | Items | Where |
+|------|------|-------|-------|
+| 2026-10-01 | Measurement study for the grain-robust peak started: how isolated the raw peak is on the available clips, spatial-support and temporal candidates, CUDA feasibility. Blocker for promotion: the two grainy titles and their `cm_analyze` v2 output from [VALIDATION.md §7](docs/VALIDATION.md) are not on the development host. | WS1, WS2 | in progress |
+| 2026-10-01 | Scene averages from unfiltered frame means (sidecar version 4). `mkvdovi` regenerates a stale RPU on resume. | WS2 | [#18](https://github.com/tinof/hdr-analyze/pull/18) |
+| 2026-10-01 | Final RPU checked against the sidecar on real HDR10 and HLG clips; 0.5.1 final-RPU baselines captured for five clips. | P0, WS6 | [#17](https://github.com/tinof/hdr-analyze/pull/17) |
+| 2026-10-01 | `l1_diff` limits, L1 regression gate in CI, CPU/CUDA parity check, final-RPU baseline script. The gate's first CI run exposed a lossy test-clip encode on newer FFmpeg; fixed. | E1, WS0 | [#17](https://github.com/tinof/hdr-analyze/pull/17) |
+
 ## Development principles
 
 - **Three achievements, three kinds of evidence.** Measuring source luminance accurately is shown by
