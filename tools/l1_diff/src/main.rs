@@ -142,13 +142,27 @@ fn limit_breaches(
 }
 
 /// Count cuts with no partner within ±1 frame: (reference cuts we miss, cuts only we have).
+/// A cut is the partner of at most one cut on the other side.
 fn scene_mismatches(reference: &[i64], ours: &[i64]) -> (usize, usize) {
-    let unmatched = |from: &[i64], against: &[i64]| {
-        from.iter()
-            .filter(|cut| !against.iter().any(|other| (other - **cut).abs() <= 1))
-            .count()
-    };
-    (unmatched(reference, ours), unmatched(ours, reference))
+    let mut reference = reference.to_vec();
+    let mut ours = ours.to_vec();
+    reference.sort_unstable();
+    ours.sort_unstable();
+
+    // Both lists are sorted, so pairing the earliest compatible cuts is a maximum matching.
+    let (mut r, mut o, mut matched) = (0, 0, 0);
+    while r < reference.len() && o < ours.len() {
+        if (reference[r] - ours[o]).abs() <= 1 {
+            matched += 1;
+            r += 1;
+            o += 1;
+        } else if reference[r] < ours[o] {
+            r += 1;
+        } else {
+            o += 1;
+        }
+    }
+    (reference.len() - matched, ours.len() - matched)
 }
 
 struct RefL1 {
@@ -574,12 +588,21 @@ fn main() -> Result<()> {
     if let Some(scenes_path) = &args.scenes {
         let text = fs::read_to_string(scenes_path)
             .with_context(|| format!("reading scenes {}", scenes_path.display()))?;
+        // Frame 0 starts the first scene on both sides and is not a cut.
         let ref_cuts: Vec<i64> = text
             .lines()
             .filter(|l| !l.trim().is_empty())
             .map(|l| l.trim().parse().context("scene frame"))
-            .collect::<Result<_>>()?;
-        let our_cuts: Vec<i64> = ours.scenes.iter().map(|s| s.start as i64).collect();
+            .collect::<Result<Vec<i64>>>()?
+            .into_iter()
+            .filter(|cut| *cut > 0)
+            .collect();
+        let our_cuts: Vec<i64> = ours
+            .scenes
+            .iter()
+            .map(|s| s.start as i64)
+            .filter(|cut| *cut > 0)
+            .collect();
         let (missed, extra) = scene_mismatches(&ref_cuts, &our_cuts);
         let matched = ref_cuts.len() - missed;
         if let Some(limit) = args.max_scene_mismatches {
@@ -597,6 +620,7 @@ fn main() -> Result<()> {
             ref_cuts.len(),
             100.0 * matched as f64 / ref_cuts.len().max(1) as f64
         );
+        println!("  cuts of ours without a reference partner: {extra}");
     }
 
     if let Some(csv_path) = &args.csv {
@@ -781,6 +805,10 @@ mod tests {
         assert_eq!(scene_mismatches(&[0, 24, 48], &[0, 25, 48]), (0, 0));
         assert_eq!(scene_mismatches(&[0, 24, 48], &[0, 48, 60]), (1, 1));
         assert_eq!(scene_mismatches(&[0, 24], &[0, 24, 30, 40]), (0, 2));
+        // One reference cut cannot absorb two of ours, nor the other way round.
+        assert_eq!(scene_mismatches(&[24], &[23, 25]), (0, 1));
+        assert_eq!(scene_mismatches(&[23, 25], &[24]), (1, 0));
+        assert_eq!(scene_mismatches(&[10, 11], &[11, 12]), (0, 0));
     }
 
     #[test]

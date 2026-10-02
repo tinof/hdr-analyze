@@ -76,20 +76,22 @@ pub struct Cli {
     #[arg(long, default_value_t = 5)]
     pub madvr_version: u8,
 
-    /// Scene detection threshold (distance metric). Default: 0.3
-    #[arg(long, default_value_t = 0.3)]
+    /// Smallest histogram distance (0-200) that can be a scene cut. A cut must also stand out
+    /// from the local frame-to-frame level, so grain and motion do not need a higher value.
+    #[arg(long, default_value_t = 3.0)]
     pub scene_threshold: f64,
 
     /// Scene detection metric: 'hist' (histogram distance) or 'hybrid' (prototype; histogram fused with flow)
     #[arg(long, default_value = "hist")]
     pub scene_metric: String,
 
-    /// Minimum scene length in frames. Cuts closer than this are dropped. Default: 24
-    #[arg(long, default_value_t = 24)]
+    /// Minimum scene length in frames. Of two cuts closer than this the stronger one is kept.
+    #[arg(long, default_value_t = 12)]
     pub min_scene_length: u32,
 
-    /// Optional smoothing window (in frames) over the scene-change metric. 0 disables smoothing.
-    #[arg(long, default_value_t = 5)]
+    /// Ignored. Accepted so existing command lines keep working; the detector no longer
+    /// averages the scene-change metric.
+    #[arg(long, default_value_t = 5, hide = true)]
     pub scene_smoothing: u32,
 
     /// Optional override for header.target_peak_nits (used for v6). If omitted, defaults to computed maxCLL.

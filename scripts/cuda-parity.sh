@@ -2,7 +2,7 @@
 # CPU vs CUDA parity gate for the analyzer. Run it on the GPU host before any PR that touches
 # hdr_analyzer_mvp/src/analysis/, kernels.cu or ffmpeg_io.rs.
 #
-# Encodes the synthetic L1 corpus (tools/l1_diff/corpus/make_corpus.py, 640x360, 144 frames) as
+# Encodes the synthetic L1 corpus (tools/l1_diff/corpus/make_corpus.py, 640x360, 242 frames) as
 # HEVC Main10 twice, tagged PQ and HLG, then runs hdr_analyzer_mvp/tests/cuda_parity.rs against a
 # debug build with the cuda feature. The test compares --hwaccel none with --hwaccel cuda:
 # byte-identical .bin, equal crop/scenes/frames in the L1 sidecar, and analysis.gpu == true for
@@ -65,7 +65,7 @@ make_clip() {
         -show_entries stream=profile,pix_fmt,color_transfer,nb_read_frames \
         -of default=noprint_wrappers=1 "$out.hevc")"
     rm -f "$out.hevc"
-    for expected in "profile=Main 10" "pix_fmt=yuv420p10le" "color_transfer=${ffmpeg_transfer}" "nb_read_frames=144"; do
+    for expected in "profile=Main 10" "pix_fmt=yuv420p10le" "color_transfer=${ffmpeg_transfer}" "nb_read_frames=242"; do
         grep -qxF "$expected" <<<"$probe" \
             || { echo "generated clip $out is not as expected (want $expected):" >&2; echo "$probe" >&2; exit 1; }
     done

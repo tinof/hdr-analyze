@@ -32,9 +32,28 @@ the front page concise.
 
 ### 1.2. Scene detection
 
-- Histogram distance metric (chi-squared-like, symmetric form) with a small epsilon for stability.
-- Default threshold `0.3` (configurable via `--scene-threshold`).
-- Cut detection runs during frame analysis and is converted to scene ranges after processing.
+- Metric: symmetric chi-squared distance between the 256-bin luminance histograms of two frames
+  (0 = identical, about 200 = disjoint). CPU and CUDA runs use the same histograms, so their
+  cuts are identical.
+- Cuts are chosen after the frame loop, when every histogram is known (`analysis/scene.rs`):
+  1. **Score.** For each frame, the smallest distance over all pairs of one frame up to 4 before
+     and one up to 4 after it. A cut separates every such pair. A flash of up to 3 frames does
+     not: the picture comes back, one pair bridges it, and the score drops.
+  2. **Local level.** The median frame-to-frame distance of the 12 frames on each side (the
+     frame and its direct neighbours left out). Grain and motion raise this level.
+  3. **Candidate.** Score above `--scene-threshold` (default 3.0) and above 16 times the local
+     level. A fixed threshold alone does not work: on grainy film the frame-to-frame distance
+     exceeds any useful fixed value on about half of all frames.
+  4. **Selection.** Candidates are accepted strongest first; an accepted cut blocks candidates
+     closer than `--min-scene-length` (default 12). A weak candidate just before a real cut
+     therefore cannot suppress it.
+- With `--sample-rate N` only analyzed frames take part; a cut is reported at the first analyzed
+  frame of the new shot, and the look-around and window sizes count analyzed frames.
+- Known limit: when the whole picture changes on every frame (a spinning camera, a lightning
+  storm), the histogram distance between shots is not larger than inside them and most cuts are
+  missed. That needs a second signal (roadmap item E4).
+- At a large frame-to-frame distance the crop monitor takes a sample (at most one per minimum
+  scene length). This is reporting-only telemetry and not tied to the final cuts.
 - `--scene-metric hybrid` is a prototype that currently falls back to histogram distance; optical
   flow fusion remains roadmap work.
 

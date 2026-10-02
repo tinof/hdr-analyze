@@ -6,6 +6,34 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Changed
+
+- **Scene detection is rebuilt.** The old detector compared a smoothed histogram distance with a
+  fixed threshold (0.3). On grainy or busy pictures the distance is above that threshold on
+  about half of all frames, so a cut was placed whenever the 24-frame minimum scene length
+  allowed one: 53 scenes where the authored shot list of a 35mm war-film cut has 10. Flashes
+  were cut as well. Cuts are now chosen after analysis: a cut must separate the frames before
+  it from the frames after it (a flash of up to 3 frames does not), and must exceed 16 times
+  the local frame-to-frame level. Of two candidates closer than the minimum scene length the
+  stronger one wins. On ten real-content cuts with authored retail shot lists (168 cuts) the
+  analyzer now matches 142 with 13 extra cuts; before it matched 91 with 228 extra. Two cuts
+  where the whole picture changes on every frame (a spinning capsule, a lightning storm) still
+  miss most boundaries ([`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md) §1.2).
+  - Defaults changed: `--scene-threshold` 0.3 → 3.0 (it is now a floor on the distance),
+    `--min-scene-length` 24 → 12. `--scene-smoothing` is accepted and ignored.
+  - Scene boundaries, and with them per-scene L1 and the final RPU, change for most sources.
+    Per-frame measurements do not change. The sidecar layout and version are unchanged, so
+    `mkvdovi` reuses existing measurement files with their old boundaries; delete them to
+    re-analyze.
+- `--dump-frame-stats` also writes the scene-detection series (`scene_diff`, `scene_score`,
+  `scene_baseline`, `scene_start`).
+- `l1_diff --scenes` matches cuts one to one (two analyzer cuts can no longer both count as a
+  match for one reference cut), prints the number of extra cuts, and no longer counts frame 0
+  as a cut on either side.
+- The synthetic L1 regression clip has shots of 61, 29, 31, 43, 41 and 37 frames instead of six
+  shots of 24. Its scene reference now comes from the clip's construction, not from analyzer
+  output. The old clip could not detect a detector that cuts every 24 frames.
+
 ### Fixed
 
 - **The L1 average of a scene that changes over time was wrong.** Each frame's average passed a

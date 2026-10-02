@@ -44,7 +44,7 @@ trap 'rm -rf "$work"' EXIT
 
 # Limits in 12-bit PQ codes. An unchanged analyzer scores 0. The error limits leave room for
 # one rounding flip of a whole-code value on another CPU; the bias limits catch a shift of
-# one code over a single shot (24 of 144 frames: bias 0.17).
+# one code over the shortest shot (29 of 242 frames: bias 0.12).
 limits=(
     --max-peak-bias 0.1 --max-peak-error 0.5
     --max-min-bias 0.1 --max-min-error 1
@@ -79,7 +79,8 @@ for transfer in pq hlg; do
 
     if (( update )); then
         "$L1_DIFF" --ours "$bin" --export-reference "$corpus/$transfer.reference.csv"
-        jq -r '.scenes[].start' "$bin.l1.json" > "$corpus/$transfer.scenes.txt"
+        # The scene reference is the clip's construction, not the analyzer's output.
+        python3 "$corpus/make_corpus.py" --scenes > "$corpus/$transfer.scenes.txt"
         continue
     fi
 
