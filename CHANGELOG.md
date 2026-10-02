@@ -29,8 +29,53 @@ This document provides a historical record of completed milestones, feature impl
   difference histogram the estimator needs, so `--hwaccel cuda` no longer falls back to CPU
   analysis for it. Output is identical to the CPU path (`.bin`, sidecar and frame statistics;
   checked by `scripts/cuda-parity.sh` in both peak domains for PQ and HLG, and on a 2,855-frame
-  retail cut). Speed is the same as with the default estimator. The estimator itself is
-  unchanged and stays opt-in. `--pre-denoise median3` is still CPU-only.
+  retail cut). Speed is the same as with the default estimator. That step did not change the
+  estimator (the next entry does); it stays opt-in. `--pre-denoise median3` is still CPU-only.
+- **`--peak-estimator robust` uses a new rule that keeps the flat highlights the old one
+  lowered.** The old rule inferred the size of the brightest area from one tail count and
+  subtracted the expected maximum of that many grain samples. It lowered real highlights: a
+  flat 2x2 to 32x32 highlight and one- and three-frame flashes read 14 to 246 codes low, also
+  on a clean clip. The new rule describes the pixels at the top of the 4096-bin PQ histogram
+  by a centre and a width and removes the measured grain variance from the width:
+  `peak = centre + (raw - centre) * sqrt(1 - sigma^2 / width^2)`, with the correction limited
+  to 5.2 sigma. A top as narrow as the grain reads its centre, and a top much wider than the
+  grain is picture and is nearly kept. A flat top is kept. A small group of pixels above a gap
+  is kept exactly when it has one value, and reads its mean when it is no wider than sigma
+  ([`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md) §2.4). It works on the same
+  kernel statistics as before, so CPU and CUDA output stay identical (`scripts/cuda-parity.sh`),
+  and the default `max` estimator is unchanged.
+  Measured on 25 real-content cuts, 12-bit PQ codes, against the default `max`:
+  - Flat, noise-free synthetic highlights about 1500 codes above the picture (2x2, 8x8, 32x32,
+    one- and three-frame flashes, a moving 2x2) on a clean and a grainy clip: all 12 segments
+    read +0.0.
+  - Grainy clip against the raw maximum of its clean twin, per frame, on three pairs: bias
+    +102.7 → +23.4, +41.0 → +17.0 and +83.3 → +50.5 (the last has a saturated, partly clipped
+    highlight). Mean absolute error 108.4 → 60.3, 41.0 → 18.6 and 85.3 → 70.7. The low bias
+    is partly over- and under-correction cancelling: on the first pair the largest error
+    (251.3 → 248.6) is now an under-read, and 27% of the frames read more than 10 codes below
+    the clean twin (27% on the third pair, 2% on the second). The clean twin's raw maximum
+    carries some noise itself.
+  - One heavy-grain retail cut against its embedded L1, per shot: bias +76.1 → +54.4,
+    largest error 226.6 → 138.6.
+  - Limits, all in [`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md) §2.4. Not
+    every highlight is kept: one to three flat pixels, or a few pixels that carry grain, within
+    a few sigma of the highest grain pixel are corrected as grain and read up to 5.2 sigma
+    low. The rule also lowers clean digital content, by 3 to 21 codes per frame on average
+    (36 on an HLG cut); on single frames by up to 332 codes, and by 343 on a grainy cut, which
+    is the limit of the correction. No content floor is applied: on 4,259 of 23,519 frames
+    the result lies below the frame's 99.99th percentile. Frame-to-frame variation inside
+    shots is higher than with `max` on 24 of 25 cuts (10% on average, 38% at worst), and the
+    distance of the shot peak from the shot's typical frame grows on 15 cuts and shrinks on 7.
+    Against embedded L1, three cuts whose `max` bias was near zero or negative move further
+    down (+1.1 → -47.6, -9.2 → -65.7, -90.1 → -139.4; largest error 98 → 246, 502 → 652,
+    1499 → 1624); on all three the embedded L1 describes a composed two-layer picture, so that
+    reference is approximate.
+    Two constants of the rule were chosen on these cuts. The estimator stays opt-in.
+- With `--peak-estimator max` or `percentile`, the CPU path no longer runs the grain
+  estimator. The `robust_pq`, `sigma_pq`, `correction_pq` and `n_eff` columns of
+  `--dump-frame-stats` are then neutral (raw maximum, 0, 0, 0), as they already were with
+  `--hwaccel cuda`. `--peak-estimator robust` with `--downscale` 2 or 4 prints a warning: the
+  rule is specified for full-resolution analysis.
 - The CPU path computes the PQ max-RGB mix and each pixel's histogram bin in the kernel's f32
   arithmetic instead of f64. This removes rare one-bin differences between the backends. The
   default peak moves by less than 0.1 of a 12-bit code (measured on three real-content cuts

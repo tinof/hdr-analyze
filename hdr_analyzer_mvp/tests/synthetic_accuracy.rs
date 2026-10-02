@@ -60,7 +60,19 @@ fn encode_tagged_yuv_plane_clip(
     cr_plane: &[u16],
     color_trc: &str,
 ) -> std::path::PathBuf {
-    assert_eq!(y_plane.len(), W * H);
+    let y_planes = vec![y_plane; FRAMES];
+    encode_tagged_yuv_sequence(dir, label, &y_planes, cb_plane, cr_plane, color_trc)
+}
+
+/// Encode one luma plane per frame (chroma planes shared) as lossless yuv420p10le.
+fn encode_tagged_yuv_sequence(
+    dir: &std::path::Path,
+    label: &str,
+    y_planes: &[&[u16]],
+    cb_plane: &[u16],
+    cr_plane: &[u16],
+    color_trc: &str,
+) -> std::path::PathBuf {
     assert_eq!(cb_plane.len(), W * H / 4);
     assert_eq!(cr_plane.len(), W * H / 4);
     let out = dir.join(format!("{label}.mkv"));
@@ -105,19 +117,15 @@ fn encode_tagged_yuv_plane_clip(
         .spawn()
         .expect("spawn ffmpeg");
 
-    let mut frame = Vec::with_capacity(W * H * 3);
-    for y_code in y_plane {
-        frame.extend_from_slice(&y_code.to_le_bytes());
-    }
-    for cb_code in cb_plane {
-        frame.extend_from_slice(&cb_code.to_le_bytes());
-    }
-    for cr_code in cr_plane {
-        frame.extend_from_slice(&cr_code.to_le_bytes());
-    }
     {
         let stdin = child.stdin.as_mut().expect("ffmpeg stdin");
-        for _ in 0..FRAMES {
+        let mut frame = Vec::with_capacity(W * H * 3);
+        for y_plane in y_planes {
+            assert_eq!(y_plane.len(), W * H);
+            frame.clear();
+            for code in y_plane.iter().chain(cb_plane).chain(cr_plane) {
+                frame.extend_from_slice(&code.to_le_bytes());
+            }
             stdin.write_all(&frame).expect("write frame");
         }
     }
@@ -395,6 +403,163 @@ fn grain_estimator_handles_chroma_and_multiplicative_linear_noise() {
         linear.robust_code
     );
     assert!(linear.raw_code > linear.robust_code + 2.0 * linear.sigma_code);
+}
+
+/// Flat highlights on a grainy picture, in one shot: on the first and the last frame, as a
+/// one-frame flash, as a three-frame specular and as a small static specular. The robust
+/// estimator must keep each at its constructed value while it still corrects the grain on
+/// the frames without a highlight. The one-frame flash is brighter than the other highlights,
+/// so the shot peak shows that this single frame sets it.
+///
+/// The grain is drawn from a fixed seed. The estimator is steep where the fitted width is
+/// close to sigma: in a simulation of this plateau with other seeds about 1 frame in 11
+/// misses the tolerance below (by up to 2 sigma). A change of frame size, frame count or
+/// generator can therefore fail this test without a change of the estimator.
+#[test]
+fn robust_keeps_flat_highlights_on_grain_and_corrects_the_rest() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+
+    const CLIP_FRAMES: usize = 24;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sigma_10 = 4.0_f64;
+    let plateau_y = clamp_limited_10bit(nits_to_pq(200.0) * 876.0 + 64.0);
+    let highlight_y = clean_1000_nit_code();
+    let flash_y = highlight_y + 40;
+    const FLASH_FRAME: usize = 5;
+    let plateau_code = expected_peak_code(plateau_y);
+    let highlight_code = expected_peak_code(highlight_y);
+    let flash_code = expected_peak_code(flash_y);
+    let sigma_12 = sigma_10 * 4095.0 / 876.0;
+    assert!(highlight_code - plateau_code > 20.0 * sigma_12);
+
+    // (frames, block side): highlight on the first frame, a one-frame flash, a three-frame
+    // 8x8 specular, a static 2x2 specular, and a highlight on the last frame.
+    let highlights: [(std::ops::RangeInclusive<usize>, usize); 5] = [
+        (0..=0, 2),
+        (FLASH_FRAME..=FLASH_FRAME, 2),
+        (9..=11, 8),
+        (15..=19, 2),
+        (CLIP_FRAMES - 1..=CLIP_FRAMES - 1, 2),
+    ];
+    let block_side = |frame: usize| {
+        highlights
+            .iter()
+            .find(|(frames, _)| frames.contains(&frame))
+            .map(|h| h.1)
+    };
+
+    let mut rng = XorShift64Star::new(0xC0DE_F1A5_4000);
+    let planes: Vec<Vec<u16>> = (0..CLIP_FRAMES)
+        .map(|frame| {
+            let mut plane: Vec<u16> = (0..W * H)
+                .map(|_| clamp_limited_10bit(f64::from(plateau_y) + sigma_10 * rng.normal()))
+                .collect();
+            if let Some(side) = block_side(frame) {
+                let value = if frame == FLASH_FRAME {
+                    flash_y
+                } else {
+                    highlight_y
+                };
+                for y in 100..100 + side {
+                    for x in 200..200 + side {
+                        plane[y * W + x] = value;
+                    }
+                }
+            }
+            plane
+        })
+        .collect();
+    let plane_refs: Vec<&[u16]> = planes.iter().map(Vec::as_slice).collect();
+    let neutral = vec![512_u16; W * H / 4];
+    let clip = encode_tagged_yuv_sequence(
+        dir.path(),
+        "grain_highlights",
+        &plane_refs,
+        &neutral,
+        &neutral,
+        "smpte2084",
+    );
+
+    let analyze = |estimator: &str| {
+        let bin = dir.path().join(format!("grain_highlights_{estimator}.bin"));
+        let output = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+            .arg(&clip)
+            .arg("-o")
+            .arg(&bin)
+            .args(["--peak-source", "max", "--peak-estimator", estimator])
+            .args(["--disable-optimizer", "--no-crop"])
+            .output()
+            .expect("run analyzer");
+        assert!(
+            output.status.success(),
+            "analyzer failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let data = std::fs::read(&bin).expect("read measurements");
+        let measurements =
+            madvr_parse::MadVRMeasurements::parse_measurements(&data).expect("parse measurements");
+        let peaks: Vec<f64> = measurements
+            .frames
+            .iter()
+            .map(|frame| frame.peak_pq_2020 * 4095.0)
+            .collect();
+        let bin_shot_peak_nits = measurements
+            .scenes
+            .iter()
+            .map(|scene| scene.peak_nits)
+            .max()
+            .expect("at least one scene in the measurements");
+        let sidecar: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
+                .expect("parse L1 sidecar");
+        let shot_peak = sidecar["scenes"]
+            .as_array()
+            .expect("sidecar scenes")
+            .iter()
+            .map(|scene| scene["max_pq_12bit"].as_u64().expect("scene max"))
+            .max()
+            .expect("at least one scene");
+        (peaks, shot_peak, bin_shot_peak_nits)
+    };
+
+    let (raw, _, _) = analyze("max");
+    let (robust, shot_peak, bin_shot_peak_nits) = analyze("robust");
+    assert_eq!(robust.len(), CLIP_FRAMES);
+    // Same tolerance as the whole-frame grain fixtures.
+    let grain_tolerance = 2.0 + 0.5 * sigma_12;
+    for (frame, (&robust, &raw)) in robust.iter().zip(&raw).enumerate() {
+        if block_side(frame).is_some() {
+            let expected = if frame == FLASH_FRAME {
+                flash_code
+            } else {
+                highlight_code
+            };
+            assert!(
+                (robust - expected).abs() < 0.25,
+                "frame {frame}: highlight {expected} read as {robust}"
+            );
+        } else {
+            assert!(
+                raw - plateau_code > 2.0 * sigma_12,
+                "frame {frame}: raw {raw} must overshoot the plateau {plateau_code}"
+            );
+            assert!(
+                (robust - plateau_code).abs() <= grain_tolerance,
+                "frame {frame}: robust {robust}, plateau {plateau_code}, raw {raw}"
+            );
+        }
+    }
+    assert!(flash_code - highlight_code > 100.0);
+    assert_eq!(shot_peak, flash_code.round() as u64);
+    // The scene record of the measurement file takes the same maximum of frame peaks.
+    let flash_nits = pq_to_nits(flash_code / 4095.0);
+    assert!(
+        (f64::from(bin_shot_peak_nits) - flash_nits).abs() <= 2.0,
+        "scene peak {bin_shot_peak_nits} nits, flash {flash_nits} nits"
+    );
 }
 
 #[test]
