@@ -38,10 +38,10 @@ hdr_analyzer_mvp "video.mkv"
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--scene-threshold <float>` | `0.3` | Scene-cut distance threshold |
+| `--scene-threshold <float>` | `3.0` | Smallest histogram distance (0–200) that can be a scene cut. A cut must also stand out from the local frame-to-frame level, so grainy sources do not need a higher value |
 | `--scene-metric <hist\|hybrid>` | `hist` | `hist` = histogram distance; `hybrid` is a prototype that currently falls back to the same histogram metric |
-| `--min-scene-length <frames>` | `24` | Drop cuts closer than N frames |
-| `--scene-smoothing <frames>` | `5` | Rolling window over the scene-change metric (0 disables) |
+| `--min-scene-length <frames>` | `12` | Minimum scene length. Of two cuts closer than N frames the stronger one is kept |
+| `--scene-smoothing <frames>` | – | Ignored (hidden). Accepted so older command lines keep working |
 
 ### Optimizer
 
@@ -114,7 +114,7 @@ removed: the 8.4 RPU fixes the mapping.
 |------|---------|-------------|
 | `--analysis-threads <N>` | logical cores | Override Rayon worker count for histogram analysis |
 | `--profile-performance` | off | Print per-stage throughput (decode vs. analysis) when finished |
-| `--dump-frame-stats <PATH>` | none | Write sample-rate-aligned CSV with selected/raw/percentile/robust peaks, sigma, correction, and effective-tail count |
+| `--dump-frame-stats <PATH>` | none | Write sample-rate-aligned CSV with selected/raw/percentile/robust peaks, sigma, correction, effective-tail count, and the scene-detection series (`scene_diff`, `scene_score`, `scene_baseline`, `scene_start`) |
 
 ### Notes for v6 output
 

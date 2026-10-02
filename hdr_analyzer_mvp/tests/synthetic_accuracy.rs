@@ -216,7 +216,7 @@ fn analyze_with_peak_dump(dir: &std::path::Path, label: &str, clip: &std::path::
         .split(',')
         .map(|value| value.parse::<f64>().expect("numeric frame stat"))
         .collect();
-    assert_eq!(values.len(), 8);
+    assert_eq!(values.len(), 12);
     PeakDump {
         selected_code: values[1] * 4095.0,
         raw_code: values[2] * 4095.0,

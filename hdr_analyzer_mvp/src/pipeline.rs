@@ -32,7 +32,8 @@ use crate::analysis::histogram::{
 };
 use crate::analysis::hlg::{DOVI84_MAPPING, PQ_MAPPING};
 use crate::analysis::scene::{
-    calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed,
+    calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed, scene_series,
+    select_scene_cuts, SceneSeries,
 };
 use crate::cli::{Cli, PeakDomain, PeakEstimator};
 use crate::crop::{detect_crop, is_frame_usable_for_crop, CropRect, CROP_EDGE_TOLERANCE};
@@ -61,26 +62,71 @@ fn peak_estimator_name(estimator: PeakEstimator) -> &'static str {
     }
 }
 
-fn write_frame_stats_csv(path: &Path, stats: &[FramePeakStats]) -> Result<()> {
+/// Final scene cuts and the series they were chosen from.
+///
+/// Runs after the frame loop, on the unsmoothed histograms of the analyzed frames (with
+/// `--sample-rate` the skipped frames only hold copies), so a decision can look ahead.
+fn detect_scene_cuts(
+    frames: &[MadVRFrame],
+    sample_rate: u32,
+    threshold: f64,
+    min_scene_length: u32,
+) -> (Vec<u32>, Vec<u32>, SceneSeries) {
+    let step = sample_rate.max(1) as usize;
+    let frame_indices: Vec<u32> = (0..frames.len()).step_by(step).map(|i| i as u32).collect();
+    let histograms: Vec<&[f64]> = frame_indices
+        .iter()
+        .map(|&index| frames[index as usize].lum_histogram.as_slice())
+        .collect();
+    let series = scene_series(&histograms);
+    let cuts = select_scene_cuts(&series, &frame_indices, threshold, min_scene_length);
+    (cuts, frame_indices, series)
+}
+
+fn write_frame_stats_csv(
+    path: &Path,
+    stats: &[FramePeakStats],
+    frame_indices: &[u32],
+    series: &SceneSeries,
+    scenes: &[MadVRScene],
+) -> Result<()> {
+    // Frames skipped by --sample-rate have no scene values of their own.
+    let mut scene_values = vec![(0.0, 0.0, 0.0); stats.len()];
+    for (position, &frame) in frame_indices.iter().enumerate() {
+        if let Some(slot) = scene_values.get_mut(frame as usize) {
+            *slot = (
+                series.diff[position],
+                series.score[position],
+                series.baseline[position],
+            );
+        }
+    }
+    let cut_frames: std::collections::HashSet<u32> =
+        scenes.iter().map(|scene| scene.start).collect();
     let file = File::create(path)
         .with_context(|| format!("Failed to create frame-stats CSV {}", path.display()))?;
     let mut writer = BufWriter::new(file);
     writeln!(
         writer,
-        "frame,selected_pq,raw_max_pq,percentile_pq,robust_pq,sigma_pq,correction_pq,n_eff"
+        "frame,selected_pq,raw_max_pq,percentile_pq,robust_pq,sigma_pq,correction_pq,n_eff,scene_diff,scene_score,scene_baseline,scene_start"
     )?;
 
     for (frame_index, stat) in stats.iter().enumerate() {
+        let (scene_diff, scene_score, scene_baseline) = scene_values[frame_index];
         writeln!(
             writer,
-            "{frame_index},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},{}",
+            "{frame_index},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},{},{:.6},{:.6},{:.6},{}",
             stat.selected_peak_pq,
             stat.raw_max_pq,
             stat.percentile_pq,
             stat.robust_pq,
             stat.sigma_pq,
             stat.correction_pq,
-            stat.n_eff
+            stat.n_eff,
+            scene_diff,
+            scene_score,
+            scene_baseline,
+            u8::from(cut_frames.contains(&(frame_index as u32)))
         )?;
     }
     writer
@@ -444,7 +490,13 @@ pub fn run(
         )?;
 
     if let Some(path) = &cli.dump_frame_stats {
-        write_frame_stats_csv(path, &frame_peak_stats)?;
+        let (_, frame_indices, series) = detect_scene_cuts(
+            &frames,
+            cli.sample_rate,
+            cli.scene_threshold,
+            cli.min_scene_length,
+        );
+        write_frame_stats_csv(path, &frame_peak_stats, &frame_indices, &series, &scenes)?;
         println!("Wrote frame peak statistics: {}", path.display());
     }
 
@@ -555,6 +607,37 @@ pub fn run(
     println!("Wrote L1 measurement sidecar: {}", sidecar_path.display());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod scene_cut_tests {
+    use super::*;
+
+    fn frame(bin: usize) -> MadVRFrame {
+        let mut lum_histogram = vec![0.0; 256];
+        lum_histogram[bin] = 100.0;
+        MadVRFrame {
+            lum_histogram,
+            ..Default::default()
+        }
+    }
+
+    /// With `--sample-rate 3` the frames in between hold a copy of the last analyzed frame.
+    /// The shot changes at source frame 40; the first analyzed frame of the new shot is 42.
+    #[test]
+    fn sampled_analysis_cuts_at_the_first_analyzed_frame_of_a_shot() {
+        let frames: Vec<MadVRFrame> = (0..90)
+            .map(|index| frame(if index - index % 3 < 40 { 30 } else { 180 }))
+            .collect();
+        let (cuts, frame_indices, series) = detect_scene_cuts(&frames, 3, 3.0, 12);
+        assert_eq!(cuts, vec![42]);
+        assert_eq!(frame_indices.len(), 30);
+        assert_eq!(series.diff.len(), 30);
+
+        // Every frame analyzed: the copies make the picture change at 42 as well.
+        let (cuts, _, _) = detect_scene_cuts(&frames, 1, 3.0, 12);
+        assert_eq!(cuts, vec![42]);
+    }
 }
 
 #[cfg(test)]
@@ -699,11 +782,8 @@ fn run_native_analysis_pipeline(
     let mut frames = Vec::new();
     let mut l1_measurements = Vec::new();
     let mut frame_peak_stats = Vec::new();
-    let mut scene_cuts = Vec::new();
     let mut previous_histogram: Option<Vec<f64>> = None;
-    let smoothing_window = cli.scene_smoothing as usize;
-    let mut diff_window: VecDeque<f64> = VecDeque::with_capacity(smoothing_window.max(1));
-    let mut last_cut_frame: u32 = 0;
+    let mut last_crop_sample_frame: u32 = 0;
     let mut frame_count = 0u32;
     let mut analysis_duration = Duration::ZERO;
 
@@ -877,36 +957,30 @@ fn run_native_analysis_pipeline(
                 analysis_duration += start.elapsed();
             }
 
-            // Scene detection on analyzed frames
+            // Scene boundaries are chosen after the loop (`detect_scene_cuts`). Here a large
+            // frame-to-frame distance only marks a likely scene change at which the crop
+            // monitor takes a sample. Every final cut exceeds this distance too, but the
+            // samples are rate-limited, so they are telemetry, not one per boundary.
             if let Some(ref prev_hist) = previous_histogram {
                 let raw_diff =
                     compute_scene_diff(cli, &frame_result.frame.lum_histogram, prev_hist);
-                let diff_for_threshold = if smoothing_window > 0 {
-                    diff_window.push_back(raw_diff);
-                    if diff_window.len() > smoothing_window {
-                        diff_window.pop_front();
-                    }
-                    let sum: f64 = diff_window.iter().sum();
-                    sum / (diff_window.len() as f64)
-                } else {
-                    raw_diff
-                };
-
-                if diff_for_threshold > cli.scene_threshold
-                    && cut_allowed(Some(last_cut_frame), frame_count, cli.min_scene_length)
+                // Without crop monitoring (--no-crop) nothing reads the pixels, so an NVDEC
+                // frame is not downloaded.
+                if crop_monitor.is_some()
+                    && raw_diff > cli.scene_threshold
+                    && cut_allowed(
+                        Some(last_crop_sample_frame),
+                        frame_count,
+                        cli.min_scene_length,
+                    )
                 {
-                    scene_cuts.push(frame_count);
-                    last_cut_frame = frame_count;
-                    // Without crop monitoring (--no-crop) nothing reads the pixels, so an NVDEC
-                    // frame is not downloaded.
-                    if crop_monitor.is_some() {
-                        let cut_sample_frame: &frame::Video = if used_gpu || !used_scaled {
-                            host_view(decoded_frame, &mut transferred)?
-                        } else {
-                            &scaled_frame
-                        };
-                        sample_scene_cut_crop(&mut crop_monitor, rect, cut_sample_frame);
-                    }
+                    last_crop_sample_frame = frame_count;
+                    let cut_sample_frame: &frame::Video = if used_gpu || !used_scaled {
+                        host_view(decoded_frame, &mut transferred)?
+                    } else {
+                        &scaled_frame
+                    };
+                    sample_scene_cut_crop(&mut crop_monitor, rect, cut_sample_frame);
                 }
             }
             if transferred.is_some() {
@@ -971,6 +1045,12 @@ fn run_native_analysis_pipeline(
         monitor.report();
     }
 
+    let (scene_cuts, _, _) = detect_scene_cuts(
+        &frames,
+        cli.sample_rate,
+        cli.scene_threshold,
+        cli.min_scene_length,
+    );
     let scenes = convert_scene_cuts_to_scenes(scene_cuts, frame_count);
     println!(
         "Scene detection completed: {} scenes detected",
