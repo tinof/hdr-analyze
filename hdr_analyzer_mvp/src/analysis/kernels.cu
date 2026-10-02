@@ -48,6 +48,9 @@
 #define DIFF_BINS 64
 #define DIFF_WORDS (DIFF_BANDS * DIFF_BINS)
 #define DIFF_WORD (SUMS_WORD + 6)
+// gpu.rs reads the same layout (DIFF_WORD, RESULT_WORDS).
+static_assert(SUMS_WORD == 4386 && DIFF_WORD == 4392 && DIFF_WORD + DIFF_WORDS == 5416,
+    "result buffer layout differs from gpu.rs");
 // 2^32 as f32. x * 2^32 is an exact exponent shift for finite x in [0, 1], so truncating
 // it with __float2ull_rz equals the former (unsigned long long)((double)x * 2^32).
 #define FIXED_POINT_SCALE 4294967296.0f

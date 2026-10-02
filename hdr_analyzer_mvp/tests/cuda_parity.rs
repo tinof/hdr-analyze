@@ -283,12 +283,12 @@ fn cuda_output_matches_cpu() {
             check_parity(&format!("{name}, {crop}"), clip, mapping, no_crop, &[]);
         }
         // The grain-robust estimator in both peak domains.
-        for domain in ["max-rgb", "luma"] {
+        for (domain, no_crop) in [("max-rgb", true), ("max-rgb", false), ("luma", true)] {
             check_parity(
-                &format!("{name}, robust, {domain}"),
+                &format!("{name}, robust, {domain}, no_crop={no_crop}"),
                 clip,
                 mapping,
-                true,
+                no_crop,
                 &[
                     "--peak-estimator",
                     "robust",
