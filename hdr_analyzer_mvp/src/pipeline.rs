@@ -710,8 +710,6 @@ fn run_native_analysis_pipeline(
         None
     } else if analysis_options.denoise_mode == "median3" {
         Some("--pre-denoise median3 is CPU-only")
-    } else if analysis_options.peak_estimator == PeakEstimator::Robust {
-        Some("--peak-estimator robust is CPU-only (needs grain statistics)")
     } else {
         None
     };

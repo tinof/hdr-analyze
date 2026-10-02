@@ -141,8 +141,8 @@ Notes on these commands:
   paths agree.
 - The analyzer has no dedicated `none` value. `--hwaccel none` is treated as an unknown type and
   decodes in software, which is the CPU path. Omitting `--hwaccel` gives the same result.
-- `--pre-denoise median3` and `--peak-estimator robust` are CPU-only and turn off the CUDA kernel.
-  Keep them out of a CPU/CUDA comparison.
+- `--pre-denoise median3` is CPU-only and turns off the CUDA kernel. Keep it out of a CPU/CUDA
+  comparison. `--peak-estimator robust` runs in the kernel at the same speed as the default.
 - `--downscale` means a resize on the CPU path and a sampling stride on the CUDA path. Leave it at 1
   unless both runs are meant to measure that trade-off.
 - Run each command at least twice and keep the later timing, so both paths read the source from a

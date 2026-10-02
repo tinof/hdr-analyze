@@ -6,8 +6,9 @@
 //! max-RGB means, and domain peaks. Only a few KB of results are downloaded per
 //! frame. NVDEC frames in the shared primary context are analyzed in place
 //! (`analyze_device`); other frames are uploaded from host memory (`analyze`).
-//! The grain-robust (`robust`) peak estimator needs the cross-quad diff
-//! histogram and stays CPU-only; the pipeline never routes it here.
+//! For the grain-robust (`robust`) peak estimator the kernel also fills the
+//! cross-quad difference histogram, and the host applies the same estimator
+//! functions as the CPU path.
 
 use anyhow::{anyhow, Result};
 #[cfg(feature = "cuda")]
@@ -15,8 +16,13 @@ use ffmpeg_next::format;
 use ffmpeg_next::frame;
 
 #[cfg(feature = "cuda")]
-use crate::analysis::frame::{high_percentile_pq, low_percentile_pq, mean_nits_from_pq_hist};
+use crate::analysis::frame::{
+    effective_tail_count, high_percentile_pq, low_percentile_pq, mean_nits_from_pq_hist,
+    robust_peak_pq, sigma_from_diff_hist,
+};
 use crate::analysis::frame::{AnalyzedFrame, FrameAnalysisOptions};
+#[cfg(any(feature = "cuda", test))]
+use crate::analysis::frame::{DIFF_BINS, DIFF_VALUE_BANDS};
 #[cfg(any(feature = "cuda", test))]
 use crate::analysis::histogram::nits_to_pq;
 #[cfg(any(feature = "cuda", test))]
@@ -42,10 +48,18 @@ const MAX_RGB_WORD: usize = MAX_LUMA_WORD + 1;
 const SUMS_WORD: usize = 4386;
 #[cfg(any(feature = "cuda", test))]
 const SUM_WORDS: usize = 3;
+/// Cross-quad difference histogram of the grain-robust estimator, after the sums.
 #[cfg(any(feature = "cuda", test))]
-const RESULT_WORDS: usize = SUMS_WORD + 2 * SUM_WORDS;
+const DIFF_WORD: usize = SUMS_WORD + 2 * SUM_WORDS;
+#[cfg(any(feature = "cuda", test))]
+const DIFF_WORDS: usize = DIFF_VALUE_BANDS * DIFF_BINS;
+#[cfg(any(feature = "cuda", test))]
+const RESULT_WORDS: usize = DIFF_WORD + DIFF_WORDS;
 #[cfg(feature = "cuda")]
 const _: () = assert!(SUMS_WORD == MAX_RGB_WORD + 2 && SUMS_WORD % 2 == 0);
+// kernels.cu hard-codes DIFF_WORD = SUMS_WORD + 6, 16 bands and 64 bins.
+#[cfg(any(feature = "cuda", test))]
+const _: () = assert!(DIFF_WORD == SUMS_WORD + 6 && DIFF_VALUE_BANDS == 16 && DIFF_BINS == 64);
 #[cfg(feature = "cuda")]
 const FIXED_POINT_SCALE: f64 = 4_294_967_296.0;
 /// Threads per block, a multiple of the warp size (the kernel's warp reductions rely on it).
@@ -86,6 +100,18 @@ fn result_sums(results: &[u32]) -> [u64; SUM_WORDS] {
             (u64::from(low) << 32) | u64::from(high)
         }
     })
+}
+
+#[cfg(any(feature = "cuda", test))]
+/// The kernel's cross-quad difference histogram, in the CPU estimator's layout.
+#[cfg(any(feature = "cuda", test))]
+fn result_diff_hist(results: &[u32]) -> [[u32; DIFF_BINS]; DIFF_VALUE_BANDS] {
+    let mut diff_hist = [[0u32; DIFF_BINS]; DIFF_VALUE_BANDS];
+    for (band, counts) in diff_hist.iter_mut().enumerate() {
+        let start = DIFF_WORD + band * DIFF_BINS;
+        counts.copy_from_slice(&results[start..start + DIFF_BINS]);
+    }
+    diff_hist
 }
 
 #[cfg(any(feature = "cuda", test))]
@@ -370,15 +396,6 @@ mod backend {
             Ok(())
         }
 
-        fn reject_cpu_only(options: &FrameAnalysisOptions<'_>) -> Result<()> {
-            if options.peak_estimator == PeakEstimator::Robust {
-                return Err(anyhow!(
-                    "the grain-robust peak estimator is CPU-only (needs the cross-quad diff histogram)"
-                ));
-            }
-            Ok(())
-        }
-
         fn device_address(slot: &Option<CudaSlice<u8>>, stream: &CudaStream) -> u64 {
             slot.as_ref().map_or(0, |slice| slice.device_ptr(stream).0)
         }
@@ -464,7 +481,6 @@ mod backend {
             sample_stride: u32,
             options: &FrameAnalysisOptions<'_>,
         ) -> Result<AnalyzedFrame> {
-            Self::reject_cpu_only(options)?;
             let (planes, producer) = self
                 .device_planes(frame)
                 .map_err(|reason| anyhow!("NVDEC frame not usable in place: {reason}"))?;
@@ -527,8 +543,6 @@ mod backend {
             sample_stride: u32,
             options: &FrameAnalysisOptions<'_>,
         ) -> Result<AnalyzedFrame> {
-            Self::reject_cpu_only(options)?;
-
             let layout = match frame.format() {
                 format::Pixel::YUV420P10LE => 0i32,
                 format::Pixel::P010LE => 1i32,
@@ -614,6 +628,9 @@ mod backend {
             let crop_height = crop_rect.height as i32;
             let dovi84_rgb = i32::from(options.transfer_function == TransferFunction::Hlg);
             let peak_is_max_rgb = i32::from(options.peak_domain == PeakDomain::MaxRgb);
+            // The difference histogram costs a second decode for half of the pixels, so it
+            // is only gathered for the estimator that needs it.
+            let grain_stats = i32::from(options.peak_estimator == PeakEstimator::Robust);
             let cfg = LaunchConfig {
                 grid_dim: (
                     (sample_count as u32)
@@ -647,7 +664,8 @@ mod backend {
                 .arg(&planes.layout)
                 .arg(&sample_count)
                 .arg(&dovi84_rgb)
-                .arg(&peak_is_max_rgb);
+                .arg(&peak_is_max_rgb)
+                .arg(&grain_stats);
             unsafe { launch.launch(cfg) }
                 .map_err(|err| anyhow!("CUDA analysis launch failed: {err:?}"))?;
 
@@ -702,10 +720,22 @@ mod backend {
                 PeakDomain::Luma => max_luma_pq,
             };
             let percentile_pq = high_percentile_pq(&pq_hist, options.peak_percentile);
+            // Without the difference histogram the grain statistics stay neutral.
+            let (sigma_pq, robust_pq, n_eff) = if grain_stats != 0 {
+                let diff_hist = result_diff_hist(&self.results_host);
+                let sigma_pq = sigma_from_diff_hist(&diff_hist, &pq_hist);
+                (
+                    sigma_pq,
+                    robust_peak_pq(&pq_hist, raw_max_pq, sigma_pq),
+                    effective_tail_count(&pq_hist, raw_max_pq, sigma_pq),
+                )
+            } else {
+                (0.0, raw_max_pq, 0)
+            };
             let selected_peak_pq = match options.peak_estimator {
                 PeakEstimator::Max => raw_max_pq,
                 PeakEstimator::Percentile => percentile_pq,
-                PeakEstimator::Robust => unreachable!("robust estimator rejected above"),
+                PeakEstimator::Robust => robust_pq,
             };
             let min_pq = low_percentile_pq(&pq_hist, options.min_percentile);
 
@@ -725,16 +755,14 @@ mod backend {
                     max_rgb_pq,
                     fall_nits: mean_nits_from_pq_hist(&pq_hist),
                 },
-                // Grain statistics (sigma / n_eff / robust correction) need the CPU
-                // cross-quad diff histogram; report neutral values on the GPU path.
                 peak_stats: FramePeakStats {
                     selected_peak_pq,
                     raw_max_pq,
                     percentile_pq,
-                    robust_pq: raw_max_pq,
-                    correction_pq: 0.0,
-                    sigma_pq: 0.0,
-                    n_eff: 0,
+                    robust_pq,
+                    correction_pq: raw_max_pq - robust_pq,
+                    sigma_pq,
+                    n_eff,
                 },
             })
         }
@@ -878,6 +906,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn result_diff_hist_reads_the_words_after_the_sums() {
+        let mut results = vec![0u32; RESULT_WORDS];
+        // kernels.cu: results[DIFF_WORD + band * DIFF_BINS + difference]
+        results[DIFF_WORD] = 7;
+        results[DIFF_WORD + 3 * DIFF_BINS + 5] = 11;
+        results[RESULT_WORDS - 1] = 13;
+        let diff_hist = result_diff_hist(&results);
+        assert_eq!(diff_hist[0][0], 7);
+        assert_eq!(diff_hist[3][5], 11);
+        assert_eq!(diff_hist[DIFF_VALUE_BANDS - 1][DIFF_BINS - 1], 13);
+        let total: u32 = diff_hist.iter().flatten().sum();
+        assert_eq!(total, 31);
+        assert_eq!(DIFF_WORD, 4392);
+        assert_eq!(RESULT_WORDS, 5416);
     }
 
     #[test]

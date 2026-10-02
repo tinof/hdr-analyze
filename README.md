@@ -84,7 +84,7 @@ Dolby provides its own professional tools for this job. If you already use them 
 
 ## Limitations
 
-- The default peak estimator is sensitive to film grain (see above). The grain-rejecting estimator is opt-in and CPU-only.
+- The default peak estimator is sensitive to film grain (see above). The grain-rejecting estimator is opt-in (`--peak-estimator robust`, CPU and CUDA) and not yet accurate enough to be the default.
 - Profile 7 FEL conversion is experimental and re-encodes the picture. The research notes are in [docs/experimental/](docs/experimental/README.md).
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
 - There is no Profile 5 output, no lossless FEL path and no XML metadata export.

@@ -50,9 +50,19 @@ fn unavailable_reason() -> Option<String> {
 struct Run {
     bin: Vec<u8>,
     sidecar: Value,
+    /// `--dump-frame-stats` CSV: peak candidates and grain statistics per frame.
+    frame_stats: String,
 }
 
-fn run_analyzer(clip: &Path, bin: &Path, hwaccel: &str, no_crop: bool, label: &str) -> Run {
+fn run_analyzer(
+    clip: &Path,
+    bin: &Path,
+    hwaccel: &str,
+    no_crop: bool,
+    extra_args: &[&str],
+    label: &str,
+) -> Run {
+    let stats_path = PathBuf::from(format!("{}.stats.csv", bin.display()));
     let mut command = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"));
     command.arg(clip).arg("-o").arg(bin).args([
         "--hwaccel",
@@ -64,6 +74,8 @@ fn run_analyzer(clip: &Path, bin: &Path, hwaccel: &str, no_crop: bool, label: &s
     if no_crop {
         command.arg("--no-crop");
     }
+    command.args(extra_args);
+    command.arg("--dump-frame-stats").arg(&stats_path);
     let output = command.output().expect("run analyzer");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -85,6 +97,7 @@ fn run_analyzer(clip: &Path, bin: &Path, hwaccel: &str, no_crop: bool, label: &s
     Run {
         bin: std::fs::read(bin).expect("read measurements"),
         sidecar: serde_json::from_str(&sidecar_text).expect("parse L1 sidecar"),
+        frame_stats: std::fs::read_to_string(&stats_path).expect("read frame stats"),
     }
 }
 
@@ -131,10 +144,20 @@ fn section_differences(section: &str, cpu: &Value, gpu: &Value) -> Vec<String> {
     vec![format!("{section}: cpu {cpu} vs gpu {gpu}")]
 }
 
-fn check_parity(label: &str, clip: &Path, mapping: &str, no_crop: bool) {
+fn check_parity(label: &str, clip: &Path, mapping: &str, no_crop: bool, extra_args: &[&str]) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let cpu = run_analyzer(clip, &dir.path().join("cpu.bin"), "none", no_crop, label);
-    let gpu = run_analyzer(clip, &dir.path().join("gpu.bin"), "cuda", no_crop, label);
+    let run = |name: &str, hwaccel: &str| {
+        run_analyzer(
+            clip,
+            &dir.path().join(name),
+            hwaccel,
+            no_crop,
+            extra_args,
+            label,
+        )
+    };
+    let cpu = run("cpu.bin", "none");
+    let gpu = run("gpu.bin", "cuda");
 
     assert_eq!(
         cpu.sidecar["analysis"]["gpu"],
@@ -168,8 +191,9 @@ fn check_parity(label: &str, clip: &Path, mapping: &str, no_crop: bool) {
         .map_or(0, Vec::len);
     assert!(frame_count > 0, "{label}: the clip produced no frames");
 
+    // The light-level block is only written for max-RGB runs.
     assert!(
-        !cpu.sidecar["light_level"].is_null(),
+        extra_args.contains(&"luma") || !cpu.sidecar["light_level"].is_null(),
         "{label}: cpu sidecar has no `light_level`"
     );
     let differences: Vec<String> = ["crop", "light_level", "scenes", "frames"]
@@ -189,6 +213,46 @@ fn check_parity(label: &str, clip: &Path, mapping: &str, no_crop: bool) {
         cpu.bin.len(),
         gpu.bin.len()
     );
+    // Peak candidates and grain statistics per frame. With the robust estimator every column
+    // must be equal: sigma and the effective tail count come from the cross-quad difference
+    // histogram, so this proves the kernel counts like the CPU. Without it the GPU does not
+    // gather that histogram and reports neutral grain statistics.
+    if extra_args.contains(&"robust") {
+        assert_eq!(
+            cpu.frame_stats.lines().count(),
+            frame_count + 1,
+            "{label}: frame-stats rows"
+        );
+        if let Some((line, (cpu_row, gpu_row))) = cpu
+            .frame_stats
+            .lines()
+            .zip(gpu.frame_stats.lines())
+            .enumerate()
+            .find(|(_, (cpu_row, gpu_row))| cpu_row != gpu_row)
+        {
+            panic!("{label}: frame statistics differ at line {line}:\n  cpu {cpu_row}\n  gpu {gpu_row}");
+        }
+        assert_eq!(
+            cpu.frame_stats.len(),
+            gpu.frame_stats.len(),
+            "{label}: frame statistics differ in length"
+        );
+        let corrected = cpu
+            .frame_stats
+            .lines()
+            .skip(1)
+            .filter(|row| {
+                row.split(',')
+                    .nth(6)
+                    .is_some_and(|value| value != "0.000000000000")
+            })
+            .count();
+        assert!(
+            corrected > 0,
+            "{label}: no frame carries a grain correction"
+        );
+        eprintln!("{label}: {corrected} of {frame_count} frames carry a grain correction");
+    }
     eprintln!(
         "{label}: identical ({frame_count} frames, {} bytes)",
         cpu.bin.len()
@@ -216,7 +280,24 @@ fn cuda_output_matches_cpu() {
             } else {
                 "crop detection"
             };
-            check_parity(&format!("{name}, {crop}"), clip, mapping, no_crop);
+            check_parity(&format!("{name}, {crop}"), clip, mapping, no_crop, &[]);
+        }
+        // The grain-robust estimator in both peak domains.
+        for domain in ["max-rgb", "luma"] {
+            check_parity(
+                &format!("{name}, robust, {domain}"),
+                clip,
+                mapping,
+                true,
+                &[
+                    "--peak-estimator",
+                    "robust",
+                    "--peak-source",
+                    "max",
+                    "--peak-domain",
+                    domain,
+                ],
+            );
         }
     }
 }
