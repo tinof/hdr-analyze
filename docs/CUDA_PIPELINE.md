@@ -239,5 +239,13 @@ What it does not prove:
   decoded. A small ring of in-flight frames with CUDA events would let NVDEC and the kernel run at
   the same time. The output would stay identical if frames are processed in order.
 - **Crop detection on the GPU**, which would remove the remaining scene-cut downloads.
-- **The CPU-only estimators** (`--peak-estimator robust`, `--pre-denoise median3`) still switch the
-  whole analysis to the CPU (NVDEC decoding can still be used). `mkvdovi` does not use them.
+- **`--pre-denoise median3`** still switches the whole analysis to the CPU (NVDEC decoding can
+  still be used). `mkvdovi` does not use it. `--peak-estimator robust` runs in the kernel: it
+  adds the cross-quad difference histogram (16 x 64 counts after the u64 sums, `DIFF_WORD`),
+  gathered only when that estimator is selected. Each counted pixel decodes its left neighbour
+  a second time by position, so the count does not depend on thread order. Speed is unchanged
+  within measurement noise (about 325 to 415 fps on 4K cuts).
+- **CPU and kernel use the same f32 arithmetic** for the PQ max-RGB mix and for the histogram
+  bin of a pixel (separate multiplies and adds; `__fmul_rn`/`__fadd_rn` in the kernel, no FMA).
+  Before, the CPU used f64 there, and on real content an occasional pixel landed in a
+  neighbouring bin: enough to change the robust estimator on 2 of 2,855 frames of one cut.

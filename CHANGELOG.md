@@ -25,6 +25,16 @@ This document provides a historical record of completed milestones, feature impl
     Per-frame measurements do not change. The sidecar layout and version are unchanged, so
     `mkvdovi` reuses existing measurement files with their old boundaries; delete them to
     re-analyze.
+- **`--peak-estimator robust` runs on the GPU.** The CUDA kernel now gathers the cross-quad
+  difference histogram the estimator needs, so `--hwaccel cuda` no longer falls back to CPU
+  analysis for it. Output is identical to the CPU path (`.bin`, sidecar and frame statistics;
+  checked by `scripts/cuda-parity.sh` in both peak domains for PQ and HLG, and on a 2,855-frame
+  retail cut). Speed is the same as with the default estimator. The estimator itself is
+  unchanged and stays opt-in. `--pre-denoise median3` is still CPU-only.
+- The CPU path computes the PQ max-RGB mix and each pixel's histogram bin in the kernel's f32
+  arithmetic instead of f64. This removes rare one-bin differences between the backends. The
+  default peak moves by less than 0.1 of a 12-bit code (measured on three real-content cuts
+  whose peak changed at all; twenty others are unchanged).
 - `--dump-frame-stats` also writes the scene-detection series (`scene_diff`, `scene_score`,
   `scene_baseline`, `scene_start`).
 - `l1_diff --scenes` matches cuts one to one (two analyzer cuts can no longer both count as a

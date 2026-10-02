@@ -326,7 +326,11 @@ entirely.
   frames, 8-bit and 12-bit surfaces are downloaded to host memory first. Bit-identical L1 output vs.
   the CPU path. On an RTX 4070, 4K sources analyze at about 325 fps (HDR10) and 490 fps (HLG) end to end;
   see [PERFORMANCE.md](PERFORMANCE.md) and [CUDA_PIPELINE.md](CUDA_PIPELINE.md).
-  `--pre-denoise median3` and `--peak-estimator robust` are CPU-only and disable the GPU kernel.
+  `--pre-denoise median3` is CPU-only and disables the GPU kernel. `--peak-estimator robust` runs
+  on the GPU with the same output as on the CPU at `--downscale 1`. Use it only at
+  `--downscale 1`: with a sampling stride the compared pixels are 4 or 8 pixels apart, picture
+  detail counts as grain, and the correction grows (median sigma 15, 26 and 43 codes at
+  stride 1, 2 and 4 on one grainy cut).
   A failed CUDA call while decoding on NVDEC stops the run with an error, because the decoder
   shares the analyzer's CUDA context (rerun with `--hwaccel none`). Frames rejected before any
   CUDA work, and GPU failures with software-decoded frames, fall back to host-memory or CPU

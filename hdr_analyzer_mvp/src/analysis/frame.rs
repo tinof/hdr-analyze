@@ -13,8 +13,8 @@ use crate::ffmpeg_io::TransferFunction;
 use crate::l1_sidecar::FrameL1Measurement;
 
 const PQ_HIST_BINS: usize = 4096;
-const DIFF_VALUE_BANDS: usize = 16;
-const DIFF_BINS: usize = 64;
+pub(crate) const DIFF_VALUE_BANDS: usize = 16;
+pub(crate) const DIFF_BINS: usize = 64;
 const MIN_GRAIN_SAMPLES: u64 = 500;
 const ROBUST_FLOOR_PERCENTILE: f64 = 99.99;
 const ROBUST_FLOOR_Z: f64 = 3.719_016_485_455_709;
@@ -125,12 +125,18 @@ fn pq_code(pq: f64) -> usize {
     (pq.clamp(0.0, 1.0) * (PQ_HIST_BINS - 1) as f64).round() as usize
 }
 
+/// Histogram bin of a per-pixel PQ value, in the f32 arithmetic of the CUDA kernel
+/// (`load_sample` in kernels.cu), so both backends put every pixel in the same bin.
+fn pixel_pq_bin(pq: f32) -> usize {
+    ((pq * (PQ_HIST_BINS - 1) as f32 + 0.5) as i32).clamp(0, PQ_HIST_BINS as i32 - 1) as usize
+}
+
 fn record_cross_quad_diff(
     diff_hist: &mut [[u32; DIFF_BINS]; DIFF_VALUE_BANDS],
     previous: &mut Option<u16>,
-    current_pq: f64,
+    current_bin: usize,
 ) {
-    let current = pq_code(current_pq) as u16;
+    let current = current_bin as u16;
     if let Some(previous) = *previous {
         let value_band = (usize::from(current.max(previous)) >> 8).min(DIFF_VALUE_BANDS - 1);
         let difference = usize::from(current.abs_diff(previous)).min(DIFF_BINS - 1);
@@ -176,7 +182,7 @@ pub(crate) fn sigma_from_diff_hist(
     0.0
 }
 
-fn effective_tail_count(pq_hist: &[u64], raw_max_pq: f64, sigma_pq: f64) -> u64 {
+pub(crate) fn effective_tail_count(pq_hist: &[u64], raw_max_pq: f64, sigma_pq: f64) -> u64 {
     let threshold = pq_code((raw_max_pq - 2.0 * sigma_pq).max(0.0));
     pq_hist[threshold..].iter().sum()
 }
@@ -412,8 +418,8 @@ pub fn analyze_native_frame_cropped(
                 let cr_code =
                     u16::from_le_bytes([v_plane_data[v_offset], v_plane_data[v_offset + 1]])
                         & 0x03FF;
-                let cb = (f64::from(cb_code) - 512.0) / 896.0;
-                let cr = (f64::from(cr_code) - 512.0) / 896.0;
+                let cb = (f32::from(cb_code) - 512.0) / 896.0;
+                let cr = (f32::from(cr_code) - 512.0) / 896.0;
                 let dovi84_chroma = match options.transfer_function {
                     TransferFunction::Hlg => Some(dovi84.chroma(cb_code, cr_code)),
                     _ => None,
@@ -444,17 +450,22 @@ pub fn analyze_native_frame_cropped(
                             _ => y_signal,
                         }
                         .clamp(0.0, 1.0);
-                        accumulator.max_luma_pq = accumulator.max_luma_pq.max(luma_pq);
+                        // The luma peak is the kernel's f32 value (its transfer LUT is f32).
+                        accumulator.max_luma_pq =
+                            accumulator.max_luma_pq.max(f64::from(luma_pq as f32));
 
                         let max_rgb_pq = match &dovi84_chroma {
                             // Full DV 8.4 decode (luma curve + chroma MMR + RPU matrix),
                             // in f32 so the CUDA kernel reproduces it bit for bit.
                             Some(chroma) => f64::from(dovi84.max_rgb_pq(y_code, chroma)),
+                            // f32 with separate multiplies and adds, operation for operation
+                            // as in the CUDA kernel, so both backends agree bit for bit.
                             None => {
+                                let y_signal = (f32::from(y_code) - 64.0) / 876.0;
                                 let red = y_signal + 1.4746 * cr;
                                 let blue = y_signal + 1.8814 * cb;
                                 let green = (y_signal - 0.2627 * red - 0.0593 * blue) / 0.6780;
-                                red.max(green).max(blue).clamp(0.0, 1.0)
+                                f64::from(red.max(green.max(blue)).clamp(0.0, 1.0))
                             }
                         };
                         accumulator.max_rgb_pq = accumulator.max_rgb_pq.max(max_rgb_pq);
@@ -466,7 +477,8 @@ pub fn analyze_native_frame_cropped(
                             PeakDomain::MaxRgb => max_rgb_pq,
                             PeakDomain::Luma => luma_pq,
                         };
-                        accumulator.pq_hist[pq_code(peak_pq)] += 1;
+                        let peak_bin = pixel_pq_bin(peak_pq as f32);
+                        accumulator.pq_hist[peak_bin] += 1;
 
                         // Sample the first valid pixel in each chroma quad. Adjacent samples are
                         // two luma pixels apart and cross a 4:2:0 chroma boundary, so max-RGB grain
@@ -478,7 +490,7 @@ pub fn analyze_native_frame_cropped(
                             } else {
                                 &mut previous_bottom
                             };
-                            record_cross_quad_diff(&mut accumulator.diff_hist, previous, peak_pq);
+                            record_cross_quad_diff(&mut accumulator.diff_hist, previous, peak_bin);
                         }
 
                         // Histogram retains its existing Y-based semantics.
