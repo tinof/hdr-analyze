@@ -54,6 +54,16 @@ Comparison harness: `tools/l1_diff` (per-frame deltas in 12-bit PQ codes and nit
 | Same plateau with chroma grain | robust peak remains within the predeclared synthetic tolerance |
 | Same plateau with multiplicative-linear grain | robust peak remains within the predeclared synthetic tolerance |
 | Clean 1000-nit plateau, robust estimator | < 0.25 of one 12-bit PQ code |
+| Grainy 200-nit plateau (σ10 = 4) with flat 1000-nit highlights in one shot: first frame, last frame, three-frame 8x8, static 2x2, and a brighter one-frame flash | robust peak within 0.25 code of the highlight on its frames and within ±(2 + 0.5σ12) of the plateau on the others; shot peak (sidecar and measurement file) is the flash |
+
+The grain fixtures draw their noise from fixed seeds. The robust estimator is steep where the
+fitted width is close to sigma: with other seeds about 1 frame in 11 of the σ10 = 4 plateau
+misses the ±(2 + 0.5σ12) tolerance (by up to 2σ) in a simulation of the fixture. The
+chroma-grain fixture, whose constant luma makes 2x2 blocks of identical pixels, misses its
+tolerance on about 1 simulated seed in 3 and returns the raw maximum on 1 in 10. A
+change of frame size, frame count or generator can therefore fail these tests without a change
+of the estimator. The highlights are flat, at least 2x2 and more than 20σ above the plateau;
+highlights near the grain and a fade are not covered ([TECHNICAL_REFERENCE.md §2.4](TECHNICAL_REFERENCE.md)).
 
 The analyzer reproduces mathematically known peaks to within the measurement format's own
 quantization (observed error ≈ 0.03 code). Pixel reading, PQ math, and file writing are exact.
@@ -254,6 +264,10 @@ choice, so the implementation remains opt-in via `--peak-estimator robust` and t
 `max`. No constants were changed after viewing the reference results, and the reference CSVs were
 not reopened. A future spatial-support or shot-aggregation experiment needs its own synthetic design
 and fresh validation round.
+
+The estimator described in this finding was replaced on 2026-10-02
+([TECHNICAL_REFERENCE.md §2.4](TECHNICAL_REFERENCE.md)). The numbers above belong to the old rule;
+the new rule has not been scored against `cm_analyze`.
 
 **Supporting results.** Minimum: 0.0-code error per shot everywhere; running cm with
 `--letterbox 0 0 120 120` moves the min comparison vs embedded from −2.8 to +0.1 codes; L5

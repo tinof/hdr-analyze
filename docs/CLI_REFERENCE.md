@@ -60,7 +60,7 @@ hdr_analyzer_mvp "video.mkv"
 |------|---------|-------------|
 | `--peak-domain <max-rgb\|luma>` | `max-rgb` | Domain used for direct peak measurement. For HLG, `max-rgb` uses the full Dolby Vision 8.4 decode and `luma` the 8.4 luma curve alone |
 | `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source |
-| `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or synthetic-calibrated grain correction |
+| `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or the raw maximum less the part of the upper tail that the measured grain explains |
 | `--peak-percentile <0-100>` | `99.99` | Fine 4096-bin percentile used by `--peak-estimator percentile` |
 | `--header-peak-source <max\|histogram99\|histogram999>` | none | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
 | `--hist-bin-ema-beta <0.0-1.0>` | `0.1` | EMA smoothing for histogram bins and the `.bin` frame average (lower = more smoothing, 0 = disabled). Does not affect the L1 sidecar averages. |
@@ -75,10 +75,29 @@ hdr_analyzer_mvp "video.mkv"
 - `histogram999`: 99.9th percentile (most conservative).
 
 `--peak-source` selects the existing madVR/Y-histogram path; `--peak-estimator` controls how the
-direct max-RGB or luma peak itself is measured. Robust mode estimates PQ-domain grain from
-cross-chroma-quad differences and corrects Gaussian extremes while retaining isolated highlights.
-It passes deterministic synthetic truth but remains opt-in because its first two-title real-content
-gate did not justify changing the default.
+direct max-RGB or luma peak itself is measured. Robust mode measures PQ-domain grain (sigma) from
+cross-chroma-quad differences. It then describes the pixels at the top of the frame's PQ histogram
+by a centre and a width, and takes the grain variance out of that width: a top as narrow as the
+grain reads its centre, and a top much wider than the grain is nearly kept. The correction is
+limited to 5.2 sigma. A flat top (several pixels on the brightest value) is kept. A small group
+of pixels above a clear gap is kept exactly when it has a single value, and reads its mean when
+it is no wider than sigma ([TECHNICAL_REFERENCE.md §2.4](TECHNICAL_REFERENCE.md)).
+
+Robust mode stays opt-in, and its limits are measured, not solved:
+
+- Highlights. Flat highlights of 2x2 pixels and more and one- to three-frame flashes far above
+  the picture are kept. A flat highlight of fewer than about 5 pixels (about 17 on a 10-bit code
+  grid at sigma 19) is kept only when a gap separates it from the grain; one to three pixels,
+  or a few pixels that carry grain, within a few sigma of the highest grain pixel are corrected
+  as grain and read up to 5.2 sigma low.
+- Grain. On three clean/grain pairs the per-frame bias against the clean twin falls by 77%,
+  59% and 39% (+102.7 → +23.4, +41.0 → +17.0, +83.3 → +50.5 codes), and the mean absolute
+  error by 44%, 55% and 17%; up to 27% of the frames then read more than 10 codes below the
+  clean twin.
+- Clean content is lowered by 3 to 21 codes per frame on average (single frames by up to 332),
+  because the sigma measurement cannot tell sensor noise and fine texture from grain.
+- Frame-to-frame variation inside shots is about 10% higher than with `max`.
+- Use it with `--downscale 1`; with 2 or 4 the analyzer prints a warning.
 
 Histogram percentiles and APL remain Y-based in both domains, preserving madVR histogram semantics.
 An explicit histogram peak source therefore opts out of max-RGB peak selection.

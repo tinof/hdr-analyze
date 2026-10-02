@@ -430,6 +430,13 @@ pub fn run(
     }
 
     let downscale = effective_downscale(cli.downscale);
+    if cli.peak_estimator == PeakEstimator::Robust && downscale > 1 {
+        eprintln!(
+            "Warning: --peak-estimator robust is specified for --downscale 1. With --downscale {downscale} \
+             the grain measurement and the pixel counts of its rule refer to analysis samples, \
+             not source pixels."
+        );
+    }
     let input_path = cli
         .input_positional
         .as_deref()
