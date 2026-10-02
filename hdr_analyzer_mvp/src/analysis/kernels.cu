@@ -314,8 +314,10 @@ extern "C" __global__ void analyze_frame(
             // Grain statistics, as frame.rs `record_cross_quad_diff`: on every luma row the
             // first pixel of each chroma quad inside the crop is compared with the one of
             // the quad to its left. With a sampling stride the same rule runs on the grid
-            // of sampled pixels. The neighbour is read by position, so the count does not
-            // depend on which thread handles which sample.
+            // of sampled pixels; the compared pixels are then 2 * stride apart and picture
+            // detail inflates sigma, so the estimator is only meaningful at stride 1. The
+            // neighbour is read by position, so the count does not depend on which thread
+            // handles which sample.
             if (grain_stats) {
                 const int column = sample_stride == 1 ? x : sx;
                 const int first_column = sample_stride == 1 ? crop_x : 0;
