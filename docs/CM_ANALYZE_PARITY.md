@@ -17,11 +17,21 @@ Known differences today:
   `cm_analyze --analysis-version 2` on two real-content samples.
 - `cm_analyze`'s default CM v4 L1 applies a peak floor at PQ(100 nits) and an anchored average. This
   analyzer reports measured values instead.
-- There is no L4 temporal anchoring, L2 trims are neutral, and L3/L8 are not derived.
+- The measured L1 is not what the RPU carries in every scene. `dovi_tool generate` writes a minimum
+  above 12 codes as 12, a maximum below 2081 as 2081 and an average below 819 as 819. Of 435 test
+  scenes, 135 have a measured minimum above 12 and 24 a maximum below 2081. The retail RPUs of the
+  test cuts carry minima up to 251 codes.
+- `source_min_pq` / `source_max_pq` come from a coarse lookup on the L6 mastering values, not from
+  the values themselves.
+- There is no L4, L2 trims are neutral, L3 is the generator's neutral block under CM v4.0, and L8 is
+  not derived. Every retail RPU of the test cuts carries L4 on every frame and non-neutral L2.
+- For HDR10+ inputs L1 is derived from the HDR10+ metadata by `dovi_tool`, not measured.
 - L5 comes from one crop for the whole file, and there is no XML export.
 
 Status and prioritization live in the [roadmap](../ROADMAP.md); current conversion usage lives in
-[FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).
+[FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md). Profile 7 FEL inputs are refused since
+2026-10-03; the compositor was removed and the no-re-encode design is tracked in
+[FEL_PLAN.md](FEL_PLAN.md).
 
 ## What `cm_analyze` produces
 
@@ -67,6 +77,19 @@ Key facts:
   generator input; it does **not** infer L1 minimum from the histogram. `mkvdovi` therefore bypasses
   the madVR path and passes the sidecar's per-scene minimum, max-RGB mean, and maximum as explicit
   generator shots.
+- The generator then clamps each shot (`dolby_vision` crate, checked on `dovi_tool` 2.3.4 output):
+  minimum to at most 12 codes (0.00026 nits), maximum to at least 2081 (100 nits), average to at
+  least 819 (2.43 nits; `mkvdovi` requests the CM v2.9 floor, the CM v4.0 floor would be 1229) and
+  below the maximum. Measured (min, max, avg) = (100, 1500, 500) is written as (12, 2081, 819);
+  (5, 2500, 1000) passes unchanged. These are the generator's rules; ETSI GS CCM 001 §6.2.2 defines
+  the L1 fields over 0–4095 without them. The sidecar keeps the measured values.
+- For Profile 8.1 the generator sets `source_min_pq` / `source_max_pq` from L6 by lookup: a
+  mastering peak other than 1000/2000/4000/10000 nits gives 3079 (1000 nits), and a mastering minimum
+  other than ≤ 0.001 or exactly 0.005 nits gives 0. `mkvdovi` does not pass the two fields. For
+  Profile 8.4 the preset's 62/3079 is used regardless of L6.
+- HDR10+ inputs are not analyzed. `dovi_tool generate --hdr10plus-json` takes L1 from the first
+  frame of each HDR10+ scene: minimum 0, average = PQ of the linear-light max-RGB mean rounded to
+  whole nits, maximum from the selected peak.
 - Seven seek-based crop probes are used by default across 15% to 85% of seekable inputs. Black/low-signal
   frames are rejected, candidates are clustered within two pixels, and multiple aspect-ratio modes
   use their union. Scene cuts are monitored but do not change the committed crop.
@@ -83,13 +106,13 @@ Key facts:
 
 | Level | Current state | Remaining gap | Roadmap |
 |-------|---------------|---------------|---------|
-| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators | Robust mode reduced real-content per-shot bias from +92.6 to +80.4 and from +74.4 to +66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial support or separately validated shot aggregation is needed before a default change; target-gamut transforms | P2 / WS1 |
-| **L1 avg** | Per-scene max-RGB mean delivered in the RPU (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar | Revisit when new validation evidence exists; cm v4's "avg" is an anchored constant, not a mean | WS1 |
-| **L1 min** | Noise-rejected active-area minimum delivered per scene in the RPU | Maintain validation coverage | WS1 |
-| **L4** | None; optimizer smooths madVR `target_nits`, not L1 | Shot-anchored L1 and optional temporal filtering | WS2 |
+| **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators. Delivered with a floor of 2081 (24 of 435 test scenes raised) | Robust mode reduced real-content per-shot bias from +92.6 to +80.4 and from +74.4 to +66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial-support statistics measured 2026-10-03 remove 55 to 70% of the grain excess on a clean/grainy pair but lose real highlights; none passes ([roadmap](../ROADMAP.md) WS1). Target-gamut transforms. Sub-100-nit shot maxima are not delivered | WS1 / P10 |
+| **L1 avg** | Per-scene max-RGB mean delivered in the RPU with a floor of 819 (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar. HDR10+ inputs: derived from HDR10+ metadata, 156 to 505 codes (median 264) above the measured mean on the one test cut | Hybrid HDR10+ mode with a measured average; cm v4's "avg" is an anchored constant, not a mean. Retail averages sit at exactly 819 on most shots of two test cuts, so the floor is kept | P9 / WS1 |
+| **L1 min** | Noise-rejected active-area minimum measured per scene and passed to the generator, which writes any value above 12 codes as 12 (135 of 435 test scenes). HDR10+ inputs: 0 | The measured minimum does not reach the RPU when it is above 12 codes, while retail RPUs carry minima up to 251. Record measured against delivered; decide whether to write L1 without the generator's clamp. No open renderer reads L1 min, so the effect can only be checked on a device | P10 |
+| **L4** | None; optimizer smooths madVR `target_nits`, not L1. `--mdfix` drops an authored L4 | Every retail RPU of the test cuts has L4 on every frame; its anchor follows the per-frame average (r = 0.94 to 0.99 in eight of nine, 0.71 in one). Emission is deferred until something can validate it: no open renderer reads L4 | WS2 / P11 |
 | **L5** | Offsets from the committed crop (HDR10/HLG); sampled source L5 for Dolby Vision inputs | Per-scene offsets for changing aspect ratios | P3 / WS3 |
-| **L6** | Container/MediaInfo values with warned fallbacks | Optionally measure MaxCLL/MaxFALL from analysis | P6 |
-| **L2/L3/L8** | Neutral L2; no L3/L8 derivation | Experimental open tone-mapping baseline and A/B validation | WS4 |
+| **L6 / source range** | Container/MediaInfo values with warned fallbacks; measured MaxCLL/MaxFALL fill fields the source does not state. `source_min_pq` / `source_max_pq` from the generator's lookup on L6 | Pass `source_min_pq` / `source_max_pq` explicitly: a mastering peak outside 1000/2000/4000/10000 nits is written as 1000, a mastering minimum outside ≤ 0.001 / 0.005 nits as 0 | P6 / P10 |
+| **L2/L3/L8** | Neutral L2 for 100/600/1000-nit targets; neutral L3 from the generator under CM v4.0; no L8. `--mdfix` replaces authored L2 with neutral L2 | Authored L2 in the retail RPUs is far from neutral (up to 928 codes on slope and 1189 on power at the 100-nit target on one MEL title). Generated trims stay behind an evaluation gate and device A/B; whether `--mdfix` keeps authored levels is an open decision | WS4 / WS7 / P11 |
 | **L9** | Auto-detected with CLI override | Maintain and expand inconsistent-source diagnostics | P5 / P6 |
 | **L11/L254** | Emitted | Maintain validation coverage | None |
 | **XML** | No export | Resolve/Metafier-compatible metadata interchange | WS5 |
@@ -136,8 +159,18 @@ scene resets. The robust minimum is an unsmoothed spatial-percentile measurement
 The sidecar minimum is P0.1 by default over the active area after selected denoising. Scene minimum is
 the minimum of the already noise-rejected per-frame values, so a real raised-black excursion remains
 visible while isolated dark pixels do not dominate. Synthetic tests cover a uniform 0.05-nit floor,
-sparse dark contamination, and the `--min-percentile 0` absolute-minimum control. `mkvdovi` writes
-this measured value into each scene's L1 minimum.
+sparse dark contamination, and the `--min-percentile 0` absolute-minimum control. `mkvdovi` passes
+this measured value to the generator as each scene's L1 minimum, and the generator writes at most 12
+codes (0.00026 nits). A measured raised black therefore stays in the sidecar and does not reach the
+RPU. An earlier version of this document said it was delivered; that was wrong. Whether to write L1
+without the clamp is roadmap item P10.
+
+For HDR10+ inputs the average is not measured. On the HDR10+ test cut (11 scenes, full-frame
+picture) the generator's average, PQ of the linear-light mean rounded to whole nits, is 156 to 505
+codes (median 264) above the analyzer's mean of PQ max-RGB in every scene; the rounding alone moves
+a 0.7-nit scene by 71 codes. A linear-light mean lies above a mean of PQ values by construction, but
+how much of the gap that explains and how much is the HDR10+ producer's own measurement was not
+separated.
 
 ### Active area and temporal stability
 
@@ -148,11 +181,26 @@ follow-up because changing the sample area can itself create measurement discont
 L1 is emitted per scene, but there is no shot anchoring or L4-style temporal filtering yet. Shot aggregation and optional L4-style anchoring
 must be compared against reference shot boundaries and checked for pumping around cuts and fades.
 
+The nine retail RPUs of the test cuts were checked on 2026-10-03. L1 changes only on frames that
+start a shot (0 changes elsewhere), so scene-constant L1 matches authored practice on this material.
+L4 is present on every frame and changes inside shots. Its anchor correlates with the analyzer's
+unfiltered per-frame average at r = 0.94 to 0.99 in eight RPUs and 0.71 in one, and equally well
+with the luma average, so the correlation does not decide between the two average domains. No test
+cut contains a dissolve or a fade, so how authored metadata treats transitions is not measured.
+
 ### Trims
 
 Neutral L2 remains the safe default. Any non-neutral L2/L8 derivation must begin with a documented open
 operator such as ITU-R BT.2390 and remain opt-in unless blinded real-content comparisons show it is at
 least as good as neutral output.
+
+Authored trims are not neutral. In the retail RPUs of the test cuts (all CM v2.9, no L3 or L8) the
+100-nit L2 has slope 1120 to 1384 and power 859 to 1149 on one MEL title and differs from the
+neutral 2048 by typically 100 to 400 codes on the others; one cut has no L2. `--mdfix` regenerates
+the RPU and replaces these with neutral L2 and no L4. Trims were authored for the authored L1 and
+shot list, so keeping them under newly measured L1 is not obviously right either; the decision is
+roadmap item P11. The open display-mapping curves read no trims, so generated trims cannot be scored
+without a device.
 
 ## Validation methodology
 
@@ -175,6 +223,13 @@ detects change; it does not measure accuracy. `tools/l1_diff` and `tools/compare
 excluded from the workspace, so `cargo test --workspace` does not execute either utility; the CI
 gate job lints and tests `l1_diff` itself. Remaining validation work is to grow the
 redistributable corpus.
+
+All of the above scores PQ codes. What a code error costs on a display depends on the tone curve
+and on whether the shot exceeds the panel: recomputed with open curves for a 1000-nit shot on a
+1000-nit panel, L1 max +75 / +140 codes lowers the peak by 14.6% / 24.4% with libplacebo's spline
+and by 2.5% / 4.5% with the ITU-R BT.2390 EETF, and changes nothing when L1 max stays below the
+panel peak. A display-mapping simulator that reports such numbers per shot is planned (roadmap WS7).
+Open curves are not a Dolby display, and they read only L1 max, L1 avg and the source range.
 
 For every accuracy change:
 
