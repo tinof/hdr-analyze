@@ -21,7 +21,10 @@ use crate::crop::CropRect;
 /// Vision Profile 8.4 reconstruction `"dovi84-v2"` (luma curve for luma; luma curve + chroma MMR
 /// + RPU matrix for max-RGB) or the earlier `"dovi84-v1"` (luma curve only, max-RGB equal to
 /// luma). Both HLG values share the schema; mkvdovi re-analyzes `dovi84-v1` sidecars instead of
-/// reusing them (`metadata::DOVI84_LUMINANCE_MAPPING`). Version 2 added analyzer/source/analysis
+/// reusing them, and accept an HLG sidecar only when it names the selected composer exactly. The HLG value names the composer the
+/// decode used (`dovi84_composer::Composer::luminance_mapping`): `"dovi84-v2"` for the preset,
+/// `"dovi84-bt2100-v1"` for the BT.2100 fit (`--hlg-composer bt2100`), a new value of the same
+/// field, so the version stays 4. Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
 pub const L1_SIDECAR_VERSION: u32 = 4;
@@ -95,7 +98,8 @@ pub struct AnalysisMetadata {
     pub gpu: bool,
     pub no_crop: bool,
     /// How signal codes were mapped to PQ: `"pq"` (PQ/unspecified input, measured directly)
-    /// or `"dovi84-v2"` (HLG through the DV Profile 8.4 decode). Added in version 3.
+    /// or the HLG composer's name (`"dovi84-v2"` preset, `"dovi84-bt2100-v1"` BT.2100 fit;
+    /// HLG through the DV Profile 8.4 decode). Added in version 3.
     pub luminance_mapping: String,
 }
 
@@ -292,6 +296,8 @@ fn pq_to_12bit(pq: f64) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use dovi84_composer::Composer;
+
     use super::*;
 
     #[test]
@@ -373,58 +379,68 @@ mod tests {
 
     #[test]
     fn hlg_sidecar_round_trips_dovi84_luminance_mapping() {
-        let dir = tempfile::tempdir().unwrap();
-        let output = dir.path().join("hlg.bin");
-        let scenes = vec![MadVRScene {
-            start: 0,
-            end: 0,
-            ..Default::default()
-        }];
-        let frames = vec![MadVRFrame::default()];
-        let measurements = vec![FrameL1Measurement::default()];
-        let provenance = SidecarProvenance {
-            source: SourceMetadata {
-                file_name: "hlg.mkv".into(),
-                size_bytes: 1,
-                width: 1920,
-                height: 1080,
-                transfer_function: "HLG (ARIB STD-B67)".into(),
-            },
-            analysis: AnalysisMetadata {
-                downscale: 1,
-                sample_rate: 1,
-                gpu: false,
-                no_crop: true,
-                luminance_mapping: crate::analysis::hlg::DOVI84_MAPPING.into(),
-            },
-        };
-        let path = write_l1_sidecar(
-            &output,
-            &scenes,
-            &frames,
-            &measurements,
-            0.1,
-            "none",
-            PeakDomain::Luma,
-            PeakEstimator::Max,
-            99.9,
-            CropRect {
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-            },
-            &provenance,
-        )
-        .unwrap();
+        for (composer, mapping) in [
+            (Composer::Preset, "dovi84-v2"),
+            (Composer::Bt2100V1, "dovi84-bt2100-v1"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let output = dir.path().join("hlg.bin");
+            let scenes = vec![MadVRScene {
+                start: 0,
+                end: 0,
+                ..Default::default()
+            }];
+            let frames = vec![MadVRFrame::default()];
+            let measurements = vec![FrameL1Measurement::default()];
+            let provenance = SidecarProvenance {
+                source: SourceMetadata {
+                    file_name: "hlg.mkv".into(),
+                    size_bytes: 1,
+                    width: 1920,
+                    height: 1080,
+                    transfer_function: "HLG (ARIB STD-B67)".into(),
+                },
+                analysis: AnalysisMetadata {
+                    downscale: 1,
+                    sample_rate: 1,
+                    gpu: false,
+                    no_crop: true,
+                    luminance_mapping: composer.luminance_mapping().into(),
+                },
+            };
+            let path = write_l1_sidecar(
+                &output,
+                &scenes,
+                &frames,
+                &measurements,
+                0.1,
+                "none",
+                PeakDomain::Luma,
+                PeakEstimator::Max,
+                99.9,
+                CropRect {
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1080,
+                },
+                &provenance,
+            )
+            .unwrap();
 
-        let json: serde_json::Value = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
-        assert_eq!(json["version"], L1_SIDECAR_VERSION);
-        assert_eq!(json["analysis"]["luminance_mapping"], "dovi84-v2");
-        // A luma peak domain has no max-RGB frame average, so no light levels are written.
-        assert!(json.get("light_level").is_none());
-        let parsed: L1Sidecar = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
-        assert_eq!(parsed.analysis.luminance_mapping, "dovi84-v2");
+            let json: serde_json::Value =
+                serde_json::from_reader(File::open(&path).unwrap()).unwrap();
+            assert_eq!(json["version"], L1_SIDECAR_VERSION);
+            assert_eq!(json["analysis"]["luminance_mapping"], mapping);
+            // A luma peak domain has no max-RGB frame average, so no light levels are written.
+            assert!(json.get("light_level").is_none());
+            let parsed: L1Sidecar = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
+            assert_eq!(parsed.analysis.luminance_mapping, mapping);
+            assert_eq!(
+                Composer::from_luminance_mapping(&parsed.analysis.luminance_mapping),
+                Some(composer)
+            );
+        }
     }
 
     #[test]

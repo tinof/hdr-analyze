@@ -381,6 +381,13 @@ pub fn analyzer_has_cuda_feature(exe: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the analyzer's `--help` lists `option` (probe for options added after 0.5.1).
+pub fn analyzer_lists_option(exe: &Path, option: &str) -> bool {
+    get_command_output(Command::new(exe).arg("--help"))
+        .map(|out| out.contains(option))
+        .unwrap_or(false)
+}
+
 /// A `(major, minor, patch)` tool version; tuple ordering gives version comparison.
 pub type ToolVersion = (u32, u32, u32);
 

@@ -17,7 +17,18 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("--crop-probes"))
         .stdout(predicate::str::contains("--peak-estimator"))
         .stdout(predicate::str::contains("--peak-percentile"))
-        .stdout(predicate::str::contains("--dump-frame-stats"));
+        .stdout(predicate::str::contains("--dump-frame-stats"))
+        .stdout(predicate::str::contains("--hlg-composer"))
+        .stdout(predicate::str::contains("bt2100"));
+}
+
+#[test]
+fn test_unknown_hlg_composer_is_rejected() {
+    analyzer_cmd()
+        .args(["--hlg-composer", "bt2020", "input.mkv"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("possible values: preset, bt2100"));
 }
 
 #[test]

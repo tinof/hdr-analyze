@@ -273,7 +273,7 @@ fn main() -> anyhow::Result<()> {
                 failed += 1;
             }
             Err(e) => {
-                progress::print_error(&format!("Error processing '{}': {}", file, e));
+                progress::print_error(&format!("Error processing '{}': {:#}", file, e));
                 failed += 1;
             }
         }

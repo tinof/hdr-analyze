@@ -11,6 +11,7 @@
 //! functions as the CPU path.
 
 use anyhow::{anyhow, Result};
+use dovi84_composer::Composer;
 #[cfg(feature = "cuda")]
 use ffmpeg_next::format;
 use ffmpeg_next::frame;
@@ -26,7 +27,9 @@ use crate::analysis::frame::{DIFF_BINS, DIFF_VALUE_BANDS};
 #[cfg(any(feature = "cuda", test))]
 use crate::analysis::histogram::nits_to_pq;
 #[cfg(any(feature = "cuda", test))]
-use crate::analysis::hlg::{dovi84_decoder, dovi84_pq_lut, MMR_MAX_ORDER, MMR_TERMS};
+use crate::analysis::hlg::{
+    dovi84_decoder, dovi84_pq_lut, Dovi84Decoder, MMR_MAX_ORDER, MMR_TERMS,
+};
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
 
@@ -115,25 +118,25 @@ fn result_diff_hist(results: &[u32]) -> [[u32; DIFF_BINS]; DIFF_VALUE_BANDS] {
 }
 
 #[cfg(any(feature = "cuda", test))]
-fn pq_for_code(code: i32, transfer_function: TransferFunction) -> f64 {
+fn pq_for_code(code: i32, transfer_function: TransferFunction, composer: Composer) -> f64 {
     match transfer_function {
-        TransferFunction::Hlg => f64::from(dovi84_pq_lut()[code.clamp(0, 1023) as usize]),
+        TransferFunction::Hlg => f64::from(dovi84_pq_lut(composer)[code.clamp(0, 1023) as usize]),
         _ => ((code - 64) as f64) / 876.0,
     }
     .clamp(0.0, 1.0)
 }
 
 #[cfg(any(feature = "cuda", test))]
-fn build_transfer_lut(transfer_function: TransferFunction) -> Vec<f32> {
+fn build_transfer_lut(transfer_function: TransferFunction, composer: Composer) -> Vec<f32> {
     (0..1024)
-        .map(|code| pq_for_code(code, transfer_function) as f32)
+        .map(|code| pq_for_code(code, transfer_function, composer) as f32)
         .collect()
 }
 
-/// Flatten the shared Profile 8.4 decoder into the kernel's `dovi_params` buffer.
+/// Flatten a shared Profile 8.4 decoder ([`dovi84_decoder`], the struct the CPU path decodes
+/// with) into the kernel's `dovi_params` buffer.
 #[cfg(any(feature = "cuda", test))]
-fn build_dovi84_params() -> Vec<f32> {
-    let decoder = dovi84_decoder();
+fn build_dovi84_params(decoder: &Dovi84Decoder) -> Vec<f32> {
     let mut params = Vec::with_capacity(DOVI_PARAM_WORDS);
     params.extend_from_slice(&decoder.luma_term);
     for curve in &decoder.mmr {
@@ -151,14 +154,14 @@ fn build_dovi84_params() -> Vec<f32> {
 }
 
 #[cfg(any(feature = "cuda", test))]
-fn build_luminance_bin_lut(transfer_function: TransferFunction) -> Vec<u16> {
+fn build_luminance_bin_lut(transfer_function: TransferFunction, composer: Composer) -> Vec<u16> {
     // Must match the v5 binning constants in analyze_native_frame_cropped exactly.
     let sdr_peak_pq = nits_to_pq(100.0);
     let sdr_step = sdr_peak_pq / 64.0;
     let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
     (0..1024)
         .map(|code| {
-            let pq = pq_for_code(code, transfer_function);
+            let pq = pq_for_code(code, transfer_function, composer);
             let bin = if pq < sdr_peak_pq {
                 (pq / sdr_step).floor() as usize
             } else {
@@ -321,7 +324,8 @@ mod backend {
             ))
         }
 
-        pub fn new(transfer_function: TransferFunction) -> Result<Self> {
+        /// `composer` selects the Profile 8.4 decode for HLG input; it is ignored for PQ.
+        pub fn new(transfer_function: TransferFunction, composer: Composer) -> Result<Self> {
             // cudarc's dynamic loader panics when a library is wholly absent. Probe with
             // libloading first so `--hwaccel cuda` can reliably fall back to CPU.
             let (cuda_driver, nvrtc) = Self::load_cuda_libraries()?;
@@ -338,13 +342,13 @@ mod backend {
                 .load_function("analyze_frame")
                 .map_err(|err| anyhow!("failed to load analyze_frame kernel: {err:?}"))?;
             let transfer_lut = stream
-                .clone_htod(&build_transfer_lut(transfer_function))
+                .clone_htod(&build_transfer_lut(transfer_function, composer))
                 .map_err(|err| anyhow!("failed to upload transfer LUT: {err:?}"))?;
             let luminance_bin_lut = stream
-                .clone_htod(&build_luminance_bin_lut(transfer_function))
+                .clone_htod(&build_luminance_bin_lut(transfer_function, composer))
                 .map_err(|err| anyhow!("failed to upload luminance-bin LUT: {err:?}"))?;
             let dovi_params = stream
-                .clone_htod(&build_dovi84_params())
+                .clone_htod(&build_dovi84_params(dovi84_decoder(composer)))
                 .map_err(|err| anyhow!("failed to upload DV 8.4 decode parameters: {err:?}"))?;
             let results = stream
                 .alloc_zeros::<u32>(RESULT_WORDS)
@@ -777,7 +781,7 @@ pub struct GpuAnalyzer;
 
 #[cfg(not(feature = "cuda"))]
 impl GpuAnalyzer {
-    pub fn new(_transfer_function: TransferFunction) -> Result<Self> {
+    pub fn new(_transfer_function: TransferFunction, _composer: Composer) -> Result<Self> {
         Err(anyhow!(
             "CUDA analysis is unavailable because this binary was built without --features cuda"
         ))
@@ -820,7 +824,7 @@ mod tests {
 
     #[test]
     fn pq_lut_matches_limited_range_contract() {
-        let lut = build_transfer_lut(TransferFunction::Pq);
+        let lut = build_transfer_lut(TransferFunction::Pq, Composer::Preset);
         assert_eq!(lut.len(), 1024);
         assert_eq!(lut[0], 0.0);
         assert_eq!(lut[64], 0.0);
@@ -831,7 +835,7 @@ mod tests {
 
     #[test]
     fn hlg_lut_is_monotonic_and_peak_limited() {
-        let lut = build_transfer_lut(TransferFunction::Hlg);
+        let lut = build_transfer_lut(TransferFunction::Hlg, Composer::Preset);
         // The DV 8.4 curve has a ~3e-7 PQ seam at the 910/911 piece boundary.
         assert!(lut
             .windows(2)
@@ -844,11 +848,13 @@ mod tests {
 
     #[test]
     fn hlg_transfer_lut_equals_dovi84_lut_bit_exactly() {
-        let lut = build_transfer_lut(TransferFunction::Hlg);
-        let reference = dovi84_pq_lut();
-        assert_eq!(lut.len(), reference.len());
-        for (code, (&gpu, &cpu)) in lut.iter().zip(reference.iter()).enumerate() {
-            assert_eq!(gpu.to_bits(), cpu.to_bits(), "code {code}");
+        for composer in Composer::ALL {
+            let lut = build_transfer_lut(TransferFunction::Hlg, composer);
+            let reference = dovi84_pq_lut(composer);
+            assert_eq!(lut.len(), reference.len());
+            for (code, (&gpu, &cpu)) in lut.iter().zip(reference.iter()).enumerate() {
+                assert_eq!(gpu.to_bits(), cpu.to_bits(), "{composer:?} code {code}");
+            }
         }
     }
 
@@ -894,15 +900,21 @@ mod tests {
 
     #[test]
     fn dovi84_kernel_params_reproduce_the_cpu_decoder_bit_exactly() {
-        let params = build_dovi84_params();
-        assert_eq!(params.len(), DOVI_PARAM_WORDS);
-        let decoder = dovi84_decoder();
-        for y in (0..1024_u16).step_by(7) {
-            for cb in (0..1024_u16).step_by(31) {
-                for cr in (0..1024_u16).step_by(29) {
-                    let cpu = decoder.max_rgb_pq(y, &decoder.chroma(cb, cr));
-                    let kernel = kernel_max_rgb_pq(&params, y, cb, cr);
-                    assert_eq!(cpu.to_bits(), kernel.to_bits(), "codes ({y}, {cb}, {cr})");
+        for composer in Composer::ALL {
+            let decoder = dovi84_decoder(composer);
+            let params = build_dovi84_params(decoder);
+            assert_eq!(params.len(), DOVI_PARAM_WORDS);
+            for y in (0..1024_u16).step_by(7) {
+                for cb in (0..1024_u16).step_by(31) {
+                    for cr in (0..1024_u16).step_by(29) {
+                        let cpu = decoder.max_rgb_pq(y, &decoder.chroma(cb, cr));
+                        let kernel = kernel_max_rgb_pq(&params, y, cb, cr);
+                        assert_eq!(
+                            cpu.to_bits(),
+                            kernel.to_bits(),
+                            "{composer:?} codes ({y}, {cb}, {cr})"
+                        );
+                    }
                 }
             }
         }
@@ -951,8 +963,9 @@ mod tests {
             check(x);
         }
         for lut in [
-            build_transfer_lut(TransferFunction::Pq),
-            build_transfer_lut(TransferFunction::Hlg),
+            build_transfer_lut(TransferFunction::Pq, Composer::Preset),
+            build_transfer_lut(TransferFunction::Hlg, Composer::Preset),
+            build_transfer_lut(TransferFunction::Hlg, Composer::Bt2100V1),
         ] {
             lut.into_iter().for_each(check);
         }
@@ -960,11 +973,11 @@ mod tests {
 
     #[test]
     fn luminance_bin_lut_uses_exact_cpu_boundaries() {
-        let bins = build_luminance_bin_lut(TransferFunction::Pq);
+        let bins = build_luminance_bin_lut(TransferFunction::Pq, Composer::Preset);
         let sdr_peak_pq = nits_to_pq(100.0);
         let sdr_step = sdr_peak_pq / 64.0;
         for (code, &bin) in bins.iter().enumerate() {
-            let pq = pq_for_code(code as i32, TransferFunction::Pq);
+            let pq = pq_for_code(code as i32, TransferFunction::Pq, Composer::Preset);
             if pq < sdr_peak_pq {
                 assert_eq!(usize::from(bin), (pq / sdr_step).floor() as usize);
             }

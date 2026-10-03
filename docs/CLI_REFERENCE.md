@@ -114,19 +114,27 @@ validation.
 ### HLG
 
 HLG (ARIB STD-B67) input is detected from the stream and needs no flag. It is mapped to PQ through
-the Dolby Vision Profile 8.4 decode, clamped to the 8.4 source range (PQ codes 62–3079, about
-0–1000 nits), on both the CPU and CUDA paths (bit-identical). Luma statistics use the 8.4 luma
-reshaping curve. Max-RGB (the default peak domain, and the max-RGB mean) reconstructs each pixel
-through the luma curve, the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix, then takes
-max(R′, G′, B′). Neutral content therefore reads about 2% higher in max-RGB than in luma: the 8.4
-preset's chroma curves tint neutrals slightly blue. `--peak-domain luma` restores the luma-only
-peak. The sidecar records `analysis.luminance_mapping: "dovi84-v2"` for every HLG run (`mkvdovi`
-re-analyzes older luma-only `"dovi84-v1"` sidecars). The former `--hlg-peak-nits` flag was
-removed: the 8.4 RPU fixes the mapping.
+the Dolby Vision Profile 8.4 decode of the composer selected with `--hlg-composer`, clamped to the
+8.4 source range (PQ codes 62–3079, about 0–1000 nits), on both the CPU and CUDA paths
+(bit-identical). The composer must be the one the RPU carries; `mkvdovi` passes the matching value.
+Luma statistics use the 8.4 luma reshaping curve. Max-RGB (the default peak domain, and the max-RGB
+mean) reconstructs each pixel through the luma curve, the two chroma MMR curves and the RPU's
+YCbCr-to-RGB matrix, then takes max(R′, G′, B′). With the default `preset` composer, neutral
+content reads about 2% higher in max-RGB than in luma, because the preset's chroma curves tint
+neutrals slightly blue. The `bt2100` composer keeps neutrals neutral, so luma and max-RGB agree on
+grey. `--peak-domain luma` restores the luma-only peak. The sidecar records the composer as
+`analysis.luminance_mapping`: `"dovi84-v2"` (preset) or `"dovi84-bt2100-v1"` (bt2100). `mkvdovi`
+re-analyzes a sidecar of the other composer and older luma-only `"dovi84-v1"` sidecars. The former
+`--hlg-peak-nits` flag was removed: the 8.4 RPU fixes the mapping.
+
+Samples are assumed to be limited range with BT.2020 non-constant-luminance coefficients. A stream
+tagged full range or with another matrix (BT.2020 constant luminance included) is analyzed with a
+warning; `mkvdovi` refuses such HLG input (see [HLG input](#hlg-input)).
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--transfer <auto\|pq\|hlg>` | `auto` | Transfer to analyze with. `auto` uses the stream tag, or the first decoded frame's tag when that is PQ/HLG (catches HLG signalled via the alternative-transfer SEI). `hlg`/`pq` force it; `mkvdovi` passes `--transfer hlg` for inputs it classified as HLG, because some FFmpeg versions drop an HLG tag held only in the MKV colour element |
+| `--hlg-composer <preset\|bt2100>` | `preset` | Profile 8.4 composer HLG is measured through. `preset`: the `dolby_vision` crate's `Profile84` preset, which `dovi_tool generate` writes. `bt2100`: fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion, neutrals kept neutral ([HLG_COMPOSER.md](HLG_COMPOSER.md)). Accepted and ignored for PQ input |
 
 ### Performance & diagnostics
 
@@ -210,9 +218,9 @@ mkvdovi "input.mkv"     # process a specific file
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
 | `--keep-source` | off | Keep a non-DV source (DV inputs and `--mdfix` runs are always kept by default) |
 | `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8.1 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv`. Profile 8.4 (HLG base layer) and Profile 7 FEL inputs are refused |
-| `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, when the temp dir was created for the same input, mkvdovi version, and settings; a temp dir left by an older mkvdovi, with no fingerprint, resumes with a warning) |
+| `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, when the temp dir was created for the same input, mkvdovi version, and settings; a temp dir left by an older mkvdovi, with no fingerprint, resumes with a warning, or is discarded when a non-preset `--hlg-composer` is selected) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables). This tells a stalled tool apart from merely slow storage |
-| `--verify` | off | After muxing, validate the result: RPU structure, and RPU frame count against the muxed video track and the L1 sidecar (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
+| `--verify` | off | After muxing, validate the result: RPU structure, and RPU frame count against the muxed video track and the L1 sidecar. For HLG output it fails when the measurements are missing or the sidecar does not load, and checks that every RPU frame carries the composer the sidecar names (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
 | `-v, --verbose` | off | Show raw command output (debugging) |
 | `-q, --quiet` | off | Minimal output (errors and final result only) |
 | `--drop-chapters` | off | Drop chapters in the output (kept by default) |
@@ -225,6 +233,7 @@ mkvdovi "input.mkv"     # process a specific file
 | `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
 | `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation. Not available for HLG input (the file is refused) |
+| `--hlg-composer <preset\|bt2100>` | `preset` | Profile 8.4 composer written into the RPU of HLG inputs, and measured through. `preset` keeps the RPU exactly as `dovi_tool generate` writes it. `bt2100` (opt-in) is fitted to the BT.2100 / BT.2408 1000-nit conversion: mkvdovi passes it to the analyzer and replaces the composer on every RPU frame. Whether playback devices apply a composer other than the preset is unverified (it needs a playback test). When analysis runs, the analyzer's `--help` must list `--hlg-composer`; otherwise the file is refused. Ignored for non-HLG input. See [HLG_COMPOSER.md](HLG_COMPOSER.md) |
 | `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); it selects GPU decode and analysis in the spawned analyzer (HDR10, HLG and `--mdfix`) and nothing else |
 | `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
 
@@ -247,6 +256,18 @@ See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#hdr10-peak-mapping) for gu
 | `--reference-mode <true\|false>` | `false` | L11 reference mode (critical/studio viewing) |
 | `--source-primaries <0\|1\|2>` | auto | L9 source primaries: `0=P3-D65, 1=BT.709, 2=BT.2020` (auto-detected from MediaInfo if unset) |
 | `--trim-targets <csv>` | `100,600,1000` | Nits values for the DV L2 trim pass (neutral compatibility trims, not a panel calibration) |
+
+### HLG input
+
+HLG becomes Profile 8.4 with the base layer copied unchanged, and the 8.4 RPU describes only
+limited-range BT.2020 non-constant-luminance video with BT.2020 primaries. An HLG file tagged full
+range, with another matrix (BT.709, BT.2020 constant luminance) or with other primaries is refused
+before any temporary work, whatever the composer. The check reads MediaInfo (`colour_range`,
+`matrix_coefficients`, `colour_primaries` and their `_Original` variants) and ffprobe
+(`color_range`, `color_space`, `color_primaries`); any source with a non-conforming value refuses
+the file, and the error lists every source and value. Untagged fields are accepted as limited range,
+BT.2020 NCL and BT.2020 primaries, with a warning. The source is kept and a multi-file run continues
+with the next file.
 
 ### Profile 7 FEL input
 

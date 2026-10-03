@@ -1,4 +1,6 @@
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Parser, Subcommand, ValueEnum};
+use dovi84_composer::Composer;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum SubCmd {
@@ -96,6 +98,19 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = AnalysisQuality::Auto)]
     pub analysis_quality: AnalysisQuality,
 
+    /// Dolby Vision Profile 8.4 composer (reshaping curves) written into the RPU of HLG inputs.
+    /// preset (default) = the dolby_vision crate's Profile84 preset that dovi_tool generates
+    /// (decodes neutral greys slightly blue); bt2100 = fitted to the BT.2100 / BT.2408
+    /// 1000-nit HLG-to-PQ conversion with neutrals kept neutral. bt2100 is opt-in: whether
+    /// playback devices apply a composer other than the preset is unverified.
+    #[arg(
+        long,
+        value_parser = PossibleValuesParser::new(Composer::ALL.map(Composer::cli_name))
+            .map(|name| Composer::from_cli_name(&name).expect("restricted to Composer::ALL")),
+        default_value = Composer::Preset.cli_name()
+    )]
+    pub hlg_composer: Composer,
+
     /// Compatibility escape hatch: build L1 from the madVR measurements file with dovi_tool's
     /// --use-custom-targets instead of the analyzer's measured L1 sidecar. L1 max then comes
     /// from optimizer targets and L1 average is a placeholder. Only for reproducing old output.
@@ -149,6 +164,17 @@ mod tests {
         assert_eq!(args.hwaccel, HwAccel::Auto);
         assert_eq!(args.analysis_quality, AnalysisQuality::Auto);
         assert_eq!(args.dovi_input, DoviInput::Auto);
+    }
+
+    #[test]
+    fn hlg_composer_defaults_to_the_preset_and_parses_bt2100() {
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        assert_eq!(args.hlg_composer, Composer::Preset);
+        let args = Args::try_parse_from(["mkvdovi", "--hlg-composer", "bt2100"]).unwrap();
+        assert_eq!(args.hlg_composer, Composer::Bt2100V1);
+        let args = Args::try_parse_from(["mkvdovi", "--hlg-composer", "preset"]).unwrap();
+        assert_eq!(args.hlg_composer, Composer::Preset);
+        assert!(Args::try_parse_from(["mkvdovi", "--hlg-composer", "dovi84-bt2100-v1"]).is_err());
     }
 
     #[test]

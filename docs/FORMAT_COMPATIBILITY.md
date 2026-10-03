@@ -25,15 +25,24 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   or the extraction step exits with an error or writes an empty file). `hdr10plus_tool` is not
   checked at startup, and if it cannot be started the file fails instead of falling back.
 - HLG: the base layer is copied unchanged and the output is Dolby Vision Profile 8.4 (HLG
-  backward-compatible). A Profile 8.4 RPU carries a fixed reshaping curve (the `dolby_vision` crate's
-  `Profile84` preset, which `dovi_tool generate` embeds) that a Dolby Vision decoder uses to turn the
-  HLG signal into PQ. `hdr_analyzer_mvp` measures the HLG stream through that same decode: the luma
-  curve for luma statistics, and for max-RGB peaks and means the full reconstruction (luma curve,
-  the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix). Both are clamped to the RPU's
-  declared source range (PQ codes 62–3079, about 0–1000 nits), so L1 describes what the decoder
-  reconstructs. The sidecar records this as `analysis.luminance_mapping: "dovi84-v2"` (sidecar
-  version 3). `mkvdovi` reuses HLG measurements only with that value; older luma-only
-  `"dovi84-v1"` sidecars from pre-release builds are re-analyzed. GPU analysis
+  backward-compatible). A Profile 8.4 RPU carries a reshaping curve set, the composer, that a Dolby
+  Vision decoder uses to turn the HLG signal into PQ. `--hlg-composer` selects it. The default,
+  `preset`, is the `dolby_vision` crate's `Profile84` preset, which `dovi_tool generate` embeds; the
+  RPU is kept exactly as `dovi_tool` writes it. `bt2100` is opt-in: a composer fitted to the
+  BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion that keeps neutrals neutral
+  ([HLG_COMPOSER.md](HLG_COMPOSER.md)). `mkvdovi` writes it into every RPU frame after
+  `dovi_tool generate`. Whether playback devices apply a composer other than the preset is
+  unverified; that needs a playback test. `hdr_analyzer_mvp` measures the HLG stream through the
+  selected composer's decode: the luma curve for luma statistics, and for max-RGB peaks and means
+  the full reconstruction (luma curve, the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix).
+  Both are clamped to the RPU's declared source range (PQ codes 62–3079, about 0–1000 nits), so L1
+  describes what the decoder reconstructs. The sidecar names the composer in
+  `analysis.luminance_mapping`: `"dovi84-v2"` (preset) or `"dovi84-bt2100-v1"` (bt2100). `mkvdovi`
+  reuses HLG measurements only when that value names the selected composer; a sidecar of the other
+  composer and older luma-only `"dovi84-v1"` sidecars from pre-release builds are re-analyzed. HLG
+  input tagged full range, with a matrix other than BT.2020 non-constant luminance, or with primaries
+  other than BT.2020 is refused before any work, because the RPU cannot describe it (see
+  [CLI_REFERENCE.md](CLI_REFERENCE.md#hlg-input)). GPU analysis
   (`--hwaccel cuda`) works for HLG exactly as for HDR10. Broadcast HLG that signals BT.2020 in the
   VUI and HLG in the alternative transfer characteristics SEI (BBC iPlayer style) is handled: the
   analyzer reads the transfer from decoded frames, and the output still gets Dolby Vision
@@ -54,8 +63,8 @@ quality depends on metadata accuracy and the display's mapping.
 `hdr_analyzer_mvp` measures PQ (SMPTE ST 2084) and HLG (ARIB STD-B67) signals. Any other tagged
 transfer is refused, including the BT.2020 10/12-bit tags, which share the BT.709 SDR curve. An
 untagged transfer is analyzed as PQ with a notice. Samples are interpreted as limited range with
-BT.2020 non-constant-luminance coefficients; streams tagged full range or with another matrix produce
-a warning.
+BT.2020 non-constant-luminance coefficients; streams tagged full range or with another matrix
+(BT.2020 constant luminance included) produce a warning. `mkvdovi` refuses such HLG input instead.
 
 ### Analysis quality and optimizer behavior
 
@@ -120,13 +129,14 @@ clamps them before it writes the RPU: a minimum above 12 codes is written as 12,
 unchanged. Sidecar version 2 added `analyzer_version`, `source` (file
 name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, crop disabled), and
 stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 adds
-`analysis.luminance_mapping`: `pq`, or `dovi84-v2` for HLG measured through the full Profile 8.4
-decode. Version 4 (current) has the same layout and stores unfiltered averages. Max-RGB runs also
+`analysis.luminance_mapping`: `pq`, or for HLG the composer whose full Profile 8.4 decode was
+measured (`dovi84-v2` for the preset; `dovi84-bt2100-v1`, added later without a version change, for
+the bt2100 composer). Version 4 (current) has the same layout and stores unfiltered averages. Max-RGB runs also
 write `light_level` (`max_cll_nits`, `max_fall_nits`): the content light levels of CTA-861.3 over
 the active image area, with the frame average taken in linear light. The block is optional, so a
 version 4 sidecar written before it existed stays valid. `mkvdovi` accepts
 versions 1–4; it reuses a sidecar below version 4 with a warning that its averages were smoothed
-over time (delete the measurements to re-analyze). HLG input requires version 3 or later with `dovi84-v2`, and a `dovi84`
+over time (delete the measurements to re-analyze). HLG input requires version 3 or later with the selected composer's name, and a `dovi84`
 sidecar is rejected for a non-HLG input. Version 1 carries no identity or full-resolution crop, so
 only structure and frame count are checked and no L5 is derived from it.
 
@@ -212,14 +222,20 @@ sampling and MEL/FEL classification) does not yet support L253 blocks; support w
 - Profile 8.4 playback support is narrower than 8.1. Devices without 8.4 support play the HLG base
   layer.
 - HLG peaks default to max-RGB of the full 8.4 decode, like PQ; `--peak-domain luma` selects the
-  luma curve alone. Neutral content reads about 2% higher in max-RGB than in luma, because the
-  preset's chroma curves tint neutrals slightly blue (grey code 721: luma 2389, max-RGB 2439).
-- The decode was checked against libplacebo's Dolby Vision renderer on lossless test patterns: the
-  luma curve within 3.2 twelve-bit PQ codes on a grey ramp over HLG codes 64–1008, and max-RGB
-  within 0.59 codes on 52 flat colour patches, on CPU and CUDA (see
+  luma curve alone. With the preset composer, neutral content reads about 2% higher in max-RGB than
+  in luma, because the preset's chroma curves tint neutrals slightly blue (grey code 721: luma 2389,
+  max-RGB 2439). The bt2100 composer decodes grey to equal R′G′B′ (code 721: 2378.6 on all three
+  channels), so luma and max-RGB agree.
+- The bt2100 composer is opt-in. Its decode is checked against libplacebo, but no Dolby Vision
+  display has been tested with it.
+- The decode was checked against libplacebo's Dolby Vision renderer on lossless test patterns: for
+  the preset, the luma curve within 3.2 twelve-bit PQ codes on a grey ramp over HLG codes 64–1008,
+  and max-RGB within 0.59 codes on 52 flat colour patches; for bt2100, within 1.77 and 0.49 codes.
+  CPU and CUDA give identical results (see
   [VALIDATION.md §8](VALIDATION.md#8-hlg-dolby-vision-84-decode-vs-libplacebo-2026-09-30)).
-- The brightest HLG codes decode above PQ 3079 in the 8.4 model: grey at nominal peak (10-bit 940)
-  decodes to PQ 3155, and superwhite codes from 943 up reach PQ 4095. The analyzer clamps luma and
+- With the preset, the brightest HLG codes decode above PQ 3079 in the 8.4 model: grey at nominal
+  peak (10-bit 940) decodes to PQ 3155, and superwhite codes from 943 up reach PQ 4095. The bt2100
+  composer decodes grey 940 to PQ 3078.7 and holds neutral superwhite at that level (1000 nits). The analyzer clamps luma and
   max-RGB to the RPU's declared range on purpose, so L1 never exceeds what the RPU declares.
   libplacebo's apparent plateau near 1000 nits for these codes is its display tone mapping (it clips
   to the L1 max_pq, or to source_max_pq 3079 when L1 is absent), not Dolby Vision decoder behaviour.
@@ -243,7 +259,10 @@ For HDR10/HLG inputs with measurements, `mkvdovi` resolves `verifier` from `PATH
 the final RPU and validates structured `dovi_tool info --frame 0` JSON: Profile 8, ordered L1 values,
 sane L6 metadata, and required L9/L11/L254 blocks for CM v4.0. It fails when the RPU frame count
 from `dovi_tool info --summary` differs from the muxed video track's frame count or from the L1
-sidecar, and warns when the output and input video frame counts differ. Missing source L6 fields or
+sidecar, and warns when the output and input video frame counts differ. For HLG output it also
+fails when no measurements are available or the L1 sidecar does not load, and it checks that every
+RPU frame carries the composer the sidecar names (`dovi84-v2` = preset, `dovi84-bt2100-v1` =
+bt2100), so a measurement is never paired with an RPU of another composer. Missing source L6 fields or
 L9 primaries are reported when warned fallbacks are used.
 
 ## Playback troubleshooting

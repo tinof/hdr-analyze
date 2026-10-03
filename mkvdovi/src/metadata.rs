@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use dovi84_composer::Composer;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -317,6 +318,168 @@ pub fn has_hlg_transfer(input_file: &str) -> bool {
                 })
             })
     })
+}
+
+/// A colour field a Dolby Vision Profile 8.4 RPU fixes for its HLG base layer: the RPU's
+/// `ycc_to_rgb` is limited-range BT.2020 non-constant-luminance, and the base layer is copied
+/// bit-exact, so an input tagged otherwise decodes wrong on every Dolby Vision display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColourField {
+    Range,
+    Matrix,
+    Primaries,
+}
+
+impl ColourField {
+    const ALL: [ColourField; 3] = [
+        ColourField::Range,
+        ColourField::Matrix,
+        ColourField::Primaries,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            ColourField::Range => "range",
+            ColourField::Matrix => "matrix",
+            ColourField::Primaries => "primaries",
+        }
+    }
+
+    /// What Profile 8.4 requires, and what an untagged field is assumed to be.
+    fn requirement(self) -> &'static str {
+        match self {
+            ColourField::Range => "limited range",
+            ColourField::Matrix => "BT.2020 non-constant-luminance matrix",
+            ColourField::Primaries => "BT.2020 primaries",
+        }
+    }
+
+    /// MediaInfo keys: the effective value (container or stream) and, when the two differ, the
+    /// stream's own value.
+    fn mediainfo_keys(self) -> [&'static str; 2] {
+        match self {
+            ColourField::Range => ["colour_range", "colour_range_Original"],
+            ColourField::Matrix => ["matrix_coefficients", "matrix_coefficients_Original"],
+            ColourField::Primaries => ["colour_primaries", "colour_primaries_Original"],
+        }
+    }
+
+    fn ffprobe_key(self) -> &'static str {
+        match self {
+            ColourField::Range => "color_range",
+            ColourField::Matrix => "color_space",
+            ColourField::Primaries => "color_primaries",
+        }
+    }
+
+    /// `Some(true)` for a value Profile 8.4 can describe, `Some(false)` for any other named value
+    /// (including ones this list does not know, so they are shown rather than let through), and
+    /// `None` for an untagged one. Accepts MediaInfo and ffprobe spellings.
+    fn conforms(self, value: &str) -> Option<bool> {
+        let value = value.trim().to_ascii_lowercase();
+        if matches!(value.as_str(), "" | "unknown" | "unspecified") {
+            return None;
+        }
+        let accepted: &[&str] = match self {
+            ColourField::Range => &["limited", "tv", "mpeg"],
+            ColourField::Matrix => &["bt.2020 non-constant", "bt2020nc", "bt2020_ncl"],
+            ColourField::Primaries => &["bt.2020", "bt2020"],
+        };
+        Some(accepted.contains(&value.as_str()))
+    }
+}
+
+/// First track (MediaInfo) or stream (ffprobe) whose type field names video.
+fn first_video_entry<'a>(
+    json: &'a Value,
+    list: &[&str],
+    type_key: &str,
+    video: &str,
+) -> Option<&'a Value> {
+    let mut entries = json;
+    for key in list {
+        entries = entries.get(key)?;
+    }
+    entries
+        .as_array()?
+        .iter()
+        .find(|entry| entry.get(type_key).and_then(Value::as_str) == Some(video))
+}
+
+/// The HLG input contract of Profile 8.4 (docs/HLG_COMPOSER.md section 11), from MediaInfo JSON
+/// (`--Output=JSON`) and ffprobe JSON (`-show_streams`). Each field is resolved on its own from
+/// every source, so a partial MediaInfo result does not keep ffprobe from filling the rest. Any
+/// source naming a non-conforming value refuses, and the error lists every source and value of
+/// that field, so conflicting tags are reported, not resolved. Untagged fields are accepted under
+/// the Profile 8.4 assumption; the `Ok` value holds the warning that says so.
+fn hlg_colour_contract(
+    mediainfo: Option<&Value>,
+    ffprobe: Option<&Value>,
+) -> std::result::Result<Vec<String>, String> {
+    let mediainfo_video =
+        mediainfo.and_then(|json| first_video_entry(json, &["media", "track"], "@type", "Video"));
+    let ffprobe_video =
+        ffprobe.and_then(|json| first_video_entry(json, &["streams"], "codec_type", "video"));
+
+    let mut refusals = Vec::new();
+    let mut untagged = Vec::new();
+    for field in ColourField::ALL {
+        let mut observed: Vec<(String, String)> = Vec::new();
+        for key in field.mediainfo_keys() {
+            if let Some(value) = mediainfo_video.and_then(|track| track.get(key)?.as_str()) {
+                observed.push((format!("MediaInfo {key}"), value.to_owned()));
+            }
+        }
+        let key = field.ffprobe_key();
+        if let Some(value) = ffprobe_video.and_then(|stream| stream.get(key)?.as_str()) {
+            observed.push((format!("ffprobe {key}"), value.to_owned()));
+        }
+
+        let verdicts: Vec<Option<bool>> = observed
+            .iter()
+            .map(|(_, value)| field.conforms(value))
+            .collect();
+        if verdicts.contains(&Some(false)) {
+            let listing: Vec<String> = observed
+                .iter()
+                .map(|(source, value)| format!("{source} = {value}"))
+                .collect();
+            refusals.push(format!("{}: {}", field.label(), listing.join(", ")));
+        } else if !verdicts.contains(&Some(true)) {
+            untagged.push(field);
+        }
+    }
+
+    let requirements: Vec<&str> = ColourField::ALL
+        .iter()
+        .map(|field| field.requirement())
+        .collect();
+    if !refusals.is_empty() {
+        return Err(format!(
+            "HLG input is tagged with colorimetry a Dolby Vision Profile 8.4 RPU cannot describe ({}; the base layer is copied unchanged). {}.",
+            requirements.join(", "),
+            refusals.join("; ")
+        ));
+    }
+    if untagged.is_empty() {
+        return Ok(Vec::new());
+    }
+    let labels: Vec<&str> = untagged.iter().map(|field| field.label()).collect();
+    let assumed: Vec<&str> = untagged.iter().map(|field| field.requirement()).collect();
+    Ok(vec![format!(
+        "HLG input does not tag its colour {}; assuming {}, the only colorimetry a Profile 8.4 RPU describes. Check the source if it looks wrong.",
+        labels.join(", "),
+        assumed.join(", ")
+    )])
+}
+
+/// Check an HLG input against the Profile 8.4 input contract before any extraction (see
+/// [`hlg_colour_contract`]). One MediaInfo and one ffprobe call; a tool that fails contributes
+/// nothing, and fields no source tags are accepted with a warning.
+pub fn check_hlg_colour_contract(input_file: &str) -> std::result::Result<Vec<String>, String> {
+    let mediainfo = get_mediainfo_json(input_file).ok();
+    let ffprobe = get_ffprobe_json(input_file).ok();
+    hlg_colour_contract(mediainfo.as_ref(), ffprobe.as_ref())
 }
 
 fn classify_hdr_hints(hints: &str, measurements: bool) -> Option<HdrFormat> {
@@ -700,7 +863,7 @@ fn primary_index_from_label(primaries: &str) -> Option<u8> {
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
 /// Versions 1 to 4 are accepted; version 2 adds provenance and a full-resolution crop,
-/// version 3 adds `analysis.luminance_mapping` (`"pq"` or one of [`DOVI84_LUMINANCE_MAPPINGS`]),
+/// version 3 adds `analysis.luminance_mapping` (`"pq"` or a [`Composer::luminance_mapping`] name),
 /// and version 4 stores unfiltered averages (same layout).
 #[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
@@ -756,8 +919,8 @@ pub struct L1SidecarAnalysis {
     pub sample_rate: u32,
     pub gpu: bool,
     pub no_crop: bool,
-    /// How signal codes became PQ luminance: `"pq"` or one of [`DOVI84_LUMINANCE_MAPPINGS`]
-    /// (version 3+).
+    /// How signal codes became PQ luminance: `"pq"`, or for HLG the
+    /// [`Composer::luminance_mapping`] of the Profile 8.4 composer measured through (version 3+).
     #[serde(default)]
     pub luminance_mapping: Option<String>,
 }
@@ -769,11 +932,12 @@ pub const L1_SIDECAR_MAX_VERSION: u32 = 4;
 /// reused with an advisory warning.
 pub const L1_SIDECAR_UNFILTERED_AVERAGES_VERSION: u32 = 4;
 
-/// Sidecar `analysis.luminance_mapping` value required for HLG sources: max-RGB through the full
-/// Dolby Vision Profile 8.4 reconstruction (luma curve + chroma MMR + RPU matrix). The earlier
-/// `dovi84-v1` (luma curve only, max-RGB equal to luma) came from pre-release builds and
-/// under-measures saturated highlights, so it is re-analyzed rather than reused.
-pub const DOVI84_LUMINANCE_MAPPING: &str = "dovi84-v2";
+/// Sidecar `analysis.luminance_mapping` of pre-release builds: luma curve only (max-RGB equal to
+/// luma), which under-measures saturated highlights, so it is re-analyzed rather than reused.
+/// Every current HLG mapping is max-RGB through the full Dolby Vision Profile 8.4 reconstruction
+/// (luma curve + chroma MMR + RPU matrix) of one composer, named by
+/// [`Composer::luminance_mapping`].
+const LUMA_ONLY_DOVI84_MAPPING: &str = "dovi84-v1";
 
 /// Any Dolby Vision 8.4 HLG mapping revision; none of them is valid L1 for a PQ input.
 fn is_dovi84_family(mapping: Option<&str>) -> bool {
@@ -941,9 +1105,10 @@ pub struct SidecarExpectation {
     pub file_name: Option<String>,
     pub size_bytes: Option<u64>,
     pub frames: Option<u64>,
-    /// The input is HLG: the sidecar must be version 3+, measured from an HLG source through the
-    /// Dolby Vision 8.4 mapping. When false, a Dolby Vision 8.4 mapped sidecar is rejected.
-    pub hlg: bool,
+    /// `Some(composer)` when the input is HLG: the sidecar must be version 3+, measured from an
+    /// HLG source through that Dolby Vision 8.4 composer (exact name). When `None`, a Dolby
+    /// Vision 8.4 mapped sidecar is rejected.
+    pub hlg_composer: Option<Composer>,
 }
 
 impl SidecarExpectation {
@@ -955,13 +1120,14 @@ impl SidecarExpectation {
                 .map(|name| name.to_string_lossy().into_owned()),
             size_bytes: fs::metadata(input).ok().map(|meta| meta.len()),
             frames,
-            hlg: false,
+            hlg_composer: None,
         }
     }
 
-    /// Set whether the input is HLG (see [`SidecarExpectation::hlg`]).
-    pub fn with_hlg(mut self, hlg: bool) -> Self {
-        self.hlg = hlg;
+    /// Set the composer an HLG input is converted with, `None` for other inputs (see
+    /// [`SidecarExpectation::hlg_composer`]).
+    pub fn with_hlg_composer(mut self, hlg_composer: Option<Composer>) -> Self {
+        self.hlg_composer = hlg_composer;
         self
     }
 }
@@ -1079,7 +1245,7 @@ pub fn validate_l1_sidecar(
     if !matches!(sidecar.version, 1..=L1_SIDECAR_MAX_VERSION) {
         return Err(SidecarError::UnsupportedVersion(sidecar.version));
     }
-    check_luminance_mapping(sidecar, expect.hlg)?;
+    check_luminance_mapping(sidecar, expect.hlg_composer)?;
     let invalid = |reason: String| Err(SidecarError::Invalid(reason));
     let Some(first) = sidecar.scenes.first() else {
         return invalid("no scenes".into());
@@ -1148,25 +1314,42 @@ pub fn validate_l1_sidecar(
     Ok(advisories)
 }
 
-/// HLG measurements are only valid when taken through the Dolby Vision 8.4 mapping (sidecar v3+),
-/// and that mapping is wrong for any PQ input.
+/// HLG measurements are only valid when taken through the Dolby Vision 8.4 reconstruction of the
+/// composer the RPU will carry (sidecar v3+, exact composer name), and no 8.4 mapping is valid
+/// for a PQ input.
 fn check_luminance_mapping(
     sidecar: &L1Sidecar,
-    hlg: bool,
+    hlg_composer: Option<Composer>,
 ) -> std::result::Result<(), SidecarError> {
     let mapping = sidecar.luminance_mapping();
-    if hlg {
-        if mapping == Some("dovi84-v1") {
+    if let Some(composer) = hlg_composer {
+        let expected = composer.luminance_mapping();
+        if mapping == Some(LUMA_ONLY_DOVI84_MAPPING) {
             return Err(SidecarError::LuminanceMappingMismatch(
                 "uses the pre-release luma-only Dolby Vision 8.4 mapping (dovi84-v1), which under-measures saturated highlights"
                     .into(),
             ));
         }
-        if sidecar.version < 3 || mapping != Some(DOVI84_LUMINANCE_MAPPING) {
+        let measured_with = mapping.and_then(Composer::from_luminance_mapping);
+        if sidecar.version >= 3 && measured_with.is_none() && is_dovi84_family(mapping) {
+            return Err(SidecarError::LuminanceMappingMismatch(format!(
+                "names a Dolby Vision 8.4 HLG mapping this mkvdovi does not know ({}); it may come from a newer analyzer",
+                mapping.unwrap_or("none")
+            )));
+        }
+        if sidecar.version < 3 || measured_with.is_none() {
             return Err(SidecarError::LuminanceMappingMismatch(format!(
                 "v{} (mapping {}) was measured without the Dolby Vision 8.4 HLG mapping",
                 sidecar.version,
                 mapping.unwrap_or("none")
+            )));
+        }
+        if let Some(other) = measured_with.filter(|&other| other != composer) {
+            return Err(SidecarError::LuminanceMappingMismatch(format!(
+                "was measured through the {} HLG composer ({}), but this run writes --hlg-composer {} ({expected})",
+                other.cli_name(),
+                other.luminance_mapping(),
+                composer.cli_name()
             )));
         }
         if !sidecar.source_is_hlg() {
@@ -1184,17 +1367,23 @@ fn check_luminance_mapping(
 }
 
 /// Dolby Vision profile for the generated RPU. HLG input becomes Profile 8.4 (the HLG base layer
-/// is kept bit-exact) and needs L1 measured through the 8.4 mapping; everything else is 8.1.
-pub fn dv_profile_for(hdr_type: HdrFormat, sidecar: Option<&L1Sidecar>) -> Result<&'static str> {
+/// is kept bit-exact) and needs L1 measured through the 8.4 reconstruction of `hlg_composer`, the
+/// composer the RPU will carry; everything else is 8.1.
+pub fn dv_profile_for(
+    hdr_type: HdrFormat,
+    sidecar: Option<&L1Sidecar>,
+    hlg_composer: Composer,
+) -> Result<&'static str> {
     let mapping = sidecar.and_then(L1Sidecar::luminance_mapping);
-    let dovi84 = mapping == Some(DOVI84_LUMINANCE_MAPPING);
+    let expected = hlg_composer.luminance_mapping();
     match (hdr_type, sidecar) {
         (HdrFormat::Hlg, None) => {
             anyhow::bail!("HLG input needs measured L1 (an analyzer sidecar) for Profile 8.4")
         }
-        (HdrFormat::Hlg, Some(sidecar)) if !dovi84 => anyhow::bail!(
-            "HLG input needs L1 measured through the Dolby Vision 8.4 mapping, but the sidecar mapping is {}",
-            sidecar.luminance_mapping().unwrap_or("none")
+        (HdrFormat::Hlg, Some(_)) if mapping != Some(expected) => anyhow::bail!(
+            "HLG input with --hlg-composer {} needs L1 measured through the Dolby Vision 8.4 mapping {expected}, but the sidecar mapping is {}",
+            hlg_composer.cli_name(),
+            mapping.unwrap_or("none")
         ),
         (HdrFormat::Hlg, Some(_)) => Ok("8.4"),
         (_, Some(_)) if is_dovi84_family(mapping) => anyhow::bail!(
@@ -1626,7 +1815,7 @@ mod tests {
             file_name: Some("input.mkv".into()),
             size_bytes: Some(42),
             frames: Some(20),
-            hlg: false,
+            hlg_composer: None,
         };
         assert!(validate_l1_sidecar(&sidecar, &expect).unwrap().is_empty());
         assert!(sidecar
@@ -1653,7 +1842,7 @@ mod tests {
             file_name: Some("input.mkv".into()),
             size_bytes: Some(43),
             frames: None,
-            hlg: false,
+            hlg_composer: None,
         };
         assert!(matches!(
             validate_l1_sidecar(&sidecar, &expect),
@@ -1882,7 +2071,7 @@ mod tests {
     }
 
     fn hlg_expectation() -> SidecarExpectation {
-        SidecarExpectation::default().with_hlg(true)
+        SidecarExpectation::default().with_hlg_composer(Some(Composer::Preset))
     }
 
     #[test]
@@ -1901,18 +2090,26 @@ mod tests {
     #[test]
     fn v3_dovi84_sidecar_is_accepted_only_for_hlg() {
         let mut fixture = v3_hlg_sidecar_json();
-        fixture["analysis"]["luminance_mapping"] = json!(DOVI84_LUMINANCE_MAPPING);
+        fixture["analysis"]["luminance_mapping"] = json!(Composer::Preset.luminance_mapping());
         let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
-        assert_eq!(sidecar.luminance_mapping(), Some(DOVI84_LUMINANCE_MAPPING));
+        assert_eq!(
+            sidecar.luminance_mapping(),
+            Some(Composer::Preset.luminance_mapping())
+        );
         assert!(validate_l1_sidecar(&sidecar, &hlg_expectation()).is_ok());
         assert_eq!(
-            dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).unwrap(),
+            dv_profile_for(HdrFormat::Hlg, Some(&sidecar), Composer::Preset).unwrap(),
             "8.4"
         );
         let error = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap_err();
         assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
         assert!(error.to_string().contains("re-analysis required"));
-        assert!(dv_profile_for(HdrFormat::Hdr10Unsupported, Some(&sidecar)).is_err());
+        assert!(dv_profile_for(
+            HdrFormat::Hdr10Unsupported,
+            Some(&sidecar),
+            Composer::Preset
+        )
+        .is_err());
     }
 
     #[test]
@@ -1924,12 +2121,17 @@ mod tests {
         assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
         assert!(error.to_string().contains("luma-only"));
         assert!(error.to_string().contains("re-analysis required"));
-        assert!(dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).is_err());
+        assert!(dv_profile_for(HdrFormat::Hlg, Some(&sidecar), Composer::Preset).is_err());
         assert!(matches!(
             validate_l1_sidecar(&sidecar, &SidecarExpectation::default()),
             Err(SidecarError::LuminanceMappingMismatch(_))
         ));
-        assert!(dv_profile_for(HdrFormat::Hdr10Unsupported, Some(&sidecar)).is_err());
+        assert!(dv_profile_for(
+            HdrFormat::Hdr10Unsupported,
+            Some(&sidecar),
+            Composer::Preset
+        )
+        .is_err());
     }
 
     #[test]
@@ -1941,7 +2143,68 @@ mod tests {
             validate_l1_sidecar(&sidecar, &hlg_expectation()),
             Err(SidecarError::LuminanceMappingMismatch(_))
         ));
-        assert!(dv_profile_for(HdrFormat::Hlg, Some(&sidecar)).is_err());
+        assert!(dv_profile_for(HdrFormat::Hlg, Some(&sidecar), Composer::Preset).is_err());
+    }
+
+    #[test]
+    fn hlg_sidecar_must_name_the_selected_composer_exactly() {
+        let preset: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
+        let mut fixture = v3_hlg_sidecar_json();
+        fixture["analysis"]["luminance_mapping"] = json!(Composer::Bt2100V1.luminance_mapping());
+        let bt2100: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        let expect = |composer| SidecarExpectation::default().with_hlg_composer(Some(composer));
+
+        assert!(validate_l1_sidecar(&bt2100, &expect(Composer::Bt2100V1)).is_ok());
+        assert_eq!(
+            dv_profile_for(HdrFormat::Hlg, Some(&bt2100), Composer::Bt2100V1).unwrap(),
+            "8.4"
+        );
+
+        // A preset sidecar under bt2100 and the other way round: re-analysis, no fallback.
+        for (sidecar, composer, measured) in [
+            (
+                &preset,
+                Composer::Bt2100V1,
+                "preset HLG composer (dovi84-v2)",
+            ),
+            (
+                &bt2100,
+                Composer::Preset,
+                "bt2100 HLG composer (dovi84-bt2100-v1)",
+            ),
+        ] {
+            let error = validate_l1_sidecar(sidecar, &expect(composer)).unwrap_err();
+            assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
+            let message = error.to_string();
+            assert!(message.contains(measured), "{message}");
+            assert!(
+                message.contains(&format!("--hlg-composer {}", composer.cli_name())),
+                "{message}"
+            );
+            assert!(message.contains("re-analysis required"), "{message}");
+            assert!(dv_profile_for(HdrFormat::Hlg, Some(sidecar), composer).is_err());
+        }
+
+        // A bt2100 sidecar is still a Dolby Vision 8.4 mapping: never valid for PQ.
+        assert!(matches!(
+            validate_l1_sidecar(&bt2100, &SidecarExpectation::default()),
+            Err(SidecarError::LuminanceMappingMismatch(_))
+        ));
+        assert!(
+            dv_profile_for(HdrFormat::Hdr10Unsupported, Some(&bt2100), Composer::Preset).is_err()
+        );
+
+        // A name that only shares the prefix is not a composer.
+        let mut fixture = v3_hlg_sidecar_json();
+        fixture["analysis"]["luminance_mapping"] = json!("dovi84-bt2100-v2");
+        let unknown: L1Sidecar = serde_json::from_value(fixture).unwrap();
+        for composer in Composer::ALL {
+            assert!(matches!(
+                validate_l1_sidecar(&unknown, &expect(composer)),
+                Err(SidecarError::LuminanceMappingMismatch(reason)) if reason.contains("does not know (dovi84-bt2100-v2)")
+            ));
+            assert!(dv_profile_for(HdrFormat::Hlg, Some(&unknown), composer).is_err());
+        }
     }
 
     #[test]
@@ -1973,18 +2236,27 @@ mod tests {
         let hlg: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
         let pq: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
 
-        assert_eq!(dv_profile_for(HdrFormat::Hlg, Some(&hlg)).unwrap(), "8.4");
-        assert!(dv_profile_for(HdrFormat::Hlg, Some(&pq)).is_err());
-        assert!(dv_profile_for(HdrFormat::Hlg, None).is_err());
+        assert_eq!(
+            dv_profile_for(HdrFormat::Hlg, Some(&hlg), Composer::Preset).unwrap(),
+            "8.4"
+        );
+        assert!(dv_profile_for(HdrFormat::Hlg, Some(&pq), Composer::Preset).is_err());
+        assert!(dv_profile_for(HdrFormat::Hlg, None, Composer::Preset).is_err());
 
         for format in [
             HdrFormat::Hdr10Plus,
             HdrFormat::Hdr10WithMeasurements,
             HdrFormat::Hdr10Unsupported,
         ] {
-            assert_eq!(dv_profile_for(format, None).unwrap(), "8.1");
-            assert_eq!(dv_profile_for(format, Some(&pq)).unwrap(), "8.1");
-            assert!(dv_profile_for(format, Some(&hlg)).is_err());
+            assert_eq!(
+                dv_profile_for(format, None, Composer::Preset).unwrap(),
+                "8.1"
+            );
+            assert_eq!(
+                dv_profile_for(format, Some(&pq), Composer::Preset).unwrap(),
+                "8.1"
+            );
+            assert!(dv_profile_for(format, Some(&hlg), Composer::Preset).is_err());
         }
     }
 
@@ -2142,6 +2414,182 @@ mod tests {
         fixture["light_level"] = json!({"max_cll_nits": 743, "max_fall_nits": 96});
         let with: L1Sidecar = serde_json::from_value(fixture).unwrap();
         assert_eq!(with.light_level.unwrap().max_cll_nits, 743);
+    }
+
+    fn mediainfo_video(fields: Value) -> Value {
+        let mut track = json!({"@type": "Video"});
+        track.as_object_mut().unwrap().extend(
+            fields
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        json!({"media": {"track": [{"@type": "General"}, track]}})
+    }
+
+    fn ffprobe_video(fields: Value) -> Value {
+        let mut stream = json!({"codec_type": "video"});
+        stream.as_object_mut().unwrap().extend(
+            fields
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        json!({"streams": [{"codec_type": "audio", "color_range": "pc"}, stream]})
+    }
+
+    #[test]
+    fn colour_values_are_classified_in_mediainfo_and_ffprobe_spellings() {
+        use ColourField::{Matrix, Primaries, Range};
+        for (field, value, expected) in [
+            (Range, "Limited", Some(true)),
+            (Range, "Full", Some(false)),
+            (Range, "tv", Some(true)),
+            (Range, "pc", Some(false)),
+            (Range, "unknown", None),
+            (Matrix, "BT.2020 non-constant", Some(true)),
+            (Matrix, "BT.2020 constant", Some(false)),
+            (Matrix, "BT.709", Some(false)),
+            (Matrix, "bt2020nc", Some(true)),
+            (Matrix, "bt2020c", Some(false)),
+            (Matrix, "bt709", Some(false)),
+            (Matrix, "unknown", None),
+            (Primaries, "BT.2020", Some(true)),
+            (Primaries, "BT.709", Some(false)),
+            (Primaries, "Display P3", Some(false)),
+            (Primaries, "bt2020", Some(true)),
+            (Primaries, "bt709", Some(false)),
+            (Primaries, "unknown", None),
+            (Primaries, "", None),
+        ] {
+            assert_eq!(field.conforms(value), expected, "{field:?} {value}");
+        }
+    }
+
+    #[test]
+    fn conforming_hlg_input_passes_without_warning() {
+        let mediainfo = mediainfo_video(json!({
+            "colour_range": "Limited",
+            "matrix_coefficients": "BT.2020 non-constant",
+            "colour_primaries": "BT.2020",
+        }));
+        let ffprobe = ffprobe_video(json!({
+            "color_range": "tv",
+            "color_space": "bt2020nc",
+            "color_primaries": "bt2020",
+        }));
+        assert_eq!(
+            hlg_colour_contract(Some(&mediainfo), Some(&ffprobe)),
+            Ok(Vec::new())
+        );
+        assert_eq!(hlg_colour_contract(Some(&mediainfo), None), Ok(Vec::new()));
+        assert_eq!(hlg_colour_contract(None, Some(&ffprobe)), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn full_range_constant_luminance_or_bt709_hlg_is_refused() {
+        for (mediainfo, ffprobe, expected) in [
+            (
+                json!({"colour_range": "Full"}),
+                json!({"color_range": "pc"}),
+                "range: MediaInfo colour_range = Full, ffprobe color_range = pc",
+            ),
+            (
+                json!({"matrix_coefficients": "BT.2020 constant"}),
+                json!({"color_space": "bt2020c"}),
+                "matrix: MediaInfo matrix_coefficients = BT.2020 constant, ffprobe color_space = bt2020c",
+            ),
+            (
+                json!({"matrix_coefficients": "BT.709"}),
+                json!({"color_space": "bt709"}),
+                "matrix: MediaInfo matrix_coefficients = BT.709, ffprobe color_space = bt709",
+            ),
+            (
+                json!({"colour_primaries": "Display P3"}),
+                json!({}),
+                "primaries: MediaInfo colour_primaries = Display P3",
+            ),
+            (
+                json!({}),
+                json!({"color_primaries": "bt709"}),
+                "primaries: ffprobe color_primaries = bt709",
+            ),
+        ] {
+            let error = hlg_colour_contract(
+                Some(&mediainfo_video(mediainfo)),
+                Some(&ffprobe_video(ffprobe)),
+            )
+            .unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            assert!(error.contains("Profile 8.4"), "{error}");
+        }
+    }
+
+    #[test]
+    fn conflicting_hlg_colour_tags_are_refused_with_every_source() {
+        // Container says full range / BT.709 matrix, the stream says limited / BT.2020 NCL
+        // (MediaInfo `_Original`), and ffprobe follows the container.
+        let mediainfo = mediainfo_video(json!({
+            "colour_range": "Full",
+            "colour_range_Original": "Limited",
+            "matrix_coefficients": "BT.709",
+            "matrix_coefficients_Original": "BT.2020 non-constant",
+            "colour_primaries": "BT.2020",
+        }));
+        let ffprobe = ffprobe_video(json!({
+            "color_range": "pc",
+            "color_space": "bt709",
+            "color_primaries": null,
+        }));
+        let error = hlg_colour_contract(Some(&mediainfo), Some(&ffprobe)).unwrap_err();
+        assert!(
+            error.contains(
+                "range: MediaInfo colour_range = Full, MediaInfo colour_range_Original = Limited, ffprobe color_range = pc"
+            ),
+            "{error}"
+        );
+        assert!(
+            error.contains("matrix: MediaInfo matrix_coefficients = BT.709, MediaInfo matrix_coefficients_Original = BT.2020 non-constant, ffprobe color_space = bt709"),
+            "{error}"
+        );
+        assert!(!error.contains("primaries:"), "{error}");
+
+        // One conforming source does not outvote a non-conforming one.
+        let mediainfo = mediainfo_video(json!({"colour_range": "Limited"}));
+        let ffprobe = ffprobe_video(json!({"color_range": "pc"}));
+        assert!(hlg_colour_contract(Some(&mediainfo), Some(&ffprobe)).is_err());
+    }
+
+    #[test]
+    fn untagged_hlg_fields_are_assumed_with_a_warning() {
+        // MediaInfo tags only the range; ffprobe fills the primaries; the matrix is untagged.
+        let mediainfo = mediainfo_video(json!({"colour_range": "Limited"}));
+        let ffprobe = ffprobe_video(json!({
+            "color_space": "unknown",
+            "color_primaries": "bt2020",
+        }));
+        let warnings = hlg_colour_contract(Some(&mediainfo), Some(&ffprobe)).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("does not tag its colour matrix"),
+            "{}",
+            warnings[0]
+        );
+        assert!(
+            warnings[0].contains("assuming BT.2020 non-constant-luminance matrix"),
+            "{}",
+            warnings[0]
+        );
+
+        let warnings = hlg_colour_contract(None, None).unwrap();
+        assert!(
+            warnings[0].contains("range, matrix, primaries"),
+            "{}",
+            warnings[0]
+        );
+        assert!(warnings[0].contains("limited range"), "{}", warnings[0]);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use colored::Colorize;
+use dovi84_composer::Composer;
 use std::path::Path;
 use std::process::Command;
 
@@ -12,20 +13,22 @@ pub fn verify_post_mux(
     measurements: Option<&Path>,
     temp_dir: &Path,
 ) -> bool {
-    verify_post_mux_with_options(input_file, output_file, measurements, temp_dir, None, false)
+    verify_post_mux_with_options(input_file, output_file, measurements, temp_dir, None, None)
 }
 
 /// Full verification with optional expected CM version for RPU content assertions.
-/// `hlg_source` selects the sidecar expectation (Dolby Vision 8.4 mapped L1 for HLG input).
+/// `hlg_composer` is `Some` for HLG input: the sidecar must then load and name that Dolby Vision
+/// 8.4 composer, and every RPU frame must carry the composer the sidecar names.
 pub fn verify_post_mux_with_options(
     input_file: &str,
     output_file: &Path,
     measurements: Option<&Path>,
     temp_dir: &Path,
     expected_cm_version: Option<&str>,
-    hlg_source: bool,
+    hlg_composer: Option<Composer>,
 ) -> bool {
     let mut ok = true;
+    let hlg_source = hlg_composer.is_some();
 
     // 1. Run internal verifier on measurements if available.
     if let Some(meas_path) = measurements {
@@ -174,22 +177,50 @@ pub fn verify_post_mux_with_options(
             );
         }
     }
-    if let (Some(meas_path), Some(rpu)) = (measurements, rpu_frames) {
-        if let Ok((sidecar, _advisories)) = metadata::load_l1_sidecar(
+    // An HLG output is only right when its RPU carries the composer the L1 was measured through,
+    // so for HLG an unusable sidecar is a failure, not a skipped check.
+    let sidecar = match (measurements, hlg_composer) {
+        (Some(meas_path), _) => match metadata::load_l1_sidecar(
             meas_path,
-            &metadata::SidecarExpectation::default().with_hlg(hlg_source),
+            &metadata::SidecarExpectation::default().with_hlg_composer(hlg_composer),
         ) {
-            if sidecar.frame_count() != rpu {
+            Ok((sidecar, _advisories)) => Some(sidecar),
+            Err(error) if hlg_source => {
                 println!(
                     "{}",
-                    format!(
-                        "RPU covers {rpu} frames but the L1 measurements cover {}.",
-                        sidecar.frame_count()
-                    )
-                    .red()
+                    format!("HLG output: the L1 sidecar cannot be verified ({error}).").red()
                 );
                 ok = false;
+                None
             }
+            Err(_) => None,
+        },
+        (None, Some(_)) => {
+            println!(
+                "{}",
+                "HLG output: no measurements to verify the L1 sidecar and composer against.".red()
+            );
+            ok = false;
+            None
+        }
+        (None, None) => None,
+    };
+    if let (Some(sidecar), Some(rpu)) = (&sidecar, rpu_frames) {
+        if sidecar.frame_count() != rpu {
+            println!(
+                "{}",
+                format!(
+                    "RPU covers {rpu} frames but the L1 measurements cover {}.",
+                    sidecar.frame_count()
+                )
+                .red()
+            );
+            ok = false;
+        }
+    }
+    if let (true, Some(sidecar)) = (hlg_source, &sidecar) {
+        if !verify_composer(sidecar, &rpu_path) {
+            ok = false;
         }
     }
 
@@ -213,6 +244,47 @@ pub fn verify_post_mux_with_options(
     }
 
     ok
+}
+
+/// Every frame of the extracted RPU must carry the composer the (already validated) sidecar
+/// names, the one the L1 was measured through.
+fn verify_composer(sidecar: &metadata::L1Sidecar, rpu_path: &Path) -> bool {
+    let Some(composer) = sidecar
+        .luminance_mapping()
+        .and_then(Composer::from_luminance_mapping)
+    else {
+        println!(
+            "{}",
+            format!(
+                "The L1 sidecar names no known HLG composer (mapping {}).",
+                sidecar.luminance_mapping().unwrap_or("none")
+            )
+            .red()
+        );
+        return false;
+    };
+    match dovi84_composer::check_rpu_file(rpu_path, composer) {
+        Ok(frames) => {
+            println!(
+                "HLG composer: all {frames} RPU frames carry {} ({}), as measured.",
+                composer.cli_name(),
+                composer.luminance_mapping()
+            );
+            true
+        }
+        Err(error) => {
+            println!(
+                "{}",
+                format!(
+                    "HLG composer check failed: the RPU does not carry {} ({}) on every frame: {error:#}",
+                    composer.cli_name(),
+                    composer.luminance_mapping()
+                )
+                .red()
+            );
+            false
+        }
+    }
 }
 
 /// Frame count from `dovi_tool info --summary` output (`Frames: N`).
