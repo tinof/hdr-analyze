@@ -4,48 +4,12 @@ use clap::{Parser, Subcommand, ValueEnum};
 pub enum SubCmd {
     /// Inspect Dolby Vision RPU metadata and report suspicious L1 patterns.
     Inspect(InspectArgs),
-
-    /// Output raw NLQ-composited frames to stdout (for piping to an encoder).
-    /// Only runs BL+EL compositing — no encoding, no muxing.
-    #[command(name = "composite-pipe")]
-    CompositePipe(CompositePipeArgs),
 }
 
 #[derive(Parser, Debug, Clone)]
 pub struct InspectArgs {
     /// Input Dolby Vision file to inspect.
     pub input: String,
-}
-
-#[derive(Parser, Debug, Clone)]
-pub struct CompositePipeArgs {
-    /// Path to the base layer HEVC file.
-    #[arg(long)]
-    pub bl: String,
-
-    /// Path to the enhancement layer HEVC file.
-    #[arg(long)]
-    pub el: String,
-
-    /// Path to the RPU binary file.
-    #[arg(long)]
-    pub rpu: String,
-
-    /// Video width in pixels.
-    #[arg(short = 'w', long)]
-    pub width: u32,
-
-    /// Video height in pixels.
-    #[arg(short = 'H', long)]
-    pub height: u32,
-
-    /// Frames per second numerator (e.g., 24000).
-    #[arg(long, default_value_t = 24000)]
-    pub fps_num: u32,
-
-    /// Frames per second denominator (e.g., 1001).
-    #[arg(long, default_value_t = 1001)]
-    pub fps_den: u32,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -57,7 +21,7 @@ pub struct CompositePipeArgs {
     subcommand_precedence_over_arg = true
 )]
 pub struct Args {
-    /// Subcommand (e.g., composite-pipe). If omitted, runs the default convert pipeline.
+    /// Subcommand (inspect). If omitted, runs the default convert pipeline.
     #[command(subcommand)]
     pub subcmd: Option<SubCmd>,
 
@@ -88,23 +52,6 @@ pub struct Args {
     /// Drop global tags in the output file (kept by default).
     #[arg(long)]
     pub drop_tags: bool,
-
-    /// Quality parameter for Profile 7 FEL re-encoding (default: 18).
-    /// Used as CRF for libx265 local encode, or QP for hevc_nvenc (Modal/CUDA).
-    #[arg(long, default_value_t = 18)]
-    pub fel_crf: u8,
-
-    /// x265 preset to use for local FEL re-encoding (default: medium).
-    #[arg(long, default_value = "medium")]
-    pub fel_preset: String,
-
-    /// Encoder backend for FEL re-encoding: local (default) or modal (offload to Modal.com).
-    #[arg(long, value_enum, default_value_t = FelEncoder::Local)]
-    pub fel_encoder: FelEncoder,
-
-    /// NVENC preset for Modal/CUDA encoding (default: p5). Range: p1 (fastest) to p7 (best quality).
-    #[arg(long, default_value = "p5")]
-    pub fel_nvenc_preset: String,
 
     /// After muxing, run verification: our verifier on the measurements and DV checks.
     #[arg(long)]
@@ -170,7 +117,7 @@ pub struct Args {
     #[arg(long, default_value_t = 300)]
     pub stall_timeout: u64,
 
-    /// Hardware acceleration hint for analysis and encoding.
+    /// Hardware acceleration for the hdr_analyzer_mvp pass (GPU decode and analysis).
     /// auto (default) detects an NVIDIA GPU at startup and uses CUDA when available.
     #[arg(long, value_enum, default_value_t = HwAccel::Auto)]
     pub hwaccel: HwAccel,
@@ -181,10 +128,6 @@ pub struct Args {
     /// container first. A failed direct read falls back to extraction automatically.
     #[arg(long, value_enum, default_value_t = DoviInput::Auto)]
     pub dovi_input: DoviInput,
-
-    /// Software/VideoToolbox encoder for Profile 7 FEL re-encodes (libx265 or hevc_videotoolbox).
-    #[arg(long, value_enum, default_value_t = Encoder::Libx265)]
-    pub encoder: Encoder,
 
     /// Verbose mode: show raw command output (useful for debugging).
     #[arg(short, long)]
@@ -243,8 +186,20 @@ mod tests {
     }
 
     #[test]
-    fn composite_pipe_subcommand_precedes_input_vec() {
-        let args = Args::try_parse_from([
+    fn removed_fel_encode_interface_is_rejected() {
+        // The FEL compositor and every encode path were removed; clap must not accept their
+        // flags or the composite-pipe subcommand's arguments any more.
+        for flag in [
+            ["--fel-crf", "18"],
+            ["--fel-preset", "medium"],
+            ["--fel-encoder", "local"],
+            ["--fel-nvenc-preset", "p5"],
+            ["--encoder", "libx265"],
+        ] {
+            let result = Args::try_parse_from(["mkvdovi", flag[0], flag[1], "movie.mkv"]);
+            assert!(result.is_err(), "{} must be rejected", flag[0]);
+        }
+        assert!(Args::try_parse_from([
             "mkvdovi",
             "composite-pipe",
             "--bl",
@@ -258,17 +213,7 @@ mod tests {
             "-H",
             "2160",
         ])
-        .unwrap();
-
-        match args.subcmd {
-            Some(SubCmd::CompositePipe(pipe_args)) => {
-                assert_eq!(pipe_args.bl, "BL.hevc");
-                assert_eq!(pipe_args.el, "EL.hevc");
-                assert_eq!(pipe_args.rpu, "RPU.bin");
-            }
-            other => panic!("expected composite-pipe subcommand, got {other:?}"),
-        }
-        assert!(args.input.is_empty());
+        .is_err());
     }
 }
 
@@ -303,39 +248,6 @@ impl std::fmt::Display for DoviInput {
             DoviInput::Auto => write!(f, "auto"),
             DoviInput::Raw => write!(f, "raw"),
             DoviInput::Mkv => write!(f, "mkv"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Encoder {
-    Libx265,
-    #[clap(name = "videotoolbox")]
-    HevcVideotoolbox,
-}
-
-impl std::fmt::Display for Encoder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Encoder::Libx265 => write!(f, "libx265"),
-            Encoder::HevcVideotoolbox => write!(f, "hevc_videotoolbox"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum FelEncoder {
-    /// Use local ffmpeg/x265 for FEL re-encoding (default).
-    Local,
-    /// Offload quality encode to Modal.com (local lossless intermediate → cloud x265).
-    Modal,
-}
-
-impl std::fmt::Display for FelEncoder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FelEncoder::Local => write!(f, "local"),
-            FelEncoder::Modal => write!(f, "modal"),
         }
     }
 }

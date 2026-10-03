@@ -10,7 +10,7 @@ HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby 
 
 ## What you get
 
-- HDR10 and HDR10+ files become Profile 8.1 MKVs, and HLG files become Profile 8.4 MKVs. In both cases the video stream is copied, not re-encoded. Only Profile 7 FEL sources take a re-encode path (see the table below).
+- HDR10 and HDR10+ files become Profile 8.1 MKVs, and HLG files become Profile 8.4 MKVs. The video stream is copied, not re-encoded: `mkvdovi` never encodes video.
 - An open-source analysis engine that measures decoded pixels and writes per-scene L1 plus L2, L6, L9 and L11 metadata. `dovi_tool` generates and injects the RPU.
 - Direct analysis of the compressed source. You do not need a ProRes or raw intermediate.
 - Optional NVDEC decode and CUDA analysis that works on the decoded frames in GPU memory: about 325 fps (4K HDR10) and 490 fps (4K HLG) end to end on an RTX 4070 ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
@@ -57,7 +57,7 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 | HDR10+ | Profile 8.1, L1 taken from HDR10+ | No | Measurement comparisons published; playback unvalidated |
 | HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; playback unvalidated |
 | Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
-| Dolby Vision Profile 7 FEL | Profile 8.1 from composited BL+EL | Yes | Experimental, unvalidated |
+| Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](docs/FEL_PLAN.md)) |
 | Profile 8.1 or MEL with `--mdfix` (Profile 8.4 is refused) | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
 
 Flag-level detail is in [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md) and [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
@@ -85,9 +85,9 @@ Dolby provides its own professional tools for this job. If you already use them 
 ## Limitations
 
 - The default peak estimator is sensitive to film grain (see above). The grain-rejecting estimator is opt-in (`--peak-estimator robust`, CPU and CUDA) and not yet accurate enough to be the default.
-- Profile 7 FEL conversion is experimental and re-encodes the picture. The research notes are in [docs/experimental/](docs/experimental/README.md).
+- Profile 7 FEL input is not supported. `mkvdovi` refuses the file and keeps it. The earlier BL+EL compositor was removed because it did not match the Dolby Vision reconstruction specification (ETSI GS CCM 001) on real discs. A design that keeps the base layer bit-exact and re-encodes nothing is planned in [docs/FEL_PLAN.md](docs/FEL_PLAN.md). `mkvdovi inspect` still reports FEL.
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
-- There is no Profile 5 output, no lossless FEL path and no XML metadata export.
+- There is no Profile 5 output and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
 - HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the 8.4 curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves).
 - Linux ARM64 has no release archive; build it from source.
@@ -106,7 +106,7 @@ These files ship in each release archive next to this README. They are also [onl
 - [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md): known analysis gaps
 - [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md): analyzer internals
 - [docs/PROVENANCE.md](docs/PROVENANCE.md): what the implementation is derived from
-- [docs/experimental/README.md](docs/experimental/README.md): FEL compositing and other prototypes
+- [docs/FEL_PLAN.md](docs/FEL_PLAN.md): plan for Profile 7 FEL input without a re-encode
 - [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md)
 
 ## Contributing

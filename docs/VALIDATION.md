@@ -176,7 +176,9 @@ rerun on the full corpus.
 - **P7 FEL base layers may not be HDR10-compatible.** This asset's BL is a reshaped ~14-nit
   signal. Measuring "the BL peak" of such files is well-defined but *not* comparable to the
   composed DV picture, which matters for any BL-vs-DV-peak inspection tooling built on top of this
-  analyzer.
+  analyzer. Every measurement on a Profile 7 FEL asset in this document is of the base layer
+  alone. No BL+EL composite has been validated, and `mkvdovi` refuses Profile 7 FEL input (see
+  [FEL_PLAN.md](FEL_PLAN.md)).
 - **avg_pq comparisons need letterbox handling** (this asset carries varying L5 offsets up to
   320 rows); peak is unaffected by black bars, averages are not.
 

@@ -116,7 +116,7 @@ pub fn run_command_with_spinner(cmd: &mut Command, log_path: &Path, message: &st
 /// stops growing for `stall_secs` seconds (`0` disables the stall check).
 ///
 /// This is the robust replacement for `run_command_with_spinner` on steps that move many
-/// gigabytes (extract / inject / mux / encode): the bytes + throughput + ETA readout makes
+/// gigabytes (extract / inject / mux): the bytes + throughput + ETA readout makes
 /// a slow-but-working step distinguishable from a hung one.
 pub fn run_command_with_progress(
     cmd: &mut Command,
@@ -370,16 +370,6 @@ pub fn detect_nvidia_gpu() -> bool {
     };
     get_command_output(Command::new(smi).arg("-L"))
         .map(|out| out.contains("GPU"))
-        .unwrap_or(false)
-}
-
-/// Check whether the ffmpeg on PATH provides a given encoder (e.g. "hevc_nvenc").
-pub fn ffmpeg_has_encoder(name: &str) -> bool {
-    get_command_output(Command::new("ffmpeg").args(["-hide_banner", "-encoders"]))
-        .map(|out| {
-            out.lines()
-                .any(|line| line.split_whitespace().nth(1) == Some(name))
-        })
         .unwrap_or(false)
 }
 
