@@ -72,8 +72,7 @@ Extract it and put `bin/` on your `PATH`, or copy its contents to a directory th
 ### What release archives do not include
 
 - GPU analysis. Release archives are built with `cargo build --release --workspace`, without the
-  `cuda` feature, so the bundled `hdr_analyzer_mvp` analyzes on the CPU only. `mkvdovi` can still
-  use NVENC for Profile 7 FEL re-encodes when your `ffmpeg` has `hevc_nvenc`. For CUDA analysis, see
+  `cuda` feature, so the bundled `hdr_analyzer_mvp` analyzes on the CPU only. For CUDA analysis, see
   [CUDA analysis build](#cuda-analysis-build).
 - Linux ARM64. There is no release archive, and `install.sh` stops on that platform. Build from
   source.
@@ -86,11 +85,11 @@ either `mediainfo` or `ffprobe` are on `PATH`, and it stops if one is missing.
 
 | Tool | Needed for | Project page |
 |------|------------|--------------|
-| `ffmpeg` | Extraction, muxing and FEL re-encodes | [ffmpeg.org](https://ffmpeg.org/) |
+| `ffmpeg` | HEVC stream extraction (stream copy). `mkvdovi` does not encode video, so no encoder (libx265, NVENC) is needed in the `ffmpeg` build | [ffmpeg.org](https://ffmpeg.org/) |
 | `mkvmerge` | Final MKV packaging (part of MKVToolNix) | [mkvtoolnix.download](https://mkvtoolnix.download/) |
 | `dovi_tool` | RPU generation, injection and inspection | [github.com/quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool) |
 | `mediainfo` | Recommended. Source of MaxCLL, MaxFALL and mastering-display luminance for L6, and of mastering primaries for L9 | [mediaarea.net](https://mediaarea.net/en/MediaInfo) |
-| `ffprobe` | Accepted by the startup check in place of MediaInfo, and used for transfer detection. Also required for Profile 7 FEL compositing, `inspect` and `--verify`, so keep it on `PATH` even when MediaInfo is installed | Ships with FFmpeg |
+| `ffprobe` | Accepted by the startup check in place of MediaInfo, and used for transfer detection. Also required for `inspect` and `--verify`, so keep it on `PATH` even when MediaInfo is installed | Ships with FFmpeg |
 | `hdr10plus_tool` | HDR10+ input only | [github.com/quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool) |
 
 Notes:

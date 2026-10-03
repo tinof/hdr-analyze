@@ -147,7 +147,7 @@ pub struct ByteProgress {
 
 impl ByteProgress {
     /// Create and start a byte progress bar. `total` is an estimate of the final output
-    /// size; pass `None` when it cannot be estimated (e.g. a re-encode).
+    /// size; pass `None` when it cannot be estimated.
     pub fn new(message: &str, total: Option<u64>) -> Self {
         let active = is_tty() && !is_verbose() && !is_quiet();
         let bar = if active {

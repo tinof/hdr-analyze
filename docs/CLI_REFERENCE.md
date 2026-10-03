@@ -106,8 +106,9 @@ The analyzer computes the average directly from active-area pixels rather than r
 from 256 histogram bins. The JSON sidecar records per-frame robust minimum, Y-luma mean, and
 max-RGB mean as 12-bit PQ codes, plus scene aggregates and the crop/denoise settings. Neither
 average domain nor the spatially noise-rejected minimum is temporally smoothed in the sidecar; the
-configured EMA/temporal smoothing applies to the histograms and the `.bin` frame average only. `mkvdovi` writes each scene's minimum from
-the sidecar into the generated L1 block as `min_pq`. The per-frame values stay in the sidecar for
+configured EMA/temporal smoothing applies to the histograms and the `.bin` frame average only. `mkvdovi` passes each scene's minimum from
+the sidecar to `dovi_tool generate` as the L1 `min_pq`; the generator writes at most 12 codes, so a
+higher measured minimum is stored as 12. The per-frame values stay in the sidecar for
 validation.
 
 ### HLG
@@ -192,7 +193,8 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin" --downsca
 
 ## `mkvdovi`
 
-Orchestrates the full HDR10/HDR10+/Profile 7 → Dolby Vision Profile 8.1 and HLG → Profile 8.4 (CM v4.0) conversion. Internally
+Orchestrates the full HDR10/HDR10+/Profile 7 MEL → Dolby Vision Profile 8.1 and HLG → Profile 8.4 (CM v4.0) conversion. The video
+stream is always copied; `mkvdovi` never encodes video. Profile 7 FEL input is refused (see [FEL_PLAN.md](FEL_PLAN.md)). Internally
 calls `ffmpeg`, `mkvmerge`, `dovi_tool`, `mediainfo` or `ffprobe`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately
 (see [README Prerequisites](../README.md#prerequisites)).
 
@@ -207,7 +209,7 @@ mkvdovi "input.mkv"     # process a specific file
 |------|---------|-------------|
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
 | `--keep-source` | off | Keep a non-DV source (DV inputs and `--mdfix` runs are always kept by default) |
-| `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8.1 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv`. Profile 8.4 (HLG base layer) input is refused |
+| `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8.1 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv`. Profile 8.4 (HLG base layer) and Profile 7 FEL inputs are refused |
 | `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, when the temp dir was created for the same input, mkvdovi version, and settings; a temp dir left by an older mkvdovi, with no fingerprint, resumes with a warning) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables). This tells a stalled tool apart from merely slow storage |
 | `--verify` | off | After muxing, validate the result: RPU structure, and RPU frame count against the muxed video track and the L1 sidecar (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |
@@ -223,9 +225,8 @@ mkvdovi "input.mkv"     # process a specific file
 | `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
 | `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation. Not available for HLG input (the file is refused) |
-| `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); GPU analysis in the spawned analyzer (HDR10, HLG and `--mdfix`), NVENC for FEL re-encodes |
+| `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); it selects GPU decode and analysis in the spawned analyzer (HDR10, HLG and `--mdfix`) and nothing else |
 | `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
-| `--encoder <libx265\|videotoolbox>` | `libx265` | Software/VideoToolbox encoder for Profile 7 FEL re-encodes (`videotoolbox` ≈ 10× faster on Apple Silicon) |
 
 ### HDR10+ peak mapping
 
@@ -247,21 +248,25 @@ See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#hdr10-peak-mapping) for gu
 | `--source-primaries <0\|1\|2>` | auto | L9 source primaries: `0=P3-D65, 1=BT.709, 2=BT.2020` (auto-detected from MediaInfo if unset) |
 | `--trim-targets <csv>` | `100,600,1000` | Nits values for the DV L2 trim pass (neutral compatibility trims, not a panel calibration) |
 
-### Profile 7 FEL encode tuning
+### Profile 7 FEL input
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--fel-crf <N>` | `18` | Local x265 CRF or Modal/NVENC quality parameter |
-| `--fel-nvenc-preset <p1..p7>` | `p5` | NVENC preset for Modal/CUDA FEL encodes (p1 fastest, p7 best quality) |
-| `--fel-preset <preset>` | `medium` | Local x265 preset |
-| `--fel-encoder <local\|modal>` | `local` | Encode the composited BL+EL result locally or offload it to Modal |
+A Profile 7 FEL file is refused, with or without `--mdfix`. The file fails before any temporary
+work with this error, the source is kept, and a multi-file run continues with the next file:
+
+```text
+Profile 7 FEL input is not supported: the BL+EL compositor was removed because it did not match
+the Dolby Vision reconstruction specification. A no-re-encode FEL design is planned (docs/FEL_PLAN.md).
+```
+
+The `composite-pipe` subcommand and the flags `--fel-crf`, `--fel-preset`, `--fel-encoder`,
+`--fel-nvenc-preset` and `--encoder` no longer exist. `mkvdovi inspect` still reports whether a
+Profile 7 file is MEL or FEL. The plan for FEL input is in [FEL_PLAN.md](FEL_PLAN.md).
 
 ### Subcommands
 
 | Command | Description |
 |---------|-------------|
 | `mkvdovi inspect <INPUT>` | Extract the complete RPU and report suspicious/static/clipped L1 patterns |
-| `mkvdovi composite-pipe --bl <HEVC> --el <HEVC> --rpu <BIN> -w <PX> -H <PX> [--fps-num N --fps-den N]` | Frame rate defaults to 24000/1001. Write raw NLQ-composited frames to stdout for an encoder pipe; dispatched before global dependency checks |
 
 ### Examples
 
@@ -271,10 +276,8 @@ mkvdovi "input.mkv" --keep-source --verify    # recommended first run
 mkvdovi "input.mkv" --content-type sport      # high-motion content
 mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9
 mkvdovi "input.mkv" --source-primaries 0      # force P3-D65
-mkvdovi "input.mkv" --encoder videotoolbox    # fast FEL re-encode on Apple Silicon
 mkvdovi inspect "input.DV.mkv"                 # inspect source RPU metadata
 mkvdovi "input.DV.mkv" --mdfix                 # write input.mdfix.DV.mkv
-mkvdovi "profile7-fel.mkv" --fel-crf 16        # composite FEL locally
 ```
 
 ### Resilience for long conversions
@@ -289,7 +292,7 @@ keep long runs safe and observable:
   RPU, extracted base layer, …) from the leftover temp dir, so it does not redo hours of work.
   A temp dir created for a different input or settings is discarded; one left by an older
   mkvdovi (no fingerprint) resumes with a warning. Pass `--no-resume` to force a clean re-run.
-- **Progress is live.** Extract/inject/mux/encode show bytes written, throughput, and ETA, and
+- **Progress is live.** Extract/inject/mux show bytes written, throughput, and ETA, and
   warn (after `--stall-timeout` seconds, default 300) if the output file stops growing, so a
   genuinely stalled tool is distinguishable from slow-but-moving I/O.
 
@@ -328,9 +331,6 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
 - `--analysis-quality auto` (the default) additionally resolves to `accurate` only when CUDA is
   active **and** the spawned `hdr_analyzer_mvp` advertises `+cuda` in `--version`; otherwise
   `balanced`. This avoids accidentally running full-res CPU analysis with a non-CUDA analyzer build.
-- NVENC selection for FEL re-encodes is guarded by an `ffmpeg -encoders` probe for
-  `hevc_nvenc`; if missing, mkvdovi warns and falls back to the configured software encoder
-  instead of failing mid-encode.
 
 The resolved choice is printed at startup. Explicit `--hwaccel none|cuda` values skip detection
 entirely.
@@ -361,11 +361,10 @@ entirely.
 - `vaapi` / `videotoolbox`: currently log and fall back to software decoding (proper device
   contexts are planned). The pipeline remains fully functional via software decoding everywhere.
 
-### Converter (encoding via mkvdovi)
+### Converter (mkvdovi)
 
-- **macOS Apple Silicon**: `--encoder videotoolbox` enables `hevc_videotoolbox` for accelerated
-  Profile 7 FEL re-encodes.
-- **Other platforms**: default `libx265` (software) for maximum compatibility and quality.
+`mkvdovi` does not encode video, so it has no encoder acceleration. `--hwaccel` only selects GPU
+decode and analysis in the analyzer it spawns.
 
 ---
 

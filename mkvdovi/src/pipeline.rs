@@ -4,13 +4,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use serde_json::Value;
 
 use crate::cli::{AnalysisQuality, Args, CmVersion, DoviInput, HwAccel, PeakSource};
 use crate::external::{self, run_command_with_progress, run_command_with_spinner, ToolVersion};
-use crate::fel_composite;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
@@ -34,6 +33,19 @@ fn resolve_dovi_input(requested: DoviInput, version: Option<ToolVersion>) -> Dov
 
 pub(crate) fn feed_mkv_to_dovi_tool(mode: DoviInput, raw_sealed: bool) -> bool {
     mode == DoviInput::Mkv && !raw_sealed
+}
+
+/// Error for Profile 7 FEL inputs. The BL+EL compositor and its re-encode were removed; FEL is
+/// refused until a design that keeps the base layer bit-exact exists (docs/FEL_PLAN.md).
+pub(crate) const FEL_UNSUPPORTED_MESSAGE: &str = "Profile 7 FEL input is not supported: the BL+EL compositor was removed because it did not match the Dolby Vision reconstruction specification. A no-re-encode FEL design is planned (docs/FEL_PLAN.md).";
+
+/// Refuse formats mkvdovi detects but cannot convert. Called before any temp-directory work,
+/// so a refused input leaves no artifacts behind and an old temp directory stays untouched.
+fn reject_unsupported_input(hdr_type: HdrFormat) -> Result<()> {
+    if hdr_type == HdrFormat::DolbyVisionFel {
+        bail!(FEL_UNSUPPORTED_MESSAGE);
+    }
+    Ok(())
 }
 
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
@@ -62,11 +74,28 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         }
     }
 
+    // With no leftover temp dir, an existing output means the file is already converted. This is
+    // checked before format detection so that a finished batch is skipped without probing.
+    let warn_output_exists = || {
+        progress::print_warn(&format!(
+            "Output file '{}' already exists. Skipping.",
+            output_file.display()
+        ));
+    };
+    if output_file.exists() && !(resume_enabled && temp_dir.exists()) {
+        warn_output_exists();
+        return Ok(true);
+    }
+
+    // Detect the format before the temp directory is created, resumed or discarded: an input
+    // that is refused (Profile 7 FEL, also under --mdfix) must not cause any temp work.
+    let detected_hdr_type = metadata::check_hdr_format(input_file);
+    reject_unsupported_input(detected_hdr_type)?;
+
     // A leftover temp dir means a previous run for this file was interrupted. With resume
     // enabled we reuse its completed steps when it was created for this exact input and these
-    // settings. A directory with no fingerprint was left by an older mkvdovi (an interrupted FEL
-    // composite can be hours of work), so it resumes with a warning. A directory with a
-    // different fingerprint is discarded.
+    // settings. A directory with no fingerprint was left by an older mkvdovi, so it resumes with
+    // a warning. A directory with a different fingerprint is discarded.
     let fingerprint = resume::Fingerprint::for_input(input_path, resume_settings(args)).ok();
     let mut resuming = resume_enabled && temp_dir.exists();
     if resuming && resume::is_legacy_hlg_dir(&temp_dir) {
@@ -106,10 +135,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
 
     if output_file.exists() && !resuming {
-        progress::print_warn(&format!(
-            "Output file '{}' already exists. Skipping.",
-            output_file.display()
-        ));
+        warn_output_exists();
         return Ok(true);
     }
 
@@ -142,7 +168,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     // --- Step 1: Detect HDR format ---
     progress::print_step(1, 0, "Detecting HDR format...");
-    let mut hdr_type = metadata::check_hdr_format(input_file);
+    let mut hdr_type = detected_hdr_type;
     let original_hdr_type = hdr_type;
     let mut measurements_file: Option<PathBuf> = None;
     let mut hdr10plus_json: Option<PathBuf> = None;
@@ -196,7 +222,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         HdrFormat::Hdr10WithMeasurements => 6, // detect, config, RPU, extract BL, inject, mux
         HdrFormat::Hdr10Unsupported => 7, // detect, analyze, config, RPU, extract BL, inject, mux
         HdrFormat::DolbyVisionMel => 7,
-        HdrFormat::DolbyVisionFel => 8,
+        HdrFormat::DolbyVisionFel => 0, // unreachable — refused before the temp dir
         HdrFormat::DolbyVisionP8 => 7,
         HdrFormat::Unsupported => 0, // unreachable — handled above
     };
@@ -290,23 +316,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             }
             hdr_type = HdrFormat::Hdr10WithMeasurements;
         }
-        HdrFormat::DolbyVisionFel => {
-            progress::print_info("Compositing Profile 7 FEL into a Profile 8.1 base layer.");
-            let composited = fel_composite::convert_fel_to_hdr10(input_file, &temp_dir, args)?;
-            bl_source_file = composited.clone();
-
-            let mut extra_args = Vec::new();
-            add_optimizer_args(&mut extra_args, args);
-            measurements_file =
-                run_hdr_analyzer(composited.to_str().unwrap(), &temp_dir, &extra_args, args)?;
-            if measurements_file.is_none() {
-                progress::print_error(
-                    "Failed to generate measurements from the composited FEL output.",
-                );
-                return Ok(false);
-            }
-            hdr_type = HdrFormat::Hdr10WithMeasurements;
-        }
+        // Refused by reject_unsupported_input before the temp directory was touched.
+        HdrFormat::DolbyVisionFel => bail!(FEL_UNSUPPORTED_MESSAGE),
         HdrFormat::DolbyVisionP8 => {
             if !args.mdfix {
                 progress::print_warn(
@@ -630,8 +641,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     current_step += 1;
     progress::print_step(current_step, total_steps, "Extracting base layer...");
 
-    // When the BL source is already a raw Annex B HEVC stream in the temp dir (mdfix and FEL
-    // paths), re-extracting it with ffmpeg would just duplicate ~the full video size on disk.
+    // When the BL source is already a raw Annex B HEVC stream in the temp dir (mdfix paths),
+    // re-extracting it with ffmpeg would just duplicate ~the full video size on disk.
     let bl_hevc = if bl_source_file.extension().is_some_and(|ext| ext == "hevc") {
         progress::print_info("Base layer is already a raw HEVC stream; skipping re-extraction.");
         bl_source_file.clone()
@@ -829,7 +840,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 /// discarded separately by `resume::is_legacy_hlg_dir`.
 fn resume_settings(args: &Args) -> String {
     format!(
-        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} encoder={:?} mdfix={} legacy_madvr_l1={}",
+        "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} mdfix={} legacy_madvr_l1={}",
         args.hwaccel,
         args.analysis_quality,
         args.optimizer_profile,
@@ -841,7 +852,6 @@ fn resume_settings(args: &Args) -> String {
         args.source_primaries,
         args.trim_targets,
         args.peak_source,
-        args.encoder,
         args.mdfix,
         args.legacy_madvr_l1,
     )
@@ -1195,7 +1205,7 @@ pub fn resolve_auto_settings(args: &mut Args) {
         if external::detect_nvidia_gpu() {
             args.hwaccel = HwAccel::Cuda;
             progress::print_info(
-                "Auto-detected NVIDIA GPU: CUDA acceleration enabled (decode + analysis; NVENC for re-encodes).",
+                "Auto-detected NVIDIA GPU: CUDA acceleration enabled (GPU decode + analysis).",
             );
         } else {
             args.hwaccel = HwAccel::None;
@@ -1545,6 +1555,26 @@ mod tests {
         assert_eq!(analysis_quality_args(AnalysisQuality::Balanced), ("2", "1"));
         assert_eq!(analysis_quality_args(AnalysisQuality::Accurate), ("1", "1"));
         assert_eq!(analysis_quality_args(AnalysisQuality::Auto), ("2", "1"));
+    }
+
+    #[test]
+    fn profile7_fel_input_is_refused() {
+        let error = reject_unsupported_input(HdrFormat::DolbyVisionFel).unwrap_err();
+        assert_eq!(error.to_string(), FEL_UNSUPPORTED_MESSAGE);
+        assert!(FEL_UNSUPPORTED_MESSAGE.starts_with("Profile 7 FEL input is not supported"));
+        assert!(FEL_UNSUPPORTED_MESSAGE.contains("docs/FEL_PLAN.md"));
+
+        for supported in [
+            HdrFormat::Hdr10Plus,
+            HdrFormat::Hlg,
+            HdrFormat::Hdr10WithMeasurements,
+            HdrFormat::Hdr10Unsupported,
+            HdrFormat::DolbyVisionMel,
+            HdrFormat::DolbyVisionP8,
+            HdrFormat::Unsupported,
+        ] {
+            assert!(reject_unsupported_input(supported).is_ok());
+        }
     }
 
     #[test]

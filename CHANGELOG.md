@@ -6,8 +6,28 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking: Profile 7 FEL conversion is removed from `mkvdovi`.** The BL+EL compositor
+  (`fel_composite.rs`) did not match the reconstruction in ETSI GS CCM 001 on real discs: on seven
+  of eight Profile 7 FEL test cuts the composed chroma missed the specified prediction by a mean of
+  69 to 534 10-bit codes. Removed with it:
+  - the `composite-pipe` subcommand;
+  - the flags `--fel-crf`, `--fel-preset`, `--fel-encoder`, `--fel-nvenc-preset` and `--encoder`;
+  - the Modal remote-encode backend and all libx265, NVENC and VideoToolbox encoding. `mkvdovi` no
+    longer encodes video: every remaining path copies the video stream bit-exactly;
+  - the notes in `docs/experimental/`. What is still useful from them is in
+    [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md), the plan for FEL input that keeps the base layer
+    bit-exact and re-encodes nothing.
+
 ### Changed
 
+- **Profile 7 FEL input is refused**, with or without `--mdfix`. The file fails with an error
+  before any temporary work, the source is kept, and a multi-file run continues with the next
+  file. Profile 7 MEL, Profile 8, HDR10, HDR10+ and HLG inputs behave as before, and
+  `mkvdovi inspect` still reports FEL.
+- **`--hwaccel` in `mkvdovi` only selects GPU decode and analysis** in the spawned
+  `hdr_analyzer_mvp`. It no longer selects an encoder.
 - **Scene detection is rebuilt.** The old detector compared a smoothed histogram distance with a
   fixed threshold (0.3). On grainy or busy pictures the distance is above that threshold on
   about half of all frames, so a cut was placed whenever the 24-frame minimum scene length

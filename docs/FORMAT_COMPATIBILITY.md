@@ -12,10 +12,10 @@ analyzer accuracy and remaining technical gaps, see [CM_ANALYZE_PARITY.md](CM_AN
 | HDR10+ | Profile 8.1, L1 from source HDR10+ metadata | No | Measurement comparisons published; playback unvalidated |
 | HLG | Profile 8.4, HLG base layer kept, L1 through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; playback unvalidated |
 | Dolby Vision Profile 7 MEL | Profile 8.1, metadata-only enhancement layer discard | No | Works |
-| Dolby Vision Profile 7 FEL | Profile 8.1 from a BL+EL composite | Yes: composite, then re-encode | Experimental, compositor accuracy unverified |
+| Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](FEL_PLAN.md)) |
 | Dolby Vision Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata, source kept | No | Works, not a guaranteed improvement over authored metadata |
 
-Not supported: Profile 5 output, lossless FEL to Profile 8 conversion, and XML metadata export.
+Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
 
 - HDR10: the base layer is copied unchanged. When no compatible measurements exist, `mkvdovi`
   runs `hdr_analyzer_mvp` and supplies its measurements to `dovi_tool generate`.
@@ -38,12 +38,16 @@ Not supported: Profile 5 output, lossless FEL to Profile 8 conversion, and XML m
   VUI and HLG in the alternative transfer characteristics SEI (BBC iPlayer style) is handled: the
   analyzer reads the transfer from decoded frames, and the output still gets Dolby Vision
   compatibility ID 4 (HLG).
-- Profile 7 FEL: the base and enhancement layers are composited in software and re-encoded, then a
-  new Profile 8.1 RPU is generated. See [experimental/README.md](experimental/README.md).
+- Profile 7 MEL: the enhancement layer carries no picture data. It is discarded and the RPU is
+  converted to Profile 8.1 with `dovi_tool`; the authored metadata is kept unless `--mdfix` is given.
+- Profile 7 FEL: refused, with or without `--mdfix`. The file fails with an error before any
+  temporary work, the source is kept, and a multi-file run continues with the next file. The BL+EL
+  compositor and its re-encode were removed: the compositor did not match the Dolby Vision
+  reconstruction specification (ETSI GS CCM 001) on real discs. A design that keeps the base layer
+  bit-exact is planned in [FEL_PLAN.md](FEL_PLAN.md). `mkvdovi inspect` still reports FEL.
 
-HDR10, HDR10+, Profile 7 MEL and `--mdfix` picture data is never filtered or re-encoded. Conversion
-quality for those paths depends on metadata accuracy and the display's mapping. HLG picture data is
-also copied unchanged. Only Profile 7 FEL changes pixels.
+`mkvdovi` never encodes video. On every path the picture data is copied unchanged, so conversion
+quality depends on metadata accuracy and the display's mapping.
 
 ### Analyzer input contract
 
@@ -110,8 +114,10 @@ and each scene value is the mean of its frames (version 4). The histogram EMA an
 apply only to the histograms and the frame average in the madVR `.bin`. Robust minima are raw
 per-frame spatial-percentile measurements.
 
-`mkvdovi` embeds the per-scene values as explicit `dovi_tool generate` shots, so the measured minimum,
-max-RGB mean, and maximum reach the RPU. Sidecar version 2 added `analyzer_version`, `source` (file
+`mkvdovi` passes the per-scene values to `dovi_tool generate` as explicit shots. The generator
+clamps them before it writes the RPU: a minimum above 12 codes is written as 12, a maximum below
+2081 (100 nits) as 2081, and an average below 819 as 819. Values inside those limits reach the RPU
+unchanged. Sidecar version 2 added `analyzer_version`, `source` (file
 name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, crop disabled), and
 stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 adds
 `analysis.luminance_mapping`: `pq`, or `dovi84-v2` for HLG measured through the full Profile 8.4
@@ -180,7 +186,7 @@ mkvdovi "input.mkv" --source-primaries 0
 
 | Level | Current output |
 |-------|----------------|
-| **L1** | HDR10/HLG: per-scene minimum, max-RGB mean, and maximum from the analyzer's L1 sidecar. HDR10+: derived from source scenes |
+| **L1** | HDR10/HLG: per-scene minimum, max-RGB mean, and maximum from the analyzer's L1 sidecar, after the `dovi_tool generate` clamps (minimum at most 12 codes, maximum at least 2081, average at least 819). HDR10+: derived from source scenes |
 | **L2** | Neutral compatibility trims for 100/600/1000-nit targets |
 | **L5** | HDR10/HLG: offsets from the committed crop. Dolby Vision inputs: sampled source L5. Full-frame content: `dovi_tool` zero default |
 | **L6** | Static mastering-display metadata and MaxCLL/MaxFALL, read with MediaInfo. HDR10/HLG: a MaxCLL or MaxFALL the source does not state (or states as 0) is taken from the analyzer's measurement (see below). Otherwise warned defaults when MediaInfo is absent or a field is missing |
@@ -199,7 +205,7 @@ MaxFALL does not exceed MaxCLL; a source-stated value is never changed. A sideca
 `mkvdovi` does not synthesize L3 offsets or creative L8 trims. L2 values are neutral (`2048`), and
 experimental non-neutral trim derivation remains opt-in roadmap work. Note that while `dovi_tool` 2.3.4
 parses Level 253 extension metadata blocks, the `dolby_vision` crate (3.4.0) used in-process (for inspect
-sampling and FEL NLQ parsing) does not yet support L253 blocks; support will be updated when the crate releases it.
+sampling and MEL/FEL classification) does not yet support L253 blocks; support will be updated when the crate releases it.
 
 ### HLG caveats
 

@@ -384,19 +384,6 @@ fn hdr_format_from_rpu(kind: RpuFormatKind) -> HdrFormat {
     }
 }
 
-/// Static HDR metadata for L6, with defaults (1000 / 0.005 / 1000 / 400 nits) for missing values.
-/// HLG sources normally carry no mastering-display or light-level metadata, and the defaults match
-/// the Profile 8.4 source range, so `hlg_source` turns the missing-value warnings into info lines.
-pub fn get_static_metadata(input_file: &str, hlg_source: bool) -> HashMap<String, f64> {
-    let mut meta = read_static_metadata(input_file);
-    apply_static_defaults(
-        &mut meta,
-        &["max_dml", "min_dml", "max_cll", "max_fall"],
-        hlg_source,
-    );
-    meta
-}
-
 /// Store a source-stated MaxCLL / MaxFALL. Zero means "unknown" in CTA-861.3, so it is not a
 /// stated value and never replaces one.
 fn insert_light_level(meta: &mut HashMap<String, f64>, key: &str, value: f64) {
