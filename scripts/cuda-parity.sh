@@ -6,7 +6,10 @@
 # HEVC Main10 twice, tagged PQ and HLG, then runs hdr_analyzer_mvp/tests/cuda_parity.rs against a
 # debug build with the cuda feature. The test compares --hwaccel none with --hwaccel cuda:
 # byte-identical .bin, equal crop/scenes/frames in the L1 sidecar, and analysis.gpu == true for
-# the CUDA run. It fails closed: a missing tool, a missing GPU or a CPU fallback is an error.
+# the CUDA run. The HLG clip is checked once per Profile 8.4 composer (--hlg-composer preset and
+# bt2100, each with its sidecar luminance_mapping), and the PQ clip also with
+# --hlg-composer bt2100, which must leave PQ output unchanged. It fails closed: a missing tool,
+# a missing GPU or a CPU fallback is an error.
 #
 # Usage:
 #   scripts/cuda-parity.sh [--pq <file>] [--hlg <file>]
@@ -89,6 +92,7 @@ echo "HLG clip: $HLG_CLIP"
 HDR_ANALYZE_CUDA_PARITY_REQUIRED=1 \
 HDR_ANALYZE_CUDA_PARITY_PQ="$PQ_CLIP" \
 HDR_ANALYZE_CUDA_PARITY_HLG="$HLG_CLIP" \
+HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS=preset,bt2100 \
     cargo test -p hdr_analyzer_mvp --features cuda --test cuda_parity -- --nocapture
 
 echo "CUDA parity: PASS"

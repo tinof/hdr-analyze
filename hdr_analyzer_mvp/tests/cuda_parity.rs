@@ -7,18 +7,40 @@
 //! test instead of comparing the CPU path with itself.
 //!
 //! Clips: `HDR_ANALYZE_CUDA_PARITY_PQ` and `HDR_ANALYZE_CUDA_PARITY_HLG` (HEVC 10-bit).
-//! Without them the test skips with a note. With `HDR_ANALYZE_CUDA_PARITY_REQUIRED` set
+//! The HLG clip runs once per Profile 8.4 composer listed in
+//! `HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS` (comma-separated `--hlg-composer` names; unset
+//! means every composer), and its sidecars must name that composer's `luminance_mapping`.
+//! The PQ clip also runs with `--hlg-composer bt2100`, which must not change its output.
+//! Without the clips the test skips with a note. With `HDR_ANALYZE_CUDA_PARITY_REQUIRED` set
 //! (any value), a missing variable, a missing file or a build without the `cuda` feature
 //! is a failure. `scripts/cuda-parity.sh` generates the clips and runs this test that way.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use dovi84_composer::Composer;
 use serde_json::Value;
 
 const PQ_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_PQ";
 const HLG_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_HLG";
+const HLG_COMPOSERS_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS";
 const REQUIRED_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_REQUIRED";
+
+/// The composers the HLG clip is checked with: [`HLG_COMPOSERS_VAR`], or every composer.
+fn hlg_composers() -> Vec<Composer> {
+    let Ok(names) = std::env::var(HLG_COMPOSERS_VAR) else {
+        return Composer::ALL.to_vec();
+    };
+    names
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            Composer::from_cli_name(name)
+                .unwrap_or_else(|| panic!("{HLG_COMPOSERS_VAR}: unknown composer '{name}'"))
+        })
+        .collect()
+}
 
 /// Why the test cannot run; `None` when both clips and a `+cuda` analyzer are available.
 fn unavailable_reason() -> Option<String> {
@@ -144,7 +166,14 @@ fn section_differences(section: &str, cpu: &Value, gpu: &Value) -> Vec<String> {
     vec![format!("{section}: cpu {cpu} vs gpu {gpu}")]
 }
 
-fn check_parity(label: &str, clip: &Path, mapping: &str, no_crop: bool, extra_args: &[&str]) {
+/// Asserts CPU/CUDA parity for one configuration and returns the CPU `.bin`.
+fn check_parity(
+    label: &str,
+    clip: &Path,
+    mapping: &str,
+    no_crop: bool,
+    extra_args: &[&str],
+) -> Vec<u8> {
     let dir = tempfile::tempdir().expect("tempdir");
     let run = |name: &str, hwaccel: &str| {
         run_analyzer(
@@ -257,6 +286,7 @@ fn check_parity(label: &str, clip: &Path, mapping: &str, no_crop: bool, extra_ar
         "{label}: identical ({frame_count} frames, {} bytes)",
         cpu.bin.len()
     );
+    cpu.bin
 }
 
 // One test for all cases: parallel tests would run several CUDA processes at once.
@@ -273,14 +303,35 @@ fn cuda_output_matches_cpu() {
     let pq = PathBuf::from(std::env::var_os(PQ_VAR).expect("checked above"));
     let hlg = PathBuf::from(std::env::var_os(HLG_VAR).expect("checked above"));
 
-    for (name, clip, mapping) in [("PQ", &pq, "pq"), ("HLG", &hlg, "dovi84-v2")] {
+    let composers = hlg_composers();
+    assert!(
+        !composers.is_empty(),
+        "{HLG_COMPOSERS_VAR} names no composer"
+    );
+    let mut cases = vec![("PQ".to_owned(), &pq, "pq", Vec::new())];
+    for composer in composers {
+        cases.push((
+            format!("HLG {}", composer.cli_name()),
+            &hlg,
+            composer.luminance_mapping(),
+            vec!["--hlg-composer", composer.cli_name()],
+        ));
+    }
+
+    for (name, clip, mapping, composer_args) in &cases {
         for no_crop in [false, true] {
             let crop = if no_crop {
                 "--no-crop"
             } else {
                 "crop detection"
             };
-            check_parity(&format!("{name}, {crop}"), clip, mapping, no_crop, &[]);
+            check_parity(
+                &format!("{name}, {crop}"),
+                clip,
+                mapping,
+                no_crop,
+                composer_args,
+            );
         }
         // The grain-robust estimator in both peak domains.
         for (domain, no_crop) in [
@@ -289,20 +340,36 @@ fn cuda_output_matches_cpu() {
             ("luma", true),
             ("luma", false),
         ] {
+            let mut args = composer_args.clone();
+            args.extend([
+                "--peak-estimator",
+                "robust",
+                "--peak-source",
+                "max",
+                "--peak-domain",
+                domain,
+            ]);
             check_parity(
                 &format!("{name}, robust, {domain}, no_crop={no_crop}"),
                 clip,
                 mapping,
                 no_crop,
-                &[
-                    "--peak-estimator",
-                    "robust",
-                    "--peak-source",
-                    "max",
-                    "--peak-domain",
-                    domain,
-                ],
+                &args,
             );
         }
     }
+
+    // The composer only affects HLG: a PQ run with a non-default composer is unchanged.
+    let pq_default = check_parity("PQ, default composer", &pq, "pq", true, &[]);
+    let pq_bt2100 = check_parity(
+        "PQ, --hlg-composer bt2100",
+        &pq,
+        "pq",
+        true,
+        &["--hlg-composer", "bt2100"],
+    );
+    assert!(
+        pq_default == pq_bt2100,
+        "PQ: --hlg-composer bt2100 changed the measurements"
+    );
 }

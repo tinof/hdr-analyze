@@ -41,7 +41,10 @@ the analyzer starts.
    - the per-pixel luma and max-RGB sums (for exact averages) and both maxima.
 
    For HLG, every pixel goes through the Dolby Vision Profile 8.4 decode first: the luma reshaping
-   curve, the two order-3 chroma MMR curves, and the RPU's YCbCr-to-RGB matrix.
+   curve, the two order-3 chroma MMR curves, and the RPU's YCbCr-to-RGB matrix. The host fills the
+   luma LUT and the `dovi_params` buffer from the composer `--hlg-composer` selects (`preset` or
+   `bt2100`), the same decoder the CPU path uses; both composers have the same shape, so the kernel
+   and the buffer layout do not depend on the choice.
 4. **Host side.** The analyzer downloads one result buffer, turns it into the frame's histograms and
    L1 values, and runs scene detection on the luminance histogram.
 5. **Crop monitoring.** At each accepted scene cut the pipeline downloads that one frame and checks
@@ -190,14 +193,20 @@ GPU host before every PR that touches `hdr_analyzer_mvp/src/analysis/`, `kernels
 
 The script encodes the synthetic clip from `tools/l1_diff/corpus/make_corpus.py` (640x360, 144
 frames, six shots) as HEVC Main10 twice, once tagged PQ and once tagged HLG. It then runs
-`hdr_analyzer_mvp/tests/cuda_parity.rs` against a debug build with the `cuda` feature. For each
-clip, with crop detection and with `--no-crop`, the test runs `--hwaccel none` and `--hwaccel cuda`
+`hdr_analyzer_mvp/tests/cuda_parity.rs` against a debug build with the `cuda` feature. The HLG clip
+is checked once per Profile 8.4 composer named in `HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS`
+(comma-separated `--hlg-composer` values; the script sets `preset,bt2100`, and unset means every
+composer). For each clip and composer, with crop detection and with `--no-crop`, the test runs `--hwaccel none` and `--hwaccel cuda`
 (both `--downscale 1 --disable-optimizer`) and requires:
 
 - byte-identical `.bin` files;
 - equal `crop`, `scenes` and `frames` in the two `.l1.json` sidecars;
 - `analysis.gpu` false for the CPU run and true for the CUDA run, so a CPU fallback fails the test;
-- `analysis.luminance_mapping` `pq` for the PQ clip and `dovi84-v2` for the HLG clip.
+- `analysis.luminance_mapping` `pq` for the PQ clip, and for the HLG clip the composer's name:
+  `dovi84-v2` (preset) or `dovi84-bt2100-v1` (bt2100).
+
+The PQ clip is also analyzed with `--hlg-composer bt2100`, and its `.bin` must be byte-identical to
+the default PQ run: the option must not touch PQ input.
 
 The script fails when `nvidia-smi`, `python3` or an `ffmpeg` with `libx265` is missing, and the
 test fails when the analyzer was built without the `cuda` feature. `--pq <file>` and `--hlg <file>`

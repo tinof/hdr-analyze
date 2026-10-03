@@ -4,8 +4,9 @@ members = [
     "hdr_analyzer_mvp",
     "mkvdovi",
     "verifier",
+    "dovi84_composer",
 ]
-exclude = ["tools/compare_baseline", "tools/l1_diff"]
+exclude = ["tools/compare_baseline", "tools/l1_diff", "tools/fit_hlg_composer"]
 
 [profile.release]
 lto = "fat"

@@ -72,6 +72,7 @@ are those of v5.6.4 and are not guaranteed to carry forward.
 | PQ transfer function | SMPTE ST 2084 / ITU-R BT.2100 |
 | HLG transfer function | ARIB STD-B67 / ITU-R BT.2100 |
 | Profile 8.4 HLG decode (luma curve, chroma MMR curves, YCbCr-to-RGB matrix) | MIT-licensed [`dolby_vision`](https://crates.io/crates/dolby_vision) crate (`Profile84` preset `rpu_data_mapping()` and `dm_data()`, from iPhone-recorded 8.4 RPUs); evaluation checked against libplacebo's renderer on grey and colour patches |
+| Fitted Profile 8.4 composer (`--hlg-composer bt2100`, the default) | Fitted by this project (`tools/fit_hlg_composer`) to the ITU-R BT.2100 HLG-to-PQ conversion through display light at 1000 cd/m², as ITU-R BT.2408 describes it; colour error weighted by ITU-R BT.2124 ΔE_ITP; composer syntax from ETSI GS CCM 001. Design: [`docs/HLG_COMPOSER.md`](HLG_COMPOSER.md) |
 | Tone-mapping reference (planned trims) | ITU-R BT.2390 (EETF) |
 | Static HDR metadata (MaxCLL/MaxFALL) | CTA-861 |
 | madVR measurement file format | MIT-licensed [`madvr_parse`](https://crates.io/crates/madvr_parse) by quietvoid |
@@ -80,7 +81,10 @@ are those of v5.6.4 and are not guaranteed to carry forward.
 
 The boundary is strict: this project computes per-frame luminance statistics from decoded
 pixels and emits generic measurement data plus a configuration JSON; the RPU bitstream itself
-is authored entirely by `dovi_tool`, which the user installs independently.
+is authored by `dovi_tool`, which the user installs independently. One exception: with
+`--hlg-composer bt2100` (the default for HLG), `mkvdovi` replaces the composer (`rpu_data_mapping`) of the RPU
+that `dovi_tool` generated, using the MIT-licensed `dolby_vision` crate that `dovi_tool` is built
+on. Every other part of the RPU stays as `dovi_tool` wrote it.
 
 ## Legal framing and its limits
 

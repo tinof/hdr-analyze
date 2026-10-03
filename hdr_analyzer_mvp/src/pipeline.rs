@@ -30,7 +30,7 @@ use crate::analysis::gpu::GpuAnalyzer;
 use crate::analysis::histogram::{
     apply_histogram_ema, apply_histogram_temporal_median, select_peak_pq,
 };
-use crate::analysis::hlg::{DOVI84_MAPPING, PQ_MAPPING};
+use crate::analysis::hlg::PQ_MAPPING;
 use crate::analysis::scene::{
     calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed, scene_series,
     select_scene_cuts, SceneSeries,
@@ -382,7 +382,8 @@ pub fn run(
     match video_info.transfer_function {
         TransferFunction::Hlg => {
             println!(
-                "Detected HLG transfer function. Measuring through the Dolby Vision Profile 8.4 decode (luma curve, chroma MMR, RPU matrix)."
+                "Detected HLG transfer function. Measuring through the Dolby Vision Profile 8.4 decode (luma curve, chroma MMR, RPU matrix) of the '{}' composer.",
+                cli.hlg_composer.cli_name()
             );
         }
         TransferFunction::Unknown => {
@@ -398,9 +399,11 @@ pub fn run(
             "Warning: stream is tagged full range; samples are interpreted as limited range (64..940), so measured levels will be biased."
         );
     }
+    // BT.2020 constant luminance is not BT.2020 NCL either: the PQ max-RGB and the DV 8.4
+    // decode both assume NCL, so it warns too.
     if !matches!(
         video_info.color_space,
-        color::Space::Unspecified | color::Space::BT2020NCL | color::Space::BT2020CL
+        color::Space::Unspecified | color::Space::BT2020NCL
     ) {
         eprintln!(
             "Warning: stream matrix is tagged {:?}; max-RGB peaks use BT.2020 non-constant-luminance coefficients.",
@@ -489,6 +492,7 @@ pub fn run(
             &FrameAnalysisOptions {
                 denoise_mode: &cli.pre_denoise,
                 transfer_function: video_info.transfer_function,
+                hlg_composer: cli.hlg_composer,
                 peak_domain,
                 min_percentile: cli.min_percentile,
                 peak_estimator: cli.peak_estimator,
@@ -604,7 +608,7 @@ pub fn run(
                 gpu: gpu_active,
                 no_crop: cli.no_crop,
                 luminance_mapping: match video_info.transfer_function {
-                    TransferFunction::Hlg => DOVI84_MAPPING,
+                    TransferFunction::Hlg => cli.hlg_composer.luminance_mapping(),
                     _ => PQ_MAPPING,
                 }
                 .to_owned(),
@@ -721,7 +725,10 @@ fn run_native_analysis_pipeline(
         None
     };
     let mut gpu_analyzer = if cuda_requested && gpu_block_reason.is_none() {
-        match GpuAnalyzer::new(analysis_options.transfer_function) {
+        match GpuAnalyzer::new(
+            analysis_options.transfer_function,
+            analysis_options.hlg_composer,
+        ) {
             Ok(analyzer) => {
                 println!(
                     "CUDA analysis active (NVRTC kernel on full-resolution frames, {}x sampling stride)",

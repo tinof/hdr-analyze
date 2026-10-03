@@ -922,6 +922,8 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
         .arg("-o")
         .arg(&bin)
         .args(["--peak-source", "max", "--disable-optimizer", "--no-crop"])
+        // The preset curve, re-derived independently below; bt2100 has its own test.
+        .args(["--hlg-composer", "preset"])
         .output()
         .expect("run analyzer");
     assert!(
@@ -976,5 +978,59 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
             (nits - expected_nits).abs() <= 1.0,
             "light_level.{field} {nits} != {expected_nits:.1} nits"
         );
+    }
+}
+
+#[test]
+fn hlg_flat_frame_measures_through_the_bt2100_composer() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let y_code = 721_u16;
+    let clip = encode_tagged_yuv_plane_clip(
+        dir.path(),
+        "hlg_721_bt2100",
+        &vec![y_code; W * H],
+        &vec![512; W * H / 4],
+        &vec![512; W * H / 4],
+        "arib-std-b67",
+    );
+    let bin = dir.path().join("hlg_721_bt2100.bin");
+    let output = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+        .arg(&clip)
+        .arg("-o")
+        .arg(&bin)
+        .args(["--peak-source", "max", "--disable-optimizer", "--no-crop"])
+        .args(["--hlg-composer", "bt2100"])
+        .output()
+        .expect("run analyzer");
+    assert!(
+        output.status.success(),
+        "analyzer failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
+            .expect("parse L1 sidecar");
+    assert_eq!(sidecar["version"], 4);
+    assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-bt2100-v1");
+
+    // The fitted composer decodes 75% neutral grey to 2378.6 on all three channels
+    // (BT.2100 reference 2378.24, about 203 nits), so luma and max-RGB agree.
+    let expected = 2378.6;
+    let scenes = sidecar["scenes"].as_array().expect("scenes array");
+    assert!(!scenes.is_empty());
+    for scene in scenes {
+        for field in ["max_pq_12bit", "avg_max_rgb_pq_12bit", "avg_luma_pq_12bit"] {
+            let code = scene[field].as_f64().expect(field);
+            assert!(
+                (code - expected).abs() <= 1.0,
+                "scene {field} {code} != BT.2100 composer value {expected}"
+            );
+        }
     }
 }

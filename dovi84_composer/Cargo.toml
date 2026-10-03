@@ -1,0 +1,17 @@
+[package]
+name = "dovi84_composer"
+version = "0.5.1"
+edition = "2021"
+license = "MIT"
+description = "Dolby Vision Profile 8.4 composers (reshaping curves) shared by hdr_analyzer_mvp and mkvdovi"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+dolby_vision = "3.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -6,6 +6,26 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Added
+
+- **Breaking: HLG output uses a composer fitted to BT.2100 by default: `--hlg-composer bt2100`**
+  (`mkvdovi` and `hdr_analyzer_mvp`; `--hlg-composer preset` restores the previous output). The Profile 8.4 preset that `dovi_tool` writes
+  decodes neutral greys with a blue tint (75% grey to R′G′B′ 2384/2387/2439 in 12-bit PQ codes) and
+  nominal white to about 1150 nits. The new composer uses the same syntax, fitted to the BT.2100 /
+  BT.2408 1000-nit HLG-to-PQ conversion with neutrals kept neutral: grey decodes to equal R′G′B′
+  within 0.005 of a 12-bit code, black and sub-black to black, nominal white to 1000 nits, and libplacebo's render of the 52
+  colour test patches is ΔE_ITP 11.8 from the reference on average, against 26.1 for the preset.
+  The analyzer measures through the selected composer (CPU and CUDA, bit-identical), the sidecar
+  names it (`dovi84-bt2100-v1`), and `mkvdovi` installs the same composer into the RPU that
+  `dovi_tool generate` wrote. Whether playback devices apply a composer other than the preset is
+  not yet confirmed by a playback test. HLG measurements and temp dirs from earlier versions carry
+  the preset, so under the new default they are re-analyzed and regenerated. Design and measurements:
+  [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md).
+  - New workspace library `dovi84_composer` (composer definitions, guarded RPU rewrite) and the
+    fitter `tools/fit_hlg_composer` that generates its constants and reports both composers.
+  - `scripts/validate_hlg_dv84.sh` and `validate_hlg_dv84_color.sh` take `--composer`, and the
+    colour script reports ΔE_ITP against the BT.2100 reference.
+
 ### Removed
 
 - **Breaking: Profile 7 FEL conversion is removed from `mkvdovi`.** The BL+EL compositor
@@ -22,6 +42,15 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed
 
+- **Breaking: HLG inputs that the 8.4 RPU cannot describe are refused**, including files earlier
+  versions converted: tagged full range, a matrix other than BT.2020 non-constant luminance
+  (BT.2020 constant luminance included), or primaries other than BT.2020, from MediaInfo or
+  ffprobe tags. The check runs before any work and lists every
+  source and value. Untagged fields are accepted with a warning that states the assumption
+  (limited range, BT.2020 NCL). The analyzer now also warns on BT.2020 constant luminance.
+- **`mkvdovi --verify` is stricter for HLG output**: a missing or unloadable L1 sidecar fails the
+  verification instead of skipping its checks, and every RPU frame must carry the composer the
+  sidecar names.
 - **Profile 7 FEL input is refused**, with or without `--mdfix`. The file fails with an error
   before any temporary work, the source is kept, and a multi-file run continues with the next
   file. Profile 7 MEL, Profile 8, HDR10, HDR10+ and HLG inputs behave as before, and

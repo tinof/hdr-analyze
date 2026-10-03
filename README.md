@@ -55,7 +55,7 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 |---|---|---|---|
 | HDR10 | Profile 8.1, CM v4.0 metadata | No | Measurement comparisons published; playback unvalidated |
 | HDR10+ | Profile 8.1, L1 taken from HDR10+ | No | Measurement comparisons published; playback unvalidated |
-| HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; playback unvalidated |
+| HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves); composer fitted to BT.2100 by default (`--hlg-composer preset` for the `dovi_tool` preset) | No | Decode validated against libplacebo; playback unvalidated |
 | Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
 | Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](docs/FEL_PLAN.md)) |
 | Profile 8.1 or MEL with `--mdfix` (Profile 8.4 is refused) | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
@@ -89,7 +89,7 @@ Dolby provides its own professional tools for this job. If you already use them 
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
 - There is no Profile 5 output and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
-- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the 8.4 curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves).
+- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the default 8.4 preset curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)); `--hlg-composer preset` writes the `dolby_vision` crate's preset instead, which tints neutral greys slightly blue. No playback device has been tested with the fitted composer yet.
 - Linux ARM64 has no release archive; build it from source.
 - Playback on real displays has not been compared and published.
 

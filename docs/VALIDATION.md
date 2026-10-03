@@ -285,30 +285,77 @@ The env-gated `real_content_consistency` integration test passed against a 15-se
 ### 8. HLG: Dolby Vision 8.4 decode vs libplacebo (2026-09-30)
 
 HLG is measured through the Profile 8.4 decode that a Dolby Vision decoder applies with the RPU
-`mkvdovi` injects (the `dolby_vision` crate's `Profile84` preset). The reference is libplacebo's
-Dolby Vision render through ffmpeg's `libplacebo` filter, on lossless flat test patterns with a
-Profile 8.4 RPU injected by `dovi_tool`. Each frame is compared with the analyzer's per-frame
+`mkvdovi` injects. By default that RPU carries the `dolby_vision` crate's `Profile84` preset
+composer; `--hlg-composer bt2100` replaces it with a composer fitted to BT.2100
+([HLG_COMPOSER.md](HLG_COMPOSER.md)). The reference is libplacebo's Dolby Vision render through
+ffmpeg's `libplacebo` filter, on lossless flat test patterns with a Profile 8.4 RPU injected by
+`dovi_tool`. Both scripts take `--composer bt2100|preset` (default `bt2100`, as in `mkvdovi`). For `bt2100` they
+rewrite the generated RPU's composer with `tools/fit_hlg_composer` (`rewrite-rpu`, the same
+function `mkvdovi` uses), run the analyzer with `--hlg-composer bt2100` and expect the sidecar
+mapping `dovi84-bt2100-v1`. libplacebo reads the composer from the RPU, so its render is an
+independent decode of the selected composer. Each frame is compared with the analyzer's per-frame
 sidecar minimum, which is not temporally smoothed and on a flat frame equals the frame's value in
 the chosen peak domain. Tolerance is 4 twelve-bit PQ codes.
 
-| Script | Patterns | Domain | Worst error (12-bit PQ codes) |
-|---|---|---|---|
-| `scripts/validate_hlg_dv84.sh` | Grey ramp, one 10-bit luma code per frame, 64–1008 | `--peak-domain luma` (8.4 luma curve) | 3.16 |
-| `scripts/validate_hlg_dv84_color.sh` | 52 patches: R, G, B, Y, C, M at 100% and 75% saturation plus grey, HLG levels 0.25 / 0.5 / 0.75 / 1.0 | max-RGB (full 8.4 decode) | 0.59 on CPU and on `--hwaccel cuda` |
+| Script | Patterns | Domain | Worst error, preset | Worst error, bt2100 |
+|---|---|---|---|---|
+| `scripts/validate_hlg_dv84.sh` | Grey ramp, one 10-bit luma code per frame, 64–1008 | `--peak-domain luma` (8.4 luma curve) | 3.16 | 1.77 |
+| `scripts/validate_hlg_dv84_color.sh` | 52 patches: R, G, B, Y, C, M at 100% and 75% saturation plus grey, HLG levels 0.25 / 0.5 / 0.75 / 1.0 | max-RGB (full 8.4 decode) | 0.59 | 0.49 |
+
+Errors are in 12-bit PQ codes. All four results come from one set of runs with ffmpeg
+N-125472-g97cbffe917-20260705, libplacebo v7.370.0 and llvmpipe software Vulkan (LLVM 20.1.2, not
+the GPU); the preset values match the earlier runs. Every run gave the same output on CPU and on
+`--hwaccel cuda`.
 
 - The 8.4 preset's chroma MMR curves tint neutrals slightly blue, so neutral HLG reads about 2%
   higher in max-RGB than in luma: grey code 721 gives luma 2389 and max-RGB 2439 (libplacebo
-  2439.1).
+  2439.1). With bt2100, grey code 721 gives 2379 (libplacebo 2378.6).
+- BT.2100 reference: the colour script also prints, per patch, the BT.2100 / BT.2408 1000-nit
+  HLG-to-PQ conversion the bt2100 composer is fitted to (as max(R, G, B) in 12-bit PQ) and the
+  BT.2124 ΔE_ITP of the unclamped libplacebo render against it. The ΔE is informational and does not
+  affect the exit status. Summary lines printed by the preset run:
+
+  ```text
+  libplacebo vs BT.2100 dE_ITP (all patches, 52): mean 26.14, max 275.24
+  libplacebo vs BT.2100 dE_ITP (grey only, 4): mean 7.12, max 11.36
+  ```
+
+  and by the bt2100 run:
+
+  ```text
+  libplacebo vs BT.2100 dE_ITP (all patches, 52): mean 11.84, max 25.92
+  libplacebo vs BT.2100 dE_ITP (grey only, 4): mean 0.05, max 0.10
+  ```
+
+  Grey patches (analyzer and libplacebo in 12-bit PQ codes):
+
+  | HLG level | Y′ code | Analyzer, preset / bt2100 | libplacebo, preset / bt2100 | BT.2100 | ΔE_ITP, preset / bt2100 |
+  |---|---|---|---|---|---|
+  | 0.25 | 283 | 1223 / 1214 | 1223.2 / 1214.5 | 1214.3 | 5.20 / 0.03 |
+  | 0.50 | 502 | 1851 / 1808 | 1851.5 / 1807.9 | 1808.3 | 4.80 / 0.10 |
+  | 0.75 | 721 | 2439 / 2379 | 2439.1 / 2378.6 | 2378.2 | 7.12 / 0.07 |
+  | 1.00 | 940 | 3079 / 3079 | 3079.0 / 3078.7 | 3078.7 | 11.36 / 0.01 |
+
+  libplacebo is the clamped value; the preset's unclamped render at level 1.00 is 3155.3. These grey
+  ΔE values are measured against the BT.2100 reference neutral. The preset ΔE in HLG_COMPOSER.md §2
+  (6.75 at code 721) is measured against R = G = B at the same luminance, a different quantity. The
+  preset maximum (275.24) is the 100% magenta patch at level 1.00, which the preset renders
+  unclamped at PQ 4095.0. The largest bt2100 values are 100% cyan at 1.00 (25.92) and 100% blue at
+  0.75 (25.64).
 - Reference precision: with FBOs, libplacebo keeps intermediates in half float, which adds up to
   about 5 codes of error on saturated colours. The colour script therefore renders with
   `disable_fbos=1` and packed `rgba64le` output.
-- Superwhite: libplacebo plateaus near 1000 nits for the brightest HLG codes. That is its display
+- Superwhite (preset): libplacebo plateaus near 1000 nits for the brightest HLG codes. That is its display
   tone mapping (IPT intensity clipped to the source peak it takes from the RPU's L1 max_pq, or
   source_max_pq 3079 when L1 is absent), not Dolby Vision decoder behaviour. Rendered with L1
   max_pq 4095, grey code 940 decodes to PQ 3155, the model's value. The colour script injects L1
   max_pq 4095 for this reason. The analyzer still clamps luma and max-RGB to the RPU's declared
   source range [62, 3079] on purpose, so L1 stays within that range (superwhite codes from 943 up
-  would otherwise decode to PQ 4095); the reference is compared with the same clamp.
+  would otherwise decode to PQ 4095); the reference is compared with the same clamp. The bt2100
+  composer decodes grey 940 and neutral superwhite to PQ 3078.7. Its worst luma-ramp difference
+  (1.77) is on superwhite codes 944–1008, where libplacebo renders slightly below the analyzer's
+  3079 without L1; that looks like renderer roll-off below `source_max_pq`, not the decode, but it
+  is not proven.
 - 100% magenta at HLG level 1.0 lies outside BT.2020 (B′ > 1, G′ < 0); both sides clamp it to 3079.
 - Real content: 100 frames of the brightest scene of a BBC HLG sample (4K, frames 1999–2098,
   losslessly re-encoded), rendered through libplacebo's DV path as above. Per-frame max-RGB agrees
@@ -422,8 +469,9 @@ cargo run --release --manifest-path tools/l1_diff/Cargo.toml -- \
 cargo test -p hdr_analyzer_mvp --test synthetic_accuracy
 
 # HLG 8.4 decode vs libplacebo (§8); needs ffmpeg with libx265 + libplacebo (Vulkan), dovi_tool, python3
-scripts/validate_hlg_dv84.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda]         # luma, grey ramp
-scripts/validate_hlg_dv84_color.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda]   # max-RGB, colour patches
+# --composer bt2100 also needs cargo (it builds tools/fit_hlg_composer to rewrite the RPU)
+bash scripts/validate_hlg_dv84.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda] [--composer preset|bt2100]         # luma, grey ramp
+bash scripts/validate_hlg_dv84_color.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda] [--composer preset|bt2100]   # max-RGB, colour patches
 
 # real-content round (§7): sample prep on the analysis host
 mkvmerge -o sample.mkv --no-audio --no-subtitles --split parts:00:20:00-00:22:00 SOURCE.mkv

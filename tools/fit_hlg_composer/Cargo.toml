@@ -1,0 +1,13 @@
+[package]
+name = "fit_hlg_composer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Fits the BT.2100 Profile 8.4 composer of dovi84_composer and reports both composers"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+dolby_vision = "3.4"
+dovi84_composer = { path = "../../dovi84_composer" }
+nalgebra = "0.34"

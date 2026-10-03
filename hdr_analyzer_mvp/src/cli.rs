@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Parser, ValueEnum};
+use dovi84_composer::Composer;
 
 /// Version string advertising compiled-in optional backends; mkvdovi probes
 /// `--version` for "+cuda" to decide whether GPU analysis is available.
@@ -71,6 +73,19 @@ pub struct Cli {
     /// the linked FFmpeg cannot see (e.g. HLG signalled only in the MKV colour element).
     #[arg(long, value_enum, default_value_t = TransferOverride::Auto)]
     pub transfer: TransferOverride,
+
+    /// Dolby Vision Profile 8.4 composer HLG is measured through; must match the composer the
+    /// RPU carries. bt2100 (default): fitted to the BT.2100 1000-nit HLG-to-PQ conversion,
+    /// neutrals kept neutral; preset: the dolby_vision crate's Profile 8.4 preset (what dovi_tool
+    /// writes). Accepted and ignored for PQ input.
+    #[arg(
+        long,
+        value_name = "COMPOSER",
+        default_value = Composer::Bt2100V1.cli_name(),
+        value_parser = PossibleValuesParser::new(Composer::ALL.map(Composer::cli_name))
+            .map(|name| Composer::from_cli_name(&name).expect("a listed composer name")),
+    )]
+    pub hlg_composer: Composer,
 
     /// madVR measurement file version to write (5 or 6). Default: 5
     #[arg(long, default_value_t = 5)]

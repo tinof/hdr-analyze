@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 
 use anyhow::Result;
+use dovi84_composer::Composer;
 use ffmpeg_next::frame;
 use madvr_parse::MadVRFrame;
 use rayon::prelude::*;
@@ -39,6 +40,8 @@ const MAX_CODE_GRID_STEP: usize = 9;
 pub struct FrameAnalysisOptions<'a> {
     pub denoise_mode: &'a str,
     pub transfer_function: TransferFunction,
+    /// Profile 8.4 composer HLG is measured through; ignored for PQ.
+    pub hlg_composer: Composer,
     pub peak_domain: PeakDomain,
     pub min_percentile: f64,
     pub peak_estimator: PeakEstimator,
@@ -609,7 +612,8 @@ pub fn analyze_native_frame_cropped(
     let cy_start = y_start / 2;
     let cx_end = x_end.div_ceil(2);
     let cy_end = y_end.div_ceil(2);
-    let dovi84 = dovi84_decoder();
+    let dovi84 = dovi84_decoder(options.hlg_composer);
+    let dovi84_luma_lut = dovi84_pq_lut(options.hlg_composer);
 
     // Parallel accumulation across 4:2:0 chroma rows. Rayon creates one
     // accumulator per fold partition, so the fine histogram is reused across
@@ -659,7 +663,7 @@ pub fn analyze_native_frame_cropped(
                         let y_signal = (f64::from(y_code) - 64.0) / 876.0;
                         let luma_pq = match options.transfer_function {
                             TransferFunction::Hlg => {
-                                f64::from(dovi84_pq_lut()[usize::from(y_code).min(1023)])
+                                f64::from(dovi84_luma_lut[usize::from(y_code).min(1023)])
                             }
                             _ => y_signal,
                         }

@@ -1,19 +1,25 @@
 //! End-to-end HLG -> Dolby Vision Profile 8.4: a synthetic HLG MKV is converted without a
-//! re-encode, and the output's base layer must be the source bitstream.
+//! re-encode, and the output's base layer must be the source bitstream. Also covers the default
+//! `bt2100` composer, `--hlg-composer preset`, and the refusal of HLG colorimetry Profile 8.4
+//! cannot describe.
 //!
 //! Skipped (with a message) when a required tool is missing, or when the workspace-built
 //! `hdr_analyzer_mvp` next to the test's mkvdovi binary is missing or predates the Dolby Vision
-//! 8.4 HLG mapping. mkvdovi prefers that sibling over PATH, so build it first with
-//! `cargo build -p hdr_analyzer_mvp` (or run `cargo test --workspace`).
+//! 8.4 HLG mapping (or, for the composer cases, `--hlg-composer`). mkvdovi prefers that sibling over
+//! PATH, so build it first with `cargo build -p hdr_analyzer_mvp` (or run
+//! `cargo test --workspace`). The refusal cases stop before analysis and need no analyzer.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use assert_cmd::prelude::*;
+use dovi84_composer::Composer;
 
 const FRAMES: &str = "48";
 const SOURCE: &str = "hlg_sample.mkv";
 const OUTPUT: &str = "hlg_sample.DV.mkv";
+/// Colour tags of the synthetic source: what Profile 8.4 requires.
+const CONFORMING_COLOUR: &str = "colormatrix=bt2020nc:range=limited";
 
 #[allow(deprecated)]
 fn mkvdovi_cmd() -> Command {
@@ -36,8 +42,8 @@ fn run(command: &mut Command) -> Output {
     output
 }
 
-/// Reason to skip, or `None` when every tool this test (and mkvdovi) needs is available.
-fn missing_prerequisite() -> Option<String> {
+/// Reason to skip, or `None` when every external tool this test (and mkvdovi) needs is available.
+fn missing_tools() -> Option<String> {
     for (tool, arg) in [
         ("ffmpeg", "-version"),
         ("ffprobe", "-version"),
@@ -55,7 +61,11 @@ fn missing_prerequisite() -> Option<String> {
     if !String::from_utf8_lossy(&encoders.stdout).contains("libx265") {
         return Some("ffmpeg has no libx265 encoder".into());
     }
+    None
+}
 
+/// `--help` of the analyzer mkvdovi will run, or the reason to skip.
+fn analyzer_help() -> Result<String, String> {
     // Same resolution as `pipeline::analyzer_executable`: the sibling of mkvdovi wins.
     #[allow(deprecated)]
     let mkvdovi = assert_cmd::cargo::cargo_bin("mkvdovi");
@@ -64,48 +74,59 @@ fn missing_prerequisite() -> Option<String> {
         .map(|dir| dir.join(format!("hdr_analyzer_mvp{}", std::env::consts::EXE_SUFFIX)))
         .filter(|path| path.exists());
     let Some(analyzer) = analyzer else {
-        return Some(
+        return Err(
             "hdr_analyzer_mvp is not built next to mkvdovi (cargo build -p hdr_analyzer_mvp)"
                 .into(),
         );
     };
-    let help = Command::new(&analyzer).arg("--help").output().ok()?;
-    if String::from_utf8_lossy(&help.stdout).contains("--hlg-peak-nits") {
-        return Some(format!(
+    let help = Command::new(&analyzer)
+        .arg("--help")
+        .output()
+        .map_err(|error| format!("{} --help failed: {error}", analyzer.display()))?;
+    let help = String::from_utf8_lossy(&help.stdout).into_owned();
+    if help.contains("--hlg-peak-nits") {
+        return Err(format!(
             "{} predates the Dolby Vision 8.4 HLG mapping; rebuild it",
             analyzer.display()
         ));
     }
-    None
+    Ok(help)
 }
 
-/// Short 10-bit HLG clip with a moving gradient, muxed by mkvmerge like a real source.
-fn synthesize_hlg_mkv(dir: &Path) -> PathBuf {
+/// Reason to skip, or `None` when the tools and an analyzer with the 8.4 HLG mapping are there.
+fn missing_prerequisite() -> Option<String> {
+    missing_tools().or_else(|| analyzer_help().err())
+}
+
+/// Short 10-bit HLG clip with a moving gradient, muxed by mkvmerge like a real source. `colour`
+/// holds the x265 matrix and range tags (BT.2020 primaries and HLG transfer are always set).
+fn synthesize_hlg_mkv(dir: &Path, colour: &str) -> PathBuf {
     let raw = dir.join("synthetic.hevc");
-    run(Command::new("ffmpeg").args([
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "lavfi",
-        "-i",
-        "nullsrc=s=256x144:r=24,format=yuv420p10le,\
+    run(Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "nullsrc=s=256x144:r=24,format=yuv420p10le,\
          geq=lum='64+mod(X*3+N*20\\,896)':cb='512':cr='512+64*sin(N/6)'",
-        "-frames:v",
-        FRAMES,
-        "-c:v",
-        "libx265",
-        "-preset",
-        "ultrafast",
-        "-x265-params",
-        "log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited",
-        "-pix_fmt",
-        "yuv420p10le",
-        "-f",
-        "hevc",
-        "-y",
-    ])
-    .arg(&raw));
+            "-frames:v",
+            FRAMES,
+            "-c:v",
+            "libx265",
+            "-preset",
+            "ultrafast",
+            "-x265-params",
+            &format!("log-level=error:colorprim=bt2020:transfer=arib-std-b67:{colour}"),
+            "-pix_fmt",
+            "yuv420p10le",
+            "-f",
+            "hevc",
+            "-y",
+        ])
+        .arg(&raw));
 
     let mkv = dir.join(SOURCE);
     run(Command::new("mkvmerge")
@@ -220,7 +241,7 @@ fn hlg_becomes_profile84_with_the_source_base_layer() {
     }
 
     let dir = tempfile::tempdir().unwrap();
-    let source = synthesize_hlg_mkv(dir.path());
+    let source = synthesize_hlg_mkv(dir.path(), CONFORMING_COLOUR);
 
     let conversion = mkvdovi_cmd()
         .current_dir(dir.path())
@@ -302,4 +323,149 @@ fn hlg_becomes_profile84_with_the_source_base_layer() {
     let source_frames = frame_hashes(&source);
     assert_eq!(source_frames.len().to_string(), FRAMES);
     assert_eq!(source_frames, frame_hashes(&output));
+}
+
+/// Run mkvdovi on the synthetic source in `dir` with `extra` arguments; returns success and the
+/// combined log.
+fn convert(dir: &Path, extra: &[&str]) -> (bool, String) {
+    let conversion = mkvdovi_cmd()
+        .current_dir(dir)
+        .arg(SOURCE)
+        .args(["--keep-source", "--hwaccel", "none"])
+        .args(extra)
+        .output()
+        .unwrap();
+    let log = format!(
+        "{}{}",
+        String::from_utf8_lossy(&conversion.stdout),
+        String::from_utf8_lossy(&conversion.stderr)
+    );
+    (conversion.status.success(), log)
+}
+
+/// Convert with `extra` arguments and check that `composer` was measured, written into every
+/// RPU frame and confirmed by `--verify`.
+fn assert_composer_end_to_end(composer: Composer, extra: &[&str]) {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!(
+            "Skipping HLG {} composer test: {reason}",
+            composer.cli_name()
+        );
+        return;
+    }
+    if !analyzer_help().is_ok_and(|help| help.contains("--hlg-composer")) {
+        eprintln!(
+            "Skipping HLG {} composer test: the hdr_analyzer_mvp next to mkvdovi does not list --hlg-composer; rebuild it (cargo build -p hdr_analyzer_mvp)",
+            composer.cli_name()
+        );
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    synthesize_hlg_mkv(dir.path(), CONFORMING_COLOUR);
+    let mut args = vec!["--verify"];
+    args.extend_from_slice(extra);
+    let (success, log) = convert(dir.path(), &args);
+    assert!(success, "mkvdovi failed:\n{log}");
+    assert!(log.contains("Profile 8.4"), "no Profile 8.4 notice:\n{log}");
+    // Only a non-preset composer is installed; the preset RPU stays as dovi_tool wrote it.
+    let installed = log.contains(&format!(
+        "Installed the {} HLG composer ({}) on {FRAMES} RPU frames",
+        composer.cli_name(),
+        composer.luminance_mapping()
+    ));
+    assert_eq!(
+        installed,
+        composer != Composer::Preset,
+        "composer install notice:\n{log}"
+    );
+    assert!(
+        log.contains(&format!(
+            "all {FRAMES} RPU frames carry {}",
+            composer.cli_name()
+        )),
+        "--verify did not check the composer:\n{log}"
+    );
+    let output = dir.path().join(OUTPUT);
+    assert!(output.exists(), "missing {}", output.display());
+
+    // The sidecar names the composer the analyzer measured through.
+    let sidecar_path = dir.path().join("hlg_sample_measurements.bin.l1.json");
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&sidecar_path).unwrap()).unwrap();
+    assert_eq!(
+        sidecar["analysis"]["luminance_mapping"],
+        composer.luminance_mapping(),
+        "{}",
+        sidecar_path.display()
+    );
+
+    // Every frame of the muxed RPU carries the composer, independently of --verify.
+    let output_hevc = dir.path().join("output.hevc");
+    let rpu = dir.path().join("output_rpu.bin");
+    extract_annexb(&output, &output_hevc);
+    run(Command::new("dovi_tool")
+        .arg("extract-rpu")
+        .arg("-i")
+        .arg(&output_hevc)
+        .arg("-o")
+        .arg(&rpu));
+    let frames = dovi84_composer::check_rpu_file(&rpu, composer).unwrap();
+    assert_eq!(frames.to_string(), FRAMES);
+    for other in Composer::ALL.into_iter().filter(|&other| other != composer) {
+        assert!(dovi84_composer::check_rpu_file(&rpu, other).is_err());
+    }
+}
+
+#[test]
+fn hlg_composer_defaults_to_bt2100_on_every_frame() {
+    assert_composer_end_to_end(Composer::Bt2100V1, &[]);
+}
+
+#[test]
+fn hlg_composer_preset_keeps_the_dovi_tool_composer() {
+    assert_composer_end_to_end(Composer::Preset, &["--hlg-composer", "preset"]);
+}
+
+/// A conversion of an HLG source tagged with `colour` must be refused before any temp work, and
+/// the refusal must name `expected`.
+fn assert_refused(colour: &str, expected: &str) {
+    if let Some(reason) = missing_tools() {
+        eprintln!("Skipping HLG colorimetry refusal test: {reason}");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let source = synthesize_hlg_mkv(dir.path(), colour);
+    let (success, log) = convert(dir.path(), &[]);
+    assert!(!success, "mkvdovi accepted {colour}:\n{log}");
+    assert!(
+        log.contains("Profile 8.4 RPU cannot describe"),
+        "no refusal:\n{log}"
+    );
+    assert!(log.contains(expected), "refusal lacks {expected}:\n{log}");
+    assert!(source.exists(), "a refused source must be kept");
+    assert!(!dir.path().join(OUTPUT).exists());
+    let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("mkvdovi_temp_") || name.contains("measurements"))
+        .collect();
+    assert!(leftovers.is_empty(), "refusal left {leftovers:?}");
+}
+
+#[test]
+fn full_range_hlg_is_refused_before_any_work() {
+    assert_refused(
+        "colormatrix=bt2020nc:range=full",
+        "ffprobe color_range = pc",
+    );
+}
+
+#[test]
+fn bt709_matrix_hlg_is_refused_before_any_work() {
+    assert_refused(
+        "colormatrix=bt709:range=limited",
+        "ffprobe color_space = bt709",
+    );
 }
