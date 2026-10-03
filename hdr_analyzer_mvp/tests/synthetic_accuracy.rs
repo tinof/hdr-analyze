@@ -922,6 +922,8 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
         .arg("-o")
         .arg(&bin)
         .args(["--peak-source", "max", "--disable-optimizer", "--no-crop"])
+        // The preset curve, re-derived independently below; bt2100 has its own test.
+        .args(["--hlg-composer", "preset"])
         .output()
         .expect("run analyzer");
     assert!(

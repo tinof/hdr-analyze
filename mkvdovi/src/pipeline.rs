@@ -243,7 +243,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
     if let Some(composer) = custom_composer {
         progress::print_info(&format!(
-            "HLG composer: {} ({}), opt-in; playback devices are not verified to apply it.",
+            "HLG composer: {} ({}); not yet confirmed on playback devices. If a display renders \
+             the output wrongly, convert with --hlg-composer preset.",
             composer.cli_name(),
             composer.luminance_mapping()
         ));
@@ -482,17 +483,22 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                     // see the tag (e.g. HLG only in the MKV colour element), so state it.
                     extra_args.extend(["--transfer".to_string(), "hlg".to_string()]);
                 }
-                if let Some(composer) = custom_composer {
-                    // Only a non-preset composer is passed, so default invocations stay as they
-                    // were (and work with analyzers that predate the option).
-                    if !external::analyzer_lists_option(&analyzer_executable(), "--hlg-composer") {
-                        progress::print_error(
-                            "--hlg-composer needs an hdr_analyzer_mvp whose --help lists \
-                             --hlg-composer; rebuild or update the analyzer.",
-                        );
+                if let Some(composer) = hlg_composer {
+                    // Always name the composer: the analyzer's own default may differ from the
+                    // one this run writes. An analyzer that predates the option measures through
+                    // the preset only.
+                    if external::analyzer_lists_option(&analyzer_executable(), "--hlg-composer") {
+                        extra_args
+                            .extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
+                    } else if composer != Composer::Preset {
+                        progress::print_error(&format!(
+                            "--hlg-composer {} needs an hdr_analyzer_mvp whose --help lists \
+                             --hlg-composer; rebuild or update the analyzer, or convert with \
+                             --hlg-composer preset.",
+                            composer.cli_name()
+                        ));
                         return Ok(false);
                     }
-                    extra_args.extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
                 }
                 measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
                 if measurements_file.is_none() {
@@ -1723,11 +1729,11 @@ mod tests {
 
     #[test]
     fn resume_settings_carry_only_a_non_preset_hlg_composer() {
-        let preset = Args::try_parse_from(["mkvdovi"]).unwrap();
-        let bt2100 = Args::try_parse_from(["mkvdovi", "--hlg-composer", "bt2100"]).unwrap();
+        let preset = Args::try_parse_from(["mkvdovi", "--hlg-composer", "preset"]).unwrap();
+        let bt2100 = Args::try_parse_from(["mkvdovi"]).unwrap();
 
-        // Default fingerprints stay what earlier builds of this version wrote, so their temp
-        // dirs still resume.
+        // Preset fingerprints stay what 0.5.1 wrote (its RPUs carry the preset), so those temp
+        // dirs still resume under --hlg-composer preset and are discarded under bt2100.
         let default = resume_settings(&preset, None);
         assert_eq!(
             default,

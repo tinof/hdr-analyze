@@ -1,10 +1,11 @@
 //! End-to-end HLG -> Dolby Vision Profile 8.4: a synthetic HLG MKV is converted without a
-//! re-encode, and the output's base layer must be the source bitstream. Also covers the opt-in
-//! `--hlg-composer bt2100` and the refusal of HLG colorimetry Profile 8.4 cannot describe.
+//! re-encode, and the output's base layer must be the source bitstream. Also covers the default
+//! `bt2100` composer, `--hlg-composer preset`, and the refusal of HLG colorimetry Profile 8.4
+//! cannot describe.
 //!
 //! Skipped (with a message) when a required tool is missing, or when the workspace-built
 //! `hdr_analyzer_mvp` next to the test's mkvdovi binary is missing or predates the Dolby Vision
-//! 8.4 HLG mapping (or, for the bt2100 case, `--hlg-composer`). mkvdovi prefers that sibling over
+//! 8.4 HLG mapping (or, for the composer cases, `--hlg-composer`). mkvdovi prefers that sibling over
 //! PATH, so build it first with `cargo build -p hdr_analyzer_mvp` (or run
 //! `cargo test --workspace`). The refusal cases stop before analysis and need no analyzer.
 
@@ -342,32 +343,47 @@ fn convert(dir: &Path, extra: &[&str]) -> (bool, String) {
     (conversion.status.success(), log)
 }
 
-#[test]
-fn hlg_composer_bt2100_is_measured_and_written_on_every_frame() {
+/// Convert with `extra` arguments and check that `composer` was measured, written into every
+/// RPU frame and confirmed by `--verify`.
+fn assert_composer_end_to_end(composer: Composer, extra: &[&str]) {
     if let Some(reason) = missing_prerequisite() {
-        eprintln!("Skipping HLG bt2100 composer test: {reason}");
+        eprintln!(
+            "Skipping HLG {} composer test: {reason}",
+            composer.cli_name()
+        );
         return;
     }
     if !analyzer_help().is_ok_and(|help| help.contains("--hlg-composer")) {
         eprintln!(
-            "Skipping HLG bt2100 composer test: the hdr_analyzer_mvp next to mkvdovi does not list --hlg-composer; rebuild it (cargo build -p hdr_analyzer_mvp)"
+            "Skipping HLG {} composer test: the hdr_analyzer_mvp next to mkvdovi does not list --hlg-composer; rebuild it (cargo build -p hdr_analyzer_mvp)",
+            composer.cli_name()
         );
         return;
     }
 
     let dir = tempfile::tempdir().unwrap();
     synthesize_hlg_mkv(dir.path(), CONFORMING_COLOUR);
-    let (success, log) = convert(dir.path(), &["--verify", "--hlg-composer", "bt2100"]);
+    let mut args = vec!["--verify"];
+    args.extend_from_slice(extra);
+    let (success, log) = convert(dir.path(), &args);
     assert!(success, "mkvdovi failed:\n{log}");
     assert!(log.contains("Profile 8.4"), "no Profile 8.4 notice:\n{log}");
-    assert!(
-        log.contains(&format!(
-            "Installed the bt2100 HLG composer (dovi84-bt2100-v1) on {FRAMES} RPU frames"
-        )),
-        "no composer install notice:\n{log}"
+    // Only a non-preset composer is installed; the preset RPU stays as dovi_tool wrote it.
+    let installed = log.contains(&format!(
+        "Installed the {} HLG composer ({}) on {FRAMES} RPU frames",
+        composer.cli_name(),
+        composer.luminance_mapping()
+    ));
+    assert_eq!(
+        installed,
+        composer != Composer::Preset,
+        "composer install notice:\n{log}"
     );
     assert!(
-        log.contains(&format!("all {FRAMES} RPU frames carry bt2100")),
+        log.contains(&format!(
+            "all {FRAMES} RPU frames carry {}",
+            composer.cli_name()
+        )),
         "--verify did not check the composer:\n{log}"
     );
     let output = dir.path().join(OUTPUT);
@@ -379,12 +395,12 @@ fn hlg_composer_bt2100_is_measured_and_written_on_every_frame() {
         serde_json::from_slice(&std::fs::read(&sidecar_path).unwrap()).unwrap();
     assert_eq!(
         sidecar["analysis"]["luminance_mapping"],
-        Composer::Bt2100V1.luminance_mapping(),
+        composer.luminance_mapping(),
         "{}",
         sidecar_path.display()
     );
 
-    // Every frame of the muxed RPU carries the fitted composer, independently of --verify.
+    // Every frame of the muxed RPU carries the composer, independently of --verify.
     let output_hevc = dir.path().join("output.hevc");
     let rpu = dir.path().join("output_rpu.bin");
     extract_annexb(&output, &output_hevc);
@@ -394,9 +410,21 @@ fn hlg_composer_bt2100_is_measured_and_written_on_every_frame() {
         .arg(&output_hevc)
         .arg("-o")
         .arg(&rpu));
-    let frames = dovi84_composer::check_rpu_file(&rpu, Composer::Bt2100V1).unwrap();
+    let frames = dovi84_composer::check_rpu_file(&rpu, composer).unwrap();
     assert_eq!(frames.to_string(), FRAMES);
-    assert!(dovi84_composer::check_rpu_file(&rpu, Composer::Preset).is_err());
+    for other in Composer::ALL.into_iter().filter(|&other| other != composer) {
+        assert!(dovi84_composer::check_rpu_file(&rpu, other).is_err());
+    }
+}
+
+#[test]
+fn hlg_composer_defaults_to_bt2100_on_every_frame() {
+    assert_composer_end_to_end(Composer::Bt2100V1, &[]);
+}
+
+#[test]
+fn hlg_composer_preset_keeps_the_dovi_tool_composer() {
+    assert_composer_end_to_end(Composer::Preset, &["--hlg-composer", "preset"]);
 }
 
 /// A conversion of an HLG source tagged with `colour` must be refused before any temp work, and

@@ -88,9 +88,9 @@ reshaping curve for luma, and the full reconstruction (luma curve, chroma MMR cu
 YCbCr-to-RGB matrix) for max-RGB, clamped to the RPU's declared source range (see
 [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md)). Section 3 predates that design; its BT.2100
 formulas are kept as background. The implemented mapping follows the 8.4 RPU instead of the BT.2100
-OOTF, because a Dolby Vision decoder reconstructs PQ through the RPU curves. With the default
-preset composer the two differ (neutral greys decode with a blue tint); the opt-in
-`--hlg-composer bt2100` writes RPU curves fitted to the BT.2100 OOTF, so the decode follows it
+OOTF, because a Dolby Vision decoder reconstructs PQ through the RPU curves. With the `preset`
+composer the two differ (neutral greys decode with a blue tint); the default `bt2100` composer
+writes RPU curves fitted to the BT.2100 OOTF, so the decode follows it
 ([HLG_COMPOSER.md](HLG_COMPOSER.md)).
 
 ## 2. Advanced HDR10 Analysis Techniques

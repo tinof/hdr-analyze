@@ -26,10 +26,10 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   checked at startup, and if it cannot be started the file fails instead of falling back.
 - HLG: the base layer is copied unchanged and the output is Dolby Vision Profile 8.4 (HLG
   backward-compatible). A Profile 8.4 RPU carries a reshaping curve set, the composer, that a Dolby
-  Vision decoder uses to turn the HLG signal into PQ. `--hlg-composer` selects it. The default,
-  `preset`, is the `dolby_vision` crate's `Profile84` preset, which `dovi_tool generate` embeds; the
-  RPU is kept exactly as `dovi_tool` writes it. `bt2100` is opt-in: a composer fitted to the
-  BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion that keeps neutrals neutral
+  Vision decoder uses to turn the HLG signal into PQ. `--hlg-composer` selects it. `preset` is
+  the `dolby_vision` crate's `Profile84` preset, which `dovi_tool generate` embeds; with it the RPU
+  is kept exactly as `dovi_tool` writes it. `bt2100`, the default since 2026-10-03, is a composer
+  fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion that keeps neutrals neutral
   ([HLG_COMPOSER.md](HLG_COMPOSER.md)). `mkvdovi` writes it into every RPU frame after
   `dovi_tool generate`. Whether playback devices apply a composer other than the preset is
   unverified; that needs a playback test. `hdr_analyzer_mvp` measures the HLG stream through the
@@ -226,8 +226,8 @@ sampling and MEL/FEL classification) does not yet support L253 blocks; support w
   in luma, because the preset's chroma curves tint neutrals slightly blue (grey code 721: luma 2389,
   max-RGB 2439). The bt2100 composer decodes grey to equal R′G′B′ (code 721: 2378.6 on all three
   channels), so luma and max-RGB agree.
-- The bt2100 composer is opt-in. Its decode is checked against libplacebo, but no Dolby Vision
-  display has been tested with it.
+- The bt2100 composer is the default. Its decode is checked against libplacebo, but no Dolby Vision
+  display has been tested with it yet; `--hlg-composer preset` is the fallback.
 - The decode was checked against libplacebo's Dolby Vision renderer on lossless test patterns: for
   the preset, the luma curve within 3.2 twelve-bit PQ codes on a grey ramp over HLG codes 64–1008,
   and max-RGB within 0.59 codes on 52 flat colour patches; for bt2100, within 1.77 and 0.49 codes.

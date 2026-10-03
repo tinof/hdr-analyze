@@ -75,13 +75,13 @@ pub struct Cli {
     pub transfer: TransferOverride,
 
     /// Dolby Vision Profile 8.4 composer HLG is measured through; must match the composer the
-    /// RPU carries. preset: the dolby_vision crate's Profile 8.4 preset (what dovi_tool writes);
-    /// bt2100: fitted to the BT.2100 1000-nit HLG-to-PQ conversion, neutrals kept neutral.
-    /// Accepted and ignored for PQ input.
+    /// RPU carries. bt2100 (default): fitted to the BT.2100 1000-nit HLG-to-PQ conversion,
+    /// neutrals kept neutral; preset: the dolby_vision crate's Profile 8.4 preset (what dovi_tool
+    /// writes). Accepted and ignored for PQ input.
     #[arg(
         long,
         value_name = "COMPOSER",
-        default_value = Composer::Preset.cli_name(),
+        default_value = Composer::Bt2100V1.cli_name(),
         value_parser = PossibleValuesParser::new(Composer::ALL.map(Composer::cli_name))
             .map(|name| Composer::from_cli_name(&name).expect("a listed composer name")),
     )]

@@ -8,8 +8,8 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
-- **Opt-in HLG composer fitted to BT.2100: `--hlg-composer bt2100`** (`mkvdovi` and
-  `hdr_analyzer_mvp`; default `preset`, unchanged). The Profile 8.4 preset that `dovi_tool` writes
+- **Breaking: HLG output uses a composer fitted to BT.2100 by default: `--hlg-composer bt2100`**
+  (`mkvdovi` and `hdr_analyzer_mvp`; `--hlg-composer preset` restores the previous output). The Profile 8.4 preset that `dovi_tool` writes
   decodes neutral greys with a blue tint (75% grey to R′G′B′ 2384/2387/2439 in 12-bit PQ codes) and
   nominal white to about 1150 nits. The new composer uses the same syntax, fitted to the BT.2100 /
   BT.2408 1000-nit HLG-to-PQ conversion with neutrals kept neutral: grey decodes to equal R′G′B′
@@ -18,7 +18,8 @@ This document provides a historical record of completed milestones, feature impl
   The analyzer measures through the selected composer (CPU and CUDA, bit-identical), the sidecar
   names it (`dovi84-bt2100-v1`), and `mkvdovi` installs the same composer into the RPU that
   `dovi_tool generate` wrote. Whether playback devices apply a composer other than the preset is
-  unverified, so it stays opt-in until a playback test. Design and measurements:
+  not yet confirmed by a playback test. HLG measurements and temp dirs from earlier versions carry
+  the preset, so under the new default they are re-analyzed and regenerated. Design and measurements:
   [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md).
   - New workspace library `dovi84_composer` (composer definitions, guarded RPU rewrite) and the
     fitter `tools/fit_hlg_composer` that generates its constants and reports both composers.

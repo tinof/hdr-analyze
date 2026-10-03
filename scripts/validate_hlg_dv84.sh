@@ -2,8 +2,8 @@
 # Check the analyzer's HLG -> PQ mapping against a Dolby Vision reference renderer.
 #
 # The analyzer measures HLG through the Profile 8.4 luma reshaping curve (analysis/hlg.rs) of the
-# selected composer: the preset, or with --composer bt2100 the BT.2100 fit (docs/HLG_COMPOSER.md),
-# which this script then also installs into the RPU.
+# selected composer: the BT.2100 fit (default, docs/HLG_COMPOSER.md), which this script installs
+# into the RPU, or with --composer preset the dolby_vision crate's preset that dovi_tool writes.
 # This script builds a lossless flat-grey HLG ramp (one 10-bit luma code per frame, 64..1008),
 # injects a Profile 8.4 RPU with dovi_tool, renders it through ffmpeg's libplacebo filter with
 # Dolby Vision applied, and compares each frame's reconstructed PQ luma (BT.2020 weights over the
@@ -13,14 +13,14 @@
 #
 # Needs: ffmpeg with libx265, libplacebo and a working Vulkan device; dovi_tool; python3; a built
 # analyzer. Usage:
-#   scripts/validate_hlg_dv84.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda] [--composer preset|bt2100]
+#   scripts/validate_hlg_dv84.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda] [--composer bt2100|preset]
 # Exit status is non-zero when any frame differs by more than TOLERANCE 12-bit PQ codes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ANALYZER=target/release/hdr_analyzer_mvp
 HWACCEL_ARGS=()
-COMPOSER=preset
+COMPOSER=bt2100
 while [ $# -gt 0 ]; do
     case "$1" in
         --hwaccel) HWACCEL_ARGS=(--hwaccel "${2:?--hwaccel needs a value}"); shift 2 ;;

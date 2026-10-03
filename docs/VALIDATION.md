@@ -289,7 +289,7 @@ HLG is measured through the Profile 8.4 decode that a Dolby Vision decoder appli
 composer; `--hlg-composer bt2100` replaces it with a composer fitted to BT.2100
 ([HLG_COMPOSER.md](HLG_COMPOSER.md)). The reference is libplacebo's Dolby Vision render through
 ffmpeg's `libplacebo` filter, on lossless flat test patterns with a Profile 8.4 RPU injected by
-`dovi_tool`. Both scripts take `--composer preset|bt2100` (default `preset`). For `bt2100` they
+`dovi_tool`. Both scripts take `--composer bt2100|preset` (default `bt2100`, as in `mkvdovi`). For `bt2100` they
 rewrite the generated RPU's composer with `tools/fit_hlg_composer` (`rewrite-rpu`, the same
 function `mkvdovi` uses), run the analyzer with `--hlg-composer bt2100` and expect the sidecar
 mapping `dovi84-bt2100-v1`. libplacebo reads the composer from the RPU, so its render is an

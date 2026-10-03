@@ -119,7 +119,7 @@ the Dolby Vision Profile 8.4 decode of the composer selected with `--hlg-compose
 (bit-identical). The composer must be the one the RPU carries; `mkvdovi` passes the matching value.
 Luma statistics use the 8.4 luma reshaping curve. Max-RGB (the default peak domain, and the max-RGB
 mean) reconstructs each pixel through the luma curve, the two chroma MMR curves and the RPU's
-YCbCr-to-RGB matrix, then takes max(R′, G′, B′). With the default `preset` composer, neutral
+YCbCr-to-RGB matrix, then takes max(R′, G′, B′). With the `preset` composer, neutral
 content reads about 2% higher in max-RGB than in luma, because the preset's chroma curves tint
 neutrals slightly blue. The `bt2100` composer keeps neutrals neutral, so luma and max-RGB agree on
 grey. `--peak-domain luma` restores the luma-only peak. The sidecar records the composer as
@@ -134,7 +134,7 @@ warning; `mkvdovi` refuses such HLG input (see [HLG input](#hlg-input)).
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--transfer <auto\|pq\|hlg>` | `auto` | Transfer to analyze with. `auto` uses the stream tag, or the first decoded frame's tag when that is PQ/HLG (catches HLG signalled via the alternative-transfer SEI). `hlg`/`pq` force it; `mkvdovi` passes `--transfer hlg` for inputs it classified as HLG, because some FFmpeg versions drop an HLG tag held only in the MKV colour element |
-| `--hlg-composer <preset\|bt2100>` | `preset` | Profile 8.4 composer HLG is measured through. `preset`: the `dolby_vision` crate's `Profile84` preset, which `dovi_tool generate` writes. `bt2100`: fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion, neutrals kept neutral ([HLG_COMPOSER.md](HLG_COMPOSER.md)). Accepted and ignored for PQ input |
+| `--hlg-composer <bt2100\|preset>` | `bt2100` | Profile 8.4 composer HLG is measured through. `preset`: the `dolby_vision` crate's `Profile84` preset, which `dovi_tool generate` writes. `bt2100` (default): fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion, neutrals kept neutral ([HLG_COMPOSER.md](HLG_COMPOSER.md)). Accepted and ignored for PQ input |
 
 ### Performance & diagnostics
 
@@ -233,7 +233,7 @@ mkvdovi "input.mkv"     # process a specific file
 | `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
 | `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation. Not available for HLG input (the file is refused) |
-| `--hlg-composer <preset\|bt2100>` | `preset` | Profile 8.4 composer written into the RPU of HLG inputs, and measured through. `preset` keeps the RPU exactly as `dovi_tool generate` writes it. `bt2100` (opt-in) is fitted to the BT.2100 / BT.2408 1000-nit conversion: mkvdovi passes it to the analyzer and replaces the composer on every RPU frame. Whether playback devices apply a composer other than the preset is unverified (it needs a playback test). When analysis runs, the analyzer's `--help` must list `--hlg-composer`; otherwise the file is refused. Ignored for non-HLG input. See [HLG_COMPOSER.md](HLG_COMPOSER.md) |
+| `--hlg-composer <bt2100\|preset>` | `bt2100` | Profile 8.4 composer written into the RPU of HLG inputs, and measured through. `bt2100` (default) is fitted to the BT.2100 / BT.2408 1000-nit conversion: mkvdovi replaces the composer on every RPU frame. `preset` keeps the RPU exactly as `dovi_tool generate` writes it; use it if a display renders bt2100 output wrongly. Whether playback devices apply a composer other than the preset is not yet confirmed by a playback test. When analysis runs, mkvdovi passes the composer to the analyzer; an analyzer whose `--help` does not list `--hlg-composer` is accepted only with `preset`. Ignored for non-HLG input. See [HLG_COMPOSER.md](HLG_COMPOSER.md) |
 | `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); it selects GPU decode and analysis in the spawned analyzer (HDR10, HLG and `--mdfix`) and nothing else |
 | `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
 

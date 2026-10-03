@@ -32,10 +32,11 @@ pub const BT2100_V1_LUMINANCE_MAPPING: &str = "dovi84-bt2100-v1";
 pub enum Composer {
     /// The `dolby_vision` crate's `Profile84` preset (from phone-recorded RPUs), which
     /// `dovi_tool generate` writes. It decodes neutral greys with a blue tint.
-    #[default]
     Preset,
     /// Fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion with neutrals kept
-    /// neutral (`tools/fit_hlg_composer`). A refit gets a new variant and sidecar name.
+    /// neutral (`tools/fit_hlg_composer`). The default. A refit gets a new variant and
+    /// sidecar name.
+    #[default]
     Bt2100V1,
 }
 

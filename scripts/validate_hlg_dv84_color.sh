@@ -19,8 +19,8 @@
 # 100% magenta at level 1.0 is outside BT.2020 (B' > 1, G' < 0) and is gamut-mapped by libplacebo;
 # both sides clamp it to 3079.
 #
-# --composer selects the 8.4 composer (docs/HLG_COMPOSER.md): preset (default) keeps the RPU exactly
-# as dovi_tool generates it; bt2100 rewrites its mapping with tools/fit_hlg_composer (rewrite-rpu)
+# --composer selects the 8.4 composer (docs/HLG_COMPOSER.md): preset keeps the RPU exactly as
+# dovi_tool generates it; bt2100 (default, as in mkvdovi) rewrites its mapping with tools/fit_hlg_composer (rewrite-rpu)
 # and runs the analyzer with --hlg-composer bt2100. libplacebo reads the composer from the RPU, so
 # its render is an independent decode of the selected mapping.
 #
@@ -32,14 +32,14 @@
 #
 # Needs: ffmpeg with libx265, libplacebo and a working Vulkan device; dovi_tool; python3; a built
 # analyzer; cargo for --composer bt2100. Usage:
-#   scripts/validate_hlg_dv84_color.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda] [--composer preset|bt2100]
+#   scripts/validate_hlg_dv84_color.sh [path/to/hdr_analyzer_mvp] [--hwaccel cuda] [--composer bt2100|preset]
 # Exit status is non-zero when any frame differs by more than TOLERANCE 12-bit PQ codes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ANALYZER=target/release/hdr_analyzer_mvp
 HWACCEL_ARGS=()
-COMPOSER=preset
+COMPOSER=bt2100
 while [ $# -gt 0 ]; do
     case "$1" in
         --hwaccel) HWACCEL_ARGS=(--hwaccel "${2:?--hwaccel needs a value}"); shift 2 ;;

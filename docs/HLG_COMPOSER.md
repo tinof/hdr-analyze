@@ -8,9 +8,9 @@
 - 2026-10-03: implemented on branch `feat/hlg-neutral-composer` as described below; results in
   section 10. An implementation review (three independent reviewers) found only minor issues, all
   handled; the deviations from the first version of this note are marked "as built".
-- The default does not change. The new composer is opt-in (`--hlg-composer bt2100`). Whether
-  playback devices apply a composer that is not the preset is unverified; a default change needs the
-  WS6 playback test on a TV first.
+- First built opt-in. 2026-10-03, by owner decision: `bt2100` is the default for both binaries,
+  ahead of the WS6 playback test, which the owner runs with it. Whether playback devices apply a
+  composer that is not the preset is still unverified; `--hlg-composer preset` is the fallback.
 
 ## 2. The problem, measured
 
@@ -183,9 +183,10 @@ visible warning and re-analyzes; it never pairs it with the preset RPU.
 
 **mkvdovi.**
 
-- `--hlg-composer preset|bt2100` (default `preset`) is forwarded to the analyzer only when it is
-  not the preset, so default invocations stay unchanged. mkvdovi first checks that the analyzer's
-  `--help` lists the option and refuses up front otherwise.
+- `--hlg-composer bt2100|preset` (default `bt2100` since the default change; first built with
+  `preset` as default) is always passed to the analyzer for HLG when the analyzer's `--help` lists
+  the option. An analyzer without the option measures through the preset, so it is accepted only
+  with `--hlg-composer preset`; any other composer is refused up front.
 - `check_luminance_mapping` and `dv_profile_for` take the expected composer explicitly and compare
   the name exactly (no `dovi84-*` prefix match). A preset sidecar is re-analyzed under `bt2100` and
   the other way round, with a visible message and no fallback.

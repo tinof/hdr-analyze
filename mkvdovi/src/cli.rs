@@ -99,15 +99,16 @@ pub struct Args {
     pub analysis_quality: AnalysisQuality,
 
     /// Dolby Vision Profile 8.4 composer (reshaping curves) written into the RPU of HLG inputs.
-    /// preset (default) = the dolby_vision crate's Profile84 preset that dovi_tool generates
-    /// (decodes neutral greys slightly blue); bt2100 = fitted to the BT.2100 / BT.2408
-    /// 1000-nit HLG-to-PQ conversion with neutrals kept neutral. bt2100 is opt-in: whether
-    /// playback devices apply a composer other than the preset is unverified.
+    /// bt2100 (default) = fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion with
+    /// neutrals kept neutral; preset = the dolby_vision crate's Profile84 preset that dovi_tool
+    /// generates (decodes neutral greys slightly blue). Device support for a composer other
+    /// than the preset is not yet confirmed by a playback test; if a display renders bt2100
+    /// output wrongly, convert with preset.
     #[arg(
         long,
         value_parser = PossibleValuesParser::new(Composer::ALL.map(Composer::cli_name))
             .map(|name| Composer::from_cli_name(&name).expect("restricted to Composer::ALL")),
-        default_value = Composer::Preset.cli_name()
+        default_value = Composer::Bt2100V1.cli_name()
     )]
     pub hlg_composer: Composer,
 
@@ -167,9 +168,9 @@ mod tests {
     }
 
     #[test]
-    fn hlg_composer_defaults_to_the_preset_and_parses_bt2100() {
+    fn hlg_composer_defaults_to_bt2100_and_parses_the_preset() {
         let args = Args::try_parse_from(["mkvdovi"]).unwrap();
-        assert_eq!(args.hlg_composer, Composer::Preset);
+        assert_eq!(args.hlg_composer, Composer::Bt2100V1);
         let args = Args::try_parse_from(["mkvdovi", "--hlg-composer", "bt2100"]).unwrap();
         assert_eq!(args.hlg_composer, Composer::Bt2100V1);
         let args = Args::try_parse_from(["mkvdovi", "--hlg-composer", "preset"]).unwrap();
