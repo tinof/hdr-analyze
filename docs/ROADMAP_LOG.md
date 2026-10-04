@@ -21,7 +21,7 @@ scenes were clamped and the largest change, and counts scenes whose L1 max lies 
 `source_max_pq`. E10: the generator converts with ×4095 like the analyzer; the retail-RPU check
 against the ×4096 of ETSI GS CCM 001 is still open.
 
-Where: branch `fix-p10-source-range`
+Where: [#25](https://github.com/tinof/hdr-analyze/pull/25)
 
 ### 2026-10-03: FEL (replaces F1, F2, R1)
 

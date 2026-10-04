@@ -327,6 +327,10 @@ impl FieldChange {
 #[derive(Debug, Default)]
 struct L1Delivery {
     scenes: usize,
+    /// Scenes whose every frame carries exactly the measured L1.
+    unchanged: usize,
+    /// Scenes with at least one frame that differs from the clamped measurement (failures).
+    mismatched: usize,
     min: FieldChange,
     max: FieldChange,
     avg: FieldChange,
@@ -334,12 +338,6 @@ struct L1Delivery {
     above_source_max: usize,
     /// One line per scene the generator changed (printed with `--verbose`).
     details: Vec<String>,
-}
-
-impl L1Delivery {
-    fn unchanged(&self) -> usize {
-        self.scenes - self.details.len()
-    }
 }
 
 #[derive(Debug, Default)]
@@ -406,9 +404,14 @@ impl DeliveryReport {
 fn l1_summary(l1: &L1Delivery) -> String {
     let mut text = format!(
         "L1 delivered as measured in {} of {} scenes",
-        l1.unchanged(),
-        l1.scenes
+        l1.unchanged, l1.scenes
     );
+    if l1.mismatched > 0 {
+        text.push_str(&format!(
+            "; {} scene(s) do not carry the measured L1 even after the generator's limits",
+            l1.mismatched
+        ));
+    }
     let fields = [
         ("min lowered to the generator's limit", l1.min),
         ("max raised to the generator's limit", l1.max),
@@ -506,13 +509,16 @@ fn check_delivery(rpus: &[DoviRpu], delivery: DeliveryExpectation<'_>) -> Delive
             }
         }
         if !scene_ok {
+            l1.mismatched += 1;
             continue;
         }
 
         let changed_min = l1.min.record(measured.0, expected.0);
         let changed_avg = l1.avg.record(measured.1, expected.1);
         let changed_max = l1.max.record(measured.2, expected.2);
-        if changed_min || changed_avg || changed_max {
+        if !(changed_min || changed_avg || changed_max) {
+            l1.unchanged += 1;
+        } else {
             l1.details.push(format!(
                 "scene {scene_index} (frames {}-{}): measured min/avg/max {}/{}/{}, delivered {}/{}/{}",
                 scene.start,
@@ -809,7 +815,7 @@ mod tests {
 
         assert!(report.passed(), "{:?}", report.failures);
         let l1 = report.l1.unwrap();
-        assert_eq!((l1.scenes, l1.unchanged()), (2, 2));
+        assert_eq!((l1.scenes, l1.unchanged, l1.mismatched), (2, 2, 0));
         assert_eq!(l1.above_source_max, 0);
         assert_eq!(
             l1_summary(&l1),
@@ -833,7 +839,7 @@ mod tests {
 
         assert!(report.passed(), "{:?}", report.failures);
         let l1 = report.l1.unwrap();
-        assert_eq!(l1.unchanged(), 0);
+        assert_eq!((l1.unchanged, l1.mismatched), (0, 0));
         assert_eq!(
             l1.min,
             FieldChange {
@@ -901,6 +907,13 @@ mod tests {
         );
         assert!(!report.passed());
         assert!(report.failures[0].contains("scene 1 frame 2"));
+        // A failed scene is never counted as delivered as measured.
+        let l1 = report.l1.unwrap();
+        assert_eq!((l1.scenes, l1.unchanged, l1.mismatched), (2, 0, 1));
+        assert_eq!(l1.min.scenes, 1, "scene 0 is still counted as clamped");
+        assert!(l1_summary(&l1).starts_with(
+            "L1 delivered as measured in 0 of 2 scenes; 1 scene(s) do not carry the measured L1"
+        ));
     }
 
     #[test]
