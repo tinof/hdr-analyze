@@ -25,6 +25,36 @@ This document provides a historical record of completed milestones, feature impl
     fitter `tools/fit_hlg_composer` that generates its constants and reports both composers.
   - `scripts/validate_hlg_dv84.sh` and `validate_hlg_dv84_color.sh` take `--composer`, and the
     colour script reports ΔE_ITP against the BT.2100 reference.
+- **`--verify` compares what the RPU delivers with what was measured** (`mkvdovi`). For a
+  generated RPU, the RPU extracted from the muxed file is parsed in-process. Every frame must carry
+  the expected source range (8.1: from the mastering display, not checked when the lookup is used;
+  8.4: 62/3079). Every frame of every
+  measured scene must carry the measured L1 after the documented `dovi_tool generate` limits
+  (minimum at most 12 codes, maximum at least 2081, average at least 819 and below the maximum).
+  Anything else fails. The limits it applied are reported: how many scenes per field, and the
+  largest change in codes, with one line per scene under `--verbose`. Scenes whose L1 max lies above
+  `source_max_pq` get an advisory. The RPU frame count used by the completeness checks now comes
+  from that parse, not from the optional `dovi_tool info --summary` output. The Profile 7 MEL
+  passthrough keeps the external checks only, because its RPU can carry levels the `dolby_vision`
+  crate does not read.
+
+### Fixed
+
+- **Profile 8.1 RPUs state the mastering display range** (`mkvdovi`). `extra.json` now passes
+  `source_min_pq` / `source_max_pq`, converted from the mastering display luminance with the
+  `dolby_vision` crate's PQ conversion (the one it uses for a Dolby CM XML). Before, `dovi_tool
+  generate` derived them from a coarse L6 lookup. Masters that change:
+  - a mastering peak other than 1000/2000/4000/10000 nits, which always got 3079 (1000 nits); for
+    example 600 nits is now 2851 and 1100 nits 3121;
+  - a mastering minimum other than 0.0001 or 0.005 nits; for example 0.001 nits was 7 and is now 26,
+    and 0.05 nits was 0 and is now 189.
+
+  The standard masters and the defaults used when the source states nothing (0.005 / 1000 nits)
+  give the same values as before, so those RPUs are unchanged. Values that cannot describe a
+  mastering display keep the lookup, with a warning: a peak outside 100–10000 nits (for example
+  a mastering SEI written in the wrong units, which reads as 0.1 nit) or a minimum outside 0–1 nit.
+  Profile 8.4 keeps the preset's 62/3079. A run interrupted under an earlier build regenerates its
+  RPU on resume, because the configuration now carries the range.
 
 ### Removed
 

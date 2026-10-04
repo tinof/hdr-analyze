@@ -258,8 +258,17 @@ mkvdovi --keep-source --verify "input.mkv"
 For HDR10/HLG inputs with measurements, `mkvdovi` resolves `verifier` from `PATH`. It also extracts
 the final RPU and validates structured `dovi_tool info --frame 0` JSON: Profile 8, ordered L1 values,
 sane L6 metadata, and required L9/L11/L254 blocks for CM v4.0. It fails when the RPU frame count
-from `dovi_tool info --summary` differs from the muxed video track's frame count or from the L1
-sidecar, and warns when the output and input video frame counts differ. For HLG output it also
+differs from the muxed video track's frame count or from the L1 sidecar, and warns when the output
+and input video frame counts differ. For an RPU that `mkvdovi` generated (every path except the
+Profile 7 MEL passthrough), the RPU is parsed in-process, which also gives the frame count. Every
+frame must then carry the expected source range: for 8.1 the mastering display range (not checked
+when the mastering values are implausible and `dovi_tool` derives the range from L6, which the
+conversion warns about), for 8.4 62/3079. Every frame of every measured scene must carry the measured L1 after the
+generator's limits (minimum at most 12 codes, maximum at least 2081, average at least 819 and below
+the maximum); any other difference fails. The output reports how many scenes those limits changed
+per field and by how much (one line per scene with `--verbose`). It also notes scenes whose L1 max
+lies above `source_max_pq`. HDR10+ output and `--legacy-madvr-l1` output are not compared with the
+measurements, because their L1 does not come from them. For HLG output it also
 fails when no measurements are available or the L1 sidecar does not load, and it checks that every
 RPU frame carries the composer the sidecar names (`dovi84-v2` = preset, `dovi84-bt2100-v1` =
 bt2100), so a measurement is never paired with an RPU of another composer. Missing source L6 fields or

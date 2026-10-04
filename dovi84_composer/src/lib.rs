@@ -14,7 +14,7 @@ use dolby_vision::rpu::rpu_data_mapping::{
 mod bt2100_v1;
 pub mod rewrite;
 
-pub use rewrite::{check_rpu_file, rewrite_rpu_file};
+pub use rewrite::{check_rpu_file, check_rpus, rewrite_rpu_file};
 
 /// Fixed-point denominator (log2) of the reshaping coefficients: the RPU header's
 /// `coefficient_log2_denom` in the Profile 8 headers `dovi_tool` generates

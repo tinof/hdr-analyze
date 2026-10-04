@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use dolby_vision::rpu::profiles::{profile84::Profile84, DoviProfile};
+use dolby_vision::utils::nits_to_pq_12_bit;
 use dovi84_composer::Composer;
 use regex::Regex;
 use serde::Deserialize;
@@ -1393,6 +1395,47 @@ pub fn dv_profile_for(
     }
 }
 
+/// Profile 8.1 `source_min_pq` / `source_max_pq` (12-bit PQ codes) from the mastering display
+/// luminance in nits (`min_dml` / `max_dml`), with the conversion the `dolby_vision` crate applies
+/// to a Dolby CM XML. Without explicit values `dovi_tool generate` derives the range from a coarse
+/// L6 lookup (mastering min other than <= 0.001 or exactly 0.005 nits becomes 0, a mastering peak
+/// other than 1000/2000/4000/10000 nits becomes 3079). `None` when the values are not a plausible
+/// mastering display, so the lookup stays in charge: not finite, a peak outside
+/// [`MASTERING_PEAK_NITS`] (a mastering SEI written in the wrong units reads as 0.1 or 1 nit), or a
+/// minimum outside [`MASTERING_MIN_NITS`] (a minimum stated in nits instead of 0.0001-nit units).
+pub fn source_range_pq_81(metadata: &HashMap<String, f64>) -> Option<(u16, u16)> {
+    let min_dml = *metadata.get("min_dml")?;
+    let max_dml = *metadata.get("max_dml")?;
+    let usable = MASTERING_MIN_NITS.contains(&min_dml) && MASTERING_PEAK_NITS.contains(&max_dml);
+    if !usable {
+        return None;
+    }
+    let range = (nits_to_pq_12_bit(min_dml), nits_to_pq_12_bit(max_dml));
+    (range.0 < range.1).then_some(range)
+}
+
+/// Mastering display peaks taken at face value for the 8.1 source range.
+pub const MASTERING_PEAK_NITS: std::ops::RangeInclusive<f64> = 100.0..=10_000.0;
+/// Mastering display minima taken at face value for the 8.1 source range.
+pub const MASTERING_MIN_NITS: std::ops::RangeInclusive<f64> = 0.0..=1.0;
+
+/// Source range of every Profile 8.4 RPU, whatever the composer: the `Profile84` preset's
+/// 62..3079 (about 0.005..1000 nits), which the HLG measurement clamps to.
+pub fn source_range_pq_84() -> (u16, u16) {
+    let dm = Profile84::dm_data();
+    (dm.source_min_pq, dm.source_max_pq)
+}
+
+/// Source range the generated RPU of `profile` must carry, `None` when mkvdovi leaves it to
+/// `dovi_tool` (a Profile 8.1 mastering range [`source_range_pq_81`] cannot use).
+pub fn expected_source_range(profile: &str, metadata: &HashMap<String, f64>) -> Option<(u16, u16)> {
+    match profile {
+        "8.4" => Some(source_range_pq_84()),
+        "8.1" => source_range_pq_81(metadata),
+        _ => None,
+    }
+}
+
 pub fn generate_extra_json(
     output_path: &Path,
     profile: &str,
@@ -1422,6 +1465,14 @@ pub fn generate_extra_json(
             "max_frame_average_light_level": max_fall as u32,
         }
     });
+
+    // Profile 8.4 keeps the preset's range: both HLG composers and the HLG measurement assume it.
+    if profile == "8.1" {
+        if let Some((source_min_pq, source_max_pq)) = source_range_pq_81(metadata) {
+            json_content["source_min_pq"] = json!(source_min_pq);
+            json_content["source_max_pq"] = json!(source_max_pq);
+        }
+    }
 
     if let Some(offsets) = level5_offsets {
         json_content["level5"] = json!({
@@ -1689,6 +1740,163 @@ mod tests {
         assert_eq!(blocks[3]["Level9"]["source_primary_index"], 0);
         assert_eq!(blocks[4]["Level11"]["content_type"], 1);
         assert_eq!(blocks[4]["Level11"]["reference_mode_flag"], false);
+    }
+
+    fn mastering(min_dml: f64, max_dml: f64) -> HashMap<String, f64> {
+        HashMap::from([
+            ("min_dml".to_string(), min_dml),
+            ("max_dml".to_string(), max_dml),
+            ("max_cll".to_string(), 1000.0),
+            ("max_fall".to_string(), 400.0),
+        ])
+    }
+
+    #[test]
+    fn source_range_matches_the_generator_lookup_on_standard_masters() {
+        use dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlockLevel6;
+
+        // The values dovi_tool derives from L6 (as written by generate_extra_json) when no
+        // explicit range is given; explicit values must not move them.
+        for (min_dml, max_dml) in [
+            (0.0001, 1000.0),
+            (0.005, 1000.0),
+            (0.0001, 2000.0),
+            (0.005, 4000.0),
+            (0.0001, 4000.0),
+            (0.005, 10000.0),
+        ] {
+            let level6 = ExtMetadataBlockLevel6 {
+                max_display_mastering_luminance: max_dml as u16,
+                min_display_mastering_luminance: (min_dml * 10000.0) as u16,
+                ..Default::default()
+            };
+            assert_eq!(
+                source_range_pq_81(&mastering(min_dml, max_dml)),
+                Some(level6.source_meta_from_l6()),
+                "mastering {min_dml}/{max_dml} nits"
+            );
+        }
+    }
+
+    #[test]
+    fn source_range_follows_non_standard_masters() {
+        // The L6 lookup would give 7/3079, 0/3079 and 7/3079.
+        assert_eq!(
+            source_range_pq_81(&mastering(0.001, 1000.0)),
+            Some((26, 3079))
+        );
+        assert_eq!(
+            source_range_pq_81(&mastering(0.05, 1000.0)),
+            Some((189, 3079))
+        );
+        assert_eq!(
+            source_range_pq_81(&mastering(0.0001, 600.0)),
+            Some((7, 2851))
+        );
+        assert_eq!(
+            source_range_pq_81(&mastering(0.0001, 1100.0)),
+            Some((7, 3121))
+        );
+    }
+
+    #[test]
+    fn source_range_rejects_unusable_mastering_values() {
+        for (min_dml, max_dml) in [
+            (0.0001, 20000.0),
+            (-1.0, 1000.0),
+            (1000.0, 1000.0),
+            (2000.0, 1000.0),
+            (0.0, 0.0),
+            (f64::NAN, 1000.0),
+            (0.0001, f64::INFINITY),
+            // Mastering SEIs written in the wrong units (x265 `L(1000,50)`, `L(10000,1)`) and a
+            // minimum stated in nits.
+            (0.005, 0.1),
+            (0.0001, 1.0),
+            (5.0, 1000.0),
+        ] {
+            assert_eq!(
+                source_range_pq_81(&mastering(min_dml, max_dml)),
+                None,
+                "mastering {min_dml}/{max_dml} nits"
+            );
+        }
+        assert_eq!(source_range_pq_81(&HashMap::new()), None);
+    }
+
+    #[test]
+    fn expected_source_range_is_the_preset_for_profile_84() {
+        assert_eq!(source_range_pq_84(), (62, 3079));
+        // The mastering metadata never changes an 8.4 range.
+        assert_eq!(
+            expected_source_range("8.4", &mastering(0.05, 600.0)),
+            Some((62, 3079))
+        );
+        assert_eq!(
+            expected_source_range("8.1", &mastering(0.005, 1000.0)),
+            Some((62, 3079))
+        );
+        assert_eq!(
+            expected_source_range("8.1", &mastering(0.0001, 20000.0)),
+            None
+        );
+    }
+
+    #[test]
+    fn extra_json_carries_the_source_range_for_profile_81_only() {
+        let write = |profile: &str, meta: &HashMap<String, f64>| -> Value {
+            let output = tempfile::NamedTempFile::new().unwrap();
+            generate_extra_json(output.path(), profile, meta, &[], None, None, None).unwrap();
+            serde_json::from_reader(File::open(output.path()).unwrap()).unwrap()
+        };
+
+        let json = write("8.1", &mastering(0.05, 600.0));
+        let expected = source_range_pq_81(&mastering(0.05, 600.0)).unwrap();
+        assert_eq!(json["source_min_pq"], expected.0);
+        assert_eq!(json["source_max_pq"], expected.1);
+
+        let json = write("8.4", &mastering(0.005, 1000.0));
+        assert!(json.get("source_min_pq").is_none());
+        assert!(json.get("source_max_pq").is_none());
+
+        // An unusable mastering range leaves the range to dovi_tool.
+        let json = write("8.1", &mastering(0.0001, 20000.0));
+        assert!(json.get("source_min_pq").is_none());
+    }
+
+    #[test]
+    fn extra_json_source_range_reaches_the_generated_rpu() {
+        use dolby_vision::rpu::generate::{GenerateConfig, VideoShot};
+        use dolby_vision::rpu::utils::parse_rpu_file;
+
+        // dovi_tool deserializes these keys into `GenerateConfig`; the crate's serde feature is
+        // not enabled here, so the two fields are carried over by hand.
+        let dir = tempfile::tempdir().unwrap();
+        let extra = dir.path().join("extra.json");
+        let meta = mastering(0.05, 600.0);
+        generate_extra_json(&extra, "8.1", &meta, &[], None, None, None).unwrap();
+        let json: Value = serde_json::from_reader(File::open(&extra).unwrap()).unwrap();
+        let code = |key: &str| json[key].as_u64().map(|v| u16::try_from(v).unwrap());
+        let config = GenerateConfig {
+            length: 2,
+            shots: vec![VideoShot {
+                start: 0,
+                duration: 2,
+                ..Default::default()
+            }],
+            source_min_pq: code("source_min_pq"),
+            source_max_pq: code("source_max_pq"),
+            ..Default::default()
+        };
+        let rpu_path = dir.path().join("RPU.bin");
+        config.write_rpus(&rpu_path).unwrap();
+
+        let rpus = parse_rpu_file(&rpu_path).unwrap();
+        let dm = rpus[0].vdr_dm_data.as_ref().unwrap();
+        assert_eq!(
+            Some((dm.source_min_pq, dm.source_max_pq)),
+            source_range_pq_81(&meta)
+        );
     }
 
     #[test]

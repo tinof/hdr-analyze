@@ -133,7 +133,13 @@ pub fn rewrite_rpu_file(path: &Path, composer: Composer) -> Result<usize> {
 pub fn check_rpu_file(path: &Path, composer: Composer) -> Result<usize> {
     let rpus =
         parse_rpu_file(path).with_context(|| format!("parsing RPU file {}", path.display()))?;
-    ensure!(!rpus.is_empty(), "{} contains no RPUs", path.display());
+    check_rpus(&rpus, composer).with_context(|| path.display().to_string())
+}
+
+/// Check that every frame of already parsed `rpus` carries `composer`'s mapping. Returns the
+/// number of frames.
+pub fn check_rpus(rpus: &[DoviRpu], composer: Composer) -> Result<usize> {
+    ensure!(!rpus.is_empty(), "the RPU contains no frames");
     let expected = composer.rpu_data_mapping();
     for (index, rpu) in rpus.iter().enumerate() {
         check_header(rpu, index)?;
@@ -143,9 +149,8 @@ pub fn check_rpu_file(path: &Path, composer: Composer) -> Result<usize> {
             .expect("checked by check_header");
         ensure!(
             mappings_equal(mapping, &expected),
-            "RPU frame {index} does not carry the {} composer ({})",
-            composer.luminance_mapping(),
-            path.display()
+            "RPU frame {index} does not carry the {} composer",
+            composer.luminance_mapping()
         );
     }
     Ok(rpus.len())
