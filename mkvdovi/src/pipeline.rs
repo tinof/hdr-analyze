@@ -656,6 +656,17 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         progress::print_info(&message);
     }
 
+    // Profile 8.1 states the mastering range explicitly; dovi_tool's own L6 lookup gets every
+    // master other than 1000/2000/4000/10000 nits (and min 0.0001/0.005 nits) wrong.
+    let source_range = metadata::expected_source_range(dv_profile, &static_meta);
+    if source_range.is_none() {
+        progress::print_warn(&format!(
+            "Mastering display luminance (min {} nits, max {} nits) is not plausible; dovi_tool derives the source range from L6.",
+            static_meta.get("min_dml").copied().unwrap_or(f64::NAN),
+            static_meta.get("max_dml").copied().unwrap_or(f64::NAN)
+        ));
+    }
+
     let previous_config = fs::read(&extra_json_path).ok();
     metadata::generate_extra_json(
         &extra_json_path,
@@ -856,6 +867,13 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             &temp_dir,
             expected_cm,
             hlg_composer,
+            Some(crate::verify::DeliveryExpectation {
+                // dovi_tool takes L1 from the HDR10+ metadata when it is given, never the shots.
+                l1_sidecar: l1_sidecar
+                    .as_ref()
+                    .filter(|_| hdr_type != HdrFormat::Hdr10Plus),
+                source_range,
+            }),
         );
         if !ok {
             progress::print_error("Inconsistencies detected during verification.");

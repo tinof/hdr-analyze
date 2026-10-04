@@ -1,10 +1,15 @@
 use colored::Colorize;
+use dolby_vision::rpu::dovi_rpu::DoviRpu;
+use dolby_vision::rpu::extension_metadata::blocks::{ExtMetadataBlock, ExtMetadataBlockLevel1};
+use dolby_vision::rpu::utils::parse_rpu_file;
+use dolby_vision::rpu::vdr_dm_data::CmVersion;
 use dovi84_composer::Composer;
 use std::path::Path;
 use std::process::Command;
 
 use crate::external::{self, run_command};
 use crate::metadata;
+use crate::progress;
 
 #[allow(dead_code)]
 pub fn verify_post_mux(
@@ -13,7 +18,28 @@ pub fn verify_post_mux(
     measurements: Option<&Path>,
     temp_dir: &Path,
 ) -> bool {
-    verify_post_mux_with_options(input_file, output_file, measurements, temp_dir, None, None)
+    verify_post_mux_with_options(
+        input_file,
+        output_file,
+        measurements,
+        temp_dir,
+        None,
+        None,
+        None,
+    )
+}
+
+/// What an RPU mkvdovi generated must deliver, checked frame by frame on the RPU extracted from
+/// the muxed output. Only for generated RPUs: the `dolby_vision` crate wrote them, so it always
+/// parses them, while a passed-through source RPU (Profile 7 MEL) can carry levels the crate does
+/// not read (L253) and gets the external checks only.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeliveryExpectation<'a> {
+    /// The measured L1 the RPU was generated from. `None` when the RPU's L1 does not come from
+    /// the sidecar (HDR10+ metadata, `--legacy-madvr-l1`).
+    pub l1_sidecar: Option<&'a metadata::L1Sidecar>,
+    /// Source range every frame must carry ([`metadata::expected_source_range`]).
+    pub source_range: Option<(u16, u16)>,
 }
 
 /// Full verification with optional expected CM version for RPU content assertions.
@@ -26,6 +52,7 @@ pub fn verify_post_mux_with_options(
     temp_dir: &Path,
     expected_cm_version: Option<&str>,
     hlg_composer: Option<Composer>,
+    delivery: Option<DeliveryExpectation<'_>>,
 ) -> bool {
     let mut ok = true;
     let hlg_source = hlg_composer.is_some();
@@ -111,13 +138,33 @@ pub fn verify_post_mux_with_options(
 
     let mut summary_cmd = external::dovi_tool_command();
     summary_cmd.args(["info", "--summary", "-i", rpu_path.to_str().unwrap()]);
-    let rpu_frames = match external::get_command_output(&mut summary_cmd) {
+    let summary_frames = match external::get_command_output(&mut summary_cmd) {
         Ok(summary) => {
             let _ = std::fs::write(temp_dir.join("dovi_info_summary.log"), &summary);
             summary_frame_count(&summary)
         }
         Err(_) => None,
     };
+    // A generated RPU is parsed in-process: its frame count then does not depend on the summary
+    // output, and a parse failure fails verification instead of skipping the delivery checks.
+    let parsed_rpus = match delivery {
+        Some(_) => match parse_rpu_file(&rpu_path) {
+            Ok(rpus) => Some(rpus),
+            Err(error) => {
+                println!(
+                    "{}",
+                    format!("Cannot parse the extracted RPU ({error:#}).").red()
+                );
+                ok = false;
+                None
+            }
+        },
+        None => None,
+    };
+    let rpu_frames = parsed_rpus
+        .as_ref()
+        .map(|rpus| rpus.len() as u64)
+        .or(summary_frames);
 
     let mut frame_cmd = external::dovi_tool_command();
     frame_cmd.args(["info", "--frame", "0", "-i", rpu_path.to_str().unwrap()]);
@@ -219,12 +266,21 @@ pub fn verify_post_mux_with_options(
         }
     }
     if let (true, Some(sidecar)) = (hlg_source, &sidecar) {
-        if !verify_composer(sidecar, &rpu_path) {
+        if !verify_composer(sidecar, &rpu_path, parsed_rpus.as_deref()) {
             ok = false;
         }
     }
 
-    // 4. Duration consistency check on the video track (1-second tolerance).
+    // 4. What the generated RPU delivers against what was measured and the mastering range.
+    if let (Some(delivery), Some(rpus)) = (delivery, &parsed_rpus) {
+        let report = check_delivery(rpus, delivery);
+        report.print(progress::is_verbose());
+        if !report.passed() {
+            ok = false;
+        }
+    }
+
+    // 5. Duration consistency check on the video track (1-second tolerance).
     if let (Some(d_in), Some(d_out)) = (
         metadata::get_duration_from_mediainfo(input_file),
         get_duration_from_file(output_file),
@@ -246,9 +302,255 @@ pub fn verify_post_mux_with_options(
     ok
 }
 
+/// Largest number of individual mismatches listed before the rest are only counted.
+const MAX_LISTED_MISMATCHES: usize = 10;
+
+/// How often the generator moved one L1 field away from the measured value, and by how much.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct FieldChange {
+    scenes: usize,
+    largest: u16,
+}
+
+impl FieldChange {
+    fn record(&mut self, measured: u16, delivered: u16) -> bool {
+        if measured == delivered {
+            return false;
+        }
+        self.scenes += 1;
+        self.largest = self.largest.max(measured.abs_diff(delivered));
+        true
+    }
+}
+
+/// Measured against delivered L1, per scene of the sidecar.
+#[derive(Debug, Default)]
+struct L1Delivery {
+    scenes: usize,
+    /// Scenes whose every frame carries exactly the measured L1.
+    unchanged: usize,
+    /// Scenes with at least one frame that differs from the clamped measurement (failures).
+    mismatched: usize,
+    min: FieldChange,
+    max: FieldChange,
+    avg: FieldChange,
+    /// Scenes whose delivered L1 max lies above the RPU's `source_max_pq`.
+    above_source_max: usize,
+    /// One line per scene the generator changed (printed with `--verbose`).
+    details: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct DeliveryReport {
+    failures: Vec<String>,
+    /// Failures beyond [`MAX_LISTED_MISMATCHES`], counted only.
+    unlisted_failures: usize,
+    /// The source range, when every frame carries the expected one.
+    source_range: Option<(u16, u16)>,
+    l1: Option<L1Delivery>,
+}
+
+impl DeliveryReport {
+    fn passed(&self) -> bool {
+        self.failures.is_empty() && self.unlisted_failures == 0
+    }
+
+    fn fail(&mut self, message: String) {
+        if self.failures.len() < MAX_LISTED_MISMATCHES {
+            self.failures.push(message);
+        } else {
+            self.unlisted_failures += 1;
+        }
+    }
+
+    fn print(&self, verbose: bool) {
+        if let Some((min, max)) = self.source_range {
+            println!("Source range: source_min_pq {min}, source_max_pq {max} on every frame.");
+        }
+        if let Some(l1) = &self.l1 {
+            println!("{}", l1_summary(l1));
+            if verbose {
+                for line in &l1.details {
+                    println!("  {line}");
+                }
+            }
+            if l1.above_source_max > 0 {
+                println!(
+                    "{}",
+                    format!(
+                        "{} scene(s) carry an L1 max above source_max_pq (brighter than the mastering display peak).",
+                        l1.above_source_max
+                    )
+                    .yellow()
+                );
+            }
+        }
+        for failure in &self.failures {
+            println!("{}", format!("Delivery FAIL: {failure}").red());
+        }
+        if self.unlisted_failures > 0 {
+            println!(
+                "{}",
+                format!(
+                    "Delivery FAIL: {} more mismatch(es) not listed.",
+                    self.unlisted_failures
+                )
+                .red()
+            );
+        }
+    }
+}
+
+fn l1_summary(l1: &L1Delivery) -> String {
+    let mut text = format!(
+        "L1 delivered as measured in {} of {} scenes",
+        l1.unchanged, l1.scenes
+    );
+    if l1.mismatched > 0 {
+        text.push_str(&format!(
+            "; {} scene(s) do not carry the measured L1 even after the generator's limits",
+            l1.mismatched
+        ));
+    }
+    let fields = [
+        ("min lowered to the generator's limit", l1.min),
+        ("max raised to the generator's limit", l1.max),
+        ("avg moved to the generator's limits", l1.avg),
+    ];
+    for (what, change) in fields {
+        if change.scenes > 0 {
+            text.push_str(&format!(
+                "; {what} in {} (largest change {} codes)",
+                change.scenes, change.largest
+            ));
+        }
+    }
+    text.push('.');
+    text
+}
+
+/// L1 block of one RPU frame (CM v2.9 metadata, where every Profile 8 RPU carries it).
+fn frame_l1(rpu: &DoviRpu) -> Option<&ExtMetadataBlockLevel1> {
+    match rpu.vdr_dm_data.as_ref()?.get_block(1)? {
+        ExtMetadataBlock::Level1(level1) => Some(level1),
+        _ => None,
+    }
+}
+
+fn l1_codes(level1: &ExtMetadataBlockLevel1) -> (u16, u16, u16) {
+    (level1.min_pq, level1.avg_pq, level1.max_pq)
+}
+
+/// Compare a parsed, generated RPU with what it must deliver: the source range on every frame,
+/// and for every sidecar scene the measured L1 after the generator's documented limits
+/// (`dovi_tool generate` clamps with `l1_avg_pq_cm_version: V29`, which mkvdovi sets whenever it
+/// embeds measured shots). A frame that differs from the clamped measurement is a failure; the
+/// clamps themselves are counted.
+fn check_delivery(rpus: &[DoviRpu], delivery: DeliveryExpectation<'_>) -> DeliveryReport {
+    let mut report = DeliveryReport::default();
+
+    if let Some((min, max)) = delivery.source_range {
+        for (index, rpu) in rpus.iter().enumerate() {
+            match rpu.vdr_dm_data.as_ref() {
+                Some(dm) if (dm.source_min_pq, dm.source_max_pq) == (min, max) => {}
+                Some(dm) => report.fail(format!(
+                    "frame {index} carries source range {}..{}, expected {min}..{max}",
+                    dm.source_min_pq, dm.source_max_pq
+                )),
+                None => report.fail(format!("frame {index} carries no display management data")),
+            }
+        }
+        if report.passed() {
+            report.source_range = Some((min, max));
+        }
+    }
+
+    let Some(sidecar) = delivery.l1_sidecar else {
+        return report;
+    };
+    if sidecar.frame_count() != rpus.len() as u64 {
+        report.fail(format!(
+            "L1 not compared, because the frame counts differ (RPU {}, measurements {})",
+            rpus.len(),
+            sidecar.frame_count()
+        ));
+        return report;
+    }
+
+    let mut l1 = L1Delivery {
+        scenes: sidecar.scenes.len(),
+        ..Default::default()
+    };
+    for (scene_index, scene) in sidecar.scenes.iter().enumerate() {
+        let measured = (
+            scene.min_pq_12bit,
+            scene.avg_max_rgb_pq_12bit,
+            scene.max_pq_12bit,
+        );
+        let expected = l1_codes(&ExtMetadataBlockLevel1::from_stats_cm_version(
+            scene.min_pq_12bit,
+            scene.max_pq_12bit,
+            scene.avg_max_rgb_pq_12bit,
+            CmVersion::V29,
+        ));
+
+        let mut scene_ok = true;
+        for frame in scene.start..=scene.end {
+            let delivered = rpus.get(frame as usize).and_then(frame_l1).map(l1_codes);
+            if delivered != Some(expected) {
+                scene_ok = false;
+                report.fail(match delivered {
+                    Some((min, avg, max)) => format!(
+                        "scene {scene_index} frame {frame}: L1 min/avg/max {min}/{avg}/{max}, expected {}/{}/{} (measured {}/{}/{})",
+                        expected.0, expected.1, expected.2, measured.0, measured.1, measured.2
+                    ),
+                    None => format!("scene {scene_index} frame {frame}: no L1 block"),
+                });
+            }
+        }
+        if !scene_ok {
+            l1.mismatched += 1;
+            continue;
+        }
+
+        let changed_min = l1.min.record(measured.0, expected.0);
+        let changed_avg = l1.avg.record(measured.1, expected.1);
+        let changed_max = l1.max.record(measured.2, expected.2);
+        if !(changed_min || changed_avg || changed_max) {
+            l1.unchanged += 1;
+        } else {
+            l1.details.push(format!(
+                "scene {scene_index} (frames {}-{}): measured min/avg/max {}/{}/{}, delivered {}/{}/{}",
+                scene.start,
+                scene.end,
+                measured.0,
+                measured.1,
+                measured.2,
+                expected.0,
+                expected.1,
+                expected.2
+            ));
+        }
+        let source_max = rpus
+            .get(scene.start as usize)
+            .and_then(|rpu| rpu.vdr_dm_data.as_ref())
+            .map(|dm| dm.source_max_pq);
+        if source_max.is_some_and(|source_max| expected.2 > source_max) {
+            l1.above_source_max += 1;
+        }
+    }
+    report.l1 = Some(l1);
+    report
+}
+
 /// Every frame of the extracted RPU must carry the composer the (already validated) sidecar
 /// names, the one the L1 was measured through.
-fn verify_composer(sidecar: &metadata::L1Sidecar, rpu_path: &Path) -> bool {
+/// `parsed` is the already parsed RPU when there is one, so a long film is not held in memory twice.
+fn verify_composer(
+    sidecar: &metadata::L1Sidecar,
+    rpu_path: &Path,
+    parsed: Option<&[DoviRpu]>,
+) -> bool {
     let Some(composer) = sidecar
         .luminance_mapping()
         .and_then(Composer::from_luminance_mapping)
@@ -263,7 +565,11 @@ fn verify_composer(sidecar: &metadata::L1Sidecar, rpu_path: &Path) -> bool {
         );
         return false;
     };
-    match dovi84_composer::check_rpu_file(rpu_path, composer) {
+    let checked = match parsed {
+        Some(rpus) => dovi84_composer::check_rpus(rpus, composer),
+        None => dovi84_composer::check_rpu_file(rpu_path, composer),
+    };
+    match checked {
         Ok(frames) => {
             println!(
                 "HLG composer: all {frames} RPU frames carry {} ({}), as measured.",
@@ -437,6 +743,247 @@ fn dv_bl_signal_compatibility_id(output_file: &Path) -> Option<u8> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    use dolby_vision::rpu::generate::{GenerateConfig, VideoShot};
+
+    /// One measured scene: start, end, min/avg/max in 12-bit PQ codes.
+    type Scene = (u64, u64, (u16, u16, u16));
+
+    fn sidecar(scenes: &[Scene]) -> metadata::L1Sidecar {
+        metadata::L1Sidecar {
+            version: 4,
+            scenes: scenes
+                .iter()
+                .map(|&(start, end, (min, avg, max))| metadata::L1SidecarScene {
+                    start,
+                    end,
+                    min_pq_12bit: min,
+                    avg_luma_pq_12bit: avg,
+                    avg_max_rgb_pq_12bit: avg,
+                    max_pq_12bit: max,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// RPUs as `dovi_tool generate` writes them from an extra.json with these shots: the L1 is
+    /// clamped (`fixup_l1` with `l1_avg_pq_cm_version: V29`) unless `clamp` is false.
+    fn generated_rpus(scenes: &[Scene], source_range: (u16, u16), clamp: bool) -> Vec<DoviRpu> {
+        let shots: Vec<VideoShot> = scenes
+            .iter()
+            .map(|&(start, end, (min, avg, max))| VideoShot {
+                start: start as usize,
+                duration: (end - start + 1) as usize,
+                metadata_blocks: vec![ExtMetadataBlock::Level1(ExtMetadataBlockLevel1::new(
+                    min, max, avg,
+                ))],
+                ..Default::default()
+            })
+            .collect();
+        let mut config = GenerateConfig {
+            length: shots.iter().map(|shot| shot.duration).sum(),
+            shots,
+            source_min_pq: Some(source_range.0),
+            source_max_pq: Some(source_range.1),
+            l1_avg_pq_cm_version: Some(CmVersion::V29),
+            ..Default::default()
+        };
+        if clamp {
+            config.fixup_l1();
+        }
+        config.generate_rpu_list().unwrap()
+    }
+
+    fn delivery(sidecar: &metadata::L1Sidecar, range: (u16, u16)) -> DeliveryExpectation<'_> {
+        DeliveryExpectation {
+            l1_sidecar: Some(sidecar),
+            source_range: Some(range),
+        }
+    }
+
+    const RANGE: (u16, u16) = (62, 3079);
+
+    #[test]
+    fn delivery_passes_when_the_rpu_carries_the_measured_l1() {
+        let scenes = [(0, 2, (5, 1500, 2900)), (3, 4, (10, 1200, 2500))];
+        let measured = sidecar(&scenes);
+        let report = check_delivery(
+            &generated_rpus(&scenes, RANGE, true),
+            delivery(&measured, RANGE),
+        );
+
+        assert!(report.passed(), "{:?}", report.failures);
+        let l1 = report.l1.unwrap();
+        assert_eq!((l1.scenes, l1.unchanged, l1.mismatched), (2, 2, 0));
+        assert_eq!(l1.above_source_max, 0);
+        assert_eq!(
+            l1_summary(&l1),
+            "L1 delivered as measured in 2 of 2 scenes."
+        );
+    }
+
+    #[test]
+    fn delivery_counts_the_generator_clamps() {
+        // min above 12, max below 2081 (and the avg pulled under it), avg below 819.
+        let scenes = [
+            (0, 1, (40, 1500, 2900)),
+            (2, 3, (5, 2050, 2060)),
+            (4, 4, (0, 700, 2600)),
+        ];
+        let measured = sidecar(&scenes);
+        let report = check_delivery(
+            &generated_rpus(&scenes, RANGE, true),
+            delivery(&measured, RANGE),
+        );
+
+        assert!(report.passed(), "{:?}", report.failures);
+        let l1 = report.l1.unwrap();
+        assert_eq!((l1.unchanged, l1.mismatched), (0, 0));
+        assert_eq!(
+            l1.min,
+            FieldChange {
+                scenes: 1,
+                largest: 28
+            }
+        );
+        assert_eq!(
+            l1.max,
+            FieldChange {
+                scenes: 1,
+                largest: 21
+            }
+        );
+        assert_eq!(
+            l1.avg,
+            FieldChange {
+                scenes: 1,
+                largest: 119
+            }
+        );
+        assert_eq!(l1.details.len(), 3);
+        assert!(l1_summary(&l1)
+            .contains("min lowered to the generator's limit in 1 (largest change 28 codes)"));
+    }
+
+    #[test]
+    fn delivery_follows_the_avg_pull_down_below_max() {
+        // A luma-domain sidecar can carry avg > max; the generator writes avg = max - 1.
+        let scenes = [(0, 1, (0, 2700, 2600))];
+        let measured = sidecar(&scenes);
+        let report = check_delivery(
+            &generated_rpus(&scenes, RANGE, true),
+            delivery(&measured, RANGE),
+        );
+
+        assert!(report.passed(), "{:?}", report.failures);
+        assert_eq!(
+            report.l1.unwrap().avg,
+            FieldChange {
+                scenes: 1,
+                largest: 101
+            }
+        );
+    }
+
+    #[test]
+    fn delivery_fails_when_the_rpu_differs_from_the_clamped_measurement() {
+        let scenes = [(0, 1, (40, 1500, 2900)), (2, 2, (0, 1000, 2500))];
+        let measured = sidecar(&scenes);
+        // Unclamped: min 40 is not what the generator delivers.
+        let report = check_delivery(
+            &generated_rpus(&scenes, RANGE, false),
+            delivery(&measured, RANGE),
+        );
+        assert!(!report.passed());
+        assert_eq!(report.failures.len(), 2, "one failure per frame of scene 0");
+        assert!(report.failures[0].contains("scene 0 frame 0"));
+
+        // Other L1 than measured.
+        let other = sidecar(&[(0, 1, (40, 1500, 2900)), (2, 2, (0, 1001, 2500))]);
+        let report = check_delivery(
+            &generated_rpus(&scenes, RANGE, true),
+            delivery(&other, RANGE),
+        );
+        assert!(!report.passed());
+        assert!(report.failures[0].contains("scene 1 frame 2"));
+        // A failed scene is never counted as delivered as measured.
+        let l1 = report.l1.unwrap();
+        assert_eq!((l1.scenes, l1.unchanged, l1.mismatched), (2, 0, 1));
+        assert_eq!(l1.min.scenes, 1, "scene 0 is still counted as clamped");
+        assert!(l1_summary(&l1).starts_with(
+            "L1 delivered as measured in 0 of 2 scenes; 1 scene(s) do not carry the measured L1"
+        ));
+    }
+
+    #[test]
+    fn delivery_fails_on_a_wrong_source_range() {
+        let scenes = [(0, 2, (0, 1500, 2900))];
+        let measured = sidecar(&scenes);
+        let report = check_delivery(
+            &generated_rpus(&scenes, (7, 3079), true),
+            delivery(&measured, RANGE),
+        );
+
+        assert!(!report.passed());
+        assert_eq!(report.failures.len(), 3, "one failure per frame");
+        assert!(report.failures[0].contains("source range 7..3079, expected 62..3079"));
+    }
+
+    #[test]
+    fn delivery_fails_when_frame_counts_differ() {
+        let scenes = [(0, 2, (0, 1500, 2900))];
+        let longer = sidecar(&[(0, 3, (0, 1500, 2900))]);
+        let report = check_delivery(
+            &generated_rpus(&scenes, RANGE, true),
+            delivery(&longer, RANGE),
+        );
+
+        assert!(!report.passed());
+        assert!(report.l1.is_none());
+        assert!(report.failures[0].contains("frame counts differ (RPU 3, measurements 4)"));
+    }
+
+    #[test]
+    fn delivery_reports_l1_max_above_the_source_range() {
+        let scenes = [(0, 0, (0, 1500, 3200)), (1, 1, (0, 1500, 2900))];
+        let measured = sidecar(&scenes);
+        let report = check_delivery(
+            &generated_rpus(&scenes, RANGE, true),
+            delivery(&measured, RANGE),
+        );
+
+        assert!(report.passed());
+        assert_eq!(report.l1.unwrap().above_source_max, 1);
+    }
+
+    #[test]
+    fn delivery_without_a_sidecar_checks_the_source_range_only() {
+        let scenes = [(0, 1, (0, 1500, 2900))];
+        let rpus = generated_rpus(&scenes, (7, 2851), true);
+        let only_range = DeliveryExpectation {
+            l1_sidecar: None,
+            source_range: Some((7, 2851)),
+        };
+
+        let report = check_delivery(&rpus, only_range);
+        assert!(report.passed());
+        assert!(report.l1.is_none());
+        assert!(check_delivery(&rpus, DeliveryExpectation::default()).passed());
+    }
+
+    #[test]
+    fn delivery_caps_the_listed_mismatches() {
+        let scenes = [(0, 29, (0, 1500, 2900))];
+        let measured = sidecar(&scenes);
+        let report = check_delivery(
+            &generated_rpus(&scenes, (7, 3079), true),
+            delivery(&measured, RANGE),
+        );
+
+        assert_eq!(report.failures.len(), MAX_LISTED_MISMATCHES);
+        assert_eq!(report.unlisted_failures, 30 - MAX_LISTED_MISMATCHES);
+    }
 
     #[test]
     fn summary_frame_count_is_parsed() {
