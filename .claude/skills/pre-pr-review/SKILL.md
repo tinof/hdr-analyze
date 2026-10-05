@@ -62,7 +62,8 @@ code from the file list). Do not choose the gates by judgment; use that list.
    it is still incomplete, report the missing lenses as a blocker.
 2. Merge the workflow's `findings` **and** `unverified` lists with the Codex findings (standalone
    mode). `unverified` holds findings over the verification cap or whose verifier failed: check
-   each of them yourself like any other. Dedupe by file:line.
+   each of them yourself like any other. Merge two findings only when they describe the same
+   defect; distinct defects at the same file:line stay separate.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
    reason that cites code) / deferred (real, out of scope).
 4. Call the `advisor` tool once with the merged list before you settle on the fixes.

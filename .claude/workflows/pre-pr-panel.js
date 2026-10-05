@@ -111,16 +111,11 @@ const results = await pipeline(
 const failedLenses = LENSES.map((l, i) => (results[i] && !results[i].failed ? null : l.key)).filter(Boolean)
 if (failedLenses.length) log(`review incomplete: lens(es) ${failedLenses.join(', ')} returned no result`)
 
-// Barrier on purpose: dedupe and cap the verification count. The key includes the lens: two
-// lenses at one line may be two different defects, and dropping one costs more than verifying
-// a duplicate twice.
-const seen = new Map()
-for (const f of results.filter(r => r && !r.failed).flatMap(r => r.findings)) {
-  const k = `${f.file}:${f.line}:${f.lens}`
-  const prev = seen.get(k)
-  if (!prev || ORDER[f.priority] < ORDER[prev.priority]) seen.set(k, f)
-}
-const all = [...seen.values()].sort((x, y) => ORDER[x.priority] - ORDER[y.priority])
+// Barrier on purpose: cap the verification count, highest priority first. No dedupe here: two
+// findings at one location may be two different defects, and dropping one costs more than
+// verifying a duplicate twice. Claude merges true duplicates when it checks the list.
+const all = results.filter(r => r && !r.failed).flatMap(r => r.findings)
+  .sort((x, y) => ORDER[x.priority] - ORDER[y.priority])
 const toVerify = all.slice(0, MAX_VERIFY)
 const unverified = all.slice(MAX_VERIFY)
 if (unverified.length) log(`${unverified.length} lower-priority findings returned unverified (cap ${MAX_VERIFY})`)
