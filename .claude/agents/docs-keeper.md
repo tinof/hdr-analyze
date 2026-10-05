@@ -29,6 +29,7 @@ where. Read the diff first. Everything you write must follow from the diff or fr
 | Cross-binary contracts, invariants, test skips, gates, commands | `CLAUDE.md`, the section that already covers the topic. Edit the sentence that is now wrong; do not append a second, contradicting one. |
 | Topic internals | the topic doc: `docs/CUDA_PIPELINE.md`, `docs/HLG_COMPOSER.md`, `docs/CM_ANALYZE_PARITY.md`, `docs/VALIDATION.md`, `docs/TECHNICAL_REFERENCE.md`, `docs/FEL_PLAN.md`. |
 | "Waiting for the owner" in `ROADMAP.md` | Remove an entry only when the diff or the caller shows it is settled. |
+| "Next up" and "Checked" bullets in `ROADMAP.md` (the roadmap memory `/roadmap-next` keeps) | Remove a step from Next up when this change completes it. Delete or correct an item's Checked bullet when this change makes it wrong; do not add new ones (that is `/roadmap-next`'s job). |
 
 ## Rules
 
