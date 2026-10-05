@@ -11,3 +11,4 @@ anyhow = "1.0"
 dolby_vision = "3.4"
 dovi84_composer = { path = "../../dovi84_composer" }
 nalgebra = "0.34"
+rayon = "1.10"

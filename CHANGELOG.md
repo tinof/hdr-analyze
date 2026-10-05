@@ -8,6 +8,13 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **`fit_hlg_composer chroma-siting` and `scripts/validate_hlg_chroma_siting.sh`** (tooling, ROADMAP
+  P8). They measure how the analyzer's 4:2:0 handling of the HLG Profile 8.4 decode differs from the
+  spec composer (ETSI GS CCM 001 §5.4.2.3.3: MMR at chroma resolution on down-sampled luma, integer
+  arithmetic) and from a renderer, on synthetic non-flat patterns and on real HLG cuts, with the
+  tool anchored to the analyzer and to libplacebo on every run. Result: up to 18 codes of L1 max per
+  scene on the HLG development cuts, so the analyzer decode is to change (open P8 step). No change
+  to any shipped binary. Measurements: [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md) §9.
 - **Breaking: HLG output uses a composer fitted to BT.2100 by default: `--hlg-composer bt2100`**
   (`mkvdovi` and `hdr_analyzer_mvp`; `--hlg-composer preset` restores the previous output). The Profile 8.4 preset that `dovi_tool` writes
   decodes neutral greys with a blue tint (75% grey to R′G′B′ 2384/2387/2439 in 12-bit PQ codes) and

@@ -64,12 +64,8 @@ doing.
 
 ### Next up (checked 2026-10-05 at main@9edee09)
 
-1. **P8: 4:2:0 chroma-siting comparison.** The only priority-1 step that waits for no one. Gate to
-   set in plan mode before any run: per-frame max-RGB PQ of the analyzer's 8.4 decode against a
-   libplacebo render, both composers, a code tolerance fixed in advance, on a non-flat synthetic
-   pattern and the HLG development cuts. A decode fix moves HLG L1: own branch, CUDA and L1 gates.
-2. **E8 + E9** on one branch: same crate, same unit-test gate, no sidecar L1 change.
-3. **P9 step 0:** an HDR10+-only fixture and the frame alignment of pixel measurements to HDR10+
+1. **E8 + E9** on one branch: same crate, same unit-test gate, no sidecar L1 change.
+2. **P9 step 0:** an HDR10+-only fixture and the frame alignment of pixel measurements to HDR10+
    scenes, before any hybrid flag (see P9 Checked).
 
 ### Waiting for the owner
@@ -92,6 +88,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
 | 2026-10-04 | L1 lines up with the picture in open-GOP cuts (RASL leading pictures); sidecar v5. | E7 | [#26](https://github.com/tinof/hdr-analyze/pull/26) |
@@ -232,10 +229,20 @@ and broader hardware acceleration (E5). Neutral trims stay.
   neutrals (75% grey ΔE_ITP 6.8, up to 10.3 near black) and decodes nominal white to about
   1150 nits.
 - **Open:** the WS6 playback test must show that devices apply a composer that is not the preset,
-  and how visible the tint is on a TV. 4:2:0 chroma siting of the analyzer's decode (both
-  composers) against a renderer on non-flat patterns. Real HLG material for both: five cuts
-  since 2026-10-05 (live sport at 50p, a concert, a nature series, a broadcast capture, a drama;
-  WS8 item 5).
+  and how visible the tint is on a TV. Real HLG material for both: five cuts since 2026-10-05
+  (live sport at 50p, a concert, a nature series, a broadcast capture, a drama; WS8 item 5).
+- **Open: spec 4:2:0 decode in the analyzer** (both composers). Measured 2026-10-05
+  ([`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md) §9): the analyzer replicates chroma over the
+  quad and reshapes it with each pixel's own luma in `code / 1023` float; the spec composer runs
+  the MMR at chroma resolution on down-sampled luma in `code / 1024` fixed point. Per scene on the
+  HLG cuts that moves L1 max by up to 18 codes and the average by up to 5, above the 4-code limit.
+  The change must: take the spec's structure and arithmetic (the tool's `spec-fixed` variant);
+  choose and justify an upsampler for the composed chroma, which the spec leaves to the display
+  (replicated against bilinear: 6.5 against 18.3 codes of L1 max on one cut); re-check the
+  `bt2100` neutral criteria under the spec's arithmetic; keep CPU and CUDA identical. It moves HLG
+  L1 for every file, so it needs a new `luminance_mapping` name, re-analysis of older sidecars and
+  its own branch. Gate: the analyzer reproduces the tool's `spec-fixed` variant within 0.5 code per
+  frame on the synthetic patterns and the five cuts (`scripts/validate_hlg_chroma_siting.sh`).
 - **Checked 2026-10-05 @9edee09:** `scripts/validate_hlg_dv84_color.sh` tests flat patches only,
   so it cannot show a chroma-siting error. The local ffmpeg has the `libplacebo` filter with
   `apply_dolbyvision`, so a renderer for the comparison is available on the dev host.

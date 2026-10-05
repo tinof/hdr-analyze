@@ -248,12 +248,59 @@ because CI has no GPU.
 - **Not covered:** a Dolby display's behaviour. Device acceptance and visibility of the change stay
   open for the WS6 playback test.
 
-**Known approximation (both composers): 4:2:0 chroma.** The analyzer reshapes each raw 4:2:0 chroma
-sample once and shares it across its four luma samples (`frame.rs`). A renderer upsamples chroma
-first and reshapes every pixel. MMR is nonlinear and depends on luma, so the two differ at colour
-edges; flat patches cannot show it. This predates the new composer and is not changed here. It is
-recorded as an open validation item (non-flat patterns with left and top-left siting against
-libplacebo) in ROADMAP P8.
+**4:2:0 chroma: the analyzer is not the spec decode (both composers; measured 2026-10-05).** Three
+decodes of the same 4:2:0 frame differ:
+
+| Decode | MMR luma input | Where the MMR runs | Arithmetic |
+|---|---|---|---|
+| Analyzer (`frame.rs`) | the pixel's own luma | full resolution, each chroma sample replicated over its 2×2 quad | f32, `code / 1023` |
+| Spec (ETSI GS CCM 001 v1.1.1 §5.4.2.3.3) | luma down-sampled to the chroma position: `[1 2 1]` around the co-sited column, mean of the two rows, edges replicated | chroma resolution; the display upsamples the composed chroma | integer: `code / 1024` (`s << 10` on a 2^20 scale), inputs clamped to the pivot ranges, 16-bit output |
+| libplacebo (`pl_shader_decode_color` after the planes are merged) | the pixel's own luma | full resolution, chroma upsampled first | float, `code / 1023` |
+
+`fit_hlg_composer chroma-siting` computes every variant per pixel, and
+`scripts/validate_hlg_chroma_siting.sh` ties it to two independent decodes before using it. Its
+analyzer variant reproduces the analyzer's per-frame max-RGB maximum exactly and the frame average
+within 0.5 code (the sidecar's integer rounding) on every frame measured. Its renderer variant
+matches libplacebo (`upscaler=bilinear`, v7.370.0, llvmpipe) within 0.32 codes per pixel through
+`bt2100` and 3.84 through the preset, at every pixel around the 1×1 to 3×3 test highlights, for
+chroma location left and top-left. `spec-float` keeps the analyzer's arithmetic and changes only
+the structure; `spec-fixed` is the spec. The two deviations are separate:
+
+- **Structure** (`spec-float` − analyzer). Large per pixel at colour edges and on small saturated
+  highlights: on the synthetic patterns the frame maximum of a field of 1×1 to 3×3 75% highlights
+  on mid-grey drops by 548 codes (`bt2100`, left) and the average of 1-px colour lines by up to
+  22. On the five HLG cuts it moves L1 max by up to 17.4 codes per scene (preset 14.4) and the
+  average by less than 1.
+- **Arithmetic** (`spec-fixed` − `spec-float`). `code / 1024` shifts every pixel: flat red −4.0
+  codes (`bt2100`) and −4.5 (preset), flat 60% grey −0.6 and −3.6. On the cuts the spec's average
+  is 0.6 to 3.3 codes per cut below the analyzer's (mean over scenes), and almost all of that is
+  arithmetic: the structure alone moves it by 0.3 code at most. libplacebo uses `code / 1023` as well, so
+  the colour script's agreement with libplacebo (0.49 / 0.59 codes) means both deviate from the
+  spec in the same way.
+
+Per-scene difference spec − analyzer on the five HLG development cuts, each at its own chroma
+location with bilinear upsampling of the composed chroma, 12-bit codes, largest |difference| over
+the scenes. `bt2100`: every frame (12,136); preset: every 4th frame, with the scene statistics over
+the same frames on both sides:
+
+| Cut (chroma location, scenes) | `bt2100` L1 max | `bt2100` L1 avg | preset L1 max | preset L1 avg |
+|---|---|---|---|---|
+| Wimbledon 2024 (top-left, 22) | 18.3 | 3.2 | 18.2 | 3.3 |
+| Glastonbury 2025 (top-left, 20) | 0.0 | 4.9 | 0.0 | 3.5 |
+| The Green Planet (left, 14) | 12.4 | 1.3 | 9.9 | 1.5 |
+| Champions League (left, 9) | 0.0 | 2.3 | 0.0 | 2.6 |
+| Bluelights (left, 32) | 14.1 | 2.3 | 10.1 | 1.8 |
+
+Every scene of Glastonbury and the Champions League cut reaches the 3079 source clamp in all
+decodes, so their L1 max cannot differ; the L1 max evidence comes from three cuts. The spec
+leaves the upsampling of the composed chroma to the display: replicating it instead of bilinear
+upsampling gives 6.5 codes on Wimbledon instead of 18.3. Up to 18 codes of L1 max is below the
+smallest point of the WS7 display scale (+75 codes). Not measured: the `bt2100` neutral criteria
+(section 6) under the spec's fixed-point decode, because the tool reports max-RGB only.
+
+The step's 4-code limit (the libplacebo tolerance) is exceeded on both composers, so the analyzer
+decode is to be changed to the spec's (ROADMAP P8). That change moves HLG L1 for every file: a new
+`luminance_mapping` name, identical CPU and CUDA output, and re-analysis of older sidecars.
 
 ## 10. Results
 
@@ -368,6 +415,6 @@ The analyzer keeps warnings (it is also used outside mkvdovi), and BT.2020 CL no
 | 6 | Verify hard-fails on sidecar errors; mapping on every frame | Section 7 |
 | 7 | Header asserts, exact format, atomic write, round-trip tests | Sections 7 and 9 |
 | 8 | Refuse BT.2020 CL, warn on untagged, conflicting tags, analyzer CL warning | Section 11 |
-| 9 | 4:2:0 chroma siting | Documented as a known approximation of both composers and an open item (section 9); not changed here |
+| 9 | 4:2:0 chroma siting | Measured 2026-10-05 against the spec composer and libplacebo (section 9); the analyzer decode is to change to the spec's (ROADMAP P8) |
 | — | Implementation review (three reviewers, all minor) | Rewrite refuses an RPU that does not carry the preset; analyzer support probed before use; full error chains printed; colour and neutral-constraint tests added; this note corrected where the build differs ("as built") |
 | — | Generate in-process instead of rewriting | Considered and rejected for now (section 7, alternative c) |

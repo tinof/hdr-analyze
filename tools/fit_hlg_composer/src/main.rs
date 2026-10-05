@@ -5,12 +5,15 @@
 //! fit_hlg_composer fit [--write <bt2100_v1.rs>] [--ridge <r>]
 //! fit_hlg_composer report
 //! fit_hlg_composer rewrite-rpu <preset|bt2100> <RPU.bin>
+//! fit_hlg_composer chroma-siting <preset|bt2100> <width> <height> [--every N]
+//!     [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] < yuv420p10le
 //! ```
 
 mod fit;
 mod model;
 mod report;
 mod samples;
+mod siting;
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -235,6 +238,7 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
-        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report | rewrite-rpu <preset|bt2100> <RPU.bin>"),
+        Some("chroma-siting") => siting::run(&args[1..]),
+        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report | rewrite-rpu <preset|bt2100> <RPU.bin> | chroma-siting <preset|bt2100> <width> <height> [options]"),
     }
 }

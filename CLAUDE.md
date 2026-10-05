@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repo actually is
 
 - Rust workspace (`resolver = "2"`) with **three shipped binaries**: `hdr_analyzer_mvp` (HDR10 analysis → PQ histograms + DV L1 metadata), `mkvdovi` (MKV container + Dolby Vision metadata injection, CM v4.0), `verifier` (MadVR / RPU measurement validation). A fourth workspace crate, `dovi84_composer`, is a library (no binary): the Profile 8.4 composers (`Composer::{Preset, Bt2100V1}`), their sidecar names and the RPU composer rewrite/check, shared by the analyzer and mkvdovi.
-- `tools/compare_baseline`, `tools/l1_diff` and `tools/fit_hlg_composer` (fits the bt2100 composer constants in `dovi84_composer/src/bt2100_v1.rs`; also `rewrite-rpu <preset|bt2100> <RPU.bin>` for the validation scripts) are separate utility crates, **excluded** from the workspace. Build/run them explicitly with `--manifest-path tools/<name>/Cargo.toml`.
+- `tools/compare_baseline`, `tools/l1_diff` and `tools/fit_hlg_composer` (fits the bt2100 composer constants in `dovi84_composer/src/bt2100_v1.rs`; also `rewrite-rpu <preset|bt2100> <RPU.bin>` for the validation scripts, and `chroma-siting`, which `scripts/validate_hlg_chroma_siting.sh` uses to compare the analyzer's 4:2:0 HLG decode with the spec composer and libplacebo) are separate utility crates, **excluded** from the workspace. Build/run them explicitly with `--manifest-path tools/<name>/Cargo.toml`.
 - Release profile is tuned: `lto = "fat"`, `codegen-units = 1`, `strip = true`, `panic = "abort"` — release builds are slow to link; expect it.
 
 ## Toolchain and platform quirks
