@@ -40,9 +40,10 @@ pub const VARIANTS: [&str; 9] = [
 const RENDERER_LEFT: usize = 7;
 const RENDERER_TOPLEFT: usize = 8;
 
-/// Histogram resolution of per-pixel differences: 0.01 code, up to 100 codes.
-const DIFF_BINS: usize = 10_000;
-const DIFF_STEP: f64 = 0.01;
+/// Histogram of per-pixel differences: 0.02-code bins over the whole 12-bit range, so no
+/// percentile saturates.
+const DIFF_STEP: f64 = 0.02;
+const DIFF_BINS: usize = (4096.0 / DIFF_STEP) as usize + 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Upsample {
@@ -440,7 +441,7 @@ pub fn frame_stats(values: &[[f32; 9]], mask: Option<&[u8]>) -> FrameStats {
     let mut sum = [0.0_f64; 9];
     let mut diff_max = [0.0_f64; 9];
     let mut roi = [0.0_f64; 9];
-    let mut histogram = vec![[0_u64; DIFF_BINS]; 9];
+    let mut histogram = vec![vec![0_u64; DIFF_BINS]; 9];
     for (i, pixel) in values.iter().enumerate() {
         let in_roi = mask.is_some_and(|m| m[i] != 0);
         for v in 0..9 {
@@ -563,6 +564,21 @@ fn read_frame(reader: &mut impl Read, buffer: &mut [u8]) -> Result<bool> {
     Ok(true)
 }
 
+/// One frame of a file that must cover every input frame (`--render`, `--mask`): ending early
+/// is an error, so a missing render cannot pass the anchor by producing no rows.
+fn read_companion(
+    reader: &mut impl Read,
+    buffer: &mut [u8],
+    option: &str,
+    index: usize,
+) -> Result<bool> {
+    ensure!(
+        read_frame(reader, buffer)?,
+        "{option} ended before input frame {index}"
+    );
+    Ok(true)
+}
+
 fn codes(bytes: &[u8]) -> Vec<u16> {
     bytes
         .chunks_exact(2)
@@ -621,11 +637,11 @@ pub fn run(args: &[String]) -> Result<()> {
     let mut index = 0_usize;
     while read_frame(&mut input, &mut buffer)? {
         let has_render = match render.as_mut() {
-            Some(reader) => read_frame(reader, &mut render_buffer)?,
+            Some(reader) => read_companion(reader, &mut render_buffer, "--render", index)?,
             None => false,
         };
         let has_mask = match mask.as_mut() {
-            Some(reader) => read_frame(reader, &mut mask_buffer)?,
+            Some(reader) => read_companion(reader, &mut mask_buffer, "--mask", index)?,
             None => false,
         };
         if index % options.every == 0 {
@@ -681,6 +697,23 @@ pub fn run(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_companion_file_must_cover_every_frame() {
+        let mut buffer = [0_u8; 4];
+        let mut empty: &[u8] = &[];
+        assert!(read_companion(&mut empty, &mut buffer, "--render", 0).is_err());
+        let mut one_frame: &[u8] = &[1, 2, 3, 4];
+        assert!(read_companion(&mut one_frame, &mut buffer, "--render", 0).unwrap());
+        assert!(read_companion(&mut one_frame, &mut buffer, "--render", 1).is_err());
+    }
+
+    #[test]
+    fn large_differences_do_not_saturate_the_percentile() {
+        let mut histogram = vec![0_u64; DIFF_BINS];
+        histogram[(1000.0 / DIFF_STEP) as usize] = 100;
+        assert!((percentile(&histogram, 0.99) - 1000.0).abs() < 1e-9);
+    }
 
     #[test]
     fn taps_follow_the_chroma_location() {

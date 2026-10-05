@@ -75,6 +75,8 @@ else
     trap 'rm -rf "$WORK"' EXIT
 fi
 
+rm -f "$WORK/refused-cuts"
+
 cargo build --release -q --manifest-path tools/fit_hlg_composer/Cargo.toml
 FIT=tools/fit_hlg_composer/target/release/fit_hlg_composer
 
@@ -256,6 +258,16 @@ if [ -n "$CUTS" ]; then
         mkdir -p "$dir"
         IFS=, read -r width height siting < <(ffprobe -v error -select_streams v:0 \
             -show_entries stream=width,height,chroma_location -of csv=p=0 "$input")
+        # The tool models chroma location left (type 0, the H.265 default) and top-left (type 2).
+        case "$siting" in
+            left | topleft) ;;
+            unspecified | "") siting=left ;;
+            *)
+                echo "refusing $cut: chroma location $siting is not modelled" >&2
+                echo "$cut ($siting)" >>"$WORK/refused-cuts"
+                continue
+                ;;
+        esac
         echo "$siting" >"$dir/siting"
         echo "analyzing $cut (${width}x${height}, chroma location $siting)" >&2
         analyze "$input" "$dir/cut"
@@ -303,11 +315,15 @@ for siting in ("left", "topleft"):
     anchor1(f"{d}/patterns", rows, f"synthetic-{siting}")
     renderer = f"renderer-{siting}"
     worst = [0.0, 0.0, 0.0]
+    checked = 0
     for r in csv.DictReader(open(f"{d}/anchor.csv")):
         if r["variant"] == renderer:
+            checked += 1
             for k, key in enumerate(("p99", "roi_max", "frame_max_diff")):
                 worst[k] = max(worst[k], float(r[key]))
-    ok = max(worst) <= tol
+    if checked != len(names):
+        failures.append(f"synthetic-{siting}: anchor 2 checked {checked} of {len(names)} frames")
+    ok = max(worst) <= tol and checked == len(names)
     if not ok:
         failures.append(f"synthetic-{siting}: anchor 2 {worst}")
     print(f"anchor 2 ({renderer} vs libplacebo bilinear): worst p99 {worst[0]:.2f}, region max "
@@ -325,10 +341,16 @@ for siting in ("left", "topleft"):
                          f"{float(r['roi_diff_max'] or 0):6.1f}")
         print(f"{name:28s} {float(a['max']):9.1f} | " + " | ".join(f"{c:>22s}" for c in cells))
 
+if os.path.exists(f"{work}/refused-cuts"):
+    for line in open(f"{work}/refused-cuts"):
+        failures.append(f"chroma location not modelled: {line.strip()}")
+
 for d in sorted(glob.glob(f"{work}/cut-*")):
+    if not os.path.exists(f"{d}/siting"):
+        continue
     cut = os.path.basename(d)[4:]
     siting = open(f"{d}/siting").read().strip()
-    own = "topleft" if siting == "topleft" else "left"
+    own = siting
     rows = tool_rows(f"{d}/tool.csv")
     print(f"\n== {cut} (chroma location {siting}), composer {expected}")
     side = anchor1(f"{d}/cut", rows, cut)
