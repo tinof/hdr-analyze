@@ -12,7 +12,7 @@ allowed-tools: Workflow(pre-pr-panel)
 - **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including step 2
   (Codex focused pass). End with "Ready for `/codex-ship <focus text>`".
 - **Ship mode:** `/codex-ship` step 1b told you to follow this file. Skip step 2: the focus text
-  from step 6 goes to `/codex-ship`'s steered Codex pass instead, so the same diff never gets two
+  from step 7 goes to `/codex-ship`'s steered Codex pass instead, so the same diff never gets two
   steered Codex runs. A blocker from step 4 or 5 stops `/codex-ship` before its push.
 
 Either way, the user's command is the opt-in for the one `pre-pr-panel` workflow run in step 3.
@@ -74,7 +74,7 @@ again. The gate commands:
 |------|---------|
 | `fmt` | `cargo fmt --all -- --check` |
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` |
-| `test` | `cargo build -p hdr_analyzer_mvp` (puts the current analyzer next to the debug mkvdovi the integration tests run), then `cargo test --workspace -- --nocapture 2>&1 \| tee <scratchpad>/prepr-test.log`; then `rg -n 'Skipping' <scratchpad>/prepr-test.log` |
+| `test` | `cargo build -p hdr_analyzer_mvp && cargo test --workspace -- --nocapture > <scratchpad>/prepr-test.log 2>&1; status=$?; rg -n -e 'Skipping' -e 'test result: FAILED' -e 'error: test failed' <scratchpad>/prepr-test.log; echo "cargo test exit $status"` (the build puts the current analyzer next to the debug mkvdovi the integration tests run; the log goes to a file, not through a pipe, so the exit status is cargo's) |
 | `clippy-cuda` | `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` |
 | `cuda-parity` | `scripts/cuda-parity.sh` |
 | `l1-regression` | `scripts/ci/l1-regression-gate.sh` (check mode) |
@@ -88,7 +88,7 @@ HLG or open-GOP test) means required coverage did not run: a blocker.
 **L1 references.** `l1-regression` runs in check mode. Use `--update` only when the step is meant
 to move L1; say so in the PR body with the reference diff.
 
-**Blockers.** A gate that fails or cannot run (no GPU, missing tool or media) is a blocker. Never
+**Blockers.** A nonzero exit from any gate command is a blocker, whatever a log grep shows. A gate that fails or cannot run (no GPU, missing tool or media) is a blocker. Never
 report it as passed. In ship mode it stops `/codex-ship` before the push.
 
 **Acceptance gate.** The commands above do not prove the step's acceptance gate (a corpus score,

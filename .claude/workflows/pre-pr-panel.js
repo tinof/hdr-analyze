@@ -105,10 +105,12 @@ const results = await pipeline(
   }).then(r => (r ? r.findings.map(f => ({ ...f, lens: l.key })) : [])),
 )
 
-// Barrier on purpose: dedupe across lenses and cap the verification count.
+// Barrier on purpose: dedupe and cap the verification count. The key includes the lens: two
+// lenses at one line may be two different defects, and dropping one costs more than verifying
+// a duplicate twice.
 const seen = new Map()
 for (const f of results.filter(Boolean).flat()) {
-  const k = `${f.file}:${f.line}`
+  const k = `${f.file}:${f.line}:${f.lens}`
   const prev = seen.get(k)
   if (!prev || ORDER[f.priority] < ORDER[prev.priority]) seen.set(k, f)
 }
