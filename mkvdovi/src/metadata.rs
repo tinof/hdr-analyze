@@ -864,9 +864,10 @@ fn primary_index_from_label(primaries: &str) -> Option<u8> {
 }
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
-/// Versions 1 to 4 are accepted; version 2 adds provenance and a full-resolution crop,
+/// Versions 1 to 5 are accepted; version 2 adds provenance and a full-resolution crop,
 /// version 3 adds `analysis.luminance_mapping` (`"pq"` or a [`Composer::luminance_mapping`] name),
-/// and version 4 stores unfiltered averages (same layout).
+/// version 4 stores unfiltered averages (same layout), and version 5 records the stream's
+/// picture count and the undecodable leading pictures before the first measured frame.
 #[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
     pub version: u32,
@@ -913,6 +914,13 @@ pub struct L1SidecarSource {
     /// Transfer function the analyzer detected, e.g. `"HLG (ARIB STD-B67)"` (version 2+).
     #[serde(default)]
     pub transfer_function: Option<String>,
+    /// Coded pictures in the video stream (version 5+).
+    #[serde(default)]
+    pub stream_frames: Option<u64>,
+    /// RASL pictures at the start of an open-GOP cut that no decoder outputs (version 5+).
+    /// Measured frame `i` is stream frame `i + leading_skipped_frames`.
+    #[serde(default)]
+    pub leading_skipped_frames: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -928,7 +936,11 @@ pub struct L1SidecarAnalysis {
 }
 
 /// Newest sidecar version this build reads.
-pub const L1_SIDECAR_MAX_VERSION: u32 = 4;
+pub const L1_SIDECAR_MAX_VERSION: u32 = 5;
+
+/// From this version on the sidecar accounts for every picture of the video stream, including
+/// undecodable leading pictures at the start.
+pub const L1_SIDECAR_STREAM_FRAMES_VERSION: u32 = 5;
 
 /// From this version on the sidecar averages are unfiltered frame means; older sidecars are
 /// reused with an advisory warning.
@@ -1028,6 +1040,22 @@ impl L1Sidecar {
             .unwrap_or(0)
     }
 
+    /// Undecodable leading pictures in front of the first measured frame (0 before version 5).
+    /// The RPU needs this many extra entries at the start: `dovi_tool inject-rpu` gives RPU `n`
+    /// to the picture with presentation number `n`, and these pictures come first.
+    pub fn leading_frames(&self) -> u64 {
+        self.source
+            .as_ref()
+            .and_then(|source| source.leading_skipped_frames)
+            .unwrap_or(0)
+    }
+
+    /// Pictures of the video stream the sidecar describes: the measured frames plus the
+    /// leading pictures in front of them. This is the length of the RPU.
+    pub fn stream_frame_count(&self) -> u64 {
+        self.frame_count() + self.leading_frames()
+    }
+
     /// One-line provenance summary for progress output.
     pub fn provenance_summary(&self) -> String {
         let mut parts = vec![format!("sidecar v{}", self.version)];
@@ -1049,6 +1077,12 @@ impl L1Sidecar {
             ));
         }
         parts.push(format!("{} frames", self.frame_count()));
+        let leading = self.leading_frames();
+        if leading > 0 {
+            parts.push(format!(
+                "{leading} undecodable leading pictures before them"
+            ));
+        }
         parts.join(", ")
     }
 }
@@ -1284,8 +1318,36 @@ pub fn validate_l1_sidecar(
             ));
         }
     }
+    let accounted = sidecar.version >= L1_SIDECAR_STREAM_FRAMES_VERSION;
+    if accounted {
+        let source = sidecar.source.as_ref();
+        let (Some(stream), Some(leading)) = (
+            source.and_then(|source| source.stream_frames),
+            source.and_then(|source| source.leading_skipped_frames),
+        ) else {
+            return invalid(format!(
+                "v{} does not record the stream's picture count",
+                sidecar.version
+            ));
+        };
+        if covered + leading != stream {
+            return invalid(format!(
+                "covers {covered} frames after {leading} leading pictures, but the stream has {stream}"
+            ));
+        }
+    }
     if let Some(expected) = expect.frames {
+        let covered = sidecar.stream_frame_count();
         let difference = expected.abs_diff(covered);
+        // Before version 5 a sidecar does not say whether the decoder skipped pictures at the
+        // start, and a skip shifts every scene against the video. Only an exact match proves
+        // that nothing was skipped.
+        if !accounted && difference > 0 {
+            return invalid(format!(
+                "v{} covers {covered} frames but the input video has {expected}, and it predates the record of undecodable leading pictures (sidecar v{L1_SIDECAR_STREAM_FRAMES_VERSION})",
+                sidecar.version
+            ));
+        }
         let tolerance = frame_count_tolerance(expected);
         if difference > tolerance {
             return invalid(format!(
@@ -1533,19 +1595,19 @@ pub fn generate_extra_json(
     // `avg_pq` (819 vs the CM v4.0 anchor 1229) so CM v2.9-only displays receive the true
     // scene average instead of a placeholder. dovi_tool still clamps to spec limits.
     if let Some(sidecar) = l1_sidecar {
-        let length = sidecar
-            .scenes
-            .iter()
-            .map(|scene| scene.end + 1)
-            .max()
-            .unwrap_or(0);
+        // Undecodable leading pictures come first in presentation order, so every scene moves
+        // back by their count and the first scene also covers them (they are never displayed).
+        let leading = sidecar.leading_frames();
+        let length = sidecar.stream_frame_count();
         let shots: Vec<Value> = sidecar
             .scenes
             .iter()
-            .map(|scene| {
+            .enumerate()
+            .map(|(index, scene)| {
+                let start = if index == 0 { 0 } else { scene.start + leading };
                 json!({
-                    "start": scene.start,
-                    "duration": scene.end - scene.start + 1,
+                    "start": start,
+                    "duration": scene.end + leading - start + 1,
                     "metadata_blocks": [{
                         "Level1": {
                             "min_pq": scene.min_pq_12bit,
@@ -1967,6 +2029,102 @@ mod tests {
         assert_eq!(shots[1]["metadata_blocks"][0]["Level1"]["avg_pq"], 462);
     }
 
+    #[test]
+    fn undecodable_leading_pictures_shift_the_shots_and_lengthen_the_rpu() {
+        let output = tempfile::NamedTempFile::new().unwrap();
+        let metadata = HashMap::from([
+            ("min_dml".to_string(), 0.0001),
+            ("max_dml".to_string(), 1000.0),
+            ("max_cll".to_string(), 997.0),
+            ("max_fall".to_string(), 91.0),
+        ]);
+        // Two RASL pictures before the first measured frame: measured frame 10 is stream frame 12.
+        let sidecar = L1Sidecar {
+            version: L1_SIDECAR_MAX_VERSION,
+            scenes: vec![scene(0, 9, 1, 500, 2400), scene(10, 19, 2, 600, 2500)],
+            source: accounted_source(22, 2),
+            ..Default::default()
+        };
+        assert!(validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).is_ok());
+        assert_eq!(sidecar.stream_frame_count(), 22);
+
+        generate_extra_json(
+            output.path(),
+            "8.1",
+            &metadata,
+            &[],
+            None,
+            None,
+            Some(&sidecar),
+        )
+        .unwrap();
+
+        let json: Value = serde_json::from_reader(File::open(output.path()).unwrap()).unwrap();
+        assert_eq!(json["length"], 22);
+        let shots = json["shots"].as_array().unwrap();
+        assert_eq!(
+            (&shots[0]["start"], &shots[0]["duration"]),
+            (&json!(0), &json!(12))
+        );
+        assert_eq!(
+            (&shots[1]["start"], &shots[1]["duration"]),
+            (&json!(12), &json!(10))
+        );
+        assert_eq!(shots[1]["metadata_blocks"][0]["Level1"]["max_pq"], 2500);
+    }
+
+    #[test]
+    fn a_v5_sidecar_must_account_for_every_stream_picture() {
+        let mut missing = current_sidecar_json();
+        missing["source"]
+            .as_object_mut()
+            .unwrap()
+            .remove("stream_frames");
+        let mut short = current_sidecar_json();
+        short["source"]["stream_frames"] = json!(22);
+        for (json, reason) in [(missing, "picture count"), (short, "the stream has 22")] {
+            let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
+            assert!(matches!(
+                validate_l1_sidecar(&sidecar, &SidecarExpectation::default()),
+                Err(SidecarError::Invalid(message)) if message.contains(reason)
+            ));
+        }
+    }
+
+    #[test]
+    fn a_sidecar_before_v5_is_reused_only_on_an_exact_frame_count() {
+        let mut json = v2_sidecar_json();
+        json["version"] = json!(4);
+        let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
+        let expect = |frames| SidecarExpectation {
+            frames: Some(frames),
+            ..Default::default()
+        };
+        assert!(validate_l1_sidecar(&sidecar, &expect(20)).is_ok());
+        // Two frames short is inside the MediaInfo tolerance, but it is exactly what two
+        // skipped leading pictures look like.
+        assert!(matches!(
+            validate_l1_sidecar(&sidecar, &expect(22)),
+            Err(SidecarError::Invalid(message)) if message.contains("undecodable leading pictures")
+        ));
+    }
+
+    #[test]
+    fn a_v5_sidecar_is_compared_with_the_input_by_stream_pictures() {
+        let mut json = current_sidecar_json();
+        json["source"]["stream_frames"] = json!(22);
+        json["source"]["leading_skipped_frames"] = json!(2);
+        let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
+        let expect = SidecarExpectation {
+            frames: Some(22),
+            ..Default::default()
+        };
+        assert!(validate_l1_sidecar(&sidecar, &expect).unwrap().is_empty());
+        assert!(sidecar
+            .provenance_summary()
+            .contains("2 undecodable leading pictures"));
+    }
+
     fn scene(start: u64, end: u64, min: u16, avg: u16, max: u16) -> L1SidecarScene {
         L1SidecarScene {
             start,
@@ -1982,7 +2140,22 @@ mod tests {
     fn current_sidecar_json() -> Value {
         let mut sidecar = v2_sidecar_json();
         sidecar["version"] = json!(L1_SIDECAR_MAX_VERSION);
+        sidecar["source"]["stream_frames"] = json!(20);
+        sidecar["source"]["leading_skipped_frames"] = json!(0);
         sidecar
+    }
+
+    /// A version 5 source record for `stream` pictures with `leading` undecodable ones.
+    fn accounted_source(stream: u64, leading: u64) -> Option<L1SidecarSource> {
+        Some(L1SidecarSource {
+            file_name: "input.mkv".into(),
+            size_bytes: 42,
+            width: 3840,
+            height: 2160,
+            transfer_function: None,
+            stream_frames: Some(stream),
+            leading_skipped_frames: Some(leading),
+        })
     }
 
     fn v2_sidecar_json() -> Value {
@@ -2090,13 +2263,13 @@ mod tests {
             ));
         }
         let future = L1Sidecar {
-            version: 5,
+            version: L1_SIDECAR_MAX_VERSION + 1,
             scenes: vec![scene(0, 1, 0, 1, 2)],
             ..Default::default()
         };
         assert!(matches!(
             validate_l1_sidecar(&future, &SidecarExpectation::default()),
-            Err(SidecarError::UnsupportedVersion(5))
+            Err(SidecarError::UnsupportedVersion(version)) if version == L1_SIDECAR_MAX_VERSION + 1
         ));
     }
 
@@ -2105,6 +2278,7 @@ mod tests {
         let sidecar = L1Sidecar {
             version: L1_SIDECAR_MAX_VERSION,
             scenes: vec![scene(0, 9, 1, 3000, 2900), scene(10, 19, 1, 5, 40)],
+            source: accounted_source(20, 0),
             ..Default::default()
         };
         let advisories = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap();
@@ -2121,6 +2295,7 @@ mod tests {
         let sidecar = L1Sidecar {
             version: L1_SIDECAR_MAX_VERSION,
             scenes,
+            source: accounted_source(80, 0),
             ..Default::default()
         };
         let advisories = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap();

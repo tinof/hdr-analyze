@@ -131,11 +131,20 @@ name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, 
 stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 adds
 `analysis.luminance_mapping`: `pq`, or for HLG the composer whose full Profile 8.4 decode was
 measured (`dovi84-v2` for the preset; `dovi84-bt2100-v1`, added later without a version change, for
-the bt2100 composer). Version 4 (current) has the same layout and stores unfiltered averages. Max-RGB runs also
+the bt2100 composer). Version 4 has the same layout and stores unfiltered averages. Max-RGB runs also
 write `light_level` (`max_cll_nits`, `max_fall_nits`): the content light levels of CTA-861.3 over
 the active image area, with the frame average taken in linear light. The block is optional, so a
-version 4 sidecar written before it existed stays valid. `mkvdovi` accepts
-versions 1–4; it reuses a sidecar below version 4 with a warning that its averages were smoothed
+version 4 sidecar written before it existed stays valid.
+
+Version 5 (current) adds `source.stream_frames` and `source.leading_skipped_frames`. A stream cut
+at an open-GOP CRA picture starts with RASL pictures that no decoder outputs. They still come first
+in the RPU's presentation order, so measured frame `i` is stream frame `i + leading_skipped_frames`.
+`mkvdovi` moves the scenes back by that count, and `--verify` compares in stream frames. The
+analyzer refuses a stream that loses any other picture, for example one that does not start at a
+random access picture.
+
+`mkvdovi` accepts versions 1–5. It reuses a sidecar below version 5 only when its frame count
+matches the input exactly, and it reuses a sidecar below version 4 with a warning that its averages were smoothed
 over time (delete the measurements to re-analyze). HLG input requires version 3 or later with the selected composer's name, and a `dovi84`
 sidecar is rejected for a non-HLG input. Version 1 carries no identity or full-resolution crop, so
 only structure and frame count are checked and no L5 is derived from it.

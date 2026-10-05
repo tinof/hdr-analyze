@@ -10,6 +10,12 @@ use crate::analysis::histogram::pq_to_nits;
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
+/// Version 5 adds `source.stream_frames` (coded pictures in the video stream) and
+/// `source.leading_skipped_frames` (RASL pictures at the start of an open-GOP cut that no decoder
+/// outputs). Measured frame `i` is stream frame `i + leading_skipped_frames` in presentation
+/// order, and the scenes cover `stream_frames - leading_skipped_frames` frames; an RPU for the
+/// stream needs `leading_skipped_frames` entries in front. Up to version 4 the scenes started at
+/// the first decoded frame with no record of skipped pictures.
 /// Version 4 changes what the averages are: `avg_luma_pq_12bit` and `avg_max_rgb_pq_12bit`
 /// (per frame and per scene) are the unfiltered per-frame means. Up to version 3 each frame mean
 /// had passed the histogram EMA / temporal median first, so a scene average leaned toward the
@@ -27,7 +33,7 @@ use crate::crop::CropRect;
 /// field, so the version stays 4. Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
-pub const L1_SIDECAR_VERSION: u32 = 4;
+pub const L1_SIDECAR_VERSION: u32 = 5;
 
 /// Coordinate space of `L1Sidecar::crop` since version 2.
 pub const CROP_SPACE_FULL: &str = "full";
@@ -87,6 +93,10 @@ pub struct SourceMetadata {
     pub width: u32,
     pub height: u32,
     pub transfer_function: String,
+    /// Coded pictures (access units) in the video stream. Added in version 5.
+    pub stream_frames: u64,
+    /// Undecodable leading (RASL) pictures before the first measured frame. Added in version 5.
+    pub leading_skipped_frames: u64,
 }
 
 /// Sampling settings the measurements were produced with.
@@ -329,6 +339,8 @@ mod tests {
                 width: 3840,
                 height: 2160,
                 transfer_function: "PQ (SMPTE 2084)".into(),
+                stream_frames: 4,
+                leading_skipped_frames: 2,
             },
             analysis: AnalysisMetadata {
                 downscale: 2,
@@ -359,7 +371,9 @@ mod tests {
         .unwrap();
 
         let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-        assert_eq!(json["version"], 4);
+        assert_eq!(json["version"], 5);
+        assert_eq!(json["source"]["stream_frames"], 4);
+        assert_eq!(json["source"]["leading_skipped_frames"], 2);
         // The measurements are zero and the (smoothed) madVR frame averages are 0.2 and 0.3:
         // the per-frame sidecar series must come from the measurements.
         assert_eq!(
@@ -399,6 +413,8 @@ mod tests {
                     width: 1920,
                     height: 1080,
                     transfer_function: "HLG (ARIB STD-B67)".into(),
+                    stream_frames: 1,
+                    leading_skipped_frames: 0,
                 },
                 analysis: AnalysisMetadata {
                     downscale: 1,

@@ -6,6 +6,40 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-04: E7, open-GOP cuts
+
+A dev-tier HDR10 cut failed `--verify` with 1443 measured frames against 1445 in the video.
+
+**Cause.** The cut starts at a CRA picture (NAL type 21), followed by a complete RASL_R (9) and a
+RASL_N (8) picture. FFmpeg skips both ("Skipping invalid undecodable NALU"). `dovi_tool` 2.3.4
+`inject-rpu` assigns `rpus[presentation_number]` (`rpu_injector.rs`). `hevc_parser` sorts each GOP
+by POC, so the two RASL pictures come first, and missing entries repeat the last RPU.
+
+**Measurement.**
+- Took 60 frames of the cut and an RPU with a distinct L1 max per frame.
+- Matched the RPU bytes of each access unit in decode order, and mapped access units to displayed
+  frames through the decoder's packet positions.
+- Result: CRA→RPU 2, RASL_R→0, RASL_N→1. Displayed frame *k* carried RPU *k* + 2, so every scene's
+  L1 was shown two frames early.
+
+**Fix.**
+- The analyzer counts the RASL pictures of the first IRAP from the packets' NAL types. It requires
+  `decoded + leading == pictures` (packets that carry a slice; an end-of-sequence packet is not
+  one) and errors on any other loss.
+- Sidecar v5 records both numbers.
+- `mkvdovi` shifts the shots and makes the RPU one entry per picture. `--verify` compares in stream
+  frames.
+- A measured RPU that `inject-rpu` reports as mismatched is refused.
+
+**Results.**
+- The cut now passes `--verify`. It reports 2 leading pictures and 1443 measured frames, and its
+  MKV statistics tags are stale: MediaInfo reports the full film's 235152 frames.
+- A new integration test cuts a synthetic open-GOP clip with `mkvmerge --split`, which leaves 3
+  RASL pictures. It checks the displayed-frame-to-L1 association without `dovi_tool`'s parser. A
+  second test checks that a stream starting after its CRA is refused and that its source is kept.
+
+Where: this branch
+
 ### 2026-10-04: P10, E10
 
 P10 steps 1 and 2. Profile 8.1 `extra.json` passes `source_min_pq` / `source_max_pq` as the PQ codes
