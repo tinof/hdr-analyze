@@ -26,10 +26,13 @@ const workspaceRust = files.some(f => !f.startsWith('tools/') && /\.rs$|(^|\/)Ca
 if (workspaceRust) { gates.add('fmt'); gates.add('clippy'); gates.add('test') }
 // CPU/GPU analysis path: the kernel, its host side, the decode path, the orchestration that hands
 // frames to it, the composer coefficients both backends use, and build inputs that change them.
-const cuda = any(/^hdr_analyzer_mvp\/src\/(analysis\/|ffmpeg_io\.rs$|pipeline\.rs$|cli\.rs$|crop\.rs$)|^dovi84_composer\/src\/|^hdr_analyzer_mvp\/Cargo\.toml$|^Cargo\.lock$|^\.cargo\/config\.toml$|^scripts\/cuda-parity\.sh$|^hdr_analyzer_mvp\/tests\/cuda_parity\.rs$/)
+// Build inputs that can change measured output without touching Cargo.lock: the workspace and crate
+// manifests (features, dependency versions, profiles), compiler flags and the toolchain.
+const BUILD = /^Cargo\.(toml|lock)$|^hdr_analyzer_mvp\/Cargo\.toml$|^dovi84_composer\/Cargo\.toml$|^\.cargo\/config\.toml$|^rust-toolchain\.toml$/
+const cuda = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/(analysis\/|ffmpeg_io\.rs$|pipeline\.rs$|cli\.rs$|crop\.rs$)|^dovi84_composer\/src\/|^scripts\/cuda-parity\.sh$|^hdr_analyzer_mvp\/tests\/cuda_parity\.rs$/)
 if (cuda) { gates.add('clippy-cuda'); gates.add('cuda-parity') }
 // Measurement change: anything that can move the analyzer's L1 output or how it is scored.
-const measurement = any(/^hdr_analyzer_mvp\/src\/|^dovi84_composer\/src\/|^tools\/l1_diff\/|^scripts\/ci\/l1-regression-gate\.sh$|^Cargo\.lock$/)
+const measurement = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/|^dovi84_composer\/src\/|^tools\/l1_diff\/|^scripts\/ci\/l1-regression-gate\.sh$/)
 if (measurement) gates.add('l1-regression')
 for (const f of files) {
   const m = /^tools\/([^/]+)\/(.+)$/.exec(f)
@@ -102,14 +105,17 @@ const results = await pipeline(
   LENSES,
   l => agent(`${l.prompt}\n\n${SCOPE}`, {
     label: `review:${l.key}`, phase: 'Review', schema: FINDINGS, model: 'opus', effort: 'low',
-  }).then(r => (r ? r.findings.map(f => ({ ...f, lens: l.key })) : [])),
+  }).then(r => (r ? { lens: l.key, findings: r.findings.map(f => ({ ...f, lens: l.key })) } : { lens: l.key, failed: true })),
 )
+// A lens that returned nothing (skipped, API error) is missing coverage, not a clean review.
+const failedLenses = LENSES.map((l, i) => (results[i] && !results[i].failed ? null : l.key)).filter(Boolean)
+if (failedLenses.length) log(`review incomplete: lens(es) ${failedLenses.join(', ')} returned no result`)
 
 // Barrier on purpose: dedupe and cap the verification count. The key includes the lens: two
 // lenses at one line may be two different defects, and dropping one costs more than verifying
 // a duplicate twice.
 const seen = new Map()
-for (const f of results.filter(Boolean).flat()) {
+for (const f of results.filter(r => r && !r.failed).flatMap(r => r.findings)) {
   const k = `${f.file}:${f.line}:${f.lens}`
   const prev = seen.get(k)
   if (!prev || ORDER[f.priority] < ORDER[prev.priority]) seen.set(k, f)
@@ -129,11 +135,17 @@ const verified = await parallel(toVerify.map(f => () =>
   ).then(v => ({ ...f, verdict: v ? (v.refuted ? 'refuted' : 'confirmed') : 'unverified', verdictReason: v ? v.reason : 'verifier failed' }))
 ))
 
-const checked = verified.filter(Boolean)
+// A verifier that threw leaves null in its slot: keep that finding, marked unverified.
+const checked = toVerify.map((f, i) => verified[i] || { ...f, verdict: 'unverified', verdictReason: 'verifier failed' })
 return {
   started: true,
+  complete: failedLenses.length === 0,
+  failedLenses,
   requiredGates,
-  findings: checked.filter(f => f.verdict !== 'refuted'),
+  findings: checked.filter(f => f.verdict === 'confirmed'),
   refuted: checked.filter(f => f.verdict === 'refuted'),
-  unverified: unverified.map(f => ({ ...f, verdict: 'unverified', verdictReason: `over the cap of ${MAX_VERIFY}` })),
+  unverified: [
+    ...checked.filter(f => f.verdict === 'unverified'),
+    ...unverified.map(f => ({ ...f, verdict: 'unverified', verdictReason: `over the cap of ${MAX_VERIFY}` })),
+  ],
 }

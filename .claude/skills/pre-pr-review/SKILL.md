@@ -53,16 +53,20 @@ Call the Workflow tool with `name: "pre-pr-panel"` and `args`:
  "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md"}
 ```
 
-It returns `findings` (each verified by an independent skeptic) and `requiredGates` (computed in
+It returns `complete`, `failedLenses`, `findings` (each verified by an independent skeptic), `unverified` and `requiredGates` (computed in
 code from the file list). Do not choose the gates by judgment; use that list.
 
 ## 4. Verify and fix
 
-1. Merge the workflow findings with the Codex findings (standalone mode). Dedupe by file:line.
-2. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
+1. If the workflow returns `complete: false` (a review lens failed), rerun the workflow once; if
+   it is still incomplete, report the missing lenses as a blocker.
+2. Merge the workflow's `findings` **and** `unverified` lists with the Codex findings (standalone
+   mode). `unverified` holds findings over the verification cap or whose verifier failed: check
+   each of them yourself like any other. Dedupe by file:line.
+3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
    reason that cites code) / deferred (real, out of scope).
-3. Call the `advisor` tool once with the merged list before you settle on the fixes.
-4. Fix the confirmed findings; add a regression test where the defect is testable.
+4. Call the `advisor` tool once with the merged list before you settle on the fixes.
+5. Fix the confirmed findings; add a regression test where the defect is testable.
 
 ## 5. Gates, on the final code
 
@@ -74,16 +78,32 @@ again. The gate commands:
 |------|---------|
 | `fmt` | `cargo fmt --all -- --check` |
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` |
-| `test` | `cargo build -p hdr_analyzer_mvp && cargo test --workspace -- --nocapture > <scratchpad>/prepr-test.log 2>&1; status=$?; rg -n -e 'Skipping' -e 'test result: FAILED' -e 'error: test failed' <scratchpad>/prepr-test.log; echo "cargo test exit $status"` (the build puts the current analyzer next to the debug mkvdovi the integration tests run; the log goes to a file, not through a pipe, so the exit status is cargo's) |
+| `test` | the block below |
 | `clippy-cuda` | `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` |
 | `cuda-parity` | `scripts/cuda-parity.sh` |
 | `l1-regression` | `scripts/ci/l1-regression-gate.sh` (check mode) |
 | `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml` |
 
-**Skips.** In the `test` log these skips are expected: `cuda_parity` (run by its own gate),
-`HDR_ANALYZE_REAL_SAMPLE`, `MKVDOVI_FEL_SAMPLE`, and the `integration.rs` "sample not found".
-Any other `Skipping` line (missing ffmpeg, dovi_tool, mkvmerge, libx265, a sibling analyzer, an
-HLG or open-GOP test) means required coverage did not run: a blocker.
+The `test` gate, as one Bash call. The build puts the current analyzer next to the debug mkvdovi
+the integration tests run. The log goes to a file, not through a pipe, and the last command
+returns the gate's status, so a failed build, a failed test or an unexpected skip exits nonzero.
+Keep `gate_rc` (zsh reserves `status`) and `grep` (`rg` may exist only as a shell function):
+
+```bash
+LOG=<scratchpad>/prepr-test.log
+cargo build -p hdr_analyzer_mvp && cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu > "$LOG" 2>&1
+gate_rc=$?
+grep -n -E 'test result: FAILED|error: test failed' "$LOG"
+if grep 'Skipping' "$LOG" | grep -v -E 'HDR_ANALYZE_REAL_SAMPLE|MKVDOVI_FEL_SAMPLE|sample not found at'; then
+    echo 'unexpected skip: required coverage did not run'; gate_rc=1
+fi
+echo "test gate exit $gate_rc"; [ "$gate_rc" -eq 0 ]
+```
+
+**Skips.** Expected, and allowed by the block: `HDR_ANALYZE_REAL_SAMPLE`, `MKVDOVI_FEL_SAMPLE`, and the
+`integration.rs` "sample not found". The CUDA parity test is skipped by name because its own gate
+runs it. Any other `Skipping` line (missing ffmpeg, dovi_tool, mkvmerge, libx265, a sibling
+analyzer, an HLG or open-GOP test) fails the gate: required coverage did not run.
 
 **L1 references.** `l1-regression` runs in check mode. Use `--update` only when the step is meant
 to move L1; say so in the PR body with the reference diff.
