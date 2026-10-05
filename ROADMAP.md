@@ -60,6 +60,18 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
+### Waiting for the owner
+
+Steps that need a decision or a hardware test from the owner. Other steps of the same item stay
+startable. `/roadmap-next` reads this list; remove an entry when it is settled.
+
+- **P8: playback test.** Do Shield/TV devices apply the bt2100 composer, and how visible is the
+  preset's tint (WS6 procedure)? The chroma-siting comparison does not wait for this.
+- **P9: default change.** Whether hybrid mode becomes the default, after its development-tier score.
+- **P10 step 3: write L1 in-process.** Needs WS7 or playback evidence first.
+- **P11: targeted repair or full regeneration.** The notice that lists the dropped authored levels
+  does not wait for this.
+
 ## Progress log
 
 Newest first. One line per step that changed the state of a roadmap item. The full text is in

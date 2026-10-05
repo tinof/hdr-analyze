@@ -62,6 +62,9 @@ AGENTS.md
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
+!.claude/skills/
+!.claude/agents/
+!.claude/workflows/
 .codex/
 
 # Local scratch/checkouts
