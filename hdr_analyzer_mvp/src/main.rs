@@ -7,6 +7,7 @@ mod analysis;
 mod cli;
 mod ffmpeg_io;
 mod l1_sidecar;
+mod leading_pictures;
 mod optimizer;
 mod pipeline;
 mod writer;

@@ -40,6 +40,25 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- **L1 lines up with the picture in sources cut at an open-GOP CRA picture** (`hdr_analyzer_mvp`,
+  `mkvdovi`). A stream cut at a CRA picture (x265's default open GOP; `mkvmerge --split`,
+  stream-copy cuts, some captures) keeps the RASL pictures that follow the CRA in decode order
+  but come first in display order. They reference pictures from before the cut, so no decoder
+  outputs them, but `dovi_tool inject-rpu` still gives RPU `n` to presentation picture `n`.
+  Before this fix the measured L1 started on those RASL pictures. Every scene's L1 was shown as
+  many frames early as there were RASL pictures, and the last frames repeated the final RPU.
+  Measured on a real cut with two RASL pictures: displayed frame *k* carried the RPU for *k* + 2.
+  - The analyzer counts the RASL pictures of the first IRAP picture from the packets' NAL types.
+    It requires every picture of the stream to be either decoded or one of those. Any other loss,
+    such as a stream that does not start at a random access picture, stops the analysis with an
+    error instead of writing shifted measurements.
+  - Sidecar version 5 records `source.stream_frames` and `source.leading_skipped_frames`.
+  - `mkvdovi` moves every scene back by the leading count and lets the first scene cover the
+    leading pictures, so the RPU has exactly one entry per picture.
+  - `--verify` compares in the stream's frame numbers.
+  - A sidecar older than version 5 is reused only when its frame count matches the input exactly.
+  - When `dovi_tool inject-rpu` reports mismatched lengths for a measured RPU, the conversion
+    stops instead of muxing it.
 - **Profile 8.1 RPUs state the mastering display range** (`mkvdovi`). `extra.json` now passes
   `source_min_pq` / `source_max_pq`, converted from the mastering display luminance with the
   `dolby_vision` crate's PQ conversion (the one it uses for a Dolby CM XML). Before, `dovi_tool

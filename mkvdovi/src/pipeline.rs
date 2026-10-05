@@ -590,7 +590,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             );
         } else if l1_sidecar.is_none() {
             // Freshly produced by the analyzer in this run: validate structure and, for HLG, the
-            // luminance mapping (an older analyzer binary would measure without it).
+            // luminance mapping (an older analyzer binary would measure without it). The frame
+            // count is the analyzer's own: a v5 sidecar accounts for every picture of the stream
+            // it demuxed, while MediaInfo can report a count estimated from the duration or
+            // copied from stale statistics tags. The inject step still refuses an RPU whose
+            // length differs from the video.
             let expect = metadata::SidecarExpectation::default().with_hlg_composer(hlg_composer);
             match metadata::load_l1_sidecar(measurements, &expect) {
                 Ok((sidecar, advisories)) => {
@@ -805,6 +809,23 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             args.stall_timeout,
         )? {
             return Ok(false);
+        }
+        // dovi_tool repeats or drops RPUs at the end when the RPU and the stream differ in
+        // length, so measurements no longer line up with the pictures they were taken from.
+        let inject_log = fs::read_to_string(temp_dir.join("dovi_inject.log")).unwrap_or_default();
+        if let Some(line) = inject_log
+            .lines()
+            .find(|line| line.contains("mismatched lengths"))
+        {
+            if measurements_file.is_some() {
+                progress::print_error(&format!(
+                    "dovi_tool inject-rpu: {}. The measured RPU does not match the video picture for picture; refusing to mux it.",
+                    line.trim().trim_start_matches("Warning: ")
+                ));
+                let _ = fs::remove_file(&bl_rpu_hevc);
+                return Ok(false);
+            }
+            progress::print_warn(&format!("dovi_tool inject-rpu: {}", line.trim()));
         }
         resume::mark_done(&bl_rpu_hevc)?;
 

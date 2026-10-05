@@ -204,8 +204,9 @@ fn read_sidecar(path: &Path, required: bool) -> Result<Option<L1Sidecar>> {
     let sidecar: L1Sidecar = serde_json::from_reader(file)
         .with_context(|| format!("parsing sidecar {}", path.display()))?;
     // Versions 2 and 3 only add provenance (full-resolution crop, luminance mapping); version 4
-    // stores unfiltered averages. The L1 data layout is unchanged.
-    if !matches!(sidecar.version, 1..=4) {
+    // stores unfiltered averages; version 5 records the stream's picture count and undecodable
+    // leading pictures. The L1 data layout, indexed by measured (decoded) frame, is unchanged.
+    if !matches!(sidecar.version, 1..=5) {
         bail!(
             "unsupported L1 sidecar version {} in {}",
             sidecar.version,

@@ -23,7 +23,7 @@ fn copy_frame(frame: &MadVRFrame) -> MadVRFrame {
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 
-use ffmpeg_next::{format, frame, software, util::color};
+use ffmpeg_next::{codec, format, frame, software, util::color};
 
 use crate::analysis::frame::{analyze_native_frame_cropped, FrameAnalysisOptions, FramePeakStats};
 use crate::analysis::gpu::GpuAnalyzer;
@@ -38,12 +38,13 @@ use crate::analysis::scene::{
 use crate::cli::{Cli, PeakDomain, PeakEstimator};
 use crate::crop::{detect_crop, is_frame_usable_for_crop, CropRect, CROP_EDGE_TOLERANCE};
 use crate::ffmpeg_io::{
-    open_software_decoder, probe_crop, setup_hardware_decoder, transfer_hardware_frame,
-    TransferFunction, VideoInfo,
+    codec_extradata, open_software_decoder, probe_crop, setup_hardware_decoder,
+    transfer_hardware_frame, TransferFunction, VideoInfo,
 };
 use crate::l1_sidecar::{
     write_l1_sidecar, AnalysisMetadata, FrameL1Measurement, SidecarProvenance, SourceMetadata,
 };
+use crate::leading_pictures::{hevc_framing, LeadingPictureScan};
 use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
 use crate::writer::write_measurement_file;
 
@@ -482,23 +483,30 @@ pub fn run(
         }
     };
 
-    let (mut scenes, mut frames, l1_measurements, frame_peak_stats, crop, gpu_active) =
-        run_native_analysis_pipeline(
-            cli,
-            video_info,
-            &mut input_context,
-            downscale,
-            initial_crop,
-            &FrameAnalysisOptions {
-                denoise_mode: &cli.pre_denoise,
-                transfer_function: video_info.transfer_function,
-                hlg_composer: cli.hlg_composer,
-                peak_domain,
-                min_percentile: cli.min_percentile,
-                peak_estimator: cli.peak_estimator,
-                peak_percentile: cli.peak_percentile,
-            },
-        )?;
+    let (
+        mut scenes,
+        mut frames,
+        l1_measurements,
+        frame_peak_stats,
+        crop,
+        gpu_active,
+        stream_frames,
+    ) = run_native_analysis_pipeline(
+        cli,
+        video_info,
+        &mut input_context,
+        downscale,
+        initial_crop,
+        &FrameAnalysisOptions {
+            denoise_mode: &cli.pre_denoise,
+            transfer_function: video_info.transfer_function,
+            hlg_composer: cli.hlg_composer,
+            peak_domain,
+            min_percentile: cli.min_percentile,
+            peak_estimator: cli.peak_estimator,
+            peak_percentile: cli.peak_percentile,
+        },
+    )?;
 
     if let Some(path) = &cli.dump_frame_stats {
         let (_, frame_indices, series) = detect_scene_cuts(
@@ -601,6 +609,8 @@ pub fn run(
                 width: video_info.width,
                 height: video_info.height,
                 transfer_function: video_info.transfer_function.to_string(),
+                stream_frames: stream_frames.stream,
+                leading_skipped_frames: stream_frames.leading_skipped,
             },
             analysis: AnalysisMetadata {
                 downscale,
@@ -705,6 +715,7 @@ fn run_native_analysis_pipeline(
     Vec<FramePeakStats>,
     CropRect,
     bool,
+    StreamFrames,
 )> {
     println!("Starting native analysis pipeline...");
     let total_frames = video_info.total_frames;
@@ -715,6 +726,9 @@ fn run_native_analysis_pipeline(
         .context("No video stream found")?;
     let video_stream_index = video_stream.index();
     let codec_parameters = video_stream.parameters();
+    let mut leading_scan = (codec_parameters.id() == codec::Id::HEVC)
+        .then(|| LeadingPictureScan::new(hevc_framing(&codec_extradata(&codec_parameters))));
+    let mut stream_pictures = 0u64;
 
     let cuda_requested = cli.hwaccel.as_deref() == Some("cuda");
     let gpu_block_reason = if !cuda_requested {
@@ -1024,6 +1038,13 @@ fn run_native_analysis_pipeline(
 
     for (stream, packet) in input_context.packets() {
         if stream.index() == video_stream_index {
+            let data = packet.data().unwrap_or_default();
+            // For HEVC only packets with a slice are pictures (not an end-of-sequence packet).
+            let picture = match leading_scan.as_mut() {
+                Some(scan) => scan.observe_packet(data),
+                None => !data.is_empty(),
+            };
+            stream_pictures += u64::from(picture);
             decoder
                 .send_packet(&packet)
                 .context("Failed to send packet to decoder")?;
@@ -1046,6 +1067,12 @@ fn run_native_analysis_pipeline(
 
     // Finalize progress display
     pb.finish_with_message("Complete");
+
+    let stream_frames = account_stream_frames(
+        stream_pictures,
+        u64::from(frame_count),
+        leading_scan.as_ref(),
+    )?;
 
     if device_frames > 0 {
         println!(
@@ -1118,7 +1145,48 @@ fn run_native_analysis_pipeline(
         frame_peak_stats,
         crop,
         gpu_active,
+        stream_frames,
     ))
+}
+
+/// Pictures of the video stream against the frames the decoder output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StreamFrames {
+    /// Access units (coded pictures) in the video stream.
+    pub stream: u64,
+    /// RASL pictures at the start that no decoder outputs; measured frame `i` is stream frame
+    /// `i + leading_skipped` in presentation order.
+    pub leading_skipped: u64,
+}
+
+/// Every picture of the stream must be either measured or one of the explained undecodable
+/// leading pictures; any other loss would shift per-frame measurements against the video.
+fn account_stream_frames(
+    stream_pictures: u64,
+    decoded: u64,
+    leading_scan: Option<&LeadingPictureScan>,
+) -> Result<StreamFrames> {
+    let leading_skipped = leading_scan.map_or(0, LeadingPictureScan::skipped);
+    if decoded + leading_skipped != stream_pictures {
+        let start = match leading_scan {
+            Some(scan) if !scan.starts_with_irap() => {
+                " The stream does not start with a random access picture (IDR/CRA/BLA): it was cut in the middle of a GOP."
+            }
+            _ => "",
+        };
+        anyhow::bail!(
+            "The decoder output {decoded} frames for {stream_pictures} pictures in the video stream, and only {leading_skipped} of the missing pictures are undecodable leading (RASL) pictures at the start.{start} Measurements would not line up with the video frames, so none are written."
+        );
+    }
+    if leading_skipped > 0 {
+        println!(
+            "The stream starts with {leading_skipped} undecodable leading (RASL) picture(s) (an open-GOP cut at a CRA picture); measured frame 0 is stream frame {leading_skipped}."
+        );
+    }
+    Ok(StreamFrames {
+        stream: stream_pictures,
+        leading_skipped,
+    })
 }
 
 fn fix_scene_end_frames(scenes: &mut [MadVRScene], total_frames: usize) {

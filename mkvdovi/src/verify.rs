@@ -253,12 +253,12 @@ pub fn verify_post_mux_with_options(
         (None, None) => None,
     };
     if let (Some(sidecar), Some(rpu)) = (&sidecar, rpu_frames) {
-        if sidecar.frame_count() != rpu {
+        if sidecar.stream_frame_count() != rpu {
             println!(
                 "{}",
                 format!(
                     "RPU covers {rpu} frames but the L1 measurements cover {}.",
-                    sidecar.frame_count()
+                    sidecar.stream_frame_count()
                 )
                 .red()
             );
@@ -468,14 +468,17 @@ fn check_delivery(rpus: &[DoviRpu], delivery: DeliveryExpectation<'_>) -> Delive
     let Some(sidecar) = delivery.l1_sidecar else {
         return report;
     };
-    if sidecar.frame_count() != rpus.len() as u64 {
+    if sidecar.stream_frame_count() != rpus.len() as u64 {
         report.fail(format!(
             "L1 not compared, because the frame counts differ (RPU {}, measurements {})",
             rpus.len(),
-            sidecar.frame_count()
+            sidecar.stream_frame_count()
         ));
         return report;
     }
+    // Frame numbers below are RPU (stream) frames: measured frame `i` is stream frame
+    // `i + leading`, and the first scene also covers the undecodable leading pictures.
+    let leading = sidecar.leading_frames();
 
     let mut l1 = L1Delivery {
         scenes: sidecar.scenes.len(),
@@ -494,8 +497,14 @@ fn check_delivery(rpus: &[DoviRpu], delivery: DeliveryExpectation<'_>) -> Delive
             CmVersion::V29,
         ));
 
+        let first = if scene_index == 0 {
+            0
+        } else {
+            scene.start + leading
+        };
+        let last = scene.end + leading;
         let mut scene_ok = true;
-        for frame in scene.start..=scene.end {
+        for frame in first..=last {
             let delivered = rpus.get(frame as usize).and_then(frame_l1).map(l1_codes);
             if delivered != Some(expected) {
                 scene_ok = false;
@@ -520,9 +529,7 @@ fn check_delivery(rpus: &[DoviRpu], delivery: DeliveryExpectation<'_>) -> Delive
             l1.unchanged += 1;
         } else {
             l1.details.push(format!(
-                "scene {scene_index} (frames {}-{}): measured min/avg/max {}/{}/{}, delivered {}/{}/{}",
-                scene.start,
-                scene.end,
+                "scene {scene_index} (frames {first}-{last}): measured min/avg/max {}/{}/{}, delivered {}/{}/{}",
                 measured.0,
                 measured.1,
                 measured.2,
@@ -532,7 +539,7 @@ fn check_delivery(rpus: &[DoviRpu], delivery: DeliveryExpectation<'_>) -> Delive
             ));
         }
         let source_max = rpus
-            .get(scene.start as usize)
+            .get(first as usize)
             .and_then(|rpu| rpu.vdr_dm_data.as_ref())
             .map(|dm| dm.source_max_pq);
         if source_max.is_some_and(|source_max| expected.2 > source_max) {
@@ -928,6 +935,35 @@ mod tests {
         assert!(!report.passed());
         assert_eq!(report.failures.len(), 3, "one failure per frame");
         assert!(report.failures[0].contains("source range 7..3079, expected 62..3079"));
+    }
+
+    #[test]
+    fn delivery_compares_in_stream_frames_after_undecodable_leading_pictures() {
+        let (a, b) = ((5, 1500, 2900), (10, 1200, 2500));
+        // Two RASL pictures precede measured frame 0: measured 0-2 / 3-4 are stream 2-4 / 5-6.
+        let mut measured = sidecar(&[(0, 2, a), (3, 4, b)]);
+        measured.version = metadata::L1_SIDECAR_MAX_VERSION;
+        measured.source = Some(metadata::L1SidecarSource {
+            file_name: "input.mkv".into(),
+            size_bytes: 1,
+            width: 1920,
+            height: 1080,
+            transfer_function: None,
+            stream_frames: Some(7),
+            leading_skipped_frames: Some(2),
+        });
+
+        let shifted = generated_rpus(&[(0, 4, a), (5, 6, b)], RANGE, true);
+        let report = check_delivery(&shifted, delivery(&measured, RANGE));
+        assert!(report.passed(), "{:?}", report.failures);
+        assert_eq!(report.l1.unwrap().unchanged, 2);
+
+        // The unshifted RPU (scenes at measured positions, padded at the end) shows scene 1's
+        // L1 two frames early.
+        let unshifted = generated_rpus(&[(0, 2, a), (3, 6, b)], RANGE, true);
+        let report = check_delivery(&unshifted, delivery(&measured, RANGE));
+        assert!(!report.passed());
+        assert!(report.failures[0].contains("scene 0 frame 3"));
     }
 
     #[test]

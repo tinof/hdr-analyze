@@ -939,7 +939,7 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
     let sidecar: serde_json::Value =
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
-    assert_eq!(sidecar["version"], 4);
+    assert_eq!(sidecar["version"], 5);
     assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v2");
     assert_eq!(sidecar["peak_domain"], "max-rgb");
 
@@ -1016,7 +1016,7 @@ fn hlg_flat_frame_measures_through_the_bt2100_composer() {
     let sidecar: serde_json::Value =
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
-    assert_eq!(sidecar["version"], 4);
+    assert_eq!(sidecar["version"], 5);
     assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-bt2100-v1");
 
     // The fitted composer decodes 75% neutral grey to 2378.6 on all three channels

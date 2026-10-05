@@ -68,6 +68,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-04 | L1 lines up with the picture in open-GOP cuts (RASL leading pictures); sidecar v5. | E7 | [#26](https://github.com/tinof/hdr-analyze/pull/26) |
 | 2026-10-04 | 8.1 source range from the mastering display; `--verify` compares delivered with measured L1. | P10, E10 | [#25](https://github.com/tinof/hdr-analyze/pull/25) |
 | 2026-10-03 | FEL compositor and re-encode removed; FEL inputs refused. | FEL | [FEL_PLAN](docs/FEL_PLAN.md) |
 | 2026-10-03 | Review of all conversion paths; priorities reordered; new items. | P8–P11, E8–E10, WS7, WS8 | this file |
@@ -403,6 +404,10 @@ The detailed gap table and validation method live in
 
 - **Status:** Partial. `--verify` fails when the RPU frame count differs from the muxed video track
   or the L1 sidecar, and warns when output and input frame counts differ.
+- Since 2026-10-04 the analyzer accounts for every picture of the stream, so measured L1 lines up
+  with the picture. It counts the undecodable RASL pictures at the start of an open-GOP cut, and
+  any other loss is an error. A measured RPU whose length differs from the video is refused at
+  inject.
 - **Open:** direct-MKV `dovi_tool` steps still accept exit status plus non-empty output, and
   verification is opt-in.
 

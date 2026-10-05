@@ -555,6 +555,21 @@ pub fn setup_hardware_decoder(
     }
 }
 
+/// Codec extradata of a stream (`hvcC` for HEVC in MKV/MP4), empty when there is none.
+pub fn codec_extradata(parameters: &codec::Parameters) -> Vec<u8> {
+    // SAFETY: parameters wraps a live AVCodecParameters; extradata points to extradata_size
+    // readable bytes whenever it is non-null.
+    unsafe {
+        let raw = parameters.as_ptr();
+        let size = usize::try_from((*raw).extradata_size).unwrap_or(0);
+        if (*raw).extradata.is_null() || size == 0 {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts((*raw).extradata, size).to_vec()
+        }
+    }
+}
+
 pub fn open_software_decoder(parameters: &codec::Parameters) -> Result<codec::decoder::Video> {
     let mut context = codec::context::Context::from_parameters(parameters.clone())
         .context("Failed to create software decoder context")?;
