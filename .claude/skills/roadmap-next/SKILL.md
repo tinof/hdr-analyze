@@ -33,7 +33,8 @@ is waiting for the owner.
 
 ## 2. Readiness per step
 
-**Confirm mode.** If no commit since the Next up `<sha>` touches `ROADMAP.md`'s Priorities or
+**Confirm mode.** If `$ARGUMENTS` is empty (the Next up ranking is unscoped, so a scoped run
+always ranks afresh) and no commit since the Next up `<sha>` touches `ROADMAP.md`'s Priorities or
 owner list, or the files the Next up candidates and their Checked bullets cite, and no open PR
 or merged commit covers a candidate, then only re-run the cheap checks below (open PRs, branches,
 GPU, media paths) and go to step 6 with the existing ranking. Skip steps 3–5: no new draft, no

@@ -23,7 +23,8 @@
 #   highlight/edge regions, and in frame max.
 # The analyzer-vs-spec numbers it prints are the measurement, not a pass/fail criterion.
 #
-# Real cuts (--cuts DIR, local only): every <DIR>/<cut>/input.mkv of the HLG development cuts is
+# Real cuts (--cuts DIR, local only): every <DIR>/<cut>/input.mkv whose manifest.json says
+# "transfer": "hlg" (the HLG development cuts; their names stay out of the repository) is
 # analyzed (anchor 1 applies) and decoded through the tool; per-scene differences between the
 # analyzer and the spec decode for the cut's own chroma location are summarized. --every N decodes
 # every Nth frame only (scene statistics then use those frames on both sides).
@@ -58,8 +59,6 @@ case "$COMPOSER" in
     *) echo "unknown composer: $COMPOSER (preset or bt2100)" >&2; exit 2 ;;
 esac
 TOLERANCE="${TOLERANCE:-4}"
-HLG_CUTS=(g1-wimbledon-2024-final-rally g2-glastonbury-2025-supergrass-stage
-    g3-the-green-planet-tropical-canopy g4-ucl-bayern-psg-match-action d11-bluelights-s01e02-hlg)
 
 for tool in ffmpeg ffprobe dovi_tool python3 cargo; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 2; }
@@ -251,6 +250,14 @@ PY
 done
 
 if [ -n "$CUTS" ]; then
+    mapfile -t HLG_CUTS < <(python3 - "$CUTS" <<'PY'
+import glob, json, os, sys
+for manifest in sorted(glob.glob(os.path.join(sys.argv[1], "*", "manifest.json"))):
+    if json.load(open(manifest)).get("transfer") == "hlg":
+        print(os.path.basename(os.path.dirname(manifest)))
+PY
+)
+    [ "${#HLG_CUTS[@]}" -gt 0 ] || { echo "no HLG cuts (manifest.json transfer hlg) in $CUTS" >&2; exit 2; }
     for cut in "${HLG_CUTS[@]}"; do
         input="$CUTS/$cut/input.mkv"
         [ -f "$input" ] || { echo "skipping $cut: no input.mkv" >&2; continue; }
