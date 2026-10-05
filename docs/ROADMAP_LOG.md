@@ -38,7 +38,7 @@ by POC, so the two RASL pictures come first, and missing entries repeat the last
   RASL pictures. It checks the displayed-frame-to-L1 association without `dovi_tool`'s parser. A
   second test checks that a stream starting after its CRA is refused and that its source is kept.
 
-Where: this branch
+Where: [#26](https://github.com/tinof/hdr-analyze/pull/26)
 
 ### 2026-10-04: P10, E10
 
