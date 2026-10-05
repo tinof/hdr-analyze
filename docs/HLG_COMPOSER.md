@@ -263,7 +263,8 @@ analyzer variant reproduces the analyzer's per-frame max-RGB maximum exactly and
 within 0.5 code (the sidecar's integer rounding) on every frame measured. Its renderer variant
 matches libplacebo (`upscaler=bilinear`, v7.370.0, llvmpipe) within 0.32 codes per pixel through
 `bt2100` and 3.84 through the preset, at every pixel around the 1×1 to 3×3 test highlights, for
-chroma location left and top-left. `spec-float` keeps the analyzer's arithmetic and changes only
+chroma location left and top-left (the script refuses a real cut with any other location).
+`spec-float` keeps the analyzer's arithmetic and changes only
 the structure; `spec-fixed` is the spec. The two deviations are separate:
 
 - **Structure** (`spec-float` − analyzer). Large per pixel at colour edges and on small saturated
