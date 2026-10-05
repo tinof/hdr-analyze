@@ -6,6 +6,23 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-05: WS8, P9, P8, coverage of real material
+
+The development tier was reviewed per input format. Results:
+- HDR10: 8 cuts plus 9 held out, from two titles, all mastered at 0.005 / 4000 nits, with shot
+  lists but no authored L1.
+- HDR10+: one cut (11 scenes).
+- HLG: one drama cut, with no shot list or reference.
+- Synthetic and open-content pairs: 7 entries.
+- The only real-content L1 reference comes from the Dolby Vision titles (Profile 7 FEL and MEL),
+  whose base layers are HDR10.
+
+P9's gate (scored on the development tier) cannot be met with one HDR10+ cut, so HDR10+ material
+now comes before P9. HLG material goes with the P8 playback test. The acquisition order is WS8
+item 5.
+
+Where: this file
+
 ### 2026-10-04: E7, open-GOP cuts
 
 A dev-tier HDR10 cut failed `--verify` with 1443 measured frames against 1445 in the video.

@@ -18,7 +18,7 @@ log (one sentence plus the PR link) and the full text of the step to
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md). Measurements go to the log or to the doc the item
 links, not into the item.
 
-## Current status (updated 2026-10-03)
+## Current status (updated 2026-10-05)
 
 The v0.3.0 release shipped the `mkvdolby` → `mkvdovi` rename, published measured accuracy in
 [`docs/VALIDATION.md`](docs/VALIDATION.md), and made PQ direct peaks default to BT.2020 NCL max-RGB.
@@ -68,6 +68,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
 | 2026-10-04 | L1 lines up with the picture in open-GOP cuts (RASL leading pictures); sidecar v5. | E7 | [#26](https://github.com/tinof/hdr-analyze/pull/26) |
 | 2026-10-04 | 8.1 source range from the mastering display; `--verify` compares delivered with measured L1. | P10, E10 | [#25](https://github.com/tinof/hdr-analyze/pull/25) |
 | 2026-10-03 | FEL compositor and re-encode removed; FEL inputs refused. | FEL | [FEL_PLAN](docs/FEL_PLAN.md) |
@@ -114,6 +115,7 @@ evidence for each priority is in its items and in
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list and peak from HDR10+; average, minimum and
    crop from pixels. Gate: opt-in, scored on the development tier before any default change.
+   Needs more HDR10+ material first (WS8 item 5): one cut from one title cannot score it.
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
    a playback test.
@@ -124,7 +126,8 @@ evidence for each priority is in its items and in
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts. Gate: the simulator reproduces the recomputed numbers in WS7.
 7. **Test material** (WS8): grain on synthetic highlights, unaligned positions, a same-master grainy
-   twin, transitions. Needed before 9 can be scored.
+   twin, transitions. Needed before 9 can be scored. Real material per format (item 5) is needed
+   earlier, for 1 and 2.
 8. **Scene detection** (WS2, E4): second signal for whole-picture motion; strong cuts closer than
    12 frames. Gate: precision and recall against authored shot lists, no loss on the other cuts.
 9. **Research, default unchanged** (WS1, WS2, WS4): grain-robust peak; per-frame L1 inside detected
@@ -205,7 +208,8 @@ and broader hardware acceleration (E5). Neutral trims stay.
   1150 nits.
 - **Open:** the WS6 playback test must show that devices apply a composer that is not the preset,
   and how visible the tint is on a TV. 4:2:0 chroma siting of the analyzer's decode (both
-  composers) against a renderer on non-flat patterns.
+  composers) against a renderer on non-flat patterns. Both need more real HLG material than the
+  one drama cut there is today (WS8 item 5).
 
 ### P9: HDR10+ → Profile 8.1 L1
 
@@ -213,6 +217,8 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - `dovi_tool generate --hdr10plus-json` takes L1 from the first frame of each HDR10+ scene
   (minimum 0, average rounded to whole nits, no measured crop). On the HDR10+ test cut the average
   reads 156 to 505 codes above the analyzer's mean; the cause is not separated.
+- **Prerequisite:** HDR10+ material for the development tier (WS8 item 5). There is one cut from
+  one title, which cannot separate a quirk of the title from a property of the generator.
 - **Plan:** opt-in hybrid mode (HDR10+ scene list and peak; average, minimum and L5 from pixels),
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
@@ -338,6 +344,21 @@ The detailed gap table and validation method live in
      light) with their intervals as truth, and retail cuts with authored transitions.
   4. A held-out split: synthetic references and open implementations for development, licensed
      reference output for scoring only ([`docs/PROVENANCE.md`](docs/PROVENANCE.md)).
+  5. Real material per format (2026-10-05). The development tier has one HDR10+ cut and one HLG
+     cut. Its HDR10 cuts come from two titles with the same 4000-nit master and have no authored
+     L1; the only real-content L1 reference comes from the Dolby Vision titles' base layers. Add,
+     in this order:
+     - **HDR10+**, before P9: 3–5 titles from different studios or streamers. Prefer releases that
+       carry HDR10+ and Dolby Vision for the same master, whose Dolby Vision L1 is then an authored
+       reference. Also one cut with implausible HDR10+ peaks, for the fallback.
+     - **HLG**, with the P8 playback test: 3–4 cuts, among them live sport or a concert at 50p,
+       content with saturated highlights, a second broadcaster, and an off-air or streamed capture
+       (the input most likely to start at an open-GOP CRA).
+     - **HDR10**: 1000-nit and non-standard masters (for example 600 or 1100 nits), a missing or
+       implausible MaxCLL, a streaming encode, animation or clean digital content, and bright
+       daytime scenes.
+     - Profile 8.1 or MEL sources if Profile 7 FEL entries are retired: they give the same authored
+       L1 on an HDR10 base layer.
 
 ## Dolby Vision profile work
 
