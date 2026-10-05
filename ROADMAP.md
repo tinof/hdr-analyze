@@ -68,6 +68,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
 | 2026-10-04 | L1 lines up with the picture in open-GOP cuts (RASL leading pictures); sidecar v5. | E7 | [#26](https://github.com/tinof/hdr-analyze/pull/26) |
 | 2026-10-04 | 8.1 source range from the mastering display; `--verify` compares delivered with measured L1. | P10, E10 | [#25](https://github.com/tinof/hdr-analyze/pull/25) |
@@ -115,7 +116,7 @@ evidence for each priority is in its items and in
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list and peak from HDR10+; average, minimum and
    crop from pixels. Gate: opt-in, scored on the development tier before any default change.
-   Needs more HDR10+ material first (WS8 item 5): one cut from one title cannot score it.
+   HDR10+ material is in (WS8 item 5, 2026-10-05), including a same-master Dolby Vision pair.
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
    a playback test.
@@ -126,8 +127,8 @@ evidence for each priority is in its items and in
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts. Gate: the simulator reproduces the recomputed numbers in WS7.
 7. **Test material** (WS8): grain on synthetic highlights, unaligned positions, a same-master grainy
-   twin, transitions. Needed before 9 can be scored. Real material per format (item 5) is needed
-   earlier, for 1 and 2.
+   twin, transitions. Needed before 9 can be scored. Real material per format (item 5) landed
+   2026-10-05.
 8. **Scene detection** (WS2, E4): second signal for whole-picture motion; strong cuts closer than
    12 frames. Gate: precision and recall against authored shot lists, no loss on the other cuts.
 9. **Research, default unchanged** (WS1, WS2, WS4): grain-robust peak; per-frame L1 inside detected
@@ -208,8 +209,9 @@ and broader hardware acceleration (E5). Neutral trims stay.
   1150 nits.
 - **Open:** the WS6 playback test must show that devices apply a composer that is not the preset,
   and how visible the tint is on a TV. 4:2:0 chroma siting of the analyzer's decode (both
-  composers) against a renderer on non-flat patterns. Both need more real HLG material than the
-  one drama cut there is today (WS8 item 5).
+  composers) against a renderer on non-flat patterns. Real HLG material for both: five cuts
+  since 2026-10-05 (live sport at 50p, a concert, a nature series, a broadcast capture, a drama;
+  WS8 item 5).
 
 ### P9: HDR10+ → Profile 8.1 L1
 
@@ -217,8 +219,13 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - `dovi_tool generate --hdr10plus-json` takes L1 from the first frame of each HDR10+ scene
   (minimum 0, average rounded to whole nits, no measured crop). On the HDR10+ test cut the average
   reads 156 to 505 codes above the analyzer's mean; the cause is not separated.
-- **Prerequisite:** HDR10+ material for the development tier (WS8 item 5). There is one cut from
-  one title, which cannot separate a quirk of the title from a property of the generator.
+- **Prerequisite met (2026-10-05):** four HDR10+ titles from two studios and one streamer
+  (WS8 item 5). Alita: Battle Angel carries Dolby Vision MEL and HDR10+ on the same disc, so its
+  retail L1 can score an HDR10+-derived L1 frame by frame.
+- **Finding for the fallback:** both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL 0 on every
+  frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on Alita) and
+  the average are present. A peak taken from MaxSCL is unusable on such sources, so the pixel
+  fallback is required, not optional; whether the percentiles can stand in is open.
 - **Plan:** opt-in hybrid mode (HDR10+ scene list and peak; average, minimum and L5 from pixels),
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
@@ -273,8 +280,13 @@ The detailed gap table and validation method live in
   ([TECHNICAL_REFERENCE.md §2.4](docs/TECHNICAL_REFERENCE.md)) removes part of the grain bias but
   lowers small highlights near the grain and clean content, and has not been scored against
   `cm_analyze`. No histogram-only or spatial statistic tried so far passes.
-- **Next:** better test material (WS8) and the display-unit scale (WS7). Do not enable the robust
-  estimator by default.
+- **Finding (2026-10-05):** the default `max` peak also reads high on clean retail sources:
+  per-shot bias against retail L1 is +148 to +162 codes on Alita: Battle Angel (digital, largely
+  computer-generated) and +88 and +162 on Skyfall (both Profile 7 MEL). Grain does not explain
+  that. Find what does (for example the reference's spatial or temporal treatment of small
+  highlights) before more grain-estimator work.
+- **Next:** explain the clean-source over-read, then the display-unit scale (WS7). Do not enable
+  the robust estimator by default.
 - **Rules for a new estimator:** identical output on CPU and CUDA (see
   [`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md)); its frozen synthetic gate includes a small
   specular, a one-frame flash, a highlight on the first or last frame of a shot, a 2–3 frame
@@ -344,21 +356,21 @@ The detailed gap table and validation method live in
      light) with their intervals as truth, and retail cuts with authored transitions.
   4. A held-out split: synthetic references and open implementations for development, licensed
      reference output for scoring only ([`docs/PROVENANCE.md`](docs/PROVENANCE.md)).
-  5. Real material per format (2026-10-05). The development tier has one HDR10+ cut and one HLG
-     cut. Its HDR10 cuts come from two titles with the same 4000-nit master and have no authored
-     L1; the only real-content L1 reference comes from the Dolby Vision titles' base layers. Add,
-     in this order:
-     - **HDR10+**, before P9: 3–5 titles from different studios or streamers. Prefer releases that
-       carry HDR10+ and Dolby Vision for the same master, whose Dolby Vision L1 is then an authored
-       reference. Also one cut with implausible HDR10+ peaks, for the fallback.
-     - **HLG**, with the P8 playback test: 3–4 cuts, among them live sport or a concert at 50p,
-       content with saturated highlights, a second broadcaster, and an off-air or streamed capture
-       (the input most likely to start at an open-GOP CRA).
-     - **HDR10**: 1000-nit and non-standard masters (for example 600 or 1100 nits), a missing or
-       implausible MaxCLL, a streaming encode, animation or clean digital content, and bright
-       daytime scenes.
-     - Profile 8.1 or MEL sources if Profile 7 FEL entries are retired: they give the same authored
-       L1 on an HDR10 base layer.
+  5. **Done 2026-10-05:** real material per format. The development tier holds 45 entries (it
+     lives outside the repository, see CLAUDE.md "Testing quirks"); 29 further cuts are held out,
+     unanalyzed, for a `cm_analyze` qualification run. Added on 2026-10-04 and 2026-10-05, no
+     Profile 7 FEL:
+     - **HDR10+:** Deadloch (Amazon WEB-DL, Profile B), The Shining (disc, DV MEL + HDR10+),
+       Alien (disc, Profile A) and Alita: Battle Angel (disc, DV MEL + HDR10+ Profile A on the same
+       master, so its retail L1 is an authored reference for exactly the frames the HDR10+
+       metadata describes).
+     - **HLG:** Wimbledon 2024 and Glastonbury 2025 (iPlayer), The Green Planet (iPlayer, nature),
+       a Champions League broadcast capture (50p, starts at an open-GOP CRA).
+     - **HDR10 and Profile 7 MEL / 8.1:** Joker: Folie à Deux (MEL, 1000 nits, starts at a CRA),
+       Skyfall (MEL, per-shot L1), Exodus: Gods and Kings (1100-nit master), Star Trek (2009, no
+       MaxCLL), Inside Out 2 (Disney+ 8.1, animation; its L1 is static and is not used as a
+       reference) and The Revenant (bright snow; an injected hybrid, its metadata is not used).
+     Measurements and what was rejected as a reference: [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md).
 
 ## Dolby Vision profile work
 

@@ -6,6 +6,53 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-05: WS8 item 5 done; findings for P9, WS1, E7
+
+Two deliveries (2026-10-04 and 2026-10-05) filled the per-format gaps. All cuts are stream copies
+of about 60 s, checked on arrival with MediaInfo, `dovi_tool` and `hdr10plus_tool`, and remuxed
+with mkvmerge (the containers carried the statistics tags of the full source). Each new PQ title
+also gave two holdout cuts; 29 cuts are now held out, unanalyzed.
+
+| Format | Title | What it adds |
+|---|---|---|
+| HDR10+ | Deadloch S01E01 (Amazon WEB-DL) | Profile B, 1000-nit master, two cuts (day, night) |
+| HDR10+ | The Shining (disc) | DV MEL + HDR10+ Profile B, 4000-nit master; retail L1 |
+| HDR10+ | Alien (disc) | Profile A with MaxSCL 0 on every frame |
+| HDR10+ | Alita: Battle Angel (disc) | DV MEL + HDR10+ Profile A on one disc: the same-master pair; retail L1 |
+| HLG | Wimbledon 2024 (iPlayer) | live sport, 50p, HLG only as the alternative transfer |
+| HLG | Glastonbury 2025 (iPlayer) | concert, stage strobes |
+| HLG | The Green Planet (iPlayer) | nature, saturated highlights |
+| HLG | Champions League (broadcast capture) | 50p, starts at an open-GOP CRA (3036 pictures, 3033 decoded) |
+| HDR10 / MEL | Joker: Folie à Deux (disc) | MEL, 1000-nit master; starts at a CRA with 2 RASL pictures |
+| HDR10 / MEL | Skyfall (disc) | MEL with per-shot L1 (32 and 11 distinct values), no MaxCLL |
+| HDR10 | Exodus: Gods and Kings (disc) | 1100-nit master, no MaxCLL |
+| HDR10 | Star Trek (2009, disc) | 1000-nit master, no MaxCLL/MaxFALL |
+| DV 8.1 | Inside Out 2 (Disney+) | animation; RPU shot list kept, static L1 not used |
+| HDR10 | The Revenant ("Open Matte" hybrid) | bright snow; injected RPU and HDR10+ not used |
+
+Not usable as references: The Revenant's RPU states a 0.0001/1000-nit master against 0.005/4000 in
+its own L6 and the HDR10 base, and marks one shot in 60 s. Inside Out 2's L1 max is 2467 to 2471 on
+all 21 shots. The Shining's two formats are not proven to come from one master; Alita's are.
+
+First scores with the default estimator (per-shot peak against retail L1, bias in 12-bit codes):
+Alita +162.3 (day) and +147.6 (night), Skyfall +88.4 and +161.8, The Shining +25.6 (night) and
+−106.3 (day). Alita is digital and largely computer-generated, so the over-read on clean MEL
+sources is not a grain effect (WS1).
+
+HDR10+ Profile A (Alien, Alita) carries MaxSCL 0 on every frame, with the percentile distribution
+and the average present (P9).
+
+Before sidecar v5 (#26) every analyzer cut on the Joker cut sat exactly 2 frames before the
+authored one (10 of 10) and the L1 comparison stopped on 1446 against 1448 frames; it is to be
+rescored with a v5 build (E7).
+
+Scene detection against the RPU and HDR10+ shot lists: Deadloch 13/13 and 20/21, Alita 15/17 and
+17/17, Skyfall 27/34 and 10/10, Inside Out 2 20/20, Alien 12/18, The Shining 2/7 (day). Shot lists
+made by the acquisition agent (HLG, plain HDR10) are unchecked; two of them (the football cut, the
+Red Sea cut) list 2 cuts where the analyzer finds 8 and 25.
+
+Where: this file
+
 ### 2026-10-05: WS8, P9, P8, coverage of real material
 
 The development tier was reviewed per input format. Results:
@@ -435,7 +482,8 @@ adaptation needs an unreleased version and its repository declares no licence.
 
 ### WS8 (Open)
 
-Test material the 2026-10-03 review found wanting. (1) The synthetic highlight pair writes its
+Item 5, real material per format, was done on 2026-10-05 (progress log). Test material the
+2026-10-03 review found wanting. (1) The synthetic highlight pair writes its
 highlights after the grain, so they carry none and the clean and grainy twins are identical on them;
 all 2x2 highlights sit on even coordinates and fill exactly one chroma quad. Add grain on the
 highlight and odd offsets. (2) The grainy twin of the clean/grainy pair comes from a different
