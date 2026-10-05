@@ -519,8 +519,8 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
     let width: usize = args.get(1).context(USAGE)?.parse()?;
     let height: usize = args.get(2).context(USAGE)?.parse()?;
     ensure!(
-        width % 2 == 0 && height % 2 == 0,
-        "width and height must be even"
+        width > 0 && height > 0 && width % 2 == 0 && height % 2 == 0,
+        "width and height must be even and non-zero"
     );
     let mut options = Options {
         width,
@@ -697,6 +697,15 @@ pub fn run(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_or_odd_dimensions_are_refused() {
+        let args = |w: &str, h: &str| ["bt2100", w, h].map(String::from).to_vec();
+        assert!(parse(&args("0", "2")).is_err());
+        assert!(parse(&args("2", "0")).is_err());
+        assert!(parse(&args("3", "2")).is_err());
+        assert!(parse(&args("2", "2")).is_ok());
+    }
 
     #[test]
     fn a_companion_file_must_cover_every_frame() {

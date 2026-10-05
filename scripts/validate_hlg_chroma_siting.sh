@@ -75,7 +75,7 @@ else
     trap 'rm -rf "$WORK"' EXIT
 fi
 
-rm -f "$WORK/refused-cuts"
+rm -f "$WORK/refused-cuts" "$WORK/measured-cuts"
 
 cargo build --release -q --manifest-path tools/fit_hlg_composer/Cargo.toml
 FIT=tools/fit_hlg_composer/target/release/fit_hlg_composer
@@ -274,11 +274,12 @@ if [ -n "$CUTS" ]; then
         ffmpeg -hide_banner -loglevel error -i "$input" -map 0:v:0 -fps_mode passthrough \
             -f rawvideo -pix_fmt yuv420p10le - |
             "$FIT" chroma-siting "$COMPOSER" "$width" "$height" --every "$EVERY" >"$dir/tool.csv"
+        echo "$dir" >>"$WORK/measured-cuts"
     done
 fi
 
 python3 - "$WORK" "$TOLERANCE" "$MAPPING" <<'PY'
-import csv, glob, json, os, sys
+import csv, json, os, sys
 work, tol, expected = sys.argv[1], float(sys.argv[2]), sys.argv[3]
 failures = []
 
@@ -345,9 +346,11 @@ if os.path.exists(f"{work}/refused-cuts"):
     for line in open(f"{work}/refused-cuts"):
         failures.append(f"chroma location not modelled: {line.strip()}")
 
-for d in sorted(glob.glob(f"{work}/cut-*")):
-    if not os.path.exists(f"{d}/siting"):
-        continue
+# Only the cuts this run measured: a reused --keep directory can hold older ones.
+measured = []
+if os.path.exists(f"{work}/measured-cuts"):
+    measured = [line.strip() for line in open(f"{work}/measured-cuts") if line.strip()]
+for d in sorted(measured):
     cut = os.path.basename(d)[4:]
     siting = open(f"{d}/siting").read().strip()
     own = siting
