@@ -384,7 +384,7 @@ for composer in "${COMPOSERS[@]}"; do
 done
 
 python3 - "$WORK" "$TOLERANCE" "$GATE" "$EXPECT_CUTS" "$CPU_ONLY" "$MAPPINGS" <<'PY'
-import csv, glob, json, os, re, struct, sys
+import csv, glob, json, math, os, re, struct, sys
 work, tol, gate, expect_cuts, cpu_only = sys.argv[1], float(sys.argv[2]), sys.argv[3] == "1", int(sys.argv[4]), sys.argv[5] == "1"
 mappings = dict(item.split("=") for item in sys.argv[6].split())
 failures = []
@@ -437,11 +437,20 @@ def check_run(stem, rows, siting, label):
              f"{len(side['frames']['avg_max_rgb_pq_12bit'])}")
         return side
     worst_max = worst_avg = 0.0
+    nan_frames = []
     for frame, row in enumerate(stats):
         t = rows[frame][target]
-        worst_max = max(worst_max, abs(float(t["max"]) - float(row["raw_max_pq"]) * CODES))
-        worst_avg = max(worst_avg, abs(float(t["avg"]) - float(row["avg_max_rgb_pq"]) * CODES))
-    ok = worst_max <= 0.5 and worst_avg <= 0.5
+        d_max = abs(float(t["max"]) - float(row["raw_max_pq"]) * CODES)
+        d_avg = abs(float(t["avg"]) - float(row["avg_max_rgb_pq"]) * CODES)
+        # max() would skip a NaN, and NaN <= 0.5 is false: a NaN frame fails on its own.
+        if math.isnan(d_max) or math.isnan(d_avg):
+            nan_frames.append(frame)
+            continue
+        worst_max = max(worst_max, d_max)
+        worst_avg = max(worst_avg, d_avg)
+    if nan_frames:
+        fail(f"{label}: NaN in the tool's {target} or the analyzer's statistics at frames {nan_frames[:5]}")
+    ok = worst_max <= 0.5 and worst_avg <= 0.5 and not nan_frames
     print(f"  {label}: analyzer vs {target}: worst |max| {worst_max:.3f}, |avg| {worst_avg:.3f} "
           f"codes over {n} frames {'ok' if ok else 'FAIL'}")
     if not ok:
@@ -505,7 +514,8 @@ def check_backends(cpu_stem, cuda_stem, label):
     else:
         for i, (ra, rb) in enumerate(zip(a, b)):
             head = [k for k in ra if k != "avg_max_rgb_pq"]
-            if any(ra[k] != rb[k] for k in head) or abs(float(ra.get("avg_max_rgb_pq", 0)) - float(rb.get("avg_max_rgb_pq", 0))) > 1e-9:
+            # `not <=` so a NaN on either side counts as a difference.
+            if any(ra[k] != rb[k] for k in head) or not abs(float(ra.get("avg_max_rgb_pq", 0)) - float(rb.get("avg_max_rgb_pq", 0))) <= 1e-9:
                 problems.append(f"frame statistics differ at frame {i}")
                 break
     print(f"  {label}: CPU vs CUDA {'identical' if not problems else 'FAIL: ' + ', '.join(problems)}")
