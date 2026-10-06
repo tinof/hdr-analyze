@@ -62,11 +62,16 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-05 at main@9edee09)
+### Next up (checked 2026-10-06 at main@ab13527)
 
-1. **E8 + E9** on one branch: same crate, same unit-test gate, no sidecar L1 change.
+1. **P8: spec 4:2:0 decode in the analyzer** (priority 1, `feat/hlg-spec-chroma-decode`, own
+   branch). Gate: the analyzer reproduces the tool's `spec-fixed` variant within 0.5 code per frame
+   on the synthetic patterns and the five HLG cuts. First make the script enforce that (see P8
+   Checked). Needs CUDA parity, and `--update` of the HLG L1 regression reference.
 2. **P9 step 0:** an HDR10+-only fixture and the frame alignment of pixel measurements to HDR10+
    scenes, before any hybrid flag (see P9 Checked).
+3. **E11:** `l1_diff` shifts by `leading_skipped_frames`; small, `tools/l1_diff` only, unblocks
+   scoring CRA-start cuts (G4, Joker). E8 + E9 (one branch, unit tests + CUDA parity) follow.
 
 ### Waiting for the owner
 
@@ -243,9 +248,13 @@ and broader hardware acceleration (E5). Neutral trims stay.
   L1 for every file, so it needs a new `luminance_mapping` name, re-analysis of older sidecars and
   its own branch. Gate: the analyzer reproduces the tool's `spec-fixed` variant within 0.5 code per
   frame on the synthetic patterns and the five cuts (`scripts/validate_hlg_chroma_siting.sh`).
-- **Checked 2026-10-05 @9edee09:** `scripts/validate_hlg_dv84_color.sh` tests flat patches only,
-  so it cannot show a chroma-siting error. The local ffmpeg has the `libplacebo` filter with
-  `apply_dolbyvision`, so a renderer for the comparison is available on the dev host.
+  The script does not enforce that gate yet: it fails only on its anchors, which compare the
+  analyzer with the tool's `analyzer` variant, so the fix must first make `spec-fixed` decide.
+- **Checked 2026-10-06 @ab13527:** the script's failures are anchor 1 (tool `analyzer` variant,
+  `validate_hlg_chroma_siting.sh:313`), anchor 2 and unmodelled locations; `spec-fixed` is only
+  printed (`:339`, `:367`), a missing cut is skipped (`:263`) and `--every` thins frames. Nothing
+  carries the chroma location to the analysis (`ffmpeg_io.rs` `VideoInfo`, `frame.rs`
+  `FrameAnalysisOptions`). The tool's fixed point uses i128 (`siting.rs:238`), the kernel f32.
 
 ### P9: HDR10+ → Profile 8.1 L1
 
@@ -264,12 +273,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
-- **Checked 2026-10-05 @9edee09:** a hybrid flag is premature until three things change.
-  `mkvdovi/src/pipeline.rs:1637` passes `--hdr10plus-json`, so `dovi_tool generate` ignores the
-  measured shots on that path (and `--verify` gets no sidecar for HDR10+, `pipeline.rs:895`).
-  `metadata.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path and cannot exercise
-  a hybrid branch. The sidecar has no per-frame peak (`l1_sidecar.rs` `FrameL1Metadata`: min and
-  the two averages only).
+- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline.rs:1635` passes
+  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline.rs:891`);
+  `metadata.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path; the sidecar has no
+  per-frame peak, and mkvdovi reads only per-frame minima (`metadata.rs:986` `L1SidecarFrames`).
+  All 45 development manifests say `shotlist_checked: false`.
 
 ### P10: measured against delivered
 
@@ -499,7 +507,8 @@ The detailed gap table and validation method live in
   `target_nits` on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`;
   the sidecar L1 and the RPU change only under `--legacy-madvr-l1`. The CUDA parity test runs
   `--disable-optimizer` (`cuda_parity.rs:94`) and does not cover it: the round-trip unit test is
-  the gate.
+  the gate. `/pre-pr-review` still requires `clippy-cuda` and CUDA parity for any `analysis/` or
+  `cli.rs` change (`.claude/workflows/pre-pr-panel.js:13`), so E8 + E9 runs them too.
 - **Fix:** one shared bin-edge function for writer and readers, with a round-trip test.
 
 ### E9: `--pre-denoise` values
@@ -523,6 +532,10 @@ The detailed gap table and validation method live in
   frames by the skipped count. Blocks scoring the development cuts that start at a CRA.
 - **Fix:** offset by `leading_skipped_frames` when the reference covers the stream frames, with a
   test on a synthetic open-GOP sidecar.
+- **Checked 2026-10-06 @ab13527:** still open; nothing in `tools/l1_diff/src` reads
+  `leading_skipped_frames`. Shift reference rows, per-shot ranges, scene cuts and exported frame
+  labels together, tell a reference over stream pictures from one over decoded pictures, and keep
+  refusing any other count difference.
 
 ## Checked and kept (2026-10-03)
 
