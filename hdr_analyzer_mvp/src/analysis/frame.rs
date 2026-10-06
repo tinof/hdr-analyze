@@ -46,6 +46,9 @@ pub struct FrameAnalysisOptions<'a> {
     pub min_percentile: f64,
     pub peak_estimator: PeakEstimator,
     pub peak_percentile: f64,
+    /// Keep every analyzed pixel's max-RGB value (`HDR_ANALYZER_DUMP_MAX_RGB`), so a validation
+    /// script can compare the decode per pixel; frame statistics can hide errors that cancel.
+    pub dump_max_rgb: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -57,12 +60,18 @@ pub struct FramePeakStats {
     pub correction_pq: f64,
     pub sigma_pq: f64,
     pub n_eff: u64,
+    /// The frame's unrounded max-RGB average (normalized PQ), as `FrameL1Measurement` holds it
+    /// before the sidecar rounds it to a 12-bit code; written by `--dump-frame-stats`.
+    pub avg_max_rgb_pq: f64,
 }
 
 pub struct AnalyzedFrame {
     pub frame: MadVRFrame,
     pub l1: FrameL1Measurement,
     pub peak_stats: FramePeakStats,
+    /// With `FrameAnalysisOptions::dump_max_rgb`: the max-RGB value (normalized PQ) of every
+    /// pixel of the crop rect, row by row; NaN where a pixel was not analyzed.
+    pub max_rgb_pixels: Option<Vec<f32>>,
 }
 
 fn mean_or_zero(sum: f64, count: u64) -> f64 {
@@ -485,6 +494,8 @@ struct FrameAccumulator {
     sum_luma_pq: f64,
     sum_max_rgb_pq: f64,
     pixel_count: u64,
+    /// `(x, y, max-RGB)` of every pixel, only with `FrameAnalysisOptions::dump_max_rgb`.
+    pixels: Vec<(u32, u32, f32)>,
 }
 
 impl FrameAccumulator {
@@ -498,6 +509,7 @@ impl FrameAccumulator {
             sum_luma_pq: 0.0,
             sum_max_rgb_pq: 0.0,
             pixel_count: 0,
+            pixels: Vec::new(),
         }
     }
 
@@ -510,6 +522,7 @@ impl FrameAccumulator {
         self.sum_luma_pq += other.sum_luma_pq;
         self.sum_max_rgb_pq += other.sum_max_rgb_pq;
         self.pixel_count += other.pixel_count;
+        self.pixels.extend(other.pixels);
         for (bin, other_bin) in self.pq_hist.iter_mut().zip(other.pq_hist.iter()) {
             *bin += *other_bin;
         }
@@ -690,6 +703,12 @@ pub fn analyze_native_frame_cropped(
                         accumulator.sum_luma_pq += luma_pq;
                         accumulator.sum_max_rgb_pq += max_rgb_pq;
                         accumulator.pixel_count += 1;
+                        if options.dump_max_rgb {
+                            // Exact: every branch above computes max-RGB in f32.
+                            accumulator
+                                .pixels
+                                .push((x as u32, y as u32, max_rgb_pq as f32));
+                        }
 
                         let peak_pq = match options.peak_domain {
                             PeakDomain::MaxRgb => max_rgb_pq,
@@ -766,6 +785,15 @@ pub fn analyze_native_frame_cropped(
     // Compute hue histogram from chroma planes
     let hue_histogram = compute_hue_histogram(frame, crop_rect);
 
+    let max_rgb_pixels = options.dump_max_rgb.then(|| {
+        let width = crop_rect.width as usize;
+        let mut pixels = vec![f32::NAN; width * crop_rect.height as usize];
+        for &(x, y, value) in &accumulator.pixels {
+            pixels[(y as usize - y_start) * width + (x as usize - x_start)] = value;
+        }
+        pixels
+    });
+
     Ok(AnalyzedFrame {
         frame: MadVRFrame {
             peak_pq_2020: selected_peak_pq,
@@ -790,7 +818,9 @@ pub fn analyze_native_frame_cropped(
             correction_pq: raw_max_pq - robust_pq,
             sigma_pq,
             n_eff,
+            avg_max_rgb_pq,
         },
+        max_rgb_pixels,
     })
 }
 

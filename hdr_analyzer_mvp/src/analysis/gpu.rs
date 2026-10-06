@@ -767,7 +767,11 @@ mod backend {
                     correction_pq: raw_max_pq - robust_pq,
                     sigma_pq,
                     n_eff,
+                    avg_max_rgb_pq,
                 },
+                // The kernel does not write per-pixel values yet; the pipeline refuses a dump
+                // on this path.
+                max_rgb_pixels: None,
             })
         }
     }

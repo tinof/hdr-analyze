@@ -562,11 +562,13 @@ struct Options {
     render: Option<String>,
     mask: Option<String>,
     anchor_out: Option<String>,
+    dump_pixels: Option<String>,
 }
 
 fn parse(args: &[String]) -> Result<(String, Options)> {
     const USAGE: &str = "chroma-siting <preset|bt2100> <width> <height> [--every N] \
-                         [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] < yuv420p10le";
+                         [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] \
+                         [--dump-pixels <dir>] < yuv420p10le";
     let composer = args.first().context(USAGE)?.clone();
     let width: usize = args.get(1).context(USAGE)?.parse()?;
     let height: usize = args.get(2).context(USAGE)?.parse()?;
@@ -581,6 +583,7 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
         render: None,
         mask: None,
         anchor_out: None,
+        dump_pixels: None,
     };
     let mut rest = args[3..].iter();
     while let Some(arg) = rest.next() {
@@ -594,6 +597,7 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
             "--render" => options.render = Some(value()?),
             "--mask" => options.mask = Some(value()?),
             "--anchor-out" => options.anchor_out = Some(value()?),
+            "--dump-pixels" => options.dump_pixels = Some(value()?),
             other => bail!("unknown argument {other}\n{USAGE}"),
         }
     }
@@ -636,6 +640,30 @@ fn codes(bytes: &[u8]) -> Vec<u16> {
         .chunks_exact(2)
         .map(|b| u16::from_le_bytes([b[0], b[1]]) & 0x03FF)
         .collect()
+}
+
+/// Variants `--dump-pixels` writes: the analyzer's decode target (`spec-float`) at each
+/// chroma location.
+const DUMPED_VARIANTS: [usize; 2] = [2, 3];
+const _: () = assert!(
+    matches!(VARIANTS[2].as_bytes(), b"spec-float-left")
+        && matches!(VARIANTS[3].as_bytes(), b"spec-float-topleft")
+);
+
+/// `--dump-pixels`: per analyzed frame and dumped variant, `frame_<index>_<variant>.f32` with
+/// every pixel's max-RGB (normalized PQ) as little-endian f32, row by row; the analyzer writes
+/// the same layout under `HDR_ANALYZER_DUMP_MAX_RGB`.
+fn dump_pixels(dir: &str, index: usize, values: &[[f32; 9]]) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("create {dir}"))?;
+    for variant in DUMPED_VARIANTS {
+        let path = format!("{dir}/frame_{index:06}_{}.f32", VARIANTS[variant]);
+        let bytes: Vec<u8> = values
+            .iter()
+            .flat_map(|pixel| pixel[variant].to_le_bytes())
+            .collect();
+        std::fs::write(&path, bytes).with_context(|| format!("write {path}"))?;
+    }
+    Ok(())
 }
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -708,6 +736,9 @@ pub fn run(args: &[String]) -> Result<()> {
                 cr: &cr,
             };
             let values = variants.frame(&frame);
+            if let Some(dir) = options.dump_pixels.as_deref() {
+                dump_pixels(dir, index, &values)?;
+            }
             let mask = has_mask.then_some(mask_buffer.as_slice());
             let stats = frame_stats(&values, mask);
             for (v, name) in VARIANTS.iter().enumerate() {

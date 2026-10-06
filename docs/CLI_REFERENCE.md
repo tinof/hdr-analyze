@@ -144,7 +144,7 @@ warning; `mkvdovi` refuses such HLG input (see [HLG input](#hlg-input)).
 |------|---------|-------------|
 | `--analysis-threads <N>` | logical cores | Override Rayon worker count for histogram analysis |
 | `--profile-performance` | off | Print per-stage throughput (decode vs. analysis) when finished |
-| `--dump-frame-stats <PATH>` | none | Write sample-rate-aligned CSV with selected/raw/percentile/robust peaks, sigma, correction, effective-tail count, and the scene-detection series (`scene_diff`, `scene_score`, `scene_baseline`, `scene_start`) |
+| `--dump-frame-stats <PATH>` | none | Write sample-rate-aligned CSV with selected/raw/percentile/robust peaks, sigma, correction, effective-tail count, and the scene-detection series (`scene_diff`, `scene_score`, `scene_baseline`, `scene_start`), then the frame's unrounded max-RGB average (`avg_max_rgb_pq`). `HDR_ANALYZER_DUMP_MAX_RGB=<dir>` also writes every analyzed pixel's max-RGB value (`frame_<n>_x<x>_y<y>_w<w>_h<h>.f32`, little-endian f32 over the crop, CPU path only) for `scripts/validate_hlg_chroma_siting.sh` |
 
 ### Notes for v6 output
 

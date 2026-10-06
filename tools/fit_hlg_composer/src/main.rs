@@ -5,8 +5,10 @@
 //! fit_hlg_composer fit [--write <bt2100_v1.rs>] [--ridge <r>]
 //! fit_hlg_composer report [--spec-fixed [--vectors]]
 //! fit_hlg_composer rewrite-rpu <preset|bt2100> <RPU.bin>
+//! fit_hlg_composer mapping <preset|bt2100>
 //! fit_hlg_composer chroma-siting <preset|bt2100> <width> <height> [--every N]
-//!     [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] < yuv420p10le
+//!     [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] [--dump-pixels <dir>]
+//!     < yuv420p10le
 //! ```
 
 mod fit;
@@ -364,7 +366,18 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("mapping") => {
+            // The sidecar `luminance_mapping` the analyzer writes for a composer, so scripts
+            // need not repeat the names.
+            let composer = match args.get(1).map(String::as_str) {
+                Some("preset") => Composer::Preset,
+                Some("bt2100") => Composer::Bt2100V1,
+                _ => bail!("mapping <preset|bt2100>"),
+            };
+            println!("{}", composer.luminance_mapping());
+            Ok(())
+        }
         Some("chroma-siting") => siting::run(&args[1..]),
-        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report [--spec-fixed [--vectors]] | rewrite-rpu <preset|bt2100> <RPU.bin> | chroma-siting <preset|bt2100> <width> <height> [options]"),
+        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report [--spec-fixed [--vectors]] | rewrite-rpu <preset|bt2100> <RPU.bin> | mapping <preset|bt2100> | chroma-siting <preset|bt2100> <width> <height> [options]"),
     }
 }
