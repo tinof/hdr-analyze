@@ -461,7 +461,7 @@ The detailed gap table and validation method live in
   references in `tools/l1_diff/corpus`); `scripts/cuda-parity.sh` checks CPU against CUDA on a GPU
   host; `scripts/rpu-baseline.sh` captures and compares final RPUs. Synthetic accuracy runs in
   workspace CI. Since 2026-10-06 the CI lint job runs clippy on the analyzer with `--features cuda`
-  (no GPU or toolkit; passed locally without nvcc, first hosted CI run pending).
+  (no GPU or toolkit; first hosted run passed on #31).
 - **Open:** expand the corpus (feeds WS6). A self-hosted GPU runner for `scripts/cuda-parity.sh`,
   now a prerequisite because the main analysis path is untested in hosted CI. Spike: an NVRTC
   compile-only check of `kernels.cu` without a GPU.

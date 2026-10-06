@@ -23,7 +23,7 @@ driver and NVRTC at runtime, so no GPU or toolkit is needed.
 - Gates on d459681: fmt, clippy, clippy-cuda, test (no unexpected skips), `scripts/cuda-parity.sh`,
   L1 regression; all pass, L1 references unchanged. No measurement changes on either backend.
 - The CI `cuda` clippy step passed locally with cudarc's build script rerun without nvcc or CUDA
-  environment variables; its first hosted CI run is pending.
+  environment variables, and in hosted CI on #31 (run 37530882715).
 - Still open: P1 item 1 (CPU fallback default); E1 GPU runner and NVRTC compile-only spike; E2
   addition; E12.
 
