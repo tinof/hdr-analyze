@@ -1,7 +1,7 @@
 export const meta = {
   name: 'pre-pr-panel',
   description: 'Pre-PR review of a roadmap change: three review lenses, each finding checked by an independent skeptic, plus the gates the touched paths require',
-  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /codex-ship step 1b). args: {base, files, item, acceptanceGate, scopeFile}. Do not start it without args.',
+  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /codex-ship step 1b). args: {base, files, item, acceptanceGate, scopeFile}. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; pre-pr-review step 5 and /codex-ship steps 4 and 6 call it that way to recompute gates after fixes.',
   phases: [
     { title: 'Review', detail: 'correctness, repo contracts, tests and gates; one Opus reviewer each' },
     { title: 'Verify', detail: 'one skeptic per finding, with a different lens than the finder' },
@@ -22,7 +22,7 @@ const any = re => files.some(f => re.test(f))
 
 // Required gates, computed from the touched paths (not left to judgment).
 const gates = new Set()
-const workspaceRust = files.some(f => !f.startsWith('tools/') && /\.rs$|(^|\/)Cargo\.(toml|lock)$|^\.cargo\/|^rust-toolchain\.toml$|^clippy\.toml$/.test(f))
+const workspaceRust = files.some(f => !f.startsWith('tools/') && /\.rs$|(^|\/)Cargo\.(toml|lock)$|^\.cargo\/|^rust-toolchain\.toml$|^clippy\.toml$|^rustfmt\.toml$/.test(f))
 if (workspaceRust) { gates.add('fmt'); gates.add('clippy'); gates.add('test') }
 // CPU/GPU analysis path: the kernel, its host side, the decode path, the orchestration that hands
 // frames to it, the composer coefficients both backends use, and build inputs that change them.
@@ -40,6 +40,9 @@ for (const f of files) {
 }
 const requiredGates = [...gates]
 log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust or analysis paths touched)'))
+// Gate list only, no reviewers: lets the skills recompute gates for a file list that grew after
+// fixes, without a second copy of the path rules.
+if (a.gatesOnly) return { gatesOnly: true, requiredGates }
 
 const SCOPE = [
   `Scope: run \`git diff ${a.base}...HEAD\` for the committed part, and read the uncommitted files `,

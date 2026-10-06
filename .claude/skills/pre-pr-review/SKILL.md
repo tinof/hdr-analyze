@@ -10,12 +10,17 @@ allowed-tools: Workflow(pre-pr-panel)
 
 **Modes.**
 - **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including step 2
-  (Codex focused pass). End with "Ready for `/codex-ship <focus text>`".
+  (Codex focused pass). End as step 8 says.
 - **Ship mode:** `/codex-ship` step 1b told you to follow this file. Skip step 2: the focus text
   from step 7 goes to `/codex-ship`'s steered Codex pass instead, so the same diff never gets two
   steered Codex runs. A blocker from step 4 or 5 stops `/codex-ship` before its push.
 
-Either way, the user's command is the opt-in for the one `pre-pr-panel` workflow run in step 3.
+Both modes end with the record in step 8. `/codex-ship` step 1b reuses that record instead of
+running this review again while HEAD is unchanged, so a standalone run followed by `/codex-ship`
+costs one review, not two.
+
+Either way, the user's command is the opt-in for the `pre-pr-panel` review run in step 3 (and its
+one rerun in step 4), and for its `gatesOnly` calls, which start no agents.
 Codex runs read-only and follows `~/.claude/rules/codex-routing.md` (`command codex`). Claude
 makes every fix.
 
@@ -23,9 +28,16 @@ makes every fix.
 
 1. Base: `--base` argument, else the open PR's base (`gh pr view --json baseRefName`), else
    `main`. `git fetch origin <base>`.
-2. Scope = committed `origin/<base>...HEAD` **plus** staged, unstaged and untracked files that
-   belong to the task. Leave out untracked files that do not clearly belong (downloads, media,
-   logs, scratch output); never delete them.
+2. Commit the task first, so the review covers a commit and step 8 can record it. If HEAD is on
+   the base branch, create a branch in the repo's style first (`feat/…`, `fix-…`; see recent PR
+   head names). Then commit the task's staged, unstaged and untracked files in the base's commit
+   style (`git log --oneline -15 origin/<base>`). Leave out untracked files that do not clearly
+   belong (downloads, media, logs, scratch output). If you cannot tell, ask once. Never delete
+   them. In ship mode, `/codex-ship` step 1 has already done this.
+   Scope = `git diff --name-only origin/<base>...HEAD`.
+   Then remove any record for this HEAD (step 8), so a run that stops early cannot leave an
+   older, reusable one behind:
+   `D=$(git rev-parse --path-format=absolute --git-common-dir)/pre-pr-review; S=$(git rev-parse HEAD); rm -f "$D/$S.json" "$D/$S.md" "$D/$S.scope.md"`
 3. Item ID: the argument, else from the branch name or the commit messages, else ask once.
 4. Read the item's section in `ROADMAP.md`: note the step being closed and its **acceptance
    gate** (what evidence closes it, e.g. a development-tier score, precision/recall against
@@ -38,7 +50,7 @@ makes every fix.
 Background Bash; wait for the completion notification, do not poll:
 
 ```
-command codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the committed diff and the listed uncommitted files). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none." > <scratchpad>/prepr-codex.md 2>&1
+command codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none." > <scratchpad>/prepr-codex.md 2>&1
 ```
 
 Report the `model:` / `reasoning effort:` header lines. A failed run is reported as failed;
@@ -65,15 +77,22 @@ code from the file list). Do not choose the gates by judgment; use that list.
    each of them yourself like any other. Merge two findings only when they describe the same
    defect; distinct defects at the same file:line stay separate.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
-   reason that cites code) / deferred (real, out of scope).
+   reason that cites code) / deferred (real, out of scope). A deferred or rejected P0/P1 is not a
+   blocker here: it goes into the record, and `/codex-ship` asks the user about it at its merge
+   gate, the same way it does for Codex findings.
 4. Call the `advisor` tool once with the merged list before you settle on the fixes.
 5. Fix the confirmed findings; add a regression test where the defect is testable.
 
 ## 5. Gates, on the final code
 
-Run every gate in `requiredGates`, after the last fix. If a later fix round changes code (here,
-or in `/codex-ship` steps 4–6), recompute the gate list for the new file list and run the gates
-again. The gate commands:
+Run the gates after the last fix, on the final file list. Fixes can touch files outside the first
+scope, and those files can add gates. So first commit the fixes (step 6 gives the message), then
+recompute the list: call the Workflow tool with `name: "pre-pr-panel"` and
+`args: {"base": "origin/<base>", "files": [<git diff --name-only origin/<base>...HEAD>], "gatesOnly": true}`.
+That returns `requiredGates` from the same path rules and starts no agents. Use the union of
+that list and step 3's list. Do the same after every later fix round, here or in `/codex-ship`
+steps 4–6, and run the gates again. When the last run passes, save the commit it ran on,
+`git rev-parse HEAD`, as `gatedCommit` for step 8. The gate commands:
 
 | Gate | Command |
 |------|---------|
@@ -124,9 +143,73 @@ the item and step, the fixes made, the gate results, and whether the acceptance-
 exists and where. Read its diff (`git diff -- '*.md'`) before you commit it; revert any edit you
 cannot verify against the code.
 
+Commits, in both modes and this order: the code fixes before the gates (step 5) as
+`fix: address pre-PR review` with a one-line list of the findings, then the docs edits here as
+`docs: …`. The two are never mixed. Commit only task files; leave unrelated untracked files
+alone.
+
 ## 7. Report
 
 Write `<scratchpad>/pre-pr-review.md`: findings table (priority, file:line, verdict, fix commit
 or reason), gate results, blockers, docs changed. Then return **focus text** for the Codex
 review: the contract areas this diff touches plus anything still uncertain, in one or two
-sentences. Standalone mode ends with "Ready for `/codex-ship <focus text>`".
+sentences.
+
+## 8. Record
+
+The record lets `/codex-ship` skip a second review of the same commit. It also carries what
+`/codex-ship` needs if it has to rerun the gates or the docs keeper later in another session.
+
+**Tree check.** The gates ran on the working tree, so the record is valid only if that tree was
+HEAD. This check is mechanical, not a judgment of which files belong to the task, and
+`/codex-ship` step 1b runs the same one. Both commands must print nothing:
+
+```bash
+git status --porcelain --untracked-files=no
+git ls-files --others --exclude-standard | grep -E '(^|/)(src|tests|benches|examples)/|\.(rs|cu)$|(^|/)(build\.rs|Cargo\.(toml|lock)|rust-toolchain\.toml)$|^\.cargo/|^scripts/'
+```
+
+Untracked files outside those paths (downloads, PDFs, notes) do not matter. If either command
+prints anything, write no record, and say which files in the report.
+
+The `docs: …` commit after the gates may change only Markdown files:
+`git diff --name-only <gatedCommit> HEAD` must list only `*.md`. `<gatedCommit>` is the sha saved
+in step 5, never one looked up afterwards. Otherwise write no record.
+
+Use the **full** sha and an **absolute** path. `/codex-ship` looks the record up with
+`git rev-parse HEAD`, and the Write tool needs an absolute path:
+
+```bash
+S=$(git rev-parse HEAD); D=$(git rev-parse --path-format=absolute --git-common-dir)/pre-pr-review
+mkdir -p "$D"; cp <scratchpad>/pre-pr-review.md "$D/$S.md"; cp <scratchpad>/prepr-scope.md "$D/$S.scope.md"
+echo "$D/$S.json"
+```
+
+The common dir is shared by every worktree of the repo and is never committed. The copies are
+needed because the scratchpad belongs to one session, and `/codex-ship` usually runs in another.
+Then write the echoed path with the Write tool:
+
+```json
+{"head": "<full sha>", "base": "origin/<base>", "item": "<ID + step>",
+ "acceptanceGate": "<quoted gate>", "acceptanceEvidence": "<where, or none>",
+ "mode": "standalone | ship", "complete": true, "gatedCommit": "<full sha from step 5>",
+ "requiredGates": ["<union from step 5>"], "gateResults": {"<gate>": "pass | fail | not-run"},
+ "blockers": [], "unfixedConfirmedP0P1": 0,
+ "deferredP0P1": [{"where": "file:line", "reason": "..."}],
+ "rejectedP0P1": [{"where": "file:line", "reason": "..."}],
+ "codexFocusedPass": "done | failed | skipped", "focusText": "...",
+ "report": "<full sha>.md", "scope": "<full sha>.scope.md"}
+```
+
+- `requiredGates` is the union from step 5, and `gateResults` has one entry for each of its
+  gates.
+- `complete` is false when a lens was still missing after the rerun in step 4.
+- `deferredP0P1` and `rejectedP0P1` do not block reuse. `/codex-ship` asks the user about them at
+  its merge gate.
+- Write the record also when there are blockers. `/codex-ship` reads it and refuses to reuse it.
+
+Standalone mode ends by naming the next command, `/codex-ship`. When the record is reusable
+(`complete` true, no blockers, `unfixedConfirmedP0P1` 0, every gate `pass`), add: "It reuses
+this review while HEAD stays at <short sha>; a new commit makes it run the review again."
+Otherwise name what blocks reuse (no record and why, or the blockers), and say that
+`/codex-ship` will stop on it or run the review again.

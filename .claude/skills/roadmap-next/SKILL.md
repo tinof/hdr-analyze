@@ -61,8 +61,8 @@ Do not spawn agents for this; it is a handful of reads.
 Up to three startable steps. For each:
 - item ID + step, and the priority number it belongs to;
 - the **acceptance gate** quoted from the item (what evidence closes the step);
-- files or crates likely touched, and which gates `/pre-pr-review` will require (CUDA parity,
-  L1 regression, integration tests with media);
+- files or crates likely touched, and which gates the pre-PR review in `/codex-ship` will require
+  (CUDA parity, L1 regression, integration tests with media);
 - branch name in the repo style (`feat/…`, `fix-…`; check `gh pr list --state merged --limit 10`);
 - whether it can share a branch with another candidate. Rule from ROADMAP: same crate, same test
   gate and no L1 change. A step that moves L1 always has its own branch.
