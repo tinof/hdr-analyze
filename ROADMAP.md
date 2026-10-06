@@ -93,6 +93,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | this PR |
 | 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | this file |
 | 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | [#29](https://github.com/tinof/hdr-analyze/pull/29) |
 | 2026-10-06 | Spec fixed-point arithmetic measured: `bt2100` is not neutral at `code / 1024` (spread 5.9 codes); the decode change targets the spec structure in `code / 1023` (`spec-float`). | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
@@ -202,10 +203,12 @@ and broader hardware acceleration (E5). Neutral trims stay.
      flip CPU `auto` to `accurate` (the same file then gives the same L1 on any host) or keep
      `balanced` with a visible note. `fast` puts cuts on a 3-frame grid and misses peaks on skipped
      frames.
-  2. Warn on an explicit `balanced`/`fast` under CUDA.
-  3. Re-analyze a coarser sidecar when the resolved quality is `accurate`, instead of reusing it
-     with a warning.
-  4. Warn when a CUDA-resolved run comes back with `analysis.gpu: false`.
+- **Done 2026-10-06** (former open items 2–4; evidence: unit tests `coarser_sampling`,
+  `rejects_coarser_sidecar`, `analysis_quality_notice`, `gpu_analysis_missing` in
+  `mkvdovi/src/pipeline.rs`, e2e test `accurate_reanalyzes_coarser_measurements` in
+  `mkvdovi/tests/hlg_profile84.rs`): mkvdovi warns on an explicit `balanced`/`fast` with GPU
+  analysis; under `accurate` it re-analyzes a coarser sidecar instead of reusing it; it warns when a
+  run that expected GPU analysis comes back with `analysis.gpu: false`.
 
 ### P3: L5 from the crop
 
@@ -456,9 +459,9 @@ The detailed gap table and validation method live in
 - **Status:** Core complete. `tools/l1_diff` runs in CI (`scripts/ci/l1-regression-gate.sh`,
   references in `tools/l1_diff/corpus`); `scripts/cuda-parity.sh` checks CPU against CUDA on a GPU
   host; `scripts/rpu-baseline.sh` captures and compares final RPUs. Synthetic accuracy runs in
-  workspace CI.
-- **Open:** expand the corpus (feeds WS6). Lint the `cuda` feature in CI (no GPU needed; the
-  driver and NVRTC are loaded at runtime). A self-hosted GPU runner for `scripts/cuda-parity.sh`,
+  workspace CI. Since 2026-10-06 the CI lint job runs clippy on the analyzer with `--features cuda`
+  (no GPU or toolkit; passed locally without nvcc, first hosted CI run pending).
+- **Open:** expand the corpus (feeds WS6). A self-hosted GPU runner for `scripts/cuda-parity.sh`,
   now a prerequisite because the main analysis path is untested in hosted CI. Spike: an NVRTC
   compile-only check of `kernels.cu` without a GPU.
 
