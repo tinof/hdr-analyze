@@ -8,7 +8,7 @@
 //! fit_hlg_composer mapping <preset|bt2100>
 //! fit_hlg_composer chroma-siting <preset|bt2100> <width> <height> [--every N]
 //!     [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] [--dump-pixels <dir>]
-//!     < yuv420p10le
+//!     [--spec-only] < yuv420p10le
 //! ```
 
 mod fit;

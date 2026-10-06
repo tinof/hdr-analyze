@@ -314,8 +314,10 @@ impl Variants {
             .clamp(self.source_range[0], self.source_range[1])
     }
 
-    /// max(R′,G′,B′) of every variant for every pixel of one frame, in normalized PQ.
-    pub fn frame(&self, frame: &Frame<'_>) -> Vec<[f32; 9]> {
+    /// max(R′,G′,B′) of every variant for every pixel of one frame, in normalized PQ. Without
+    /// `per_pixel_mmr` the variants that run the MMR per pixel (analyzer, renderer) are NaN:
+    /// they cost most of the time and the spec variants do not need them.
+    pub fn frame(&self, frame: &Frame<'_>, per_pixel_mmr: bool) -> Vec<[f32; 9]> {
         let (width, height) = (frame.width, frame.height);
         let (width_c, height_c) = (width / 2, height / 2);
         let down = downsample_luma(frame.y, width, height);
@@ -363,12 +365,14 @@ impl Variants {
                     let y_code = frame.y[y * width + x];
                     let luma = self.decoder.luma_term_f32(y_code);
                     let quad = (y / 2) * width_c + x / 2;
-                    let mut out = [0.0_f32; 9];
-                    out[0] = self.max_rgb(
-                        self.decoder
-                            .rgb_pq(y_code, frame.cb[quad], frame.cr[quad])
-                            .0,
-                    );
+                    let mut out = [f32::NAN; 9];
+                    if per_pixel_mmr {
+                        out[0] = self.max_rgb(
+                            self.decoder
+                                .rgb_pq(y_code, frame.cb[quad], frame.cr[quad])
+                                .0,
+                        );
+                    }
                     for (k, mode) in [Upsample::Nearest, Upsample::Left, Upsample::TopLeft]
                         .into_iter()
                         .enumerate()
@@ -384,7 +388,10 @@ impl Variants {
                     for (slot, mode) in [
                         (RENDERER_LEFT, Upsample::Left),
                         (RENDERER_TOPLEFT, Upsample::TopLeft),
-                    ] {
+                    ]
+                    .into_iter()
+                    .filter(|_| per_pixel_mmr)
+                    {
                         let (chroma, _) = self.decoder.reshape_chroma(
                             Decoder::normalize(y_code),
                             bl[0].sample(mode, x, y) / 1023.0,
@@ -500,12 +507,22 @@ pub fn frame_stats(values: &[[f32; 9]], mask: Option<&[u8]>) -> FrameStats {
             let value = code(pixel[v]);
             max[v] = max[v].max(value);
             sum[v] += f64::from(pixel[v]);
+            if value.is_nan() || pixel[0].is_nan() {
+                // A variant `--spec-only` skipped, or no analyzer variant to differ from.
+                continue;
+            }
             let diff = (value - code(pixel[0])).abs();
             diff_max[v] = diff_max[v].max(diff);
             histogram[v][((diff / DIFF_STEP) as usize).min(DIFF_BINS - 1)] += 1;
             if in_roi {
                 roi[v] = roi[v].max(diff);
             }
+        }
+    }
+    // A skipped variant (`--spec-only`) has no maximum either; f64::max ignored its NaNs.
+    for (m, s) in max.iter_mut().zip(sum) {
+        if s.is_nan() {
+            *m = f64::NAN;
         }
     }
     FrameStats {
@@ -563,12 +580,13 @@ struct Options {
     mask: Option<String>,
     anchor_out: Option<String>,
     dump_pixels: Option<String>,
+    spec_only: bool,
 }
 
 fn parse(args: &[String]) -> Result<(String, Options)> {
     const USAGE: &str = "chroma-siting <preset|bt2100> <width> <height> [--every N] \
                          [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] \
-                         [--dump-pixels <dir>] < yuv420p10le";
+                         [--dump-pixels <dir>] [--spec-only] < yuv420p10le";
     let composer = args.first().context(USAGE)?.clone();
     let width: usize = args.get(1).context(USAGE)?.parse()?;
     let height: usize = args.get(2).context(USAGE)?.parse()?;
@@ -584,6 +602,7 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
         mask: None,
         anchor_out: None,
         dump_pixels: None,
+        spec_only: false,
     };
     let mut rest = args[3..].iter();
     while let Some(arg) = rest.next() {
@@ -598,12 +617,17 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
             "--mask" => options.mask = Some(value()?),
             "--anchor-out" => options.anchor_out = Some(value()?),
             "--dump-pixels" => options.dump_pixels = Some(value()?),
+            "--spec-only" => options.spec_only = true,
             other => bail!("unknown argument {other}\n{USAGE}"),
         }
     }
     ensure!(
         options.render.is_none() || options.anchor_out.is_some(),
         "--render needs --anchor-out"
+    );
+    ensure!(
+        !(options.spec_only && options.render.is_some()),
+        "--render compares the renderer variants, which --spec-only skips"
     );
     Ok((composer, options))
 }
@@ -735,7 +759,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 cb: &cb,
                 cr: &cr,
             };
-            let values = variants.frame(&frame);
+            let values = variants.frame(&frame, !options.spec_only);
             if let Some(dir) = options.dump_pixels.as_deref() {
                 dump_pixels(dir, index, &values)?;
             }
@@ -830,7 +854,7 @@ mod tests {
                     cr: &cr_plane,
                 };
                 let expected = variants.flat_max_rgb(y, cb, cr).to_bits();
-                for pixel in variants.frame(&frame) {
+                for pixel in variants.frame(&frame, true) {
                     for value in &pixel[4..=6] {
                         assert_eq!(value.to_bits(), expected, "{composer:?} ({y}, {cb}, {cr})");
                     }
@@ -959,7 +983,7 @@ mod tests {
                 cb: &cbs,
                 cr: &crs,
             };
-            for pixel in variants.frame(&frame) {
+            for pixel in variants.frame(&frame, true) {
                 for v in [1, 2, 3, 7, 8] {
                     assert!(
                         (pixel[v] - pixel[0]).abs() < 1e-6,

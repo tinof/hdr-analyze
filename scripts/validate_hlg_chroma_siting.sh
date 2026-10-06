@@ -365,9 +365,14 @@ PY
             for backend in "${BACKENDS[@]}"; do
                 analyze "$input" "$dir/$composer/$backend/cut" "$composer" "$backend" nodump --no-crop
             done
+            # The gate needs only the spec variants; the per-pixel MMR of the analyzer and
+            # renderer variants would multiply the time on 4K cuts.
+            spec_only=()
+            [ "$GATE" = 1 ] && spec_only=(--spec-only)
             ffmpeg -hide_banner -loglevel error -i "$input" -map 0:v:0 -fps_mode passthrough \
                 -f rawvideo -pix_fmt yuv420p10le - |
-                "$FIT" chroma-siting "$composer" "$width" "$height" --every "$EVERY" >"$dir/$composer/tool.csv"
+                "$FIT" chroma-siting "$composer" "$width" "$height" --every "$EVERY" "${spec_only[@]}" \
+                    >"$dir/$composer/tool.csv"
         done
         echo "$dir" >>"$WORK/measured-cuts"
     done
@@ -441,9 +446,10 @@ def check_run(stem, rows, siting, label):
           f"codes over {n} frames {'ok' if ok else 'FAIL'}")
     if not ok:
         failures.append(f"{label}: analyzer vs {target} max {worst_max:.3f} avg {worst_avg:.3f}")
-    # Diagnostic: the tool's model of the pre-P8 analyzer.
-    old_max = max(abs(float(rows[f]["analyzer"]["max"]) - float(stats[f]["raw_max_pq"]) * CODES) for f in rows)
-    print(f"  {label}: (diagnostic) analyzer vs the tool's pre-P8 model: worst |max| {old_max:.3f}")
+    # Diagnostic: the tool's model of the pre-P8 analyzer (absent under --spec-only).
+    old = [abs(float(rows[f]["analyzer"]["max"]) - float(stats[f]["raw_max_pq"]) * CODES) for f in rows]
+    if old and all(v == v for v in old):
+        print(f"  {label}: (diagnostic) analyzer vs the tool's pre-P8 model: worst |max| {max(old):.3f}")
     return side
 
 def check_pixels(stem, tool_dir, siting, width, label, expect_crop):
@@ -589,6 +595,8 @@ for d in sorted(measured):
         # Per-scene measurement against the analyzer (first backend).
         side, stats = load_run(f"{d}/{composer}/{backends[0]}/cut")
         variants = [f"spec-float-{siting}", f"spec-fixed-{siting}", "spec-float-nearest", f"renderer-{siting}", "analyzer"]
+        # --spec-only (gate mode) leaves the per-pixel-MMR variants out.
+        variants = [v for v in variants if rows and rows[min(rows)][v]["max"].lower() != "nan"]
         per_scene = {v: {"max": [], "avg": []} for v in variants}
         has_avg = bool(stats) and "avg_max_rgb_pq" in stats[0]
         for scene in side["scenes"]:
