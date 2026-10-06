@@ -237,7 +237,7 @@ mkvdovi "input.mkv"     # process a specific file
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame |
+| `--analysis-quality <auto\|fast\|balanced\|accurate>` | `auto` | Analyzer sampling: `auto` = `accurate` when GPU analysis is available, else `balanced`; fast = half-res/every 3rd frame, balanced = half-res/every frame, accurate = full-res/every frame. Only `accurate` gives identical output on CPU and CUDA; with GPU analysis all presets run at the same speed, so an explicit `balanced`/`fast` there is warned about. Under `accurate`, existing measurements analyzed more coarsely are re-analyzed |
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
 | `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation. Not available for HLG input (the file is refused) |
 | `--hlg-composer <bt2100\|preset>` | `bt2100` | Profile 8.4 composer written into the RPU of HLG inputs, and measured through. `bt2100` (default) is fitted to the BT.2100 / BT.2408 1000-nit conversion: mkvdovi replaces the composer on every RPU frame. `preset` keeps the RPU exactly as `dovi_tool generate` writes it; use it if a display renders bt2100 output wrongly. Whether playback devices apply a composer other than the preset is not yet confirmed by a playback test. When analysis runs, mkvdovi passes the composer to the analyzer; an analyzer whose `--help` does not list `--hlg-composer` is accepted only with `preset`. Ignored for non-HLG input. See [HLG_COMPOSER.md](HLG_COMPOSER.md) |
@@ -358,7 +358,9 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
 - Otherwise → behaves as `--hwaccel none` (today's CPU pipeline).
 - `--analysis-quality auto` (the default) additionally resolves to `accurate` only when CUDA is
   active **and** the spawned `hdr_analyzer_mvp` advertises `+cuda` in `--version`; otherwise
-  `balanced`. This avoids accidentally running full-res CPU analysis with a non-CUDA analyzer build.
+  `balanced`. This avoids accidentally running full-res CPU analysis with a non-CUDA analyzer build;
+  `mkvdovi` warns when `--hwaccel cuda` meets an analyzer without `+cuda`, and after a run that
+  expected GPU analysis but was analyzed on the CPU.
 
 The resolved choice is printed at startup. Explicit `--hwaccel none|cuda` values skip detection
 entirely.

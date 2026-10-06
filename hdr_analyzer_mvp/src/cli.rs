@@ -115,8 +115,9 @@ pub struct Cli {
     #[arg(long)]
     pub target_peak_nits: Option<u32>,
 
-    /// Downscale factor for analysis to improve throughput (1=full, 2=half, 4=quarter)
-    /// Only affects internal analysis resolution. Output statistics remain comparable.
+    /// Downscale factor for analysis (1=full, 2=half, 4=quarter). Speeds up CPU analysis only:
+    /// the CPU resizes the frame, CUDA samples every Nth pixel, so above 1 the two backends
+    /// measure differently. Small highlights can be missed above 1.
     #[arg(long, default_value_t = 1)]
     pub downscale: u32,
 
@@ -201,8 +202,9 @@ pub struct Cli {
     pub header_peak_source: Option<String>,
 
     /// Frame sample rate: analyze every Nth frame (1=all frames, 2=every other, 3=every third, etc.)
-    /// Higher values significantly speed up analysis with minimal quality impact.
-    /// Skipped frames inherit measurements from the previous analyzed frame.
+    /// Higher values speed up CPU analysis; CUDA analysis is limited by decoding, which still
+    /// reads every frame. Skipped frames inherit measurements from the previous analyzed frame,
+    /// so peaks on skipped frames are missed and scene cuts fall on the sampling grid.
     #[arg(long, default_value_t = 1)]
     pub sample_rate: u32,
 }

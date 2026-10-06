@@ -94,7 +94,8 @@ pub struct Args {
 
     /// Analysis quality for HDR10/HLG sources.
     /// fast = half-res, every 3rd frame (old default); balanced = half-res, every frame;
-    /// accurate = full-res, every frame (slowest but most precise L1).
+    /// accurate = full-res, every frame (most precise L1; the only preset where CPU and CUDA
+    /// give identical output). With GPU analysis all three run at the same speed.
     #[arg(long, value_enum, default_value_t = AnalysisQuality::Auto)]
     pub analysis_quality: AnalysisQuality,
 
@@ -363,16 +364,18 @@ impl std::fmt::Display for OptimizerProfile {
 
 /// Controls the resolution and frame-sampling rate of the hdr_analyzer_mvp pass.
 /// auto (default) picks accurate on a CUDA-capable setup, balanced otherwise.
-/// Higher quality = more accurate per-scene L1 luminance, at the cost of analysis time.
+/// Higher quality = more accurate per-scene L1 luminance, at the cost of CPU analysis time.
+/// GPU analysis is limited by NVDEC decoding, so there every preset runs at the same speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum AnalysisQuality {
     /// Pick automatically: accurate when GPU analysis is active, balanced otherwise.
     #[default]
     Auto,
-    /// Half-resolution, every 3rd frame — fastest; may miss brief peak frames.
+    /// Half-resolution, every 3rd frame — fastest on the CPU; may miss brief peak frames.
     Fast,
-    /// Half-resolution, every frame — good balance of speed and accuracy.
+    /// Half-resolution, every frame — CPU default; no measured MaxCLL.
     Balanced,
-    /// Full resolution, every frame — most accurate L1; significantly slower.
+    /// Full resolution, every frame — most accurate L1; default with GPU analysis, slower on
+    /// the CPU.
     Accurate,
 }

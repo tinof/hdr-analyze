@@ -35,6 +35,10 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo clippy (deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # The CUDA analysis backend is the main pipeline but has no GPU runner. cudarc loads the
+      # driver and NVRTC at runtime, so this compiles and lints without a GPU or CUDA toolkit.
+      - name: cargo clippy, analyzer with the cuda feature (deny warnings)
+        run: cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings
 
   test:
     name: Test (Ubuntu)

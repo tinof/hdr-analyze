@@ -98,6 +98,22 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed
 
+- **CUDA is the main analysis pipeline** (`mkvdovi`, `hdr_analyzer_mvp`, CI; ROADMAP P1, E1).
+  `accurate` (full resolution, every frame) is the only `--analysis-quality` preset where CPU and
+  CUDA give identical output, and with GPU analysis every preset runs at the same speed, because the
+  run is limited by NVDEC decoding.
+  - Under `--analysis-quality accurate` (the `auto` default with GPU analysis), existing
+    measurements analyzed more coarsely (for example `balanced` on a CPU host) are re-analyzed
+    instead of reused with a warning. Delivered L1 and MaxCLL change for those files. Other presets
+    still reuse them with the warning.
+  - An explicit `--analysis-quality balanced` or `fast` with GPU analysis is kept but warned about:
+    it saves no time, drops the measured MaxCLL (`fast` also MaxFALL), and is not parity-checked.
+  - `mkvdovi` warns when `--hwaccel cuda` resolves with an analyzer built without the `cuda`
+    feature, when a run that expected GPU analysis comes back analyzed on the CPU (sidecar
+    `analysis.gpu` false), and says what `auto` → `balanced` means on a CPU host.
+  - `--downscale`, `--sample-rate` and `--analysis-quality` help no longer promises comparable
+    output or a speed gain that holds only on the CPU.
+  - CI lints the analyzer with `--features cuda` (no GPU or toolkit needed).
 - **Breaking: HLG max-RGB is measured through the spec's 4:2:0 decode** (`hdr_analyzer_mvp`,
   `mkvdovi`; ROADMAP P8). The chroma curves of the Profile 8.4 composer now run once per chroma
   sample on down-sampled luma, as ETSI GS CCM 001 §5.4.2.3.3 specifies, in `code / 1023` float, and

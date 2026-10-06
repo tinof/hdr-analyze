@@ -96,7 +96,7 @@ estimates the count from the duration for some MKVs), and (version 2 and later) 
 and size. A scene outside min ≤ avg ≤ max only produces a warning, because percentile and robust peak
 estimators and `--peak-domain luma` can legitimately produce one. Otherwise `mkvdovi` warns and re-runs the analyzer. Reused measurements
 print their provenance, with a warning when they were analyzed more coarsely than the resolved
-`--analysis-quality`.
+`--analysis-quality`; under `accurate` such measurements are re-analyzed instead of reused.
 
 `--target-peak-nits` belongs to `hdr_analyzer_mvp` v6 header output and does not configure a display
 target in `mkvdovi`. The planned opt-in `mkvdovi --target-nits` workflow does not exist yet.
