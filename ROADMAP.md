@@ -95,6 +95,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-06 | `l1_diff` lines references up with open-GOP cuts by `leading_skipped_frames`; exports are labelled in stream frames. | E11 | branch `fix-l1-diff-open-gop` |
 | 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
@@ -528,16 +529,13 @@ The detailed gap table and validation method live in
 
 ### E11: `l1_diff` and open-GOP cuts
 
-- **Status:** Open. `tools/l1_diff` does not read `source.leading_skipped_frames` (sidecar v5), so
-  on an open-GOP cut it stops with a frame-count mismatch (`main.rs:467`) instead of shifting our
-  frames by the skipped count. Blocks scoring the development cuts that start at a CRA.
-- **Fix:** offset by `leading_skipped_frames` when the reference covers the stream frames, with a
-  test on a synthetic open-GOP sidecar.
-- **Checked 2026-10-06 @df54ad4:** still open. Rows are paired by position and frame labels are not
-  checked (`parse_reference`, `tools/l1_diff/src/main.rs:219`); a shot list must start at 0
-  (`:267`); `export_reference` writes decoded indices from 0 (`:679`). Joker is the numeric case
-  (2 RASL pictures, 1446 decoded vs 1448 RPU frames); G4 has only a shot list. Keep refusing any
-  other count difference, and never invent measurements for the skipped pictures.
+- **Status:** Done 2026-10-06. `tools/l1_diff` shifts our frames by
+  `source.leading_skipped_frames` (sidecar v5) when the reference covers the stream frames, re-bases
+  `--per-shot` and `--scenes`, and labels `--export-reference` rows with stream frames. Any other
+  count difference is still refused; no measurements are invented for the skipped pictures.
+  Evidence: [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) (2026-10-06).
+- **Still open (supporting, not the gate):** Joker and the Champions League cut (G4) have only v4
+  runs; scoring Joker's retail L1 per frame needs a re-analysis with a v5 analyzer.
 
 ## Checked and kept (2026-10-03)
 
