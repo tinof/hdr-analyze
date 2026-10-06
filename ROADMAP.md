@@ -62,16 +62,18 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-06 at main@ab13527)
+### Next up (checked 2026-10-06 at main@df54ad4)
 
-1. **P8: spec 4:2:0 decode in the analyzer** (priority 1, `feat/hlg-spec-chroma-decode`, own
-   branch). Gate: the analyzer reproduces the tool's `spec-fixed` variant within 0.5 code per frame
-   on the synthetic patterns and the five HLG cuts. First make the script enforce that (see P8
-   Checked). Needs CUDA parity, and `--update` of the HLG L1 regression reference.
-2. **P9 step 0:** an HDR10+-only fixture and the frame alignment of pixel measurements to HDR10+
-   scenes, before any hybrid flag (see P9 Checked).
-3. **E11:** `l1_diff` shifts by `leading_skipped_frames`; small, `tools/l1_diff` only, unblocks
-   scoring CRA-start cuts (G4, Joker). E8 + E9 (one branch, unit tests + CUDA parity) follow.
+P8's spec 4:2:0 decode is in progress on the local branch `feat/hlg-spec-chroma-decode`.
+
+1. **E11:** `l1_diff` shifts by `leading_skipped_frames` (`fix-l1-diff-open-gop`, `tools/l1_diff`
+   only). Gate: the E11 Fix, with a synthetic open-GOP sidecar test. No file overlap with the P8
+   branch and no CUDA gate; unblocks scoring Joker against its retail L1 (see E11 Checked). Run the
+   L1 regression gate after P8's benchmark, not during it.
+2. **P9 step 0:** frame alignment of pixel measurements to HDR10+ scenes on the HDR10+-only cuts,
+   before any hybrid flag (see P9 Checked). Shares `mkvdovi/src/{metadata,pipeline}.rs` with the
+   P8 branch, so start it after P8 lands.
+3. **E8 + E9** (one branch): needs CUDA parity and edits `cli.rs` like the P8 branch; after P8.
 
 ### Waiting for the owner
 
@@ -503,12 +505,11 @@ The detailed gap table and validation method live in
   1000-nit value reads as about 305 nits. It reaches the output only with
   `--peak-source histogram99/histogram999` or `--peak-domain luma` with a non-conservative
   optimizer profile.
-- **Checked 2026-10-05 @9edee09:** `find_highlight_knee_nits` also feeds the optimizer's
-  `target_nits` on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`;
-  the sidecar L1 and the RPU change only under `--legacy-madvr-l1`. The CUDA parity test runs
-  `--disable-optimizer` (`cuda_parity.rs:94`) and does not cover it: the round-trip unit test is
-  the gate. `/pre-pr-review` still requires `clippy-cuda` and CUDA parity for any `analysis/` or
-  `cli.rs` change (`.claude/workflows/pre-pr-panel.js:13`), so E8 + E9 runs them too.
+- **Checked 2026-10-06 @df54ad4:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
+  on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
+  (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
+  `--disable-optimizer`, so a round-trip and optimizer unit test is the gate. The bin edges are
+  written in `frame.rs:603` and `gpu.rs` `build_luminance_bin_lut`; `frame.rs:846` bins uniformly.
 - **Fix:** one shared bin-edge function for writer and readers, with a round-trip test.
 
 ### E9: `--pre-denoise` values
@@ -532,10 +533,11 @@ The detailed gap table and validation method live in
   frames by the skipped count. Blocks scoring the development cuts that start at a CRA.
 - **Fix:** offset by `leading_skipped_frames` when the reference covers the stream frames, with a
   test on a synthetic open-GOP sidecar.
-- **Checked 2026-10-06 @ab13527:** still open; nothing in `tools/l1_diff/src` reads
-  `leading_skipped_frames`. Shift reference rows, per-shot ranges, scene cuts and exported frame
-  labels together, tell a reference over stream pictures from one over decoded pictures, and keep
-  refusing any other count difference.
+- **Checked 2026-10-06 @df54ad4:** still open. Rows are paired by position and frame labels are not
+  checked (`parse_reference`, `tools/l1_diff/src/main.rs:219`); a shot list must start at 0
+  (`:267`); `export_reference` writes decoded indices from 0 (`:679`). Joker is the numeric case
+  (2 RASL pictures, 1446 decoded vs 1448 RPU frames); G4 has only a shot list. Keep refusing any
+  other count difference, and never invent measurements for the skipped pictures.
 
 ## Checked and kept (2026-10-03)
 
