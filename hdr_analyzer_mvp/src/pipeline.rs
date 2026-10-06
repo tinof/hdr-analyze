@@ -381,11 +381,24 @@ pub fn run(
         }
     };
 
+    let (chroma_siting, chroma_modelled) =
+        crate::ffmpeg_io::chroma_siting(video_info.chroma_location);
     match video_info.transfer_function {
         TransferFunction::Hlg => {
             println!(
                 "Detected HLG transfer function. Measuring through the Dolby Vision Profile 8.4 decode (luma curve, chroma MMR, RPU matrix) of the '{}' composer.",
                 cli.hlg_composer.cli_name()
+            );
+            if !chroma_modelled {
+                eprintln!(
+                    "Warning: chroma location {:?} is not modelled; the composed chroma is upsampled as for chroma location left.",
+                    video_info.chroma_location
+                );
+            }
+            println!(
+                "HLG chroma location: {} (signalled {:?})",
+                chroma_siting.name(),
+                video_info.chroma_location
             );
         }
         TransferFunction::Unknown => {
@@ -502,6 +515,7 @@ pub fn run(
             denoise_mode: &cli.pre_denoise,
             transfer_function: video_info.transfer_function,
             hlg_composer: cli.hlg_composer,
+            chroma_siting,
             peak_domain,
             min_percentile: cli.min_percentile,
             peak_estimator: cli.peak_estimator,

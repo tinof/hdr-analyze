@@ -283,12 +283,22 @@ impl Dovi84Decoder {
         s.clamp(self.chroma_clamp[0], self.chroma_clamp[1])
     }
 
-    /// Reconstructed R', G', B' in normalized PQ for one luma code and its 4:2:0 chroma
-    /// sample, before the clamp to the declared source range.
-    pub fn rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> [f32; 3] {
-        let y = Self::normalize(y_code);
-        let cb = self.reshape_chroma(&self.mmr[0], y, chroma) - self.chroma_offset[0];
-        let cr = self.reshape_chroma(&self.mmr[1], y, chroma) - self.chroma_offset[1];
+    /// The composed (reshaped) Cb and Cr of one chroma sample, normalized and clamped, before
+    /// the RPU's chroma offset. `mmr_luma_code` is the MMR's luma input: in the spec composer
+    /// the luma down-sampled to the chroma position ([`downsample_luma`]).
+    pub fn composed_chroma(&self, mmr_luma_code: u16, chroma: &Dovi84Chroma) -> [f32; 2] {
+        let y = Self::normalize(mmr_luma_code);
+        [
+            self.reshape_chroma(&self.mmr[0], y, chroma),
+            self.reshape_chroma(&self.mmr[1], y, chroma),
+        ]
+    }
+
+    /// Reconstructed R', G', B' in normalized PQ for one luma code and the composed chroma at
+    /// its position, before the clamp to the declared source range.
+    pub fn rgb_pq_composed(&self, y_code: u16, composed: [f32; 2]) -> [f32; 3] {
+        let cb = composed[0] - self.chroma_offset[0];
+        let cr = composed[1] - self.chroma_offset[1];
         let luma = self.luma_term[usize::from(y_code.min(1023))];
         let m = &self.ycc_chroma;
         [
@@ -298,13 +308,103 @@ impl Dovi84Decoder {
         ]
     }
 
-    /// max(R', G', B') in normalized PQ for one luma code and its 4:2:0 chroma sample.
-    pub fn max_rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> f32 {
-        let [red, green, blue] = self.rgb_pq(y_code, chroma);
+    /// max(R', G', B') in normalized PQ for one luma code and the composed chroma at its
+    /// position, clamped to the declared source range.
+    pub fn max_rgb_pq_composed(&self, y_code: u16, composed: [f32; 2]) -> f32 {
+        let [red, green, blue] = self.rgb_pq_composed(y_code, composed);
         red.max(green)
             .max(blue)
             .clamp(self.source_range[0], self.source_range[1])
     }
+
+    /// Reconstructed R', G', B' with the chroma sample reshaped on the pixel's own luma: the
+    /// decode of a flat field, where the down-sampled luma is the pixel's (the section 6 tests).
+    #[cfg(test)]
+    pub fn rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> [f32; 3] {
+        self.rgb_pq_composed(y_code, self.composed_chroma(y_code, chroma))
+    }
+
+    /// max(R', G', B') of [`Self::rgb_pq`], clamped to the declared source range.
+    #[cfg(test)]
+    pub fn max_rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> f32 {
+        self.max_rgb_pq_composed(y_code, self.composed_chroma(y_code, chroma))
+    }
+}
+
+/// Position of the 4:2:0 chroma samples relative to luma (H.273 chroma location type).
+///
+/// The spec composer runs the chroma MMR at chroma resolution and leaves the upsampling of the
+/// composed chroma to the display; the analyzer upsamples bilinearly at the stream's own
+/// location (docs/HLG_COMPOSER.md section 9).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChromaSiting {
+    /// Type 0, the H.265 default: co-sited with even luma columns, midway between luma rows.
+    #[default]
+    Left,
+    /// Type 2: co-sited with even luma columns and even luma rows.
+    TopLeft,
+}
+
+impl ChromaSiting {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::TopLeft => "top-left",
+        }
+    }
+}
+
+/// The spec composer's luma down-sampling to chroma sample `(cx, cy)` (ETSI GS CCM 001
+/// §5.4.2.3.3): `[1 2 1]` around luma column `2·cx` on rows `2·cy` and `2·cy + 1`, each rounded
+/// (`(a + 2b + c + 2) >> 2`), then their rounded mean (`(r0 + r1 + 1) >> 1`). Samples outside
+/// the frame repeat the edge. `luma(x, y)` returns the 10-bit code at an in-frame position.
+pub fn downsample_luma(
+    luma: impl Fn(usize, usize) -> u16,
+    width: usize,
+    height: usize,
+    cx: usize,
+    cy: usize,
+) -> u16 {
+    let x = 2 * cx;
+    let (left, right) = (x.saturating_sub(1), (x + 1).min(width - 1));
+    let x = x.min(width - 1);
+    let row = |y: usize| {
+        let y = y.min(height - 1);
+        (u32::from(luma(left, y)) + 2 * u32::from(luma(x, y)) + u32::from(luma(right, y)) + 2) >> 2
+    };
+    ((row(2 * cy) + row(2 * cy + 1) + 1) >> 1) as u16
+}
+
+/// The two chroma samples (index, weight) that bilinearly interpolate luma position `pos` along
+/// one axis of `len` chroma samples. `centred` places chroma sample `j` midway between luma
+/// positions `2j` and `2j + 1`; otherwise it is co-sited with `2j`. Edges repeat.
+pub fn chroma_taps(pos: usize, len: usize, centred: bool) -> [(usize, f32); 2] {
+    let j = (pos / 2).min(len - 1);
+    let last = len - 1;
+    match (centred, pos % 2) {
+        (false, 0) => [(j, 1.0), (j, 0.0)],
+        (false, _) => [(j, 0.5), ((j + 1).min(last), 0.5)],
+        (true, 0) => [(j, 0.75), (j.saturating_sub(1), 0.25)],
+        (true, _) => [(j, 0.75), ((j + 1).min(last), 0.25)],
+    }
+}
+
+/// Bilinear upsampling of one composed-chroma component to luma position `(x, y)`.
+/// `at(cx, cy)` reads the component at a chroma sample. The operation order is fixed
+/// (`w0·a + w1·b` per chroma row, then the same across the two rows) so the CUDA kernel can
+/// reproduce it bit for bit.
+pub fn upsample_chroma(
+    at: impl Fn(usize, usize) -> f32,
+    chroma_width: usize,
+    chroma_height: usize,
+    siting: ChromaSiting,
+    x: usize,
+    y: usize,
+) -> f32 {
+    let columns = chroma_taps(x, chroma_width, false);
+    let rows = chroma_taps(y, chroma_height, siting == ChromaSiting::Left);
+    let row = |cy: usize| columns[0].1 * at(columns[0].0, cy) + columns[1].1 * at(columns[1].0, cy);
+    rows[0].1 * row(rows[0].0) + rows[1].1 * row(rows[1].0)
 }
 
 /// Slot of a composer in the per-composer caches below.
