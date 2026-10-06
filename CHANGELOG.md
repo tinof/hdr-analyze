@@ -47,6 +47,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- **`tools/l1_diff` lines references up with open-GOP cuts** (tooling, ROADMAP E11). It reads
+  `source.leading_skipped_frames` from a v5 sidecar: a reference over the whole stream has its rows
+  for the undecodable leading pictures skipped, and `--per-shot` and `--scenes` are re-based by the
+  same offset. `--export-reference` labels rows with stream frames (unchanged without leading
+  pictures). Stricter reference checks: frame labels must count up by one; a reference labelled in
+  decoded frames refuses `--per-shot` and `--scenes` when the cut has leading pictures; a cut beyond
+  the reference's frames is an error; any other count difference is still refused.
+
 - **L1 lines up with the picture in sources cut at an open-GOP CRA picture** (`hdr_analyzer_mvp`,
   `mkvdovi`). A stream cut at a CRA picture (x265's default open GOP; `mkvmerge --split`,
   stream-copy cuts, some captures) keeps the RASL pictures that follow the CRA in decode order
