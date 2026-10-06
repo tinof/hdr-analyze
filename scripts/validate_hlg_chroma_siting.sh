@@ -403,7 +403,7 @@ def tool_rows(path):
 
 runs = {}
 for line in open(f"{work}/runs"):
-    stem, composer, backend, dump = line.split()
+    stem, composer, backend, dump = line.rstrip("\n").rsplit(" ", 3)
     runs[stem] = (composer, backend, dump == "dump")
 
 def load_run(stem):
@@ -411,16 +411,23 @@ def load_run(stem):
     stats = list(csv.DictReader(open(f"{stem}.frames.csv")))
     return side, stats
 
-def check_run(stem, rows, siting, label):
-    """Per-frame P8 gate and metadata checks of one analyzer run against the tool."""
+def check_sidecar(stem, label):
+    """Every gate run: the sidecar names the composer's current mapping, and a CUDA run really ran
+    on the GPU (--hwaccel cuda can fall back to the CPU, and matching output alone would then
+    certify nothing)."""
     composer, backend, _ = runs[stem]
-    side, stats = load_run(stem)
+    side = json.load(open(f"{stem}.bin.l1.json"))
     mapping = side["analysis"].get("luminance_mapping")
     if mapping != mappings[composer]:
         fail(f"{label}: luminance_mapping {mapping!r}, expected {mappings[composer]!r}")
     gpu = side["analysis"].get("gpu")
     if gpu != (backend == "cuda"):
         fail(f"{label}: sidecar analysis.gpu is {gpu} for --hwaccel {backend}")
+
+def check_run(stem, rows, siting, label):
+    """Per-frame P8 gate and metadata checks of one analyzer run against the tool."""
+    check_sidecar(stem, label)
+    side, stats = load_run(stem)
     log = open(f"{stem}.analyzer.log").read()
     reported = re.search(r"HLG chroma location: (\S+)", log)
     if reported is None:
@@ -552,6 +559,7 @@ for siting in ("left", "topleft"):
             if gate:
                 check_run(stem, rows, siting, label)
                 check_pixels(stem, f"{cdir}/patterns.tool-pixels", siting, 256, label, False)
+                check_sidecar(f"{cdir}/{backend}/letterbox", f"letterbox-{siting} {composer} {backend}")
                 check_pixels(f"{cdir}/{backend}/letterbox", f"{cdir}/letterbox.tool-pixels", siting, 256,
                              f"letterbox-{siting} {composer} {backend}", True)
         if gate and "cuda" in backends:
