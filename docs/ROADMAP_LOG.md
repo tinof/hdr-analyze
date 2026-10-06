@@ -6,6 +6,49 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-06: E11, `l1_diff` and open-GOP cuts
+
+E11 is done. A cut that starts at a CRA has RASL pictures no decoder outputs; sidecar v5 records
+them, and our frame `i` is stream frame `i + leading`. `tools/l1_diff` paired rows by position
+and stopped on the count difference, so such cuts could only be compared in decoded coordinates.
+
+- The sidecar is checked against the `.bin` first: v5 stream fields present,
+  decoded + leading = `stream_frames`, every per-frame array of length n.
+- Reference frame labels must count up by one. A reference that ends at the last stream picture
+  is read in stream coordinates and its rows for the leading pictures are skipped. One labelled
+  from 0 with a row per decoded frame (older exports) keeps decoded coordinates and refuses
+  `--per-shot` and `--scenes`. Every other count difference is an error, with a hint when no v5
+  sidecar was read.
+- `--per-shot` and `--scenes` are re-based by the same offset; shots and cuts in the leading
+  pictures are dropped and counted, and a cut beyond the reference's frames is an error.
+- `--export-reference` labels rows with stream frames (unchanged without leading pictures).
+
+Acceptance gate:
+
+- Synthetic test `tools/l1_diff/tests/open_gop.rs`: a `.bin` of 10 decoded frames with a v5
+  sidecar recording 2 leading pictures. A 12-row stream reference scores zero error with its first
+  2 rows skipped; `--per-shot` and `--scenes` with a stream shot list match every cut; a
+  stream-labelled export reads back with zero error. S+1 rows, a wrong `stream_frames`, a v5
+  sidecar without its source fields and a cut beyond the stream are refused; an older sidecar with
+  a stream reference gets a hint.
+- Gates on 0e5f6da: `tools/l1_diff` fmt, clippy `-D warnings`, 22 unit + 7 integration tests
+  pass. `l1-regression` passes in check mode (PQ and HLG synthetic clips, 5/5 scene cuts each);
+  `tools/l1_diff/corpus` is unchanged, so export output without leading pictures is
+  byte-identical.
+- Real material, no new analysis: the three Blade Runner 2049 development cuts have v5 sidecars
+  with 2 leading pictures (bitstream: CRA, then 2 RASL pictures, checked with ffmpeg
+  `trace_headers`). With a stream-labelled export from this `l1_diff` and their shot lists in
+  stream frames, scene cuts match 14/14, 5/5 and 7/7, the same counts as the original
+  decoded-frame lists against our decoded scene starts.
+
+Corpus convention (owner decision, 2026-10-06): truth shot lists count stream frames, like the
+RPU. Four development lists that were on decoded frames (the three Blade Runner 2049 cuts and G4)
+were moved to stream frames.
+
+Still open, supporting evidence only: Joker (the cut with retail L1: 1448 stream frames, 2 RASL,
+1446 decoded) and the Champions League cut (G4, 3 RASL) have only v4 runs. Scoring Joker's retail
+L1 per frame needs a re-analysis with a v5 analyzer.
+
 ### 2026-10-06: P8, spec 4:2:0 decode in the analyzer
 
 The analyzer now measures HLG max-RGB through the spec's 4:2:0 structure (ETSI GS CCM 001
