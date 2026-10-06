@@ -16,10 +16,11 @@ use dolby_vision::rpu::rpu_data_mapping::DoviReshapingCurve;
 use dovi84_composer::{Composer, COEFFICIENT_LOG2_DENOM};
 
 /// `analysis.luminance_mapping` value for PQ signals measured directly. HLG runs write the
-/// composer's name instead ([`Composer::luminance_mapping`]): `"dovi84-v2"` for the preset,
-/// `"dovi84-bt2100-v1"` for the BT.2100 fit. Both mean the full DV 8.4 decode (luma through
-/// the luma curve, max-RGB through luma curve + chroma MMR + RPU matrix). The earlier
-/// `"dovi84-v1"` (luma curve only, max-RGB equal to luma) is no longer written.
+/// composer's name instead ([`Composer::luminance_mapping`]): `"dovi84-v3"` for the preset,
+/// `"dovi84-bt2100-v1-spec420"` for the BT.2100 fit. Both mean the full DV 8.4 decode (luma
+/// through the luma curve, max-RGB through luma curve + chroma MMR at chroma resolution, bilinear
+/// composed chroma + RPU matrix). The earlier `"dovi84-v1"` (luma curve only) and `"dovi84-v2"`
+/// / `"dovi84-bt2100-v1"` (chroma reshaped per pixel) are no longer written.
 pub const PQ_MAPPING: &str = "pq";
 
 /// Fixed-point denominator of the reshaping coefficients (`int + frac / 2^23`); every

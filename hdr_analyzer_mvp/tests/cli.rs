@@ -19,6 +19,13 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("--peak-percentile"))
         .stdout(predicate::str::contains("--dump-frame-stats"))
         .stdout(predicate::str::contains("--hlg-composer"))
+        // mkvdovi probes the help for the mapping names (its analyzer contract).
+        .stdout(predicate::str::contains(
+            dovi84_composer::Composer::Preset.luminance_mapping(),
+        ))
+        .stdout(predicate::str::contains(
+            dovi84_composer::Composer::Bt2100V1.luminance_mapping(),
+        ))
         .stdout(predicate::str::contains("bt2100"));
 }
 

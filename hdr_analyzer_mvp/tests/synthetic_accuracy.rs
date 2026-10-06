@@ -940,7 +940,7 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
     assert_eq!(sidecar["version"], 5);
-    assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v2");
+    assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v3");
     assert_eq!(sidecar["peak_domain"], "max-rgb");
 
     // Luma: 721 → ~208.5 nits through the 8.4 curve (BT.2100 OOTF would give ~203).
@@ -1017,7 +1017,10 @@ fn hlg_flat_frame_measures_through_the_bt2100_composer() {
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
     assert_eq!(sidecar["version"], 5);
-    assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-bt2100-v1");
+    assert_eq!(
+        sidecar["analysis"]["luminance_mapping"],
+        "dovi84-bt2100-v1-spec420"
+    );
 
     // The fitted composer decodes 75% neutral grey to 2378.6 on all three channels
     // (BT.2100 reference 2378.24, about 203 nits), so luma and max-RGB agree.

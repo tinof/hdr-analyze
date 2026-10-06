@@ -485,20 +485,25 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 }
                 if let Some(composer) = hlg_composer {
                     // Always name the composer: the analyzer's own default may differ from the
-                    // one this run writes. An analyzer that predates the option measures through
-                    // the preset only.
-                    if external::analyzer_lists_option(&analyzer_executable(), "--hlg-composer") {
-                        extra_args
-                            .extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
-                    } else if composer != Composer::Preset {
+                    // one this run writes. The analyzer's --help names the luminance mappings
+                    // it writes (a cross-binary contract, like the +cuda version probe); one
+                    // that does not list this composer's predates the spec 4:2:0 HLG decode,
+                    // and its measurement would be refused after a full analysis.
+                    if !external::analyzer_lists_option(
+                        &analyzer_executable(),
+                        composer.luminance_mapping(),
+                    ) {
                         progress::print_error(&format!(
-                            "--hlg-composer {} needs an hdr_analyzer_mvp whose --help lists \
-                             --hlg-composer; rebuild or update the analyzer, or convert with \
-                             --hlg-composer preset.",
-                            composer.cli_name()
+                            "--hlg-composer {} needs an hdr_analyzer_mvp that measures HLG \
+                             through the spec 4:2:0 decode (sidecar mapping {}), and this \
+                             analyzer's --help does not name it; rebuild or update \
+                             hdr_analyzer_mvp.",
+                            composer.cli_name(),
+                            composer.luminance_mapping()
                         ));
                         return Ok(false);
                     }
+                    extra_args.extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
                 }
                 measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
                 if measurements_file.is_none() {
@@ -602,13 +607,17 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                     l1_sidecar = Some(sidecar);
                 }
                 Err(error) if hdr_type == HdrFormat::Hlg => {
-                    let required = if custom_composer.is_some() {
-                        "`--transfer` and `--hlg-composer`"
-                    } else {
-                        "`--transfer`"
-                    };
+                    let required = hlg_composer.map_or(
+                        "`--transfer` and `--hlg-composer`".to_string(),
+                        |composer| {
+                            format!(
+                                "`--transfer`, `--hlg-composer` and the mapping {}",
+                                composer.luminance_mapping()
+                            )
+                        },
+                    );
                     progress::print_error(&format!(
-                        "The analyzer's L1 sidecar cannot be used for Profile 8.4 ({error}). The analyzer did not measure through the selected Dolby Vision 8.4 HLG composer, so it is probably an older build: `hdr_analyzer_mvp --help` must list {required}."
+                        "The analyzer's L1 sidecar cannot be used for Profile 8.4 ({error}). The analyzer did not measure through the selected Dolby Vision 8.4 HLG composer and decode, so it is probably an older build: `hdr_analyzer_mvp --help` must list {required}."
                     ));
                     return Ok(false);
                 }
@@ -946,7 +955,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 /// `hlg_composer` is `Some` for HLG inputs. The composer changes `RPU.bin` but not `extra.json`, so
 /// the fingerprint must carry it. It is appended only when it is not the preset: a fingerprint is
 /// compared as a whole, so an unconditional token would discard every temp dir left by an earlier
-/// build of this version, and the composer is irrelevant for other inputs.
+/// build of this version, and the composer is irrelevant for other inputs. The token is the
+/// sidecar mapping name, so a decode change (dovi84-bt2100-v1 to -spec420) discards bt2100 temp
+/// dirs too; preset temp dirs rely on the `extra.json` comparison, which withdraws the RPU when
+/// the re-analyzed L1 differs (the RPU's composer is unchanged).
 fn resume_settings(args: &Args, hlg_composer: Option<Composer>) -> String {
     let mut settings = format!(
         "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} mdfix={} legacy_madvr_l1={}",
@@ -1784,7 +1796,7 @@ mod tests {
         // bt2100 differs from the preset both ways, so neither reuses the other's RPU.bin.
         assert_eq!(
             resume_settings(&bt2100, Some(Composer::Bt2100V1)),
-            format!("{default} hlg_composer=dovi84-bt2100-v1")
+            format!("{default} hlg_composer=dovi84-bt2100-v1-spec420")
         );
     }
 

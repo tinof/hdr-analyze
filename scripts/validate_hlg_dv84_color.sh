@@ -49,8 +49,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 case "$COMPOSER" in
-    preset) MAPPING=dovi84-v2; TOOLS=(ffmpeg dovi_tool python3) ;;
-    bt2100) MAPPING=dovi84-bt2100-v1; TOOLS=(ffmpeg dovi_tool python3 cargo) ;;
+    preset | bt2100) TOOLS=(ffmpeg dovi_tool python3 cargo) ;;
     *) echo "unknown composer: $COMPOSER (preset or bt2100)" >&2; exit 2 ;;
 esac
 TOLERANCE="${TOLERANCE:-4}"
@@ -58,6 +57,8 @@ TOLERANCE="${TOLERANCE:-4}"
 for tool in "${TOOLS[@]}"; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 2; }
 done
+# The sidecar name the analyzer writes for this composer, from the composer crate.
+MAPPING=$(cargo run --release -q --manifest-path tools/fit_hlg_composer/Cargo.toml -- mapping "$COMPOSER")
 [ -x "$ANALYZER" ] || { echo "analyzer not found: $ANALYZER (build it first)" >&2; exit 2; }
 
 WORK="$(mktemp -d)"

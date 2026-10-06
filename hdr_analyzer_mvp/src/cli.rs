@@ -77,7 +77,9 @@ pub struct Cli {
     /// Dolby Vision Profile 8.4 composer HLG is measured through; must match the composer the
     /// RPU carries. bt2100 (default): fitted to the BT.2100 1000-nit HLG-to-PQ conversion,
     /// neutrals kept neutral; preset: the dolby_vision crate's Profile 8.4 preset (what dovi_tool
-    /// writes). Accepted and ignored for PQ input.
+    /// writes). Accepted and ignored for PQ input. The chroma is decoded at chroma resolution
+    /// and upsampled bilinearly; the sidecar names the measurement dovi84-bt2100-v1-spec420
+    /// (bt2100) or dovi84-v3 (preset), and mkvdovi looks for these names in this help.
     #[arg(
         long,
         value_name = "COMPOSER",
