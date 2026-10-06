@@ -93,6 +93,8 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | [#31](https://github.com/tinof/hdr-analyze/pull/31) |
+| 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | this file |
 | 2026-10-06 | `l1_diff` lines references up with open-GOP cuts by `leading_skipped_frames`; exports are labelled in stream frames. | E11 | [#30](https://github.com/tinof/hdr-analyze/pull/30) |
 | 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | [#29](https://github.com/tinof/hdr-analyze/pull/29) |
 | 2026-10-06 | Spec fixed-point arithmetic measured: `bt2100` is not neutral at `code / 1024` (spread 5.9 codes); the decode change targets the spec structure in `code / 1023` (`spec-float`). | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
@@ -190,12 +192,24 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P1: CPU analysis default
 
-- **Status:** Partial. Source-honest generation is the default.
-- **Open:** decide whether full-resolution every-frame analysis becomes the CPU default. `auto`
-  resolves to `accurate` only with CUDA, otherwise `balanced`, which downsizes with
-  `FAST_BILINEAR` at half resolution and averages small highlights. Measure the CPU cost and the
-  effect on L1 max before any more elaborate peak estimator. `fast` puts cuts on a 3-frame grid and
-  misses peaks on skipped frames.
+- **Status:** Partial. Source-honest generation is the default. CUDA is the main pipeline;
+  `accurate` (downscale 1, sample-rate 1) is the only parity-checked measurement. On CUDA,
+  `balanced`/`fast` sample with a stride and the CPU resizes, so those presets differ by backend and
+  no gate covers them ([`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md)). They also save no time on
+  CUDA, where the run is NVDEC-bound, and they lose the measured MaxCLL (`fast` also MaxFALL).
+- **Open:**
+  1. Decide the CPU fallback default. `auto` resolves to `accurate` only with CUDA, otherwise
+     `balanced`, which downsizes with `FAST_BILINEAR` at half resolution and averages small
+     highlights. Measure the CPU cost of `accurate` and the effect of `FAST_BILINEAR` on L1 max, then
+     flip CPU `auto` to `accurate` (the same file then gives the same L1 on any host) or keep
+     `balanced` with a visible note. `fast` puts cuts on a 3-frame grid and misses peaks on skipped
+     frames.
+- **Done 2026-10-06** (former open items 2–4; evidence: unit tests `coarser_sampling`,
+  `rejects_coarser_sidecar`, `analysis_quality_notice`, `gpu_analysis_missing` in
+  `mkvdovi/src/pipeline.rs`, e2e test `accurate_reanalyzes_coarser_measurements` in
+  `mkvdovi/tests/hlg_profile84.rs`): mkvdovi warns on an explicit `balanced`/`fast` with GPU
+  analysis; under `accurate` it re-analyzes a coarser sidecar instead of reusing it; it warns when a
+  run that expected GPU analysis comes back with `analysis.gpu: false`.
 
 ### P3: L5 from the crop
 
@@ -446,8 +460,11 @@ The detailed gap table and validation method live in
 - **Status:** Core complete. `tools/l1_diff` runs in CI (`scripts/ci/l1-regression-gate.sh`,
   references in `tools/l1_diff/corpus`); `scripts/cuda-parity.sh` checks CPU against CUDA on a GPU
   host; `scripts/rpu-baseline.sh` captures and compares final RPUs. Synthetic accuracy runs in
-  workspace CI.
-- **Open:** expand the corpus (feeds WS6); a self-hosted GPU runner would automate the parity check.
+  workspace CI. Since 2026-10-06 the CI lint job runs clippy on the analyzer with `--features cuda`
+  (no GPU or toolkit; first hosted run passed on #31).
+- **Open:** expand the corpus (feeds WS6). A self-hosted GPU runner for `scripts/cuda-parity.sh`,
+  now a prerequisite because the main analysis path is untested in hosted CI. Spike: an NVRTC
+  compile-only check of `kernels.cu` without a GPU.
 
 ### E2: crop detection
 
@@ -455,6 +472,11 @@ The detailed gap table and validation method live in
   variable-AR union shipped in PR [#4](https://github.com/tinof/hdr-analyze/pull/4), closing issue
   [#3](https://github.com/tinof/hdr-analyze/issues/3).
 - **Open:** per-scene crop application, a continuity-sensitive follow-up.
+- **Also open:** the crop probe decodes on the CPU in CUDA runs; measure its cost on a full episode,
+  then decide an NVDEC probe. A kernel crop reduction must reproduce `detect_crop` exactly (every
+  10th sample, at least 10% non-black per row and column, `crop.rs`); per-scene crop application
+  needs a second pass, because the crop is fixed before the histograms are built (affordable on
+  NVDEC, not on the CPU).
 
 ### E3: `mkvdovi` debug options
 
@@ -529,6 +551,16 @@ The detailed gap table and validation method live in
   Evidence: [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) (2026-10-06).
 - **Still open (supporting, not the gate):** Joker and the Champions League cut (G4) have only v4
   runs; scoring Joker's retail L1 per frame needs a re-analysis with a v5 analyzer.
+
+### E12: CUDA release binaries
+
+- **Status:** Open. `release.yml` builds without `--features cuda`, so release users never get GPU
+  analysis, and `auto` resolves to CPU `balanced` even on an NVIDIA host.
+- **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
+  macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
+  and a clean CPU fallback without libcuda. Windows `--features cuda` is untested.
+- **Effect:** changes delivered L1 and MaxCLL for NVIDIA release users (`balanced` → `accurate`);
+  needs a CHANGELOG entry.
 
 ## Checked and kept (2026-10-03)
 

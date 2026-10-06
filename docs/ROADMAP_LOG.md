@@ -6,6 +6,27 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-06: P1, E1, CUDA as the main pipeline
+
+mkvdovi now treats CUDA as the main analysis pipeline. An explicit `--analysis-quality balanced` or
+`fast` with GPU analysis is kept but warned about: it saves no time (the run is NVDEC-bound), drops
+the measured MaxCLL (`fast` also MaxFALL) and is not parity-checked. Under `accurate` (the `auto`
+default with GPU analysis), measurements analyzed more coarsely are re-analyzed instead of reused
+with a warning; other presets keep the warning. mkvdovi warns when a run that expected GPU analysis
+comes back with sidecar `analysis.gpu: false`, and when `--hwaccel cuda` resolves with an analyzer
+built without the `cuda` feature. CI lints the analyzer with `--features cuda`; cudarc loads the
+driver and NVRTC at runtime, so no GPU or toolkit is needed.
+
+- Evidence: unit tests `coarser_sampling`, `rejects_coarser_sidecar`, `analysis_quality_notice` and
+  `gpu_analysis_missing` (`mkvdovi/src/pipeline.rs`); e2e test
+  `accurate_reanalyzes_coarser_measurements` (`mkvdovi/tests/hlg_profile84.rs`).
+- Gates on d459681: fmt, clippy, clippy-cuda, test (no unexpected skips), `scripts/cuda-parity.sh`,
+  L1 regression; all pass, L1 references unchanged. No measurement changes on either backend.
+- The CI `cuda` clippy step passed locally with cudarc's build script rerun without nvcc or CUDA
+  environment variables, and in hosted CI on #31 (run 37530882715).
+- Still open: P1 item 1 (CPU fallback default); E1 GPU runner and NVRTC compile-only spike; E2
+  addition; E12.
+
 ### 2026-10-06: E11, `l1_diff` and open-GOP cuts
 
 E11 is done. A cut that starts at a CRA has RASL pictures no decoder outputs; sidecar v5 records
