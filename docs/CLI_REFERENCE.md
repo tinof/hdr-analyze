@@ -121,12 +121,17 @@ the Dolby Vision Profile 8.4 decode of the composer selected with `--hlg-compose
 (bit-identical). The composer must be the one the RPU carries; `mkvdovi` passes the matching value.
 Luma statistics use the 8.4 luma reshaping curve. Max-RGB (the default peak domain, and the max-RGB
 mean) reconstructs each pixel through the luma curve, the two chroma MMR curves and the RPU's
-YCbCr-to-RGB matrix, then takes max(R′, G′, B′). With the `preset` composer, neutral
+YCbCr-to-RGB matrix, then takes max(R′, G′, B′). The chroma curves run at chroma resolution on
+down-sampled luma (ETSI GS CCM 001 §5.4.2.3.3, in `code / 1023` float), and the composed chroma
+is upsampled bilinearly at the stream's chroma location (left or top-left; other locations warn
+and use left). With the `preset` composer, neutral
 content reads about 2% higher in max-RGB than in luma, because the preset's chroma curves tint
 neutrals slightly blue. The `bt2100` composer keeps neutrals neutral, so luma and max-RGB agree on
 grey. `--peak-domain luma` restores the luma-only peak. The sidecar records the composer as
-`analysis.luminance_mapping`: `"dovi84-v2"` (preset) or `"dovi84-bt2100-v1"` (bt2100). `mkvdovi`
-re-analyzes a sidecar of the other composer and older luma-only `"dovi84-v1"` sidecars. The former
+`analysis.luminance_mapping`: `"dovi84-v3"` (preset) or `"dovi84-bt2100-v1-spec420"` (bt2100), and
+`--help` names both, because `mkvdovi` looks for them there. `mkvdovi` re-analyzes a sidecar of the
+other composer, the pre-spec 4:2:0 names `"dovi84-v2"` and `"dovi84-bt2100-v1"`, and older
+luma-only `"dovi84-v1"` sidecars. The former
 `--hlg-peak-nits` flag was removed: the 8.4 RPU fixes the mapping.
 
 Samples are assumed to be limited range with BT.2020 non-constant-luminance coefficients. A stream

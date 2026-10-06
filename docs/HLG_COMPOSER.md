@@ -11,6 +11,10 @@
 - First built opt-in. 2026-10-03, by owner decision: `bt2100` is the default for both binaries,
   ahead of the WS6 playback test, which the owner runs with it. Whether playback devices apply a
   composer that is not the preset is still unverified; `--hlg-composer preset` is the fallback.
+- 2026-10-06 (P8): the analyzer measures both composers through the spec's 4:2:0 structure in
+  `code / 1023` f32 (`spec-float`, section 9), with new sidecar names `dovi84-v3` (preset) and
+  `dovi84-bt2100-v1-spec420` (bt2100). Section 9's table and the analyzer row above it describe the
+  pre-P8 decode.
 
 ## 2. The problem, measured
 
@@ -175,18 +179,22 @@ A small workspace library crate, `dovi84_composer`, is the single source:
 - The analyzer builds its `Dovi84Decoder` and luma LUT from the selected composer's mapping. The
   CPU path and the CUDA parameter buffer both come from that one struct, as today.
 
-**Sidecar.** `analysis.luminance_mapping` names the composer: `dovi84-v2` (preset, unchanged) or
-`dovi84-bt2100-v1`. A refit gets a new name (`-v2`), never a silent change. The sidecar layout does
-not change, so the version stays at 4: this is a new value of an existing, strictly validated
-field, as when `dovi84-v2` was added. An older mkvdovi rejects the unknown value with its existing
-visible warning and re-analyzes; it never pairs it with the preset RPU.
+**Sidecar.** `analysis.luminance_mapping` names the composer and the decode: `dovi84-v2` (preset,
+unchanged) or `dovi84-bt2100-v1` as built on 2026-10-03; since P8 (2026-10-06) `dovi84-v3` and
+`dovi84-bt2100-v1-spec420` for the spec 4:2:0 decode, with the old names kept as legacy
+(`dovi84_composer::LEGACY_LUMINANCE_MAPPINGS`) and re-analyzed with a "pre-spec 4:2:0" message.
+A refit gets a new name (`dovi84-bt2100-v2-spec420`), never a silent change. The sidecar layout does
+not change, so the version stayed at 4 then and stays at 5 for the P8 names: each is a new value
+of an existing, strictly validated field, as when `dovi84-v2` was added. An older mkvdovi rejects
+the unknown value with a visible message; it never pairs it with an RPU of another composer.
 
 **mkvdovi.**
 
 - `--hlg-composer bt2100|preset` (default `bt2100` since the default change; first built with
-  `preset` as default) is always passed to the analyzer for HLG when the analyzer's `--help` lists
-  the option. An analyzer without the option measures through the preset, so it is accepted only
-  with `--hlg-composer preset`; any other composer is refused up front.
+  `preset` as default) is always passed to the analyzer for HLG. Since P8 mkvdovi first requires the
+  analyzer's `--help` to contain the selected composer's `luminance_mapping()` name, for every
+  composer including the preset, and refuses an analyzer without it before any analysis. (As built
+  on 2026-10-03, an analyzer without `--hlg-composer` was accepted for `--hlg-composer preset`.)
 - `check_luminance_mapping` and `dv_profile_for` take the expected composer explicitly and compare
   the name exactly (no `dovi84-*` prefix match). A preset sidecar is re-analyzed under `bt2100` and
   the other way round, with a visible message and no fallback.
@@ -300,8 +308,24 @@ smallest point of the WS7 display scale (+75 codes). Not measured: the `bt2100` 
 (section 6) under the spec's fixed-point decode, because the tool reports max-RGB only.
 
 The step's 4-code limit (the libplacebo tolerance) is exceeded on both composers, so the analyzer
-decode is to be changed to the spec's (ROADMAP P8). That change moves HLG L1 for every file: a new
-`luminance_mapping` name, identical CPU and CUDA output, and re-analysis of older sidecars.
+decode was changed (ROADMAP P8, below). The table above compares the pre-P8 analyzer.
+
+**The analyzer since P8 (2026-10-06): `spec-float`.** For max-RGB the analyzer runs the chroma MMR
+once per 4:2:0 chroma sample on luma down-sampled with `[1 2 1]` across two rows (the spec's
+structure), in `code / 1023` f32 arithmetic, then upsamples the composed chroma bilinearly at the
+stream's chroma location: left (also when unspecified) or top-left; other locations warn and use
+left. CUDA does the chroma pass in a second kernel, `compose_chroma`
+([CUDA_PIPELINE.md](CUDA_PIPELINE.md)). The luma path is unchanged. `spec-fixed` (the spec's
+`code / 1024` fixed point) was not adopted: under it `bt2100` is not neutral (R′G′B′ spread 5.9
+codes, luma error 3.57 codes; [ROADMAP_LOG.md](ROADMAP_LOG.md), 2026-10-06), and libplacebo
+evaluates at `code / 1023` as well. Which convention devices use is a WS6 open question.
+`scripts/validate_hlg_chroma_siting.sh --gate` checks the analyzer against the tool's `spec-float`
+at the stream's own location: within 0.5 code per frame on the synthetic clips and the five cuts,
+bit for bit per pixel on the synthetic clips, CPU equal to CUDA. Result (2026-10-06): 0.000 codes
+worst |max| and |avg| on every clip and cut, both composers, both backends. Against the pre-P8
+analyzer, scene L1 max moved by up to 19 codes (mostly down) and the max-RGB average by at most
+1 code on the two cuts measured; luma averages did not move. Numbers:
+[ROADMAP_LOG.md](ROADMAP_LOG.md), 2026-10-06.
 
 ## 10. Results
 

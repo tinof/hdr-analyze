@@ -64,8 +64,6 @@ doing.
 
 ### Next up (checked 2026-10-06 at main@df54ad4)
 
-P8's spec 4:2:0 decode is in progress on the local branch `feat/hlg-spec-chroma-decode`.
-
 1. **E11:** `l1_diff` shifts by `leading_skipped_frames` (`fix-l1-diff-open-gop`, `tools/l1_diff`
    only). Gate: the E11 Fix, with a synthetic open-GOP sidecar test. No file overlap with the P8
    branch and no CUDA gate; unblocks scoring Joker against its retail L1 (see E11 Checked). Run the
@@ -95,6 +93,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | branch `feat/hlg-spec-chroma-decode` |
 | 2026-10-06 | Spec fixed-point arithmetic measured: `bt2100` is not neutral at `code / 1024` (spread 5.9 codes); the decode change targets the spec structure in `code / 1023` (`spec-float`). | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](docs/ROADMAP_LOG.md) |
@@ -239,28 +238,14 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Open:** the WS6 playback test must show that devices apply a composer that is not the preset,
   and how visible the tint is on a TV. Real HLG material for both: five cuts since 2026-10-05
   (live sport at 50p, a concert, a nature series, a broadcast capture, a drama; WS8 item 5).
-- **Open: spec 4:2:0 decode in the analyzer** (both composers). Measured 2026-10-05
-  ([`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md) §9): the analyzer replicates chroma over the
-  quad and reshapes it with each pixel's own luma in `code / 1023` float; the spec composer runs
-  the MMR at chroma resolution on down-sampled luma in `code / 1024` fixed point. Per scene on the
-  HLG cuts that moves L1 max by up to 18 codes and the average by up to 5, above the 4-code limit.
-  The change must: take the spec's structure (the tool's `spec-float` variant; the spec's
-  `code / 1024` arithmetic leaves `bt2100` 5.9 codes off neutral, see the 2026-10-06 log);
-  choose and justify an upsampler for the composed chroma, which the spec leaves to the display
-  (replicated against bilinear: 6.5 against 18.3 codes of L1 max on one cut; bilinear at the
-  stream's chroma location chosen 2026-10-06); keep CPU and CUDA identical. (The neutral criteria
-  were re-checked under the spec's arithmetic on 2026-10-06; `spec-float` leaves them as they are.) It moves HLG
-  L1 for every file, so it needs a new `luminance_mapping` name, re-analysis of older sidecars and
-  its own branch. Gate: the analyzer reproduces the tool's `spec-float` variant (spec structure,
-  `code / 1023` arithmetic; decided 2026-10-06, see the log) within 0.5 code per frame on the
-  synthetic patterns and the five cuts (`scripts/validate_hlg_chroma_siting.sh`). The script does
-  not enforce that gate yet: it fails only on its anchors, which compare the analyzer with the
-  tool's `analyzer` variant.
-- **Checked 2026-10-06 @ab13527:** the script's failures are anchor 1 (tool `analyzer` variant,
-  `validate_hlg_chroma_siting.sh:313`), anchor 2 and unmodelled locations; `spec-fixed` is only
-  printed (`:339`, `:367`), a missing cut is skipped (`:263`) and `--every` thins frames. Nothing
-  carries the chroma location to the analysis (`ffmpeg_io.rs` `VideoInfo`, `frame.rs`
-  `FrameAnalysisOptions`). The tool's fixed point uses i128 (`siting.rs:238`), the kernel f32.
+- **Done 2026-10-06: spec 4:2:0 decode in the analyzer** (both composers;
+  `feat/hlg-spec-chroma-decode`). Max-RGB runs the chroma MMR at chroma resolution on down-sampled
+  luma in `code / 1023` f32 (`spec-float`; `code / 1024` leaves `bt2100` 5.9 codes off neutral) and
+  upsamples the composed chroma bilinearly at the stream's chroma location; CPU and CUDA identical.
+  New sidecar names `dovi84-v3` / `dovi84-bt2100-v1-spec420`; older sidecars are re-analyzed, and
+  mkvdovi refuses an analyzer whose `--help` does not name the mapping. Gate
+  (`scripts/validate_hlg_chroma_siting.sh --gate`): 0.000 codes on the synthetic patterns and the
+  five cuts. Scene L1 max moves by up to 19 codes on the two cuts compared. Evidence: [log](docs/ROADMAP_LOG.md) 2026-10-06.
 
 ### P9: HDR10+ → Profile 8.1 L1
 
@@ -279,8 +264,8 @@ and broader hardware acceleration (E5). Neutral trims stay.
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
-- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline.rs:1637` passes
-  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline.rs:892`);
+- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline.rs:1649` passes
+  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline.rs:901`);
   `metadata.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path; the sidecar has no
   per-frame peak, and mkvdovi reads only per-frame minima (`metadata.rs:986` `L1SidecarFrames`).
   All 45 development manifests say `shotlist_checked: false`.
@@ -517,7 +502,7 @@ The detailed gap table and validation method live in
   on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
   (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
   `--disable-optimizer`, so a round-trip and optimizer unit test is the gate. The bin edges are
-  written in `frame.rs:603` and `gpu.rs` `build_luminance_bin_lut`; `frame.rs:846` bins uniformly.
+  written in `frame.rs:667` and `gpu.rs` `build_luminance_bin_lut`; `frame.rs:970` bins uniformly.
 - **Fix:** one shared bin-edge function for writer and readers, with a round-trip test.
 
 ### E9: `--pre-denoise` values

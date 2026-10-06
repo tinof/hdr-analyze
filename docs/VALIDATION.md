@@ -292,10 +292,22 @@ ffmpeg's `libplacebo` filter, on lossless flat test patterns with a Profile 8.4 
 `dovi_tool`. Both scripts take `--composer bt2100|preset` (default `bt2100`, as in `mkvdovi`). For `bt2100` they
 rewrite the generated RPU's composer with `tools/fit_hlg_composer` (`rewrite-rpu`, the same
 function `mkvdovi` uses), run the analyzer with `--hlg-composer bt2100` and expect the sidecar
-mapping `dovi84-bt2100-v1`. libplacebo reads the composer from the RPU, so its render is an
+mapping, which they read from the composer crate (`fit_hlg_composer mapping`; `dovi84-bt2100-v1-spec420`
+for bt2100, `dovi84-v3` for the preset since P8). libplacebo reads the composer from the RPU, so its render is an
 independent decode of the selected composer. Each frame is compared with the analyzer's per-frame
 sidecar minimum, which is not temporally smoothed and on a flat frame equals the frame's value in
 the chosen peak domain. Tolerance is 4 twelve-bit PQ codes.
+
+These flat patterns cannot show the 4:2:0 structure of the decode. For that,
+`scripts/validate_hlg_chroma_siting.sh` compares the analyzer with the spec composer's structure
+on non-flat synthetic patterns and real HLG cuts ([HLG_COMPOSER.md](HLG_COMPOSER.md) §9). Its
+`--gate --cuts DIR` mode is the P8 acceptance gate: for both composers, CPU and CUDA, every frame,
+the analyzer must match the tool's `spec-float` variant at the stream's own chroma location within
+0.5 code per frame (max and unrounded average from `--dump-frame-stats`), and per pixel bit for bit
+on the synthetic clips (`HDR_ANALYZER_DUMP_MAX_RGB`); CPU and CUDA must give identical output, the
+sidecar must carry the composer's current mapping name, and every HLG cut in `DIR` must be present.
+Run on 2026-10-06: passed, 0.000 codes worst on every clip and cut
+([ROADMAP_LOG.md](ROADMAP_LOG.md)).
 
 | Script | Patterns | Domain | Worst error, preset | Worst error, bt2100 |
 |---|---|---|---|---|

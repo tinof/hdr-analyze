@@ -37,9 +37,13 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   the full reconstruction (luma curve, the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix).
   Both are clamped to the RPU's declared source range (PQ codes 62–3079, about 0–1000 nits), so L1
   describes what the decoder reconstructs. The sidecar names the composer in
-  `analysis.luminance_mapping`: `"dovi84-v2"` (preset) or `"dovi84-bt2100-v1"` (bt2100). `mkvdovi`
-  reuses HLG measurements only when that value names the selected composer; a sidecar of the other
-  composer and older luma-only `"dovi84-v1"` sidecars from pre-release builds are re-analyzed. HLG
+  `analysis.luminance_mapping`: `"dovi84-v3"` (preset) or `"dovi84-bt2100-v1-spec420"` (bt2100), the
+  decode with the chroma curves at chroma resolution (ETSI GS CCM 001 §5.4.2.3.3) and bilinear
+  upsampling at the stream's chroma location. `mkvdovi` reuses HLG measurements only when that value
+  names the selected composer; a sidecar of the other composer, the pre-spec 4:2:0 names
+  `"dovi84-v2"` and `"dovi84-bt2100-v1"`, and older luma-only `"dovi84-v1"` sidecars from
+  pre-release builds are re-analyzed. An analyzer whose `--help` does not name the selected
+  composer's mapping is refused before any analysis, for every composer. HLG
   input tagged full range, with a matrix other than BT.2020 non-constant luminance, or with primaries
   other than BT.2020 is refused before any work, because the RPU cannot describe it (see
   [CLI_REFERENCE.md](CLI_REFERENCE.md#hlg-input)). GPU analysis
@@ -131,7 +135,8 @@ name, size, dimensions, transfer), `analysis` (downscale, sample rate, GPU use, 
 stores `crop` in full-resolution coordinates (`crop_space: "full"`). Version 3 adds
 `analysis.luminance_mapping`: `pq`, or for HLG the composer whose full Profile 8.4 decode was
 measured (`dovi84-v2` for the preset; `dovi84-bt2100-v1`, added later without a version change, for
-the bt2100 composer). Version 4 has the same layout and stores unfiltered averages. Max-RGB runs also
+the bt2100 composer; both replaced in version 5 by `dovi84-v3` and `dovi84-bt2100-v1-spec420` for
+the spec 4:2:0 decode, again without a version change). Version 4 has the same layout and stores unfiltered averages. Max-RGB runs also
 write `light_level` (`max_cll_nits`, `max_fall_nits`): the content light levels of CTA-861.3 over
 the active image area, with the frame average taken in linear light. The block is optional, so a
 version 4 sidecar written before it existed stays valid.
@@ -279,8 +284,8 @@ per field and by how much (one line per scene with `--verbose`). It also notes s
 lies above `source_max_pq`. HDR10+ output and `--legacy-madvr-l1` output are not compared with the
 measurements, because their L1 does not come from them. For HLG output it also
 fails when no measurements are available or the L1 sidecar does not load, and it checks that every
-RPU frame carries the composer the sidecar names (`dovi84-v2` = preset, `dovi84-bt2100-v1` =
-bt2100), so a measurement is never paired with an RPU of another composer. Missing source L6 fields or
+RPU frame carries the composer the sidecar names (`dovi84-v3` = preset,
+`dovi84-bt2100-v1-spec420` = bt2100), so a measurement is never paired with an RPU of another composer. Missing source L6 fields or
 L9 primaries are reported when warned fallbacks are used.
 
 ## Playback troubleshooting
