@@ -5,7 +5,8 @@
 //!
 //! Skipped (with a message) when a required tool is missing, or when the workspace-built
 //! `hdr_analyzer_mvp` next to the test's mkvdovi binary is missing or predates the Dolby Vision
-//! 8.4 HLG mapping (or, for the composer cases, `--hlg-composer`). mkvdovi prefers that sibling over
+//! 8.4 HLG mapping with the spec 4:2:0 decode (its `--help` must name the composers' mapping
+//! names, which mkvdovi probes too). mkvdovi prefers that sibling over
 //! PATH, so build it first with `cargo build -p hdr_analyzer_mvp` (or run
 //! `cargo test --workspace`). The refusal cases stop before analysis and need no analyzer.
 
@@ -88,6 +89,16 @@ fn analyzer_help() -> Result<String, String> {
         return Err(format!(
             "{} predates the Dolby Vision 8.4 HLG mapping; rebuild it",
             analyzer.display()
+        ));
+    }
+    if let Some(composer) = Composer::ALL
+        .into_iter()
+        .find(|composer| !help.contains(composer.luminance_mapping()))
+    {
+        return Err(format!(
+            "{} predates the spec 4:2:0 HLG decode (its --help does not name {}); rebuild it",
+            analyzer.display(),
+            composer.luminance_mapping()
         ));
     }
     Ok(help)

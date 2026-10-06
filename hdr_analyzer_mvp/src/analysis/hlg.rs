@@ -16,10 +16,11 @@ use dolby_vision::rpu::rpu_data_mapping::DoviReshapingCurve;
 use dovi84_composer::{Composer, COEFFICIENT_LOG2_DENOM};
 
 /// `analysis.luminance_mapping` value for PQ signals measured directly. HLG runs write the
-/// composer's name instead ([`Composer::luminance_mapping`]): `"dovi84-v2"` for the preset,
-/// `"dovi84-bt2100-v1"` for the BT.2100 fit. Both mean the full DV 8.4 decode (luma through
-/// the luma curve, max-RGB through luma curve + chroma MMR + RPU matrix). The earlier
-/// `"dovi84-v1"` (luma curve only, max-RGB equal to luma) is no longer written.
+/// composer's name instead ([`Composer::luminance_mapping`]): `"dovi84-v3"` for the preset,
+/// `"dovi84-bt2100-v1-spec420"` for the BT.2100 fit. Both mean the full DV 8.4 decode (luma
+/// through the luma curve, max-RGB through luma curve + chroma MMR at chroma resolution, bilinear
+/// composed chroma + RPU matrix). The earlier `"dovi84-v1"` (luma curve only) and `"dovi84-v2"`
+/// / `"dovi84-bt2100-v1"` (chroma reshaped per pixel) are no longer written.
 pub const PQ_MAPPING: &str = "pq";
 
 /// Fixed-point denominator of the reshaping coefficients (`int + frac / 2^23`); every
@@ -283,12 +284,22 @@ impl Dovi84Decoder {
         s.clamp(self.chroma_clamp[0], self.chroma_clamp[1])
     }
 
-    /// Reconstructed R', G', B' in normalized PQ for one luma code and its 4:2:0 chroma
-    /// sample, before the clamp to the declared source range.
-    pub fn rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> [f32; 3] {
-        let y = Self::normalize(y_code);
-        let cb = self.reshape_chroma(&self.mmr[0], y, chroma) - self.chroma_offset[0];
-        let cr = self.reshape_chroma(&self.mmr[1], y, chroma) - self.chroma_offset[1];
+    /// The composed (reshaped) Cb and Cr of one chroma sample, normalized and clamped, before
+    /// the RPU's chroma offset. `mmr_luma_code` is the MMR's luma input: in the spec composer
+    /// the luma down-sampled to the chroma position ([`downsample_luma`]).
+    pub fn composed_chroma(&self, mmr_luma_code: u16, chroma: &Dovi84Chroma) -> [f32; 2] {
+        let y = Self::normalize(mmr_luma_code);
+        [
+            self.reshape_chroma(&self.mmr[0], y, chroma),
+            self.reshape_chroma(&self.mmr[1], y, chroma),
+        ]
+    }
+
+    /// Reconstructed R', G', B' in normalized PQ for one luma code and the composed chroma at
+    /// its position, before the clamp to the declared source range.
+    pub fn rgb_pq_composed(&self, y_code: u16, composed: [f32; 2]) -> [f32; 3] {
+        let cb = composed[0] - self.chroma_offset[0];
+        let cr = composed[1] - self.chroma_offset[1];
         let luma = self.luma_term[usize::from(y_code.min(1023))];
         let m = &self.ycc_chroma;
         [
@@ -298,13 +309,103 @@ impl Dovi84Decoder {
         ]
     }
 
-    /// max(R', G', B') in normalized PQ for one luma code and its 4:2:0 chroma sample.
-    pub fn max_rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> f32 {
-        let [red, green, blue] = self.rgb_pq(y_code, chroma);
+    /// max(R', G', B') in normalized PQ for one luma code and the composed chroma at its
+    /// position, clamped to the declared source range.
+    pub fn max_rgb_pq_composed(&self, y_code: u16, composed: [f32; 2]) -> f32 {
+        let [red, green, blue] = self.rgb_pq_composed(y_code, composed);
         red.max(green)
             .max(blue)
             .clamp(self.source_range[0], self.source_range[1])
     }
+
+    /// Reconstructed R', G', B' with the chroma sample reshaped on the pixel's own luma: the
+    /// decode of a flat field, where the down-sampled luma is the pixel's (the section 6 tests).
+    #[cfg(test)]
+    pub fn rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> [f32; 3] {
+        self.rgb_pq_composed(y_code, self.composed_chroma(y_code, chroma))
+    }
+
+    /// max(R', G', B') of [`Self::rgb_pq`], clamped to the declared source range.
+    #[cfg(test)]
+    pub fn max_rgb_pq(&self, y_code: u16, chroma: &Dovi84Chroma) -> f32 {
+        self.max_rgb_pq_composed(y_code, self.composed_chroma(y_code, chroma))
+    }
+}
+
+/// Position of the 4:2:0 chroma samples relative to luma (H.273 chroma location type).
+///
+/// The spec composer runs the chroma MMR at chroma resolution and leaves the upsampling of the
+/// composed chroma to the display; the analyzer upsamples bilinearly at the stream's own
+/// location (docs/HLG_COMPOSER.md section 9).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChromaSiting {
+    /// Type 0, the H.265 default: co-sited with even luma columns, midway between luma rows.
+    #[default]
+    Left,
+    /// Type 2: co-sited with even luma columns and even luma rows.
+    TopLeft,
+}
+
+impl ChromaSiting {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::TopLeft => "top-left",
+        }
+    }
+}
+
+/// The spec composer's luma down-sampling to chroma sample `(cx, cy)` (ETSI GS CCM 001
+/// §5.4.2.3.3): `[1 2 1]` around luma column `2·cx` on rows `2·cy` and `2·cy + 1`, each rounded
+/// (`(a + 2b + c + 2) >> 2`), then their rounded mean (`(r0 + r1 + 1) >> 1`). Samples outside
+/// the frame repeat the edge. `luma(x, y)` returns the 10-bit code at an in-frame position.
+pub fn downsample_luma(
+    luma: impl Fn(usize, usize) -> u16,
+    width: usize,
+    height: usize,
+    cx: usize,
+    cy: usize,
+) -> u16 {
+    let x = 2 * cx;
+    let (left, right) = (x.saturating_sub(1), (x + 1).min(width - 1));
+    let x = x.min(width - 1);
+    let row = |y: usize| {
+        let y = y.min(height - 1);
+        (u32::from(luma(left, y)) + 2 * u32::from(luma(x, y)) + u32::from(luma(right, y)) + 2) >> 2
+    };
+    ((row(2 * cy) + row(2 * cy + 1) + 1) >> 1) as u16
+}
+
+/// The two chroma samples (index, weight) that bilinearly interpolate luma position `pos` along
+/// one axis of `len` chroma samples. `centred` places chroma sample `j` midway between luma
+/// positions `2j` and `2j + 1`; otherwise it is co-sited with `2j`. Edges repeat.
+pub fn chroma_taps(pos: usize, len: usize, centred: bool) -> [(usize, f32); 2] {
+    let j = (pos / 2).min(len - 1);
+    let last = len - 1;
+    match (centred, pos % 2) {
+        (false, 0) => [(j, 1.0), (j, 0.0)],
+        (false, _) => [(j, 0.5), ((j + 1).min(last), 0.5)],
+        (true, 0) => [(j, 0.75), (j.saturating_sub(1), 0.25)],
+        (true, _) => [(j, 0.75), ((j + 1).min(last), 0.25)],
+    }
+}
+
+/// Bilinear upsampling of one composed-chroma component to luma position `(x, y)`.
+/// `at(cx, cy)` reads the component at a chroma sample. The operation order is fixed
+/// (`w0·a + w1·b` per chroma row, then the same across the two rows) so the CUDA kernel can
+/// reproduce it bit for bit.
+pub fn upsample_chroma(
+    at: impl Fn(usize, usize) -> f32,
+    chroma_width: usize,
+    chroma_height: usize,
+    siting: ChromaSiting,
+    x: usize,
+    y: usize,
+) -> f32 {
+    let columns = chroma_taps(x, chroma_width, false);
+    let rows = chroma_taps(y, chroma_height, siting == ChromaSiting::Left);
+    let row = |cy: usize| columns[0].1 * at(columns[0].0, cy) + columns[1].1 * at(columns[1].0, cy);
+    rows[0].1 * row(rows[0].0) + rows[1].1 * row(rows[1].0)
 }
 
 /// Slot of a composer in the per-composer caches below.
@@ -341,6 +442,41 @@ pub fn dovi84_pq_lut(composer: Composer) -> &'static [f32; 1024] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hand-worked taps: chroma location left (centred vertically) and the co-sited axes, at the
+    /// first, a middle and the last position, for even and odd luma lengths.
+    #[test]
+    fn chroma_taps_are_the_bilinear_weights_with_repeated_edges() {
+        // Co-sited (columns, or rows for top-left), 4 chroma samples for 8 luma positions.
+        assert_eq!(chroma_taps(0, 4, false), [(0, 1.0), (0, 0.0)]);
+        assert_eq!(chroma_taps(3, 4, false), [(1, 0.5), (2, 0.5)]);
+        assert_eq!(chroma_taps(7, 4, false), [(3, 0.5), (3, 0.5)]);
+        // Odd luma length 7: 4 chroma samples, the last position is co-sited with sample 3.
+        assert_eq!(chroma_taps(6, 4, false), [(3, 1.0), (3, 0.0)]);
+        // Centred between luma rows 2j and 2j+1: 3/4 of the near sample, 1/4 of the far one.
+        assert_eq!(chroma_taps(0, 4, true), [(0, 0.75), (0, 0.25)]);
+        assert_eq!(chroma_taps(4, 4, true), [(2, 0.75), (1, 0.25)]);
+        assert_eq!(chroma_taps(5, 4, true), [(2, 0.75), (3, 0.25)]);
+        assert_eq!(chroma_taps(7, 4, true), [(3, 0.75), (3, 0.25)]);
+    }
+
+    /// The spec's luma down-sampling worked by hand: `[1 2 1]` rounded per row, then the rounded
+    /// mean of the two rows, with the left frame edge repeated.
+    #[test]
+    fn downsample_luma_follows_the_spec_rounding_and_edges() {
+        // 4x2 luma: row 0 = 100 200 300 400, row 1 = 101 203 305 407.
+        let luma = [100_u16, 200, 300, 400, 101, 203, 305, 407];
+        let at = |x: usize, y: usize| luma[y * 4 + x];
+        // Chroma (0, 0): the left tap repeats x = 0.
+        // row 0: (100 + 2·100 + 200 + 2) >> 2 = 125; row 1: (101 + 2·101 + 203 + 2) >> 2 = 127;
+        // (125 + 127 + 1) >> 1 = 126.
+        assert_eq!(downsample_luma(at, 4, 2, 0, 0), 126);
+        // Chroma (1, 0) at luma column 2: row 0 (200 + 2·300 + 400 + 2) >> 2 = 300;
+        // row 1 (203 + 2·305 + 407 + 2) >> 2 = 305; (300 + 305 + 1) >> 1 = 303.
+        assert_eq!(downsample_luma(at, 4, 2, 1, 0), 303);
+        // A flat field returns its own code (the section 6 flat-field decode relies on it).
+        assert_eq!(downsample_luma(|_, _| 721, 4, 2, 1, 0), 721);
+    }
 
     const CODE_12BIT: f64 = 1.0 / 4095.0;
 

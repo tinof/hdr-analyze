@@ -49,6 +49,125 @@ Still open, supporting evidence only: Joker (the cut with retail L1: 1448 stream
 1446 decoded) and the Champions League cut (G4, 3 RASL) have only v4 runs. Scoring Joker's retail
 L1 per frame needs a re-analysis with a v5 analyzer.
 
+### 2026-10-06: P8, spec 4:2:0 decode in the analyzer
+
+The analyzer now measures HLG max-RGB through the spec's 4:2:0 structure (ETSI GS CCM 001
+§5.4.2.3.3): the chroma MMR runs once per chroma sample on luma down-sampled with `[1 2 1]` across
+two rows, in `code / 1023` f32 arithmetic (`spec-float`), and the composed chroma is upsampled
+bilinearly at the stream's chroma location (left, also when unspecified, or top-left; other
+locations warn and use left). CUDA runs the chroma pass in a second kernel, `compose_chroma`. New
+sidecar names `dovi84-v3` (preset) and `dovi84-bt2100-v1-spec420` (bt2100); the old names are
+legacy and re-analyzed; the sidecar stays at version 5. mkvdovi requires the analyzer's `--help` to
+name the selected composer's mapping, preset included.
+
+**Gate** (`scripts/validate_hlg_chroma_siting.sh <analyzer +cuda from #29> --gate --cuts
+~/mkvdovi-work/corpus/dev`): exit 0, "P8 gate ok", wall 2:34:33. A NaN hole in the script's checks,
+found in review, was fixed afterwards in the same PR, with two more check fixes from the Codex
+review; the saved outputs re-evaluated with the fixed checks give the same verdicts.
+
+- Synthetic clips (256×256 patterns, left and top-left siting; a letterbox clip with 32-px bars),
+  both composers, CPU and CUDA: analyzer against the tool's `spec-float` at its own siting, worst
+  |max| 0.000 and |avg| 0.000 codes over 13 frames; per pixel 0 of 851,968 differ, and inside the
+  detected crop of the letterbox clip (256×192 at 0,32) 0 of 638,976. CPU and CUDA identical
+  (`.bin` bytes, sidecar frames/scenes/light_level, frame statistics). Anchor 2 (tool renderer
+  against libplacebo bilinear) within its 4-code tolerance.
+- Five HLG cuts, both composers, CPU and CUDA (`gpu: true` on every CUDA sidecar), worst |max| /
+  |avg| per frame against `spec-float` at the cut's own siting:
+
+| Cut | Siting | Frames | Worst \|max\| / \|avg\| | CPU = CUDA |
+|-----|--------|--------|------------------|-----------|
+| d11 Blue Lights S01E02 | left | 2976 | 0.000 / 0.000 | identical |
+| g1 Wimbledon 2024 final | top-left | 3051 | 0.000 / 0.000 | identical |
+| g2 Glastonbury 2025 | top-left | 1550 | 0.000 / 0.000 | identical |
+| g3 The Green Planet | left | 1526 | 0.000 / 0.000 | identical |
+| g4 UCL Bayern-PSG (open GOP) | left | 3033 decoded (stream_frames 3036, 3 leading skipped) | 0.000 / 0.000 | identical |
+
+- `HDR_ANALYZER_CUDA_HOST_FRAMES=1` (CUDA analyzes frames downloaded from NVDEC; every CUDA run
+  printed that it took this path), g2, the synthetic clips, both composers: "P8 gate ok", 0.000 codes
+  worst |max| and |avg| over 1550 frames, per pixel 0 differ, CPU = CUDA identical.
+
+Per-scene diagnostics, variant minus new analyzer, 12-bit codes, largest |difference| over scenes
+(`spec-float-nearest` = spec structure with nearest-neighbour upsampling; `spec-fixed` =
+`code / 1024`):
+
+| Cut | Composer | `spec-float-nearest` L1 max / avg | `spec-fixed` L1 max / avg |
+|-----|----------|------|------|
+| d11 | bt2100 | 9.86 / 0.06 | 4.71 / 2.25 |
+| d11 | preset | 9.57 / 0.18 | 5.37 / 1.77 |
+| g1 | bt2100 | 13.45 / 0.05 | 4.94 / 3.14 |
+| g1 | preset | 22.73 / 0.08 | 6.09 / 3.22 |
+| g2 | bt2100 | 0.00 / 0.35 | 0.00 / 4.63 |
+| g2 | preset | 0.00 / 0.36 | 0.00 / 3.36 |
+| g3 | bt2100 | 11.87 / 0.60 | 5.02 / 1.02 |
+| g3 | preset | 3.10 / 0.66 | 5.35 / 1.36 |
+| g4 | bt2100 | 0.00 / 0.15 | 0.00 / 2.14 |
+| g4 | preset | 0.00 / 0.14 | 0.00 / 2.44 |
+
+g2 and g4 sit at the 3079 source-max clamp in every scene, so their L1 max cannot move.
+
+**What it does to L1** (main 71fd03d against this branch; CUDA, `--no-crop --downscale 1
+--disable-optimizer`; sidecar per-scene values, new minus old, 12-bit codes; scene boundaries
+identical):
+
+| Cut | Composer | Scenes | L1 max: max abs (mean) | avg max-RGB: max abs (mean) | avg luma | min | MaxCLL old → new |
+|-----|----------|--------|------------------|------------------|----------|-----|-------------------|
+| d11 | bt2100 | 32 | 9 (−0.38) | 0 | 0 | 0 | 905 → 903 nits |
+| d11 | preset | 32 | 11 (−0.44) | 1 (−0.16) | 0 | 0 | 925 → 925 |
+| g1 | bt2100 | 22 | 15 (−1.41) | 0 | 0 | 1 (−0.09) | 1001 → 1001 |
+| g1 | preset | 22 | 19 (−2.18) | 1 (−0.14) | 0 | 1 (−0.14) | 1001 → 1001 |
+
+Luma averages do not move (the luma path is unchanged). Scene L1 max moves by up to 19 codes,
+mostly down.
+
+**Other checks.**
+
+- `scripts/cuda-parity.sh`: PASS.
+- PQ unchanged: `.bin` and sidecar (timestamps removed) byte-identical between main (71fd03d) and
+  this branch on 16 configurations (CPU/CUDA × crop/no-crop × downscale 1/2 × max-RGB/luma) of a
+  134-frame 4K PQ clip.
+- L1 regression reference: only `tools/l1_diff/corpus/hlg.reference.csv` shot 1 (frames 61–89)
+  average 1360 → 1359 (#29).
+- mkvdovi by hand: a pre-P8 analyzer is refused up front; a legacy-name sidecar is re-analyzed with
+  the "pre-spec 4:2:0" message; `--verify` passes; the source is kept.
+- CUDA throughput (RTX 4070, WSL2; `--hwaccel cuda --no-crop --disable-optimizer --transfer hlg`,
+  frames ÷ wall time, best of 2 interleaved runs): −0.03% to −1.12% on g1 and d11, both composers,
+  downscale 1 and 2 (table in [`CUDA_PIPELINE.md`](CUDA_PIPELINE.md)). NVDEC-bound. Below the 10%
+  follow-up threshold; no follow-up item.
+
+Where: [#29](https://github.com/tinof/hdr-analyze/pull/29); [`HLG_COMPOSER.md`](HLG_COMPOSER.md) §9
+
+### 2026-10-06: P8, spec arithmetic measured; decode target `spec-float`
+
+Step 0 of the P8 decode change measured the `bt2100` composer's section 6 criteria
+([`HLG_COMPOSER.md`](HLG_COMPOSER.md)) through the spec composer's fixed-point arithmetic, on flat
+fields (`fit_hlg_composer report --spec-fixed`). Two deciding criteria fail, so the planned
+`spec-fixed` target was dropped by owner decision.
+
+- `bt2100` under `spec-fixed`: neutral R′G′B′ spread 5.891 codes (float decode 0.005), neutral luma
+  error 3.57 codes at code 902 (0.64), ΔE_ITP 1.05 (0.11); superwhite 0.03 and the source clamp
+  pass. Neutral composed chroma at code 721 is (32751, 32750), 17 LSB below 32768. The preset
+  barely moves (spread 172 → 173 codes); it is tinted under either arithmetic.
+- Cause: the normalization, not the 16-bit output. ETSI GS CCM 001 §5.4.2.3.2–3 (pp. 18–20) feeds a
+  10-bit code into the polynomial and the MMR as `s << 10` on a 2^20 scale, i.e. `code / 1024`;
+  the composer was fitted at `code / 1023` (`tools/fit_hlg_composer/src/model.rs`). About 5.78 of
+  the 5.89 codes of spread are the moved neutral point, 0.1 the quantization; the luma error is
+  entirely the moved variable.
+- Checked three ways: the spec text read against `SpecComposer` term by term; an independent
+  Python re-derivation from the constants (5.891 and 3.57 exactly); libplacebo, which scales the
+  pivots by `1 / ((1 << bl_bit_depth) − 1)` and evaluates on texture values, i.e. `code / 1023`
+  with no correction (`libav_internal.h:967-968`). No open-source decoder runs the spec's fixed
+  point. CCM 001 defines only BT.1886 and PQ base layers, so spec arithmetic for an HLG base layer
+  is an extrapolation.
+- Decision: the analyzer takes the spec's structure (MMR at chroma resolution on down-sampled luma,
+  bilinear upsampling at the stream's chroma location) with the `code / 1023` f32 arithmetic the
+  composer was fitted for and libplacebo uses (`spec-float`). The structure is unambiguous and
+  carried up to 17.4 codes of L1 max per scene; the arithmetic moved scene averages by 0.6 to 3.3.
+  On flat fields `spec-float` equals the current decode, so section 6 holds unchanged. Which
+  convention devices use is a WS6 question; a `code / 1024` decision would be a refit (new
+  composer, new RPU).
+
+Where: this file; `fit_hlg_composer report --spec-fixed`
+
 ### 2026-10-05: P8, 4:2:0 chroma of the HLG decode
 
 The P8 step "4:2:0 chroma siting of the analyzer's decode against a renderer on non-flat

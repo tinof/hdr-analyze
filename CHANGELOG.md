@@ -13,7 +13,7 @@ This document provides a historical record of completed milestones, feature impl
   spec composer (ETSI GS CCM 001 §5.4.2.3.3: MMR at chroma resolution on down-sampled luma, integer
   arithmetic) and from a renderer, on synthetic non-flat patterns and on real HLG cuts, with the
   tool anchored to the analyzer and to libplacebo on every run. Result: up to 18 codes of L1 max per
-  scene on the HLG development cuts, so the analyzer decode is to change (open P8 step). No change
+  scene on the HLG development cuts, so the analyzer decode changed (see Changed). No change
   to any shipped binary. Measurements: [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md) §9.
 - **Breaking: HLG output uses a composer fitted to BT.2100 by default: `--hlg-composer bt2100`**
   (`mkvdovi` and `hdr_analyzer_mvp`; `--hlg-composer preset` restores the previous output). The Profile 8.4 preset that `dovi_tool` writes
@@ -106,6 +106,22 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed
 
+- **Breaking: HLG max-RGB is measured through the spec's 4:2:0 decode** (`hdr_analyzer_mvp`,
+  `mkvdovi`; ROADMAP P8). The chroma curves of the Profile 8.4 composer now run once per chroma
+  sample on down-sampled luma, as ETSI GS CCM 001 §5.4.2.3.3 specifies, in `code / 1023` float, and
+  the composed chroma is upsampled bilinearly at the stream's chroma location (left or top-left;
+  other locations warn and use left). CPU and CUDA stay bit-identical. On two HLG development cuts
+  (Blue Lights, Wimbledon) scene L1 max moves by up to 19 codes (mostly down) and the max-RGB average by at most 1 code;
+  luma statistics do not change. The sidecar names the new measurement `dovi84-v3` (preset) or
+  `dovi84-bt2100-v1-spec420` (bt2100), version still 5; sidecars with the old names `dovi84-v2` and
+  `dovi84-bt2100-v1` are re-analyzed with a "pre-spec 4:2:0" message. `mkvdovi` needs an
+  `hdr_analyzer_mvp` from this release for every HLG composer, preset included: it looks for the
+  mapping name in the analyzer's `--help` and refuses an older analyzer before any analysis. An
+  older `mkvdovi` with this analyzer analyzes the file, then rejects the sidecar ("names a Dolby
+  Vision 8.4 HLG mapping this mkvdovi does not know (dovi84-v3); it may come from a newer
+  analyzer") and fails the file. `--dump-frame-stats` gains a last column, `avg_max_rgb_pq` (the
+  frame's unrounded max-RGB average), on PQ runs too; PQ `.bin` files and sidecars are unchanged.
+  Measurements: [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) (2026-10-06).
 - **Breaking: HLG inputs that the 8.4 RPU cannot describe are refused**, including files earlier
   versions converted: tagged full range, a matrix other than BT.2020 non-constant luminance
   (BT.2020 constant luminance included), or primaries other than BT.2020, from MediaInfo or

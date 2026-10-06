@@ -7,7 +7,9 @@ use madvr_parse::MadVRFrame;
 use rayon::prelude::*;
 
 use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq, pq_to_nits};
-use crate::analysis::hlg::{dovi84_decoder, dovi84_pq_lut};
+use crate::analysis::hlg::{
+    dovi84_decoder, dovi84_pq_lut, downsample_luma, upsample_chroma, ChromaSiting, Dovi84Decoder,
+};
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 use crate::ffmpeg_io::TransferFunction;
@@ -42,10 +44,15 @@ pub struct FrameAnalysisOptions<'a> {
     pub transfer_function: TransferFunction,
     /// Profile 8.4 composer HLG is measured through; ignored for PQ.
     pub hlg_composer: Composer,
+    /// Where the stream's 4:2:0 chroma samples sit; HLG upsamples the composed chroma there.
+    pub chroma_siting: ChromaSiting,
     pub peak_domain: PeakDomain,
     pub min_percentile: f64,
     pub peak_estimator: PeakEstimator,
     pub peak_percentile: f64,
+    /// Keep every analyzed pixel's max-RGB value (`HDR_ANALYZER_DUMP_MAX_RGB`), so a validation
+    /// script can compare the decode per pixel; frame statistics can hide errors that cancel.
+    pub dump_max_rgb: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -57,12 +64,18 @@ pub struct FramePeakStats {
     pub correction_pq: f64,
     pub sigma_pq: f64,
     pub n_eff: u64,
+    /// The frame's unrounded max-RGB average (normalized PQ), as `FrameL1Measurement` holds it
+    /// before the sidecar rounds it to a 12-bit code; written by `--dump-frame-stats`.
+    pub avg_max_rgb_pq: f64,
 }
 
 pub struct AnalyzedFrame {
     pub frame: MadVRFrame,
     pub l1: FrameL1Measurement,
     pub peak_stats: FramePeakStats,
+    /// With `FrameAnalysisOptions::dump_max_rgb`: the max-RGB value (normalized PQ) of every
+    /// pixel of the crop rect, row by row; NaN where a pixel was not analyzed.
+    pub max_rgb_pixels: Option<Vec<f32>>,
 }
 
 fn mean_or_zero(sum: f64, count: u64) -> f64 {
@@ -485,6 +498,8 @@ struct FrameAccumulator {
     sum_luma_pq: f64,
     sum_max_rgb_pq: f64,
     pixel_count: u64,
+    /// `(x, y, max-RGB)` of every pixel, only with `FrameAnalysisOptions::dump_max_rgb`.
+    pixels: Vec<(u32, u32, f32)>,
 }
 
 impl FrameAccumulator {
@@ -498,6 +513,7 @@ impl FrameAccumulator {
             sum_luma_pq: 0.0,
             sum_max_rgb_pq: 0.0,
             pixel_count: 0,
+            pixels: Vec::new(),
         }
     }
 
@@ -510,6 +526,7 @@ impl FrameAccumulator {
         self.sum_luma_pq += other.sum_luma_pq;
         self.sum_max_rgb_pq += other.sum_max_rgb_pq;
         self.pixel_count += other.pixel_count;
+        self.pixels.extend(other.pixels);
         for (bin, other_bin) in self.pq_hist.iter_mut().zip(other.pq_hist.iter()) {
             *bin += *other_bin;
         }
@@ -534,6 +551,53 @@ impl FrameAccumulator {
 ///
 /// # Returns
 /// Denoised Y-plane data (cloned and filtered)
+/// The spec composer's chroma at chroma resolution (docs/HLG_COMPOSER.md section 9): the MMR
+/// of every chroma sample in a rectangle, on the luma down-sampled to that sample.
+struct ComposedChroma {
+    cx0: usize,
+    cy0: usize,
+    width: usize,
+    values: Vec<[f32; 2]>,
+}
+
+impl ComposedChroma {
+    /// Chroma samples `cx0..=cx1` by `cy0..=cy1` of a 10-bit 4:2:0 frame. Luma taps outside the
+    /// frame repeat its edge; the rectangle never depends on a crop beyond its bounds.
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        decoder: &Dovi84Decoder,
+        luma: impl Fn(usize, usize) -> u16 + Sync,
+        chroma: impl Fn(usize, usize) -> (u16, u16) + Sync,
+        frame_width: usize,
+        frame_height: usize,
+        (cx0, cx1): (usize, usize),
+        (cy0, cy1): (usize, usize),
+    ) -> Self {
+        let width = cx1 + 1 - cx0;
+        let values = (cy0..=cy1)
+            .into_par_iter()
+            .flat_map_iter(|cy| {
+                let (luma, chroma) = (&luma, &chroma);
+                (cx0..=cx1).map(move |cx| {
+                    let mmr_luma = downsample_luma(luma, frame_width, frame_height, cx, cy);
+                    let (cb, cr) = chroma(cx, cy);
+                    decoder.composed_chroma(mmr_luma, &decoder.chroma(cb, cr))
+                })
+            })
+            .collect();
+        Self {
+            cx0,
+            cy0,
+            width,
+            values,
+        }
+    }
+
+    fn at(&self, cx: usize, cy: usize) -> [f32; 2] {
+        self.values[(cy - self.cy0) * self.width + (cx - self.cx0)]
+    }
+}
+
 fn apply_median3_denoise(y_data: &[u8], stride: usize, crop_rect: &CropRect) -> Vec<u8> {
     let mut output = y_data.to_vec();
     let x_start = crop_rect.x as usize;
@@ -615,6 +679,37 @@ pub fn analyze_native_frame_cropped(
     let dovi84 = dovi84_decoder(options.hlg_composer);
     let dovi84_luma_lut = dovi84_pq_lut(options.hlg_composer);
 
+    // HLG: the chroma MMR runs once per chroma sample on down-sampled luma (the spec
+    // composer's structure), over the crop's chroma samples plus the neighbours the bilinear
+    // upsampling of the composed chroma reads, within the frame.
+    let frame_width = frame.width() as usize;
+    let frame_height = frame.height() as usize;
+    let chroma_width = frame_width.div_ceil(2);
+    let chroma_height = frame_height.div_ceil(2);
+    let read_code =
+        |data: &[u8], offset: usize| u16::from_le_bytes([data[offset], data[offset + 1]]) & 0x03FF;
+    let composed =
+        (options.transfer_function == TransferFunction::Hlg && x_end > x_start && y_end > y_start)
+            .then(|| {
+                ComposedChroma::new(
+                    dovi84,
+                    |x, y| read_code(y_plane_data, y * y_stride + x * 2),
+                    |cx, cy| {
+                        (
+                            read_code(u_plane_data, cy * u_stride + cx * 2),
+                            read_code(v_plane_data, cy * v_stride + cx * 2),
+                        )
+                    },
+                    frame_width,
+                    frame_height,
+                    (cx_start, ((x_end - 1) / 2 + 1).min(chroma_width - 1)),
+                    (
+                        cy_start.saturating_sub(1),
+                        ((y_end - 1) / 2 + 1).min(chroma_height - 1),
+                    ),
+                )
+            });
+
     // Parallel accumulation across 4:2:0 chroma rows. Rayon creates one
     // accumulator per fold partition, so the fine histogram is reused across
     // many rows instead of being allocated once per row.
@@ -638,10 +733,6 @@ pub fn analyze_native_frame_cropped(
                         & 0x03FF;
                 let cb = (f32::from(cb_code) - 512.0) / 896.0;
                 let cr = (f32::from(cr_code) - 512.0) / 896.0;
-                let dovi84_chroma = match options.transfer_function {
-                    TransferFunction::Hlg => Some(dovi84.chroma(cb_code, cr_code)),
-                    _ => None,
-                };
 
                 for y in [cy * 2, cy * 2 + 1] {
                     if y < y_start || y >= y_end {
@@ -672,10 +763,26 @@ pub fn analyze_native_frame_cropped(
                         accumulator.max_luma_pq =
                             accumulator.max_luma_pq.max(f64::from(luma_pq as f32));
 
-                        let max_rgb_pq = match &dovi84_chroma {
-                            // Full DV 8.4 decode (luma curve + chroma MMR + RPU matrix),
-                            // in f32 so the CUDA kernel reproduces it bit for bit.
-                            Some(chroma) => f64::from(dovi84.max_rgb_pq(y_code, chroma)),
+                        let max_rgb_pq = match &composed {
+                            // Full DV 8.4 decode (luma curve + chroma MMR + RPU matrix) with
+                            // the composed chroma upsampled to this pixel, in f32 so the CUDA
+                            // kernel reproduces it bit for bit.
+                            Some(composed) => {
+                                let component = |k: usize| {
+                                    upsample_chroma(
+                                        |cx, cy| composed.at(cx, cy)[k],
+                                        chroma_width,
+                                        chroma_height,
+                                        options.chroma_siting,
+                                        x,
+                                        y,
+                                    )
+                                };
+                                f64::from(
+                                    dovi84
+                                        .max_rgb_pq_composed(y_code, [component(0), component(1)]),
+                                )
+                            }
                             // f32 with separate multiplies and adds, operation for operation
                             // as in the CUDA kernel, so both backends agree bit for bit.
                             None => {
@@ -690,6 +797,12 @@ pub fn analyze_native_frame_cropped(
                         accumulator.sum_luma_pq += luma_pq;
                         accumulator.sum_max_rgb_pq += max_rgb_pq;
                         accumulator.pixel_count += 1;
+                        if options.dump_max_rgb {
+                            // Exact: every branch above computes max-RGB in f32.
+                            accumulator
+                                .pixels
+                                .push((x as u32, y as u32, max_rgb_pq as f32));
+                        }
 
                         let peak_pq = match options.peak_domain {
                             PeakDomain::MaxRgb => max_rgb_pq,
@@ -766,6 +879,15 @@ pub fn analyze_native_frame_cropped(
     // Compute hue histogram from chroma planes
     let hue_histogram = compute_hue_histogram(frame, crop_rect);
 
+    let max_rgb_pixels = options.dump_max_rgb.then(|| {
+        let width = crop_rect.width as usize;
+        let mut pixels = vec![f32::NAN; width * crop_rect.height as usize];
+        for &(x, y, value) in &accumulator.pixels {
+            pixels[(y as usize - y_start) * width + (x as usize - x_start)] = value;
+        }
+        pixels
+    });
+
     Ok(AnalyzedFrame {
         frame: MadVRFrame {
             peak_pq_2020: selected_peak_pq,
@@ -790,7 +912,9 @@ pub fn analyze_native_frame_cropped(
             correction_pq: raw_max_pq - robust_pq,
             sigma_pq,
             n_eff,
+            avg_max_rgb_pq,
         },
+        max_rgb_pixels,
     })
 }
 

@@ -24,6 +24,7 @@ use dovi84_composer::{Composer, COEFFICIENT_LOG2_DENOM};
 use rayon::prelude::*;
 
 use crate::model::{Decoder, LUMA_GAIN, LUMA_OFFSET};
+use crate::report::FlatDecode;
 
 /// Variant names, in output order. Index 0 is the analyzer, which the differences refer to.
 pub const VARIANTS: [&str; 9] = [
@@ -313,8 +314,10 @@ impl Variants {
             .clamp(self.source_range[0], self.source_range[1])
     }
 
-    /// max(R′,G′,B′) of every variant for every pixel of one frame, in normalized PQ.
-    pub fn frame(&self, frame: &Frame<'_>) -> Vec<[f32; 9]> {
+    /// max(R′,G′,B′) of every variant for every pixel of one frame, in normalized PQ. Without
+    /// `per_pixel_mmr` the variants that run the MMR per pixel (analyzer, renderer) are NaN:
+    /// they cost most of the time and the spec variants do not need them.
+    pub fn frame(&self, frame: &Frame<'_>, per_pixel_mmr: bool) -> Vec<[f32; 9]> {
         let (width, height) = (frame.width, frame.height);
         let (width_c, height_c) = (width / 2, height / 2);
         let down = downsample_luma(frame.y, width, height);
@@ -362,12 +365,14 @@ impl Variants {
                     let y_code = frame.y[y * width + x];
                     let luma = self.decoder.luma_term_f32(y_code);
                     let quad = (y / 2) * width_c + x / 2;
-                    let mut out = [0.0_f32; 9];
-                    out[0] = self.max_rgb(
-                        self.decoder
-                            .rgb_pq(y_code, frame.cb[quad], frame.cr[quad])
-                            .0,
-                    );
+                    let mut out = [f32::NAN; 9];
+                    if per_pixel_mmr {
+                        out[0] = self.max_rgb(
+                            self.decoder
+                                .rgb_pq(y_code, frame.cb[quad], frame.cr[quad])
+                                .0,
+                        );
+                    }
                     for (k, mode) in [Upsample::Nearest, Upsample::Left, Upsample::TopLeft]
                         .into_iter()
                         .enumerate()
@@ -383,7 +388,10 @@ impl Variants {
                     for (slot, mode) in [
                         (RENDERER_LEFT, Upsample::Left),
                         (RENDERER_TOPLEFT, Upsample::TopLeft),
-                    ] {
+                    ]
+                    .into_iter()
+                    .filter(|_| per_pixel_mmr)
+                    {
                         let (chroma, _) = self.decoder.reshape_chroma(
                             Decoder::normalize(y_code),
                             bl[0].sample(mode, x, y) / 1023.0,
@@ -395,6 +403,57 @@ impl Variants {
                 })
             })
             .collect()
+    }
+}
+
+/// The spec composer on a flat field: every pixel the same code triple, so the down-sampled luma
+/// is the luma code itself (`(c + 2c + c + 2) >> 2 = c`, `(c + c + 1) >> 1 = c`) and every
+/// upsampler returns the one composed chroma value. This is what the criteria of
+/// docs/HLG_COMPOSER.md section 6 measure.
+impl Variants {
+    /// The two 16-bit composed chroma outputs of a flat field.
+    pub fn flat_chroma16(&self, y: u16, cb: u16, cr: u16) -> [u16; 2] {
+        [0, 1].map(|c| self.spec.chroma(c, y, cb, cr))
+    }
+
+    /// The 16-bit mapped luma of one code.
+    pub fn luma16(&self, code: u16) -> u16 {
+        self.spec.luma(code)
+    }
+
+    /// Raw spec-fixed R′G′B′ of a flat field, normalized PQ, no source-range clamp.
+    pub fn flat_rgb(&self, y: u16, cb: u16, cr: u16) -> [f32; 3] {
+        let chroma = self
+            .flat_chroma16(y, cb, cr)
+            .map(|c| f32::from(c) / OUTPUT_ONE);
+        self.decoder
+            .compose(self.fixed_luma_term[usize::from(y.min(1023))], chroma)
+    }
+
+    /// Spec-fixed max(R′,G′,B′) of a flat field, clamped to the source range as the analyzer.
+    pub fn flat_max_rgb(&self, y: u16, cb: u16, cr: u16) -> f32 {
+        self.max_rgb(self.flat_rgb(y, cb, cr))
+    }
+}
+
+impl FlatDecode for Variants {
+    /// The clamp flag reports a saturated 16-bit chroma output (0 or 0xFFFF), the spec's only
+    /// output clamp.
+    fn rgb_pq(&self, y: u16, cb: u16, cr: u16) -> ([f32; 3], bool) {
+        let saturated = self
+            .flat_chroma16(y, cb, cr)
+            .iter()
+            .any(|&c| c == 0 || c == 0xffff);
+        (self.flat_rgb(y, cb, cr), saturated)
+    }
+
+    fn luma_term(&self, code: u16) -> f64 {
+        f64::from(self.fixed_luma_term[usize::from(code.min(1023))])
+    }
+
+    /// The spec has no output clamp on the luma curve.
+    fn luma_clamp_active(&self, _code: u16) -> bool {
+        false
     }
 }
 
@@ -448,12 +507,22 @@ pub fn frame_stats(values: &[[f32; 9]], mask: Option<&[u8]>) -> FrameStats {
             let value = code(pixel[v]);
             max[v] = max[v].max(value);
             sum[v] += f64::from(pixel[v]);
+            if value.is_nan() || pixel[0].is_nan() {
+                // A variant `--spec-only` skipped, or no analyzer variant to differ from.
+                continue;
+            }
             let diff = (value - code(pixel[0])).abs();
             diff_max[v] = diff_max[v].max(diff);
             histogram[v][((diff / DIFF_STEP) as usize).min(DIFF_BINS - 1)] += 1;
             if in_roi {
                 roi[v] = roi[v].max(diff);
             }
+        }
+    }
+    // A skipped variant (`--spec-only`) has no maximum either; f64::max ignored its NaNs.
+    for (m, s) in max.iter_mut().zip(sum) {
+        if s.is_nan() {
+            *m = f64::NAN;
         }
     }
     FrameStats {
@@ -510,11 +579,14 @@ struct Options {
     render: Option<String>,
     mask: Option<String>,
     anchor_out: Option<String>,
+    dump_pixels: Option<String>,
+    spec_only: bool,
 }
 
 fn parse(args: &[String]) -> Result<(String, Options)> {
     const USAGE: &str = "chroma-siting <preset|bt2100> <width> <height> [--every N] \
-                         [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] < yuv420p10le";
+                         [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] \
+                         [--dump-pixels <dir>] [--spec-only] < yuv420p10le";
     let composer = args.first().context(USAGE)?.clone();
     let width: usize = args.get(1).context(USAGE)?.parse()?;
     let height: usize = args.get(2).context(USAGE)?.parse()?;
@@ -529,6 +601,8 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
         render: None,
         mask: None,
         anchor_out: None,
+        dump_pixels: None,
+        spec_only: false,
     };
     let mut rest = args[3..].iter();
     while let Some(arg) = rest.next() {
@@ -542,12 +616,18 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
             "--render" => options.render = Some(value()?),
             "--mask" => options.mask = Some(value()?),
             "--anchor-out" => options.anchor_out = Some(value()?),
+            "--dump-pixels" => options.dump_pixels = Some(value()?),
+            "--spec-only" => options.spec_only = true,
             other => bail!("unknown argument {other}\n{USAGE}"),
         }
     }
     ensure!(
         options.render.is_none() || options.anchor_out.is_some(),
         "--render needs --anchor-out"
+    );
+    ensure!(
+        !(options.spec_only && options.render.is_some()),
+        "--render compares the renderer variants, which --spec-only skips"
     );
     Ok((composer, options))
 }
@@ -584,6 +664,30 @@ fn codes(bytes: &[u8]) -> Vec<u16> {
         .chunks_exact(2)
         .map(|b| u16::from_le_bytes([b[0], b[1]]) & 0x03FF)
         .collect()
+}
+
+/// Variants `--dump-pixels` writes: the analyzer's decode target (`spec-float`) at each
+/// chroma location.
+const DUMPED_VARIANTS: [usize; 2] = [2, 3];
+const _: () = assert!(
+    matches!(VARIANTS[2].as_bytes(), b"spec-float-left")
+        && matches!(VARIANTS[3].as_bytes(), b"spec-float-topleft")
+);
+
+/// `--dump-pixels`: per analyzed frame and dumped variant, `frame_<index>_<variant>.f32` with
+/// every pixel's max-RGB (normalized PQ) as little-endian f32, row by row; the analyzer writes
+/// the same layout under `HDR_ANALYZER_DUMP_MAX_RGB`.
+fn dump_pixels(dir: &str, index: usize, values: &[[f32; 9]]) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("create {dir}"))?;
+    for variant in DUMPED_VARIANTS {
+        let path = format!("{dir}/frame_{index:06}_{}.f32", VARIANTS[variant]);
+        let bytes: Vec<u8> = values
+            .iter()
+            .flat_map(|pixel| pixel[variant].to_le_bytes())
+            .collect();
+        std::fs::write(&path, bytes).with_context(|| format!("write {path}"))?;
+    }
+    Ok(())
 }
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -655,7 +759,10 @@ pub fn run(args: &[String]) -> Result<()> {
                 cb: &cb,
                 cr: &cr,
             };
-            let values = variants.frame(&frame);
+            let values = variants.frame(&frame, !options.spec_only);
+            if let Some(dir) = options.dump_pixels.as_deref() {
+                dump_pixels(dir, index, &values)?;
+            }
             let mask = has_mask.then_some(mask_buffer.as_slice());
             let stats = frame_stats(&values, mask);
             for (v, name) in VARIANTS.iter().enumerate() {
@@ -722,6 +829,38 @@ mod tests {
         let mut histogram = vec![0_u64; DIFF_BINS];
         histogram[(1000.0 / DIFF_STEP) as usize] = 100;
         assert!((percentile(&histogram, 0.99) - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn flat_field_shortcut_equals_the_frame_decode() {
+        // On a flat field the down-sampled luma is the luma code and every upsampler returns the
+        // one composed value, so `flat_max_rgb` must equal the spec-fixed variants of `frame`.
+        for composer in Composer::ALL {
+            let variants = Variants::new(&composer.rpu_data_mapping()).unwrap();
+            for (y, cb, cr) in [
+                (64, 512, 512),
+                (721, 512, 512),
+                (502, 64, 960),
+                (300, 960, 64),
+            ] {
+                let (width, height) = (6, 4);
+                let luma = vec![y; width * height];
+                let (cb_plane, cr_plane) = (vec![cb; 6], vec![cr; 6]);
+                let frame = Frame {
+                    width,
+                    height,
+                    y: &luma,
+                    cb: &cb_plane,
+                    cr: &cr_plane,
+                };
+                let expected = variants.flat_max_rgb(y, cb, cr).to_bits();
+                for pixel in variants.frame(&frame, true) {
+                    for value in &pixel[4..=6] {
+                        assert_eq!(value.to_bits(), expected, "{composer:?} ({y}, {cb}, {cr})");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -844,7 +983,7 @@ mod tests {
                 cb: &cbs,
                 cr: &crs,
             };
-            for pixel in variants.frame(&frame) {
+            for pixel in variants.frame(&frame, true) {
                 for v in [1, 2, 3, 7, 8] {
                     assert!(
                         (pixel[v] - pixel[0]).abs() < 1e-6,

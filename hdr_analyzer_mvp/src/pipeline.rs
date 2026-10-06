@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use madvr_parse::{MadVRFrame, MadVRScene};
 
 /// Create a copy of a MadVRFrame (MadVRFrame doesn't implement Clone)
@@ -109,14 +109,14 @@ fn write_frame_stats_csv(
     let mut writer = BufWriter::new(file);
     writeln!(
         writer,
-        "frame,selected_pq,raw_max_pq,percentile_pq,robust_pq,sigma_pq,correction_pq,n_eff,scene_diff,scene_score,scene_baseline,scene_start"
+        "frame,selected_pq,raw_max_pq,percentile_pq,robust_pq,sigma_pq,correction_pq,n_eff,scene_diff,scene_score,scene_baseline,scene_start,avg_max_rgb_pq"
     )?;
 
     for (frame_index, stat) in stats.iter().enumerate() {
         let (scene_diff, scene_score, scene_baseline) = scene_values[frame_index];
         writeln!(
             writer,
-            "{frame_index},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},{},{:.6},{:.6},{:.6},{}",
+            "{frame_index},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},{},{:.6},{:.6},{:.6},{},{:.12}",
             stat.selected_peak_pq,
             stat.raw_max_pq,
             stat.percentile_pq,
@@ -127,7 +127,8 @@ fn write_frame_stats_csv(
             scene_diff,
             scene_score,
             scene_baseline,
-            u8::from(cut_frames.contains(&(frame_index as u32)))
+            u8::from(cut_frames.contains(&(frame_index as u32))),
+            stat.avg_max_rgb_pq
         )?;
     }
     writer
@@ -380,11 +381,24 @@ pub fn run(
         }
     };
 
+    let (chroma_siting, chroma_modelled) =
+        crate::ffmpeg_io::chroma_siting(video_info.chroma_location);
     match video_info.transfer_function {
         TransferFunction::Hlg => {
             println!(
                 "Detected HLG transfer function. Measuring through the Dolby Vision Profile 8.4 decode (luma curve, chroma MMR, RPU matrix) of the '{}' composer.",
                 cli.hlg_composer.cli_name()
+            );
+            if !chroma_modelled {
+                eprintln!(
+                    "Warning: chroma location {:?} is not modelled; the composed chroma is upsampled as for chroma location left.",
+                    video_info.chroma_location
+                );
+            }
+            println!(
+                "HLG chroma location: {} (signalled {:?})",
+                chroma_siting.name(),
+                video_info.chroma_location
             );
         }
         TransferFunction::Unknown => {
@@ -501,10 +515,12 @@ pub fn run(
             denoise_mode: &cli.pre_denoise,
             transfer_function: video_info.transfer_function,
             hlg_composer: cli.hlg_composer,
+            chroma_siting,
             peak_domain,
             min_percentile: cli.min_percentile,
             peak_estimator: cli.peak_estimator,
             peak_percentile: cli.peak_percentile,
+            dump_max_rgb: max_rgb_dump_dir().is_some(),
         },
     )?;
 
@@ -699,6 +715,35 @@ fn compute_scene_diff(cli: &Cli, curr_hist: &[f64], prev_hist: &[f64]) -> f64 {
         "hybrid" => calculate_histogram_difference(curr_hist, prev_hist),
         _ => calculate_histogram_difference(curr_hist, prev_hist),
     }
+}
+
+/// `HDR_ANALYZER_DUMP_MAX_RGB=<dir>`: write every analyzed frame's per-pixel max-RGB values
+/// there, for `scripts/validate_hlg_chroma_siting.sh` to compare the decode pixel by pixel.
+fn max_rgb_dump_dir() -> Option<PathBuf> {
+    std::env::var_os("HDR_ANALYZER_DUMP_MAX_RGB").map(PathBuf::from)
+}
+
+/// One file per analyzed frame, `frame_<index>_x<x>_y<y>_w<w>_h<h>.f32`: the crop rect's
+/// max-RGB values (normalized PQ) as little-endian f32, row by row, in the analyzed frame's
+/// coordinates.
+fn write_max_rgb_dump(
+    dir: &Path,
+    frame_index: u32,
+    rect: &CropRect,
+    pixels: Option<&[f32]>,
+) -> Result<()> {
+    let Some(pixels) = pixels else {
+        bail!(
+            "HDR_ANALYZER_DUMP_MAX_RGB is set, but this frame's analysis kept no per-pixel values"
+        );
+    };
+    std::fs::create_dir_all(dir).with_context(|| format!("Failed to create {}", dir.display()))?;
+    let path = dir.join(format!(
+        "frame_{frame_index:06}_x{}_y{}_w{}_h{}.f32",
+        rect.x, rect.y, rect.width, rect.height
+    ));
+    let bytes: Vec<u8> = pixels.iter().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(&path, bytes).with_context(|| format!("Failed to write {}", path.display()))
 }
 
 fn run_native_analysis_pipeline(
@@ -1014,6 +1059,14 @@ fn run_native_analysis_pipeline(
             }
             previous_histogram = Some(frame_result.frame.lum_histogram.clone());
             last_analyzed_frame = Some(copy_frame(&frame_result.frame));
+            if let Some(dir) = max_rgb_dump_dir() {
+                write_max_rgb_dump(
+                    &dir,
+                    frame_count,
+                    &rect,
+                    frame_result.max_rgb_pixels.as_deref(),
+                )?;
+            }
             last_l1_measurement = Some(frame_result.l1);
             last_peak_stats = Some(frame_result.peak_stats);
             (frame_result.frame, frame_result.l1, frame_result.peak_stats)
