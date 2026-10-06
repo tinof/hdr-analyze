@@ -1492,18 +1492,28 @@ fn coarser_sampling(sidecar: &metadata::L1Sidecar, quality: AnalysisQuality) -> 
 /// Warn when a run that expected GPU analysis was analyzed on the CPU (the sidecar records
 /// `gpu: false` for a CPU run and for a mid-run CPU fallback). The analyzer's own messages say why.
 fn warn_if_gpu_analysis_missing(sidecar: &metadata::L1Sidecar, args: &Args) {
-    let analyzed_on_cpu = sidecar
-        .analysis
-        .as_ref()
-        .is_some_and(|analysis| !analysis.gpu);
-    if args.hwaccel == HwAccel::Cuda
-        && analyzed_on_cpu
-        && external::analyzer_has_cuda_feature(&analyzer_executable())
-    {
+    if gpu_analysis_missing(sidecar, args.hwaccel, || {
+        external::analyzer_has_cuda_feature(&analyzer_executable())
+    }) {
         progress::print_warn(
             "GPU analysis was expected (--hwaccel cuda, analyzer built with +cuda), but the analyzer ran on the CPU for all or part of the run; its messages above say why.",
         );
     }
+}
+
+/// Whether `sidecar` was analyzed on the CPU (for all or part of the run) although
+/// `--hwaccel cuda` and an analyzer with the cuda feature should have analyzed it on the GPU.
+/// `analyzer_has_cuda` runs only when the other conditions hold, because it starts a process.
+fn gpu_analysis_missing(
+    sidecar: &metadata::L1Sidecar,
+    hwaccel: HwAccel,
+    analyzer_has_cuda: impl FnOnce() -> bool,
+) -> bool {
+    let analyzed_on_cpu = sidecar
+        .analysis
+        .as_ref()
+        .is_some_and(|analysis| !analysis.gpu);
+    hwaccel == HwAccel::Cuda && analyzed_on_cpu && analyzer_has_cuda()
 }
 
 /// What `--analysis-quality` means on this host, or `None` when there is nothing to say.
@@ -1798,6 +1808,24 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn gpu_analysis_missing_needs_cuda_a_cuda_analyzer_and_a_cpu_run() {
+        let cpu_run = sidecar_sampled_at(1, 1);
+        let mut gpu_run = sidecar_sampled_at(1, 1);
+        gpu_run.analysis.as_mut().unwrap().gpu = true;
+        assert!(gpu_analysis_missing(&cpu_run, HwAccel::Cuda, || true));
+        assert!(!gpu_analysis_missing(&gpu_run, HwAccel::Cuda, || true));
+        assert!(!gpu_analysis_missing(&cpu_run, HwAccel::Cuda, || false));
+        assert!(!gpu_analysis_missing(&cpu_run, HwAccel::None, || {
+            panic!("no analyzer probe without --hwaccel cuda")
+        }));
+        assert!(!gpu_analysis_missing(
+            &metadata::L1Sidecar::default(),
+            HwAccel::Cuda,
+            || panic!("no analyzer probe without provenance")
+        ));
     }
 
     #[test]
