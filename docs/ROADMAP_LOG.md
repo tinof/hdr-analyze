@@ -6,6 +6,38 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-06: P8, spec arithmetic measured; decode target `spec-float`
+
+Step 0 of the P8 decode change measured the `bt2100` composer's section 6 criteria
+([`HLG_COMPOSER.md`](HLG_COMPOSER.md)) through the spec composer's fixed-point arithmetic, on flat
+fields (`fit_hlg_composer report --spec-fixed`). Two deciding criteria fail, so the planned
+`spec-fixed` target was dropped by owner decision.
+
+- `bt2100` under `spec-fixed`: neutral R′G′B′ spread 5.891 codes (float decode 0.005), neutral luma
+  error 3.57 codes at code 902 (0.64), ΔE_ITP 1.05 (0.11); superwhite 0.03 and the source clamp
+  pass. Neutral composed chroma at code 721 is (32751, 32750), 17 LSB below 32768. The preset
+  barely moves (spread 172 → 173 codes); it is tinted under either arithmetic.
+- Cause: the normalization, not the 16-bit output. ETSI GS CCM 001 §5.4.2.3.2–3 (pp. 18–20) feeds a
+  10-bit code into the polynomial and the MMR as `s << 10` on a 2^20 scale, i.e. `code / 1024`;
+  the composer was fitted at `code / 1023` (`tools/fit_hlg_composer/src/model.rs`). About 5.78 of
+  the 5.89 codes of spread are the moved neutral point, 0.1 the quantization; the luma error is
+  entirely the moved variable.
+- Checked three ways: the spec text read against `SpecComposer` term by term; an independent
+  Python re-derivation from the constants (5.891 and 3.57 exactly); libplacebo, which scales the
+  pivots by `1 / ((1 << bl_bit_depth) − 1)` and evaluates on texture values, i.e. `code / 1023`
+  with no correction (`libav_internal.h:967-968`). No open-source decoder runs the spec's fixed
+  point. CCM 001 defines only BT.1886 and PQ base layers, so spec arithmetic for an HLG base layer
+  is an extrapolation.
+- Decision: the analyzer takes the spec's structure (MMR at chroma resolution on down-sampled luma,
+  bilinear upsampling at the stream's chroma location) with the `code / 1023` f32 arithmetic the
+  composer was fitted for and libplacebo uses (`spec-float`). The structure is unambiguous and
+  carried up to 17.4 codes of L1 max per scene; the arithmetic moved scene averages by 0.6 to 3.3.
+  On flat fields `spec-float` equals the current decode, so section 6 holds unchanged. Which
+  convention devices use is a WS6 question; a `code / 1024` decision would be a refit (new
+  composer, new RPU).
+
+Where: this file; `fit_hlg_composer report --spec-fixed`
+
 ### 2026-10-05: P8, 4:2:0 chroma of the HLG decode
 
 The P8 step "4:2:0 chroma siting of the analyzer's decode against a renderer on non-flat

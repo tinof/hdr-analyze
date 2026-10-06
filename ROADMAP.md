@@ -95,6 +95,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-06 | Spec fixed-point arithmetic measured: `bt2100` is not neutral at `code / 1024` (spread 5.9 codes); the decode change targets the spec structure in `code / 1023` (`spec-float`). | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
@@ -243,15 +244,18 @@ and broader hardware acceleration (E5). Neutral trims stay.
   quad and reshapes it with each pixel's own luma in `code / 1023` float; the spec composer runs
   the MMR at chroma resolution on down-sampled luma in `code / 1024` fixed point. Per scene on the
   HLG cuts that moves L1 max by up to 18 codes and the average by up to 5, above the 4-code limit.
-  The change must: take the spec's structure and arithmetic (the tool's `spec-fixed` variant);
+  The change must: take the spec's structure (the tool's `spec-float` variant; the spec's
+  `code / 1024` arithmetic leaves `bt2100` 5.9 codes off neutral, see the 2026-10-06 log);
   choose and justify an upsampler for the composed chroma, which the spec leaves to the display
-  (replicated against bilinear: 6.5 against 18.3 codes of L1 max on one cut); re-check the
-  `bt2100` neutral criteria under the spec's arithmetic; keep CPU and CUDA identical. It moves HLG
+  (replicated against bilinear: 6.5 against 18.3 codes of L1 max on one cut; bilinear at the
+  stream's chroma location chosen 2026-10-06); keep CPU and CUDA identical. (The neutral criteria
+  were re-checked under the spec's arithmetic on 2026-10-06; `spec-float` leaves them as they are.) It moves HLG
   L1 for every file, so it needs a new `luminance_mapping` name, re-analysis of older sidecars and
-  its own branch. Gate: the analyzer reproduces the tool's `spec-fixed` variant within 0.5 code per
-  frame on the synthetic patterns and the five cuts (`scripts/validate_hlg_chroma_siting.sh`).
-  The script does not enforce that gate yet: it fails only on its anchors, which compare the
-  analyzer with the tool's `analyzer` variant, so the fix must first make `spec-fixed` decide.
+  its own branch. Gate: the analyzer reproduces the tool's `spec-float` variant (spec structure,
+  `code / 1023` arithmetic; decided 2026-10-06, see the log) within 0.5 code per frame on the
+  synthetic patterns and the five cuts (`scripts/validate_hlg_chroma_siting.sh`). The script does
+  not enforce that gate yet: it fails only on its anchors, which compare the analyzer with the
+  tool's `analyzer` variant.
 - **Checked 2026-10-06 @ab13527:** the script's failures are anchor 1 (tool `analyzer` variant,
   `validate_hlg_chroma_siting.sh:313`), anchor 2 and unmodelled locations; `spec-fixed` is only
   printed (`:339`, `:367`), a missing cut is skipped (`:263`) and `--every` thins frames. Nothing
@@ -380,6 +384,10 @@ The detailed gap table and validation method live in
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
   firmware, TV picture mode and HDMI path. It is the gate for P8 and for the default changes of P9
   and P10.
+- **Open question (2026-10-06):** do devices evaluate the 8.4 composer at `code / 1023` (as
+  libplacebo and the `bt2100` fit) or at the spec's `code / 1024`? Under the latter `bt2100` is
+  5.9 codes off neutral, probably too little to see on a neutral ramp, so the test needs a pattern
+  that separates the two. A `code / 1024` answer means a refit (new composer and RPU).
 
 ### WS7: evaluation in displayed-picture units
 
