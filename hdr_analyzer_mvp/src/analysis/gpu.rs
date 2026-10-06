@@ -187,6 +187,7 @@ mod backend {
 
     use super::*;
     use crate::analysis::frame::FramePeakStats;
+    use crate::analysis::hlg::ChromaSiting;
     use crate::cli::{PeakDomain, PeakEstimator};
     use crate::l1_sidecar::FrameL1Measurement;
 
@@ -261,6 +262,7 @@ mod backend {
         _nvrtc: Library,
         stream: Arc<CudaStream>,
         kernel: CudaFunction,
+        compose_kernel: CudaFunction,
         transfer_lut: CudaSlice<f32>,
         luminance_bin_lut: CudaSlice<u16>,
         dovi_params: CudaSlice<f32>,
@@ -274,6 +276,10 @@ mod backend {
         y_capacity: usize,
         u_capacity: usize,
         v_capacity: usize,
+        /// HLG: composed chroma at chroma resolution, written by `compose_chroma`.
+        composed: Option<CudaSlice<f32>>,
+        /// `HDR_ANALYZER_DUMP_MAX_RGB`: every sample's max-RGB.
+        dump: Option<CudaSlice<f32>>,
     }
 
     impl GpuAnalyzer {
@@ -341,6 +347,9 @@ mod backend {
             let kernel = module
                 .load_function("analyze_frame")
                 .map_err(|err| anyhow!("failed to load analyze_frame kernel: {err:?}"))?;
+            let compose_kernel = module
+                .load_function("compose_chroma")
+                .map_err(|err| anyhow!("failed to load compose_chroma kernel: {err:?}"))?;
             let transfer_lut = stream
                 .clone_htod(&build_transfer_lut(transfer_function, composer))
                 .map_err(|err| anyhow!("failed to upload transfer LUT: {err:?}"))?;
@@ -363,6 +372,7 @@ mod backend {
                 _nvrtc: nvrtc,
                 stream,
                 kernel,
+                compose_kernel,
                 transfer_lut,
                 luminance_bin_lut,
                 dovi_params,
@@ -376,7 +386,40 @@ mod backend {
                 y_capacity: 0,
                 u_capacity: 0,
                 v_capacity: 0,
+                composed: None,
+                dump: None,
             })
+        }
+
+        /// A device buffer of at least `len` f32 values, grown (never shrunk) on demand.
+        fn ensure_f32(
+            stream: &Arc<CudaStream>,
+            slot: &mut Option<CudaSlice<f32>>,
+            len: usize,
+            what: &str,
+        ) -> Result<u64> {
+            if slot.as_ref().is_none_or(|slice| slice.len() < len) {
+                *slot = Some(
+                    stream
+                        .alloc_zeros::<f32>(len.max(1))
+                        .map_err(|err| anyhow!("failed to allocate the CUDA {what}: {err:?}"))?,
+                );
+            }
+            Ok(slot
+                .as_ref()
+                .expect("buffer was just allocated")
+                .device_ptr(stream)
+                .0)
+        }
+
+        /// Checks that run before any CUDA work, so a refusal leaves the context healthy.
+        fn validate(sample_stride: u32, options: &FrameAnalysisOptions<'_>) -> Result<()> {
+            if options.dump_max_rgb && sample_stride > 1 {
+                return Err(anyhow!(
+                    "HDR_ANALYZER_DUMP_MAX_RGB needs --downscale 1 on the CUDA path"
+                ));
+            }
+            Ok(())
         }
 
         fn upload_plane(
@@ -488,6 +531,7 @@ mod backend {
             let (planes, producer) = self
                 .device_planes(frame)
                 .map_err(|reason| anyhow!("NVDEC frame not usable in place: {reason}"))?;
+            Self::validate(sample_stride, options)?;
             let sample_count = Self::sample_count(crop_rect, sample_stride)?;
             let result = self.wait_for_producer(producer).and_then(|()| {
                 self.launch_and_collect(&planes, crop_rect, sample_stride, sample_count, options)
@@ -556,6 +600,7 @@ mod backend {
                     ));
                 }
             };
+            Self::validate(sample_stride, options)?;
             let sample_count = Self::sample_count(crop_rect, sample_stride)?;
             let result = self.upload_host_planes(frame, layout).and_then(|planes| {
                 self.launch_and_collect(&planes, crop_rect, sample_stride, sample_count, options)
@@ -635,6 +680,70 @@ mod backend {
             // The difference histogram costs a second decode for half of the pixels, so it
             // is only gathered for the estimator that needs it.
             let grain_stats = i32::from(options.peak_estimator == PeakEstimator::Robust);
+
+            // HLG: compose the chroma of the crop's chroma samples, plus the neighbours the
+            // upsampling reads, within the frame (as frame.rs ComposedChroma).
+            let chroma_width = (planes.width + 1) / 2;
+            let chroma_height = (planes.height + 1) / 2;
+            let cx0 = crop_x / 2;
+            let cy0 = (crop_y / 2 - 1).max(0);
+            let cx1 = ((crop_x + crop_width - 1) / 2 + 1).min(chroma_width - 1);
+            let cy1 = ((crop_y + crop_height - 1) / 2 + 1).min(chroma_height - 1);
+            let rect_width = cx1 + 1 - cx0;
+            let rect_height = cy1 + 1 - cy0;
+            let centred = i32::from(options.chroma_siting == ChromaSiting::Left);
+            let composed = if dovi84_rgb != 0 {
+                let count = rect_width as usize * rect_height as usize;
+                let address = Self::ensure_f32(
+                    &self.stream,
+                    &mut self.composed,
+                    2 * count,
+                    "composed-chroma buffer",
+                )?;
+                let compose_cfg = LaunchConfig {
+                    grid_dim: (
+                        (count as u32).div_ceil(BLOCK_THREADS).min(self.max_blocks),
+                        1,
+                        1,
+                    ),
+                    block_dim: (BLOCK_THREADS, 1, 1),
+                    shared_mem_bytes: 0,
+                };
+                let mut compose = self.stream.launch_builder(&self.compose_kernel);
+                compose
+                    .arg(&planes.y)
+                    .arg(&planes.u)
+                    .arg(&planes.v)
+                    .arg(&self.dovi_params)
+                    .arg(&address)
+                    .arg(&planes.width)
+                    .arg(&planes.height)
+                    .arg(&planes.y_stride)
+                    .arg(&planes.u_stride)
+                    .arg(&planes.v_stride)
+                    .arg(&planes.layout)
+                    .arg(&cx0)
+                    .arg(&cy0)
+                    .arg(&rect_width)
+                    .arg(&rect_height);
+                // Same stream as analyze_frame below, so the launches are ordered.
+                unsafe { compose.launch(compose_cfg) }
+                    .map_err(|err| anyhow!("CUDA chroma composition launch failed: {err:?}"))?;
+                address
+            } else {
+                0u64
+            };
+            let dump = if options.dump_max_rgb {
+                Self::ensure_f32(
+                    &self.stream,
+                    &mut self.dump,
+                    sample_count as usize,
+                    "max-RGB dump buffer",
+                )?
+            } else {
+                0u64
+            };
+
             let cfg = LaunchConfig {
                 grid_dim: (
                     (sample_count as u32)
@@ -654,7 +763,9 @@ mod backend {
                 .arg(&self.transfer_lut)
                 .arg(&self.luminance_bin_lut)
                 .arg(&self.dovi_params)
+                .arg(&composed)
                 .arg(&mut self.results)
+                .arg(&dump)
                 .arg(&planes.width)
                 .arg(&planes.height)
                 .arg(&planes.y_stride)
@@ -669,13 +780,31 @@ mod backend {
                 .arg(&sample_count)
                 .arg(&dovi84_rgb)
                 .arg(&peak_is_max_rgb)
-                .arg(&grain_stats);
+                .arg(&grain_stats)
+                .arg(&cx0)
+                .arg(&cy0)
+                .arg(&rect_width)
+                .arg(&chroma_width)
+                .arg(&chroma_height)
+                .arg(&centred);
             unsafe { launch.launch(cfg) }
                 .map_err(|err| anyhow!("CUDA analysis launch failed: {err:?}"))?;
 
             self.stream
                 .memcpy_dtoh(&self.results, &mut self.results_host)
                 .map_err(|err| anyhow!("failed to download CUDA analysis results: {err:?}"))?;
+            // With stride 1 (`validate`) the samples are the crop's pixels, row by row.
+            let max_rgb_pixels = match (options.dump_max_rgb, self.dump.as_ref()) {
+                (true, Some(buffer)) => {
+                    let mut pixels = vec![0.0f32; buffer.len()];
+                    self.stream
+                        .memcpy_dtoh(buffer, &mut pixels)
+                        .map_err(|err| anyhow!("failed to download the max-RGB dump: {err:?}"))?;
+                    pixels.truncate(sample_count as usize);
+                    Some(pixels)
+                }
+                _ => None,
+            };
             // A copy into pageable memory normally completes before returning, but CUDA does
             // not promise it; the results, and the caller's frame, are only safe after this.
             self.stream
@@ -769,9 +898,7 @@ mod backend {
                     n_eff,
                     avg_max_rgb_pq,
                 },
-                // The kernel does not write per-pixel values yet; the pipeline refuses a dump
-                // on this path.
-                max_rgb_pixels: None,
+                max_rgb_pixels,
             })
         }
     }
@@ -825,6 +952,7 @@ impl GpuAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::hlg::{downsample_luma, upsample_chroma, ChromaSiting};
 
     #[test]
     fn pq_lut_matches_limited_range_contract() {
@@ -862,9 +990,9 @@ mod tests {
         }
     }
 
-    /// Line-by-line transcription of `dovi84_max_rgb_pq` in kernels.cu, reading the flat
-    /// parameter buffer by the kernel's offsets.
-    fn kernel_max_rgb_pq(params: &[f32], y_code: u16, cb_code: u16, cr_code: u16) -> f32 {
+    /// Line-by-line transcription of `dovi84_reshape_chroma` as `compose_chroma` in
+    /// kernels.cu calls it, reading the flat parameter buffer by the kernel's offsets.
+    fn kernel_composed(params: &[f32], mmr_luma: u16, cb_code: u16, cr_code: u16) -> [f32; 2] {
         let reshape = |mmr: &[f32], y: f32, u: f32, v: f32| {
             let (yu, yv, uv) = (y * u, y * v, u * v);
             let x = [y, u, v, yu, yv, uv, yu * v];
@@ -885,12 +1013,20 @@ mod tests {
                 .min(params[DOVI_CHROMA_CLAMP + 1])
         };
         let (y, u, v) = (
-            f32::from(y_code) / 1023.0,
+            f32::from(mmr_luma) / 1023.0,
             f32::from(cb_code) / 1023.0,
             f32::from(cr_code) / 1023.0,
         );
-        let cb = reshape(&params[DOVI_MMR_CB..], y, u, v) - params[DOVI_CHROMA_OFFSET];
-        let cr = reshape(&params[DOVI_MMR_CR..], y, u, v) - params[DOVI_CHROMA_OFFSET + 1];
+        [
+            reshape(&params[DOVI_MMR_CB..], y, u, v),
+            reshape(&params[DOVI_MMR_CR..], y, u, v),
+        ]
+    }
+
+    /// Transcription of `dovi84_max_rgb_composed` in kernels.cu.
+    fn kernel_max_rgb_composed(params: &[f32], y_code: u16, composed: [f32; 2]) -> f32 {
+        let cb = composed[0] - params[DOVI_CHROMA_OFFSET];
+        let cr = composed[1] - params[DOVI_CHROMA_OFFSET + 1];
         let luma = params[usize::from(y_code)];
         let m = &params[DOVI_YCC..];
         let red = luma + m[0] * cb + m[1] * cr;
@@ -902,22 +1038,171 @@ mod tests {
             .min(params[DOVI_SOURCE_RANGE + 1])
     }
 
+    /// Transcription of `downsample_luma` in kernels.cu (signed arithmetic, as there).
+    fn kernel_downsample(luma: &[u16], width: i32, height: i32, cx: i32, cy: i32) -> u16 {
+        let code = |x: i32, y: i32| u32::from(luma[(y * width + x) as usize]);
+        let mut x = 2 * cx;
+        let left = (x - 1).max(0);
+        let right = (x + 1).min(width - 1);
+        x = x.min(width - 1);
+        let rows: [u32; 2] = std::array::from_fn(|k| {
+            let y = (2 * cy + k as i32).min(height - 1);
+            (code(left, y) + 2 * code(x, y) + code(right, y) + 2) >> 2
+        });
+        ((rows[0] + rows[1] + 1) >> 1) as u16
+    }
+
+    /// Transcription of `chroma_taps` in kernels.cu.
+    fn kernel_taps(pos: i32, len: i32, centred: bool) -> (i32, f32, i32, f32) {
+        let j = (pos / 2).min(len - 1);
+        let last = len - 1;
+        match (centred, pos & 1) {
+            (false, 0) => (j, 1.0, j, 0.0),
+            (false, _) => (j, 0.5, (j + 1).min(last), 0.5),
+            (true, 0) => (j, 0.75, (j - 1).max(0), 0.25),
+            (true, _) => (j, 0.75, (j + 1).min(last), 0.25),
+        }
+    }
+
+    /// Transcription of `upsample_chroma` in kernels.cu, on the interleaved composed buffer.
+    #[allow(clippy::too_many_arguments)]
+    fn kernel_upsample(
+        composed: &[f32],
+        component: i32,
+        (cx0, cy0, rect_width): (i32, i32, i32),
+        chroma_width: i32,
+        chroma_height: i32,
+        centred: bool,
+        x: i32,
+        y: i32,
+    ) -> f32 {
+        let (c0, cw0, c1, cw1) = kernel_taps(x, chroma_width, false);
+        let (r0, rw0, r1, rw1) = kernel_taps(y, chroma_height, centred);
+        let at = |cx: i32, cy: i32| {
+            composed[(2 * ((cy - cy0) * rect_width + (cx - cx0)) + component) as usize]
+        };
+        let row0 = cw0 * at(c0, r0) + cw1 * at(c1, r0);
+        let row1 = cw0 * at(c0, r1) + cw1 * at(c1, r1);
+        rw0 * row0 + rw1 * row1
+    }
+
     #[test]
     fn dovi84_kernel_params_reproduce_the_cpu_decoder_bit_exactly() {
         for composer in Composer::ALL {
             let decoder = dovi84_decoder(composer);
             let params = build_dovi84_params(decoder);
             assert_eq!(params.len(), DOVI_PARAM_WORDS);
-            for y in (0..1024_u16).step_by(7) {
+            for mmr_luma in (0..1024_u16).step_by(7) {
                 for cb in (0..1024_u16).step_by(31) {
                     for cr in (0..1024_u16).step_by(29) {
-                        let cpu = decoder.max_rgb_pq(y, &decoder.chroma(cb, cr));
-                        let kernel = kernel_max_rgb_pq(&params, y, cb, cr);
+                        let cpu = decoder.composed_chroma(mmr_luma, &decoder.chroma(cb, cr));
+                        let kernel = kernel_composed(&params, mmr_luma, cb, cr);
                         assert_eq!(
-                            cpu.to_bits(),
-                            kernel.to_bits(),
-                            "{composer:?} codes ({y}, {cb}, {cr})"
+                            cpu.map(f32::to_bits),
+                            kernel.map(f32::to_bits),
+                            "{composer:?} codes ({mmr_luma}, {cb}, {cr})"
                         );
+                        // The pixel's own luma differs from the MMR's in general.
+                        let y = 1023 - mmr_luma;
+                        assert_eq!(
+                            decoder.max_rgb_pq_composed(y, cpu).to_bits(),
+                            kernel_max_rgb_composed(&params, y, kernel).to_bits(),
+                            "{composer:?} pixel {y} with composed chroma of ({mmr_luma}, {cb}, {cr})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The kernels' spatial decode (pre-pass rectangle, down-sampling, taps, upsampling) equals
+    /// the CPU's building blocks pixel for pixel, on even and odd frames, both chroma
+    /// locations and crops at and away from the frame edge.
+    #[test]
+    fn dovi84_kernel_spatial_decode_matches_the_cpu() {
+        for composer in Composer::ALL {
+            let decoder = dovi84_decoder(composer);
+            let params = build_dovi84_params(decoder);
+            for (width, height) in [(10_i32, 6_i32), (9, 5)] {
+                let (chroma_width, chroma_height) = ((width + 1) / 2, (height + 1) / 2);
+                let mut state = 0x2545_f491_u32;
+                let mut code = |range: u32| {
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    (state % range) as u16
+                };
+                let luma: Vec<u16> = (0..width * height).map(|_| 64 + code(877)).collect();
+                let cb: Vec<u16> = (0..chroma_width * chroma_height)
+                    .map(|_| 64 + code(897))
+                    .collect();
+                let cr: Vec<u16> = (0..chroma_width * chroma_height)
+                    .map(|_| 64 + code(897))
+                    .collect();
+                for siting in [ChromaSiting::Left, ChromaSiting::TopLeft] {
+                    let centred = siting == ChromaSiting::Left;
+                    for (crop_x, crop_y, crop_width, crop_height) in
+                        [(0, 0, width, height), (2, 2, width - 4, height - 3)]
+                    {
+                        // As launch_and_collect.
+                        let cx0 = crop_x / 2;
+                        let cy0 = (crop_y / 2 - 1).max(0);
+                        let cx1 = ((crop_x + crop_width - 1) / 2 + 1).min(chroma_width - 1);
+                        let cy1 = ((crop_y + crop_height - 1) / 2 + 1).min(chroma_height - 1);
+                        let rect_width = cx1 + 1 - cx0;
+                        let mut composed = Vec::new();
+                        for cy in cy0..=cy1 {
+                            for cx in cx0..=cx1 {
+                                let index = (cy * chroma_width + cx) as usize;
+                                let mmr_luma = kernel_downsample(&luma, width, height, cx, cy);
+                                composed.extend(kernel_composed(
+                                    &params, mmr_luma, cb[index], cr[index],
+                                ));
+                            }
+                        }
+                        let cpu_composed = |cx: usize, cy: usize| {
+                            let mmr_luma = downsample_luma(
+                                |x, y| luma[y * width as usize + x],
+                                width as usize,
+                                height as usize,
+                                cx,
+                                cy,
+                            );
+                            let index = cy * chroma_width as usize + cx;
+                            decoder.composed_chroma(mmr_luma, &decoder.chroma(cb[index], cr[index]))
+                        };
+                        for y in crop_y..crop_y + crop_height {
+                            for x in crop_x..crop_x + crop_width {
+                                let pixel = luma[(y * width + x) as usize];
+                                let cpu_chroma: [f32; 2] = std::array::from_fn(|k| {
+                                    upsample_chroma(
+                                        |cx, cy| cpu_composed(cx, cy)[k],
+                                        chroma_width as usize,
+                                        chroma_height as usize,
+                                        siting,
+                                        x as usize,
+                                        y as usize,
+                                    )
+                                });
+                                let kernel_chroma: [f32; 2] = std::array::from_fn(|k| {
+                                    kernel_upsample(
+                                        &composed,
+                                        k as i32,
+                                        (cx0, cy0, rect_width),
+                                        chroma_width,
+                                        chroma_height,
+                                        centred,
+                                        x,
+                                        y,
+                                    )
+                                });
+                                assert_eq!(
+                                    decoder.max_rgb_pq_composed(pixel, cpu_chroma).to_bits(),
+                                    kernel_max_rgb_composed(&params, pixel, kernel_chroma).to_bits(),
+                                    "{composer:?} {width}x{height} {siting:?} crop ({crop_x}, {crop_y}) pixel ({x}, {y})"
+                                );
+                            }
+                        }
                     }
                 }
             }

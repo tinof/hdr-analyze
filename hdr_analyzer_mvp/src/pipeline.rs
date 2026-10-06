@@ -734,8 +734,7 @@ fn write_max_rgb_dump(
 ) -> Result<()> {
     let Some(pixels) = pixels else {
         bail!(
-            "HDR_ANALYZER_DUMP_MAX_RGB is set, but this analysis path does not keep per-pixel \
-             values; rerun with --hwaccel none"
+            "HDR_ANALYZER_DUMP_MAX_RGB is set, but this frame's analysis kept no per-pixel values"
         );
     };
     std::fs::create_dir_all(dir).with_context(|| format!("Failed to create {}", dir.display()))?;
