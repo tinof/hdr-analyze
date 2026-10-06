@@ -443,6 +443,41 @@ pub fn dovi84_pq_lut(composer: Composer) -> &'static [f32; 1024] {
 mod tests {
     use super::*;
 
+    /// Hand-worked taps: chroma location left (centred vertically) and the co-sited axes, at the
+    /// first, a middle and the last position, for even and odd luma lengths.
+    #[test]
+    fn chroma_taps_are_the_bilinear_weights_with_repeated_edges() {
+        // Co-sited (columns, or rows for top-left), 4 chroma samples for 8 luma positions.
+        assert_eq!(chroma_taps(0, 4, false), [(0, 1.0), (0, 0.0)]);
+        assert_eq!(chroma_taps(3, 4, false), [(1, 0.5), (2, 0.5)]);
+        assert_eq!(chroma_taps(7, 4, false), [(3, 0.5), (3, 0.5)]);
+        // Odd luma length 7: 4 chroma samples, the last position is co-sited with sample 3.
+        assert_eq!(chroma_taps(6, 4, false), [(3, 1.0), (3, 0.0)]);
+        // Centred between luma rows 2j and 2j+1: 3/4 of the near sample, 1/4 of the far one.
+        assert_eq!(chroma_taps(0, 4, true), [(0, 0.75), (0, 0.25)]);
+        assert_eq!(chroma_taps(4, 4, true), [(2, 0.75), (1, 0.25)]);
+        assert_eq!(chroma_taps(5, 4, true), [(2, 0.75), (3, 0.25)]);
+        assert_eq!(chroma_taps(7, 4, true), [(3, 0.75), (3, 0.25)]);
+    }
+
+    /// The spec's luma down-sampling worked by hand: `[1 2 1]` rounded per row, then the rounded
+    /// mean of the two rows, with the left frame edge repeated.
+    #[test]
+    fn downsample_luma_follows_the_spec_rounding_and_edges() {
+        // 4x2 luma: row 0 = 100 200 300 400, row 1 = 101 203 305 407.
+        let luma = [100_u16, 200, 300, 400, 101, 203, 305, 407];
+        let at = |x: usize, y: usize| luma[y * 4 + x];
+        // Chroma (0, 0): the left tap repeats x = 0.
+        // row 0: (100 + 2·100 + 200 + 2) >> 2 = 125; row 1: (101 + 2·101 + 203 + 2) >> 2 = 127;
+        // (125 + 127 + 1) >> 1 = 126.
+        assert_eq!(downsample_luma(at, 4, 2, 0, 0), 126);
+        // Chroma (1, 0) at luma column 2: row 0 (200 + 2·300 + 400 + 2) >> 2 = 300;
+        // row 1 (203 + 2·305 + 407 + 2) >> 2 = 305; (300 + 305 + 1) >> 1 = 303.
+        assert_eq!(downsample_luma(at, 4, 2, 1, 0), 303);
+        // A flat field returns its own code (the section 6 flat-field decode relies on it).
+        assert_eq!(downsample_luma(|_, _| 721, 4, 2, 1, 0), 721);
+    }
+
     const CODE_12BIT: f64 = 1.0 / 4095.0;
 
     fn assert_pq_near(code: u16, expected: f64, tolerance_codes: f64) {
