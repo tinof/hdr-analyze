@@ -36,10 +36,35 @@ fn stats(mut values: Vec<f64>) -> Stats {
     }
 }
 
-/// Summary numbers of one composer, used by the report and by the acceptance check.
+/// A decode of flat fields (every pixel the same code triple), which is all the criteria of
+/// section 6 need: the float decoder of the fit, or the spec's fixed-point composer.
+pub trait FlatDecode {
+    /// Raw R′G′B′ in normalized PQ (no source-range clamp) and whether a chroma output clamp
+    /// engaged.
+    fn rgb_pq(&self, y: u16, cb: u16, cr: u16) -> ([f32; 3], bool);
+    /// The luma term `(y_out − 1/16) · coef0` of a code.
+    fn luma_term(&self, code: u16) -> f64;
+    /// Whether an output clamp of the luma curve changes this code.
+    fn luma_clamp_active(&self, code: u16) -> bool;
+}
+
+impl FlatDecode for Decoder {
+    fn rgb_pq(&self, y: u16, cb: u16, cr: u16) -> ([f32; 3], bool) {
+        Decoder::rgb_pq(self, y, cb, cr)
+    }
+
+    fn luma_term(&self, code: u16) -> f64 {
+        Decoder::luma_term(self, code)
+    }
+
+    fn luma_clamp_active(&self, code: u16) -> bool {
+        Decoder::luma_clamp_active(self, code)
+    }
+}
+
 /// R′G′B′ with this composer's luma term and the least-squares best chroma for the sample:
 /// the lower bound any chroma curve can reach with this luma curve.
-fn oracle_rgb(decoder: &Decoder, y: u16, cb: u16, cr: u16) -> [f32; 3] {
+fn oracle_rgb(decoder: &impl FlatDecode, y: u16, cb: u16, cr: u16) -> [f32; 3] {
     let luma = decoder.luma_term(y);
     let target = reference_pq(y, cb, cr);
     let m = ycc_chroma();
@@ -62,9 +87,13 @@ fn oracle_rgb(decoder: &Decoder, y: u16, cb: u16, cr: u16) -> [f32; 3] {
     })
 }
 
+/// Summary numbers of one composer, used by the report and by the acceptance check.
 pub struct Evaluation {
     pub neutral_spread_max: f64,
     pub neutral_luma_error_max: f64,
+    /// The luma error over codes 64..=100 only, where an output clamp of the luma curve would
+    /// act; the spec composer has none.
+    pub near_black_luma_error_max: f64,
     pub neutral_delta_e_max: f64,
     pub superwhite_error_max: f64,
     pub luma_monotonic: bool,
@@ -77,7 +106,10 @@ pub struct Evaluation {
 }
 
 pub fn evaluate(name: &str, mapping: &RpuDataMapping) -> Evaluation {
-    let decoder = Decoder::new(mapping);
+    evaluate_with(name, &Decoder::new(mapping))
+}
+
+pub fn evaluate_with(name: &str, decoder: &impl FlatDecode) -> Evaluation {
     let mut text = String::new();
     let _ = writeln!(text, "== {name}");
 
@@ -99,6 +131,7 @@ pub fn evaluate(name: &str, mapping: &RpuDataMapping) -> Evaluation {
 
     let (mut spread_max, mut luma_max, mut de_max, mut superwhite_max) =
         (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+    let mut near_black_max = 0.0_f64;
     let (mut luma_max_code, mut de_max_code) = (0_u16, 0_u16);
     let mut clamp_codes = Vec::new();
     let mut previous = f64::NEG_INFINITY;
@@ -115,6 +148,9 @@ pub fn evaluate(name: &str, mapping: &RpuDataMapping) -> Evaluation {
         // Below the declared source_min_pq the RPU's own range makes both sides black.
         let floored = |pq: f64| pq.max(SOURCE_MIN * 4095.0);
         let luma_error = (floored(luma) - floored(reference)).abs();
+        if code <= 100 {
+            near_black_max = near_black_max.max(luma_error);
+        }
         if code <= 940 {
             if luma_error > luma_max {
                 (luma_max, luma_max_code) = (luma_error, code);
@@ -177,7 +213,7 @@ pub fn evaluate(name: &str, mapping: &RpuDataMapping) -> Evaluation {
             .iter()
             .filter(|&&(y, cb, cr)| !is_superwhite(y, cb, cr))
             .map(|&(y, cb, cr)| {
-                let rgb = oracle_rgb(&decoder, y, cb, cr);
+                let rgb = oracle_rgb(decoder, y, cb, cr);
                 delta_e_itp(decoded_nits(rgb), reference_nits(y, cb, cr))
             })
             .collect(),
@@ -221,6 +257,7 @@ pub fn evaluate(name: &str, mapping: &RpuDataMapping) -> Evaluation {
     Evaluation {
         neutral_spread_max: spread_max,
         neutral_luma_error_max: luma_max,
+        near_black_luma_error_max: near_black_max,
         neutral_delta_e_max: de_max,
         superwhite_error_max: superwhite_max,
         luma_monotonic: monotonic,

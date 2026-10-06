@@ -22,10 +22,22 @@ pub use rewrite::{check_rpu_file, check_rpus, rewrite_rpu_file};
 /// [`rewrite_rpu_file`] refuses an RPU whose header uses another value.
 pub const COEFFICIENT_LOG2_DENOM: u32 = 23;
 
-/// `analysis.luminance_mapping` of the preset composer (luma curve + chroma MMR + matrix).
-pub const PRESET_LUMINANCE_MAPPING: &str = "dovi84-v2";
-/// `analysis.luminance_mapping` of the BT.2100-fitted composer, first fit.
-pub const BT2100_V1_LUMINANCE_MAPPING: &str = "dovi84-bt2100-v1";
+/// `analysis.luminance_mapping` of HLG measured through the preset composer: luma curve,
+/// chroma MMR at chroma resolution on down-sampled luma, bilinear composed chroma, matrix
+/// (docs/HLG_COMPOSER.md section 9). The preset's counter counts decode revisions.
+pub const PRESET_LUMINANCE_MAPPING: &str = "dovi84-v3";
+/// `analysis.luminance_mapping` of HLG measured through the BT.2100-fitted composer, first
+/// fit, with the same decode. `bt2100-v1` names the composer (the RPU), `spec420` the
+/// decode, so a refit becomes `dovi84-bt2100-v2-spec420`.
+pub const BT2100_V1_LUMINANCE_MAPPING: &str = "dovi84-bt2100-v1-spec420";
+
+/// Names earlier analyzers wrote for the same composers, with each pixel's chroma reshaped on
+/// its own luma (no chroma-resolution decode). Such a measurement is re-analyzed, never
+/// reused; the RPU itself is the same.
+pub const LEGACY_LUMINANCE_MAPPINGS: [(&str, Composer); 2] = [
+    ("dovi84-v2", Composer::Preset),
+    ("dovi84-bt2100-v1", Composer::Bt2100V1),
+];
 
 /// A Profile 8.4 composer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -75,11 +87,20 @@ impl Composer {
             .find(|composer| composer.cli_name() == name)
     }
 
-    /// The composer a sidecar's `analysis.luminance_mapping` names, if any.
+    /// The composer a sidecar's `analysis.luminance_mapping` names, if any. Only current
+    /// names: a legacy name ([`LEGACY_LUMINANCE_MAPPINGS`]) is not a usable measurement.
     pub fn from_luminance_mapping(name: &str) -> Option<Composer> {
         Composer::ALL
             .into_iter()
             .find(|composer| composer.luminance_mapping() == name)
+    }
+
+    /// The composer a legacy `analysis.luminance_mapping` (an earlier decode) names, if any.
+    pub fn from_legacy_luminance_mapping(name: &str) -> Option<Composer> {
+        LEGACY_LUMINANCE_MAPPINGS
+            .into_iter()
+            .find(|&(legacy, _)| legacy == name)
+            .map(|(_, composer)| composer)
     }
 }
 
@@ -195,6 +216,19 @@ mod tests {
         }
         assert_eq!(Composer::from_luminance_mapping("dovi84-v1"), None);
         assert_eq!(Composer::from_luminance_mapping("pq"), None);
+        // Legacy names identify their composer but are never a current measurement.
+        for (legacy, composer) in LEGACY_LUMINANCE_MAPPINGS {
+            assert_eq!(Composer::from_luminance_mapping(legacy), None);
+            assert_eq!(
+                Composer::from_legacy_luminance_mapping(legacy),
+                Some(composer)
+            );
+            assert_ne!(legacy, composer.luminance_mapping());
+        }
+        assert_eq!(
+            Composer::from_legacy_luminance_mapping(PRESET_LUMINANCE_MAPPING),
+            None
+        );
     }
 
     #[test]

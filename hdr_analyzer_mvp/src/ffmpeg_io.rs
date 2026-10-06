@@ -5,10 +5,11 @@ use anyhow::{anyhow, Context, Result};
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::{
     codec, format, frame, media, software,
-    util::{color, mathematics::rescale},
+    util::{chroma, color, mathematics::rescale},
     Rescale,
 };
 
+use crate::analysis::hlg::ChromaSiting;
 use crate::crop::{
     detect_crop, is_frame_usable_for_crop, vote_crop_candidates, CropVote, CROP_EDGE_TOLERANCE,
 };
@@ -61,6 +62,8 @@ pub struct VideoInfo {
     pub color_range: color::Range,
     /// Signalled YCbCr matrix. The analyzer assumes BT.2020 non-constant luminance.
     pub color_space: color::Space,
+    /// Signalled position of the 4:2:0 chroma samples (`resolve_chroma_location`).
+    pub chroma_location: chroma::Location,
 }
 
 fn spread_probe_timestamps(start: i64, duration: i64, count: u32) -> Vec<i64> {
@@ -275,8 +278,9 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
     // AVCodecContext is valid for the lifetime of the Context object.
     let stream_transfer =
         unsafe { color::TransferCharacteristic::from((*decoder_context.as_ptr()).color_trc) };
-    let frame_transfer = first_frame_transfer(input_path);
-    let transfer_characteristic = resolve_transfer(stream_transfer, frame_transfer);
+    let frame_tags = first_frame_tags(input_path);
+    let transfer_characteristic =
+        resolve_transfer(stream_transfer, frame_tags.map(|(transfer, _)| transfer));
     if transfer_characteristic != stream_transfer {
         println!(
             "Transfer tag: stream reports {}, decoded frames report {} (alternative-transfer SEI or container colour tag); using {}.",
@@ -293,6 +297,10 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
     let height = decoder.height();
     let color_range = decoder.color_range();
     let color_space = decoder.color_space();
+    let chroma_location = resolve_chroma_location(
+        decoder.chroma_location(),
+        frame_tags.map(|(_, location)| location),
+    );
 
     // Try multiple methods to estimate frame count
     let frame_count = {
@@ -357,17 +365,19 @@ pub fn get_native_video_info(input_path: &str) -> Result<(VideoInfo, format::con
         transfer_function,
         color_range,
         color_space,
+        chroma_location,
     };
 
     Ok((info, input_context))
 }
 
-/// Transfer characteristic of the first decoded frame, from a short separate decode.
+/// Transfer characteristic and chroma location of the first decoded frame, from a short
+/// separate decode.
 ///
 /// FFmpeg's HEVC decoder applies the alternative transfer characteristics SEI (broadcast HLG
 /// often signals BT.2020 in the VUI and HLG in that SEI) and keeps a container colour tag when
 /// the VUI carries none. The stream-level tag misses both, so the frame-level value is preferred.
-fn first_frame_transfer(input_path: &str) -> Option<color::TransferCharacteristic> {
+fn first_frame_tags(input_path: &str) -> Option<(color::TransferCharacteristic, chroma::Location)> {
     let mut input = format::input(input_path).ok()?;
     let stream = input.streams().best(media::Type::Video)?;
     let index = stream.index();
@@ -382,12 +392,44 @@ fn first_frame_transfer(input_path: &str) -> Option<color::TransferCharacteristi
             continue;
         }
         if decoder.receive_frame(&mut decoded).is_ok() {
-            return Some(decoded.color_transfer_characteristic());
+            return Some((
+                decoded.color_transfer_characteristic(),
+                decoded.chroma_location(),
+            ));
         }
     }
     decoder.send_eof().ok()?;
     decoder.receive_frame(&mut decoded).ok()?;
-    Some(decoded.color_transfer_characteristic())
+    Some((
+        decoded.color_transfer_characteristic(),
+        decoded.chroma_location(),
+    ))
+}
+
+/// Pick the chroma location: a decoded frame's specified value (the HEVC VUI, which the decoder
+/// applies) wins, then the stream's (container or probed codec parameters).
+fn resolve_chroma_location(
+    stream: chroma::Location,
+    frame: Option<chroma::Location>,
+) -> chroma::Location {
+    match frame {
+        Some(frame) if frame != chroma::Location::Unspecified => frame,
+        _ => stream,
+    }
+}
+
+/// The upsampling position the HLG decode uses for a signalled chroma location, and whether the
+/// analyzer models that location. Unspecified means type 0 (left), the H.265 default; a location
+/// it does not model (centre, top, bottom) is decoded as left.
+pub fn chroma_siting(location: chroma::Location) -> (ChromaSiting, bool) {
+    match location {
+        chroma::Location::Unspecified | chroma::Location::Left => (ChromaSiting::Left, true),
+        chroma::Location::TopLeft => (ChromaSiting::TopLeft, true),
+        chroma::Location::Center
+        | chroma::Location::Top
+        | chroma::Location::BottomLeft
+        | chroma::Location::Bottom => (ChromaSiting::Left, false),
+    }
 }
 
 /// Pick the transfer to analyze with: a decoded frame's PQ/HLG tag wins, then the stream's
@@ -416,7 +458,40 @@ mod tests {
 
     use ffmpeg_next::util::color::TransferCharacteristic;
 
-    use super::{resolve_transfer, select_cuda_format, spread_probe_timestamps, TransferFunction};
+    use ffmpeg_next::util::chroma::Location;
+
+    use super::{
+        chroma_siting, resolve_chroma_location, resolve_transfer, select_cuda_format,
+        spread_probe_timestamps, TransferFunction,
+    };
+    use crate::analysis::hlg::ChromaSiting;
+
+    #[test]
+    fn frame_chroma_location_overrides_the_stream_and_maps_to_a_siting() {
+        assert_eq!(
+            resolve_chroma_location(Location::Left, Some(Location::TopLeft)),
+            Location::TopLeft
+        );
+        // An unspecified frame value keeps the stream's.
+        assert_eq!(
+            resolve_chroma_location(Location::TopLeft, Some(Location::Unspecified)),
+            Location::TopLeft
+        );
+        assert_eq!(
+            resolve_chroma_location(Location::Unspecified, None),
+            Location::Unspecified
+        );
+        assert_eq!(
+            chroma_siting(Location::Unspecified),
+            (ChromaSiting::Left, true)
+        );
+        assert_eq!(chroma_siting(Location::Left), (ChromaSiting::Left, true));
+        assert_eq!(
+            chroma_siting(Location::TopLeft),
+            (ChromaSiting::TopLeft, true)
+        );
+        assert_eq!(chroma_siting(Location::Center), (ChromaSiting::Left, false));
+    }
 
     #[test]
     fn frame_level_hdr_transfer_overrides_the_stream_tag() {

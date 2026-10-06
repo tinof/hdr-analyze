@@ -3,10 +3,12 @@
 //!
 //! ```text
 //! fit_hlg_composer fit [--write <bt2100_v1.rs>] [--ridge <r>]
-//! fit_hlg_composer report
+//! fit_hlg_composer report [--spec-fixed [--vectors]]
 //! fit_hlg_composer rewrite-rpu <preset|bt2100> <RPU.bin>
+//! fit_hlg_composer mapping <preset|bt2100>
 //! fit_hlg_composer chroma-siting <preset|bt2100> <width> <height> [--every N]
-//!     [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] < yuv420p10le
+//!     [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] [--dump-pixels <dir>]
+//!     [--spec-only] < yuv420p10le
 //! ```
 
 mod fit;
@@ -196,6 +198,125 @@ fn run_fit(write: Option<&str>, ridge: f64) -> Result<()> {
     Ok(())
 }
 
+/// `report --spec-fixed`: the criteria of docs/HLG_COMPOSER.md section 6 measured through the
+/// spec's fixed-point composer (ETSI GS CCM 001 §5.4.2.2–5.4.2.3) on flat fields, as the
+/// analyzer will decode once it follows the spec. Items 1, 2, 3 and 6 decide for bt2100; 4, 4b
+/// and 5 are reported.
+fn run_spec_report(vectors: bool) -> Result<()> {
+    let preset = siting::Variants::new(&Composer::Preset.rpu_data_mapping())?;
+    let fitted = siting::Variants::new(&Composer::Bt2100V1.rpu_data_mapping())?;
+    let preset_eval = report::evaluate_with("preset, spec fixed point", &preset);
+    let fitted_eval = report::evaluate_with("bt2100-v1, spec fixed point", &fitted);
+    print!("{}\n{}", preset_eval.text, fitted_eval.text);
+
+    println!("\nneutral composed chroma (Cb16 − 32768, Cr16 − 32768) over codes 64..=1019:");
+    for (name, variants) in [("preset", &preset), ("bt2100-v1", &fitted)] {
+        let mut runs: Vec<(u16, u16, [i32; 2])> = Vec::new();
+        for code in 64..=1019_u16 {
+            let delta = variants
+                .flat_chroma16(code, 512, 512)
+                .map(|c| i32::from(c) - 32768);
+            match runs.last_mut() {
+                Some((_, last, d)) if *d == delta => *last = code,
+                _ => runs.push((code, code, delta)),
+            }
+        }
+        println!("  {name}: {} runs", runs.len());
+        for (first, last, delta) in runs.iter().take(40) {
+            println!("    {first:4}..={last:4}: ({:+}, {:+})", delta[0], delta[1]);
+        }
+        if runs.len() > 40 {
+            println!("    … {} more runs", runs.len() - 40);
+        }
+    }
+
+    let clamp_points = |variants: &siting::Variants| {
+        [0_u16, 64, 940, 1019].map(|code| f64::from(variants.flat_max_rgb(code, 512, 512)) * 4095.0)
+    };
+    let mut rows = Vec::new();
+    for (line, pass) in report::acceptance(&fitted_eval, &preset_eval) {
+        let deciding = ["1.", "2.", "3."].iter().any(|p| line.starts_with(p));
+        rows.push((line, pass, deciding));
+    }
+    rows.push((
+        format!(
+            "2 (near black). neutral luma error over 64..=100 {:.2} <= 1.0",
+            fitted_eval.near_black_luma_error_max
+        ),
+        fitted_eval.near_black_luma_error_max <= 1.0,
+        true,
+    ));
+    let [black, black64, white940, white1019] = clamp_points(&fitted);
+    rows.push((
+        format!(
+            "6. source clamp: codes 0, 64 -> {black:.2}, {black64:.2} (62); codes 940, 1019 -> \
+             {white940:.2}, {white1019:.2} (3079)"
+        ),
+        black.round() == 62.0
+            && black64.round() == 62.0
+            && white940.round() == 3079.0
+            && white1019.round() == 3079.0,
+        true,
+    ));
+    let [p0, p64, p940, p1019] = clamp_points(&preset);
+    println!(
+        "\npreset source clamp (information): codes 0, 64, 940, 1019 -> {p0:.2}, {p64:.2}, \
+         {p940:.2}, {p1019:.2}"
+    );
+
+    println!("\nbt2100-v1 through the spec composer (docs/HLG_COMPOSER.md section 6):");
+    let mut stop = false;
+    for (line, pass, deciding) in &rows {
+        let verdict = if *pass { "PASS" } else { "FAIL" };
+        let role = if *deciding { "decides" } else { "reported" };
+        println!("{verdict} ({role}) {line}");
+        stop |= *deciding && !*pass;
+    }
+    println!(
+        "{}",
+        if stop {
+            "STOP: a deciding criterion fails under the spec composer"
+        } else {
+            "all deciding criteria pass under the spec composer"
+        }
+    );
+
+    if vectors {
+        print_spec_vectors(&preset, &fitted);
+    }
+    Ok(())
+}
+
+/// Values the analyzer's spec decode is pinned to (docs/HLG_COMPOSER.md section 9).
+fn print_spec_vectors(preset: &siting::Variants, fitted: &siting::Variants) {
+    const LUMA_CODES: [u16; 12] = [0, 63, 64, 200, 304, 502, 721, 896, 940, 942, 1019, 1023];
+    const CHROMA: [(u16, u16, u16); 8] = [
+        (64, 512, 512),
+        (721, 512, 512),
+        (940, 512, 512),
+        (502, 64, 960),
+        (502, 960, 64),
+        (300, 64, 64),
+        (900, 960, 960),
+        (1019, 0, 1023),
+    ];
+    for (name, variants) in [("preset", preset), ("bt2100-v1", fitted)] {
+        println!("\nvectors {name}:");
+        for code in LUMA_CODES {
+            println!("  luma16({code}) = {}", variants.luma16(code));
+        }
+        for (y, cb, cr) in CHROMA {
+            let [c0, c1] = variants.flat_chroma16(y, cb, cr);
+            let max_rgb = variants.flat_max_rgb(y, cb, cr);
+            println!(
+                "  flat ({y}, {cb}, {cr}): chroma16 ({c0}, {c1}), max_rgb 0x{:08x} ({:.3} codes)",
+                max_rgb.to_bits(),
+                f64::from(max_rgb) * 4095.0
+            );
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -211,6 +332,13 @@ fn main() -> Result<()> {
                 }
             }
             run_fit(write, ridge)
+        }
+        Some("report") if args.get(1).map(String::as_str) == Some("--spec-fixed") => {
+            match args.get(2).map(String::as_str) {
+                None => run_spec_report(false),
+                Some("--vectors") => run_spec_report(true),
+                Some(other) => bail!("unknown argument {other}"),
+            }
         }
         Some("report") => {
             let preset = report::evaluate("preset", &Composer::Preset.rpu_data_mapping());
@@ -238,7 +366,18 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("mapping") => {
+            // The sidecar `luminance_mapping` the analyzer writes for a composer, so scripts
+            // need not repeat the names.
+            let composer = match args.get(1).map(String::as_str) {
+                Some("preset") => Composer::Preset,
+                Some("bt2100") => Composer::Bt2100V1,
+                _ => bail!("mapping <preset|bt2100>"),
+            };
+            println!("{}", composer.luminance_mapping());
+            Ok(())
+        }
         Some("chroma-siting") => siting::run(&args[1..]),
-        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report | rewrite-rpu <preset|bt2100> <RPU.bin> | chroma-siting <preset|bt2100> <width> <height> [options]"),
+        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report [--spec-fixed [--vectors]] | rewrite-rpu <preset|bt2100> <RPU.bin> | mapping <preset|bt2100> | chroma-siting <preset|bt2100> <width> <height> [options]"),
     }
 }

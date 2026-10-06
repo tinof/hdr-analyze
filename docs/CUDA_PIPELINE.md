@@ -185,6 +185,37 @@ fixed-point sums, and maxima of non-negative f32 values compared as bit patterns
 launch shape changes the order of those combinations, never their result. Keep it that way: a
 floating-point sum across threads would make the output depend on scheduling.
 
+## HLG chroma pass (P8, 2026-10-06)
+
+HLG max-RGB follows the 4:2:0 structure of ETSI GS CCM 001 §5.4.2.3.3 (design:
+[HLG_COMPOSER.md](HLG_COMPOSER.md) §9). On CUDA a second kernel, `compose_chroma`, runs before
+`analyze_frame`: it reshapes each chroma sample once, on luma down-sampled with `[1 2 1]` across
+two rows, and writes the composed Cb/Cr as interleaved f32 into a device buffer that covers the
+crop's chroma rectangle plus one row above and below and one column to the right (the bilinear
+taps' reach), clamped to the frame. `analyze_frame` then
+upsamples it bilinearly at the stream's chroma location. With `HDR_ANALYZER_DUMP_MAX_RGB` set, a
+dump buffer also receives every sample's max-RGB value (only at `--downscale 1`). PQ runs do not
+launch the pass; their `.bin` and sidecar were byte-identical to the previous build on 16
+configurations (CPU/CUDA × crop/no-crop × downscale 1/2 × max-RGB/luma) of a 134-frame 4K clip.
+
+Throughput, frames ÷ wall time, `--hwaccel cuda --no-crop --disable-optimizer --transfer hlg`, best
+of 2 interleaved runs, RTX 4070 under WSL2, previous build (main 71fd03d) against this one:
+
+| Cut | Composer | downscale | before (fps) | after (fps) | change |
+|-----|----------|-----------|--------------|-------------|--------|
+| 3840×2160 50p, 3051 frames | bt2100 | 1 | 524.6 | 518.7 | −1.12% |
+| same | bt2100 | 2 | 522.3 | 522.2 | −0.03% |
+| same | preset | 1 | 520.8 | 519.1 | −0.32% |
+| same | preset | 2 | 519.4 | 518.9 | −0.10% |
+| 3840×2160 25p, 2976 frames | bt2100 | 1 | 494.8 | 490.8 | −0.82% |
+| same | bt2100 | 2 | 494.3 | 490.7 | −0.73% |
+| same | preset | 1 | 493.9 | 489.5 | −0.89% |
+| same | preset | 2 | 494.8 | 490.8 | −0.81% |
+
+The run is NVDEC-bound: downscale 1 and 2 run at the same speed. `--profile-performance` on the
+25p cut (bt2100, downscale 1) reports analysis at 1855 fps before and 1888 fps after, and decode at
+778 and 766 fps effective.
+
 ## Automated parity gate
 
 `scripts/cuda-parity.sh` compares CPU analysis with CUDA analysis of the same build. Run it on the
@@ -203,7 +234,7 @@ composer). For each clip and composer, with crop detection and with `--no-crop`,
 - equal `crop`, `scenes` and `frames` in the two `.l1.json` sidecars;
 - `analysis.gpu` false for the CPU run and true for the CUDA run, so a CPU fallback fails the test;
 - `analysis.luminance_mapping` `pq` for the PQ clip, and for the HLG clip the composer's name:
-  `dovi84-v2` (preset) or `dovi84-bt2100-v1` (bt2100).
+  `dovi84-v3` (preset) or `dovi84-bt2100-v1-spec420` (bt2100).
 
 The PQ clip is also analyzed with `--hlg-composer bt2100`, and its `.bin` must be byte-identical to
 the default PQ run: the option must not touch PQ input.
@@ -231,6 +262,9 @@ What it does not prove:
 - Keep the result-buffer layout (`SUMS_WORD` and the counts before it) and the `dovi_params` layout
   (`DOVI_*`) identical in `kernels.cu` and `gpu.rs`.
 - Keep `GpuAnalyzer::new` ahead of `setup_hardware_decoder`.
+- Keep the HLG chroma pass identical to `frame.rs` operation for operation: the same pre-pass
+  rectangle (crop chroma rect plus the taps' reach, clamped to the frame) and the same tap and bilinear
+  arithmetic in f32 with `__fmul_rn`/`__fadd_rn`, no FMA.
 - Never pass an `AV_PIX_FMT_CUDA` frame to host code; go through `host_view`.
 - Benchmark with `--no-crop` (or subtract the crop probe) and report frames ÷ wall time.
   `--profile-performance` prints an "Analysis" rate that excludes decoding.

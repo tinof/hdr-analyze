@@ -1394,6 +1394,13 @@ fn check_luminance_mapping(
                     .into(),
             ));
         }
+        if let Some(legacy) = mapping.and_then(Composer::from_legacy_luminance_mapping) {
+            return Err(SidecarError::LuminanceMappingMismatch(format!(
+                "was measured with the {} composer's pre-spec 4:2:0 HLG decode ({}), which reshapes chroma per pixel instead of at chroma resolution; this run needs {expected}",
+                legacy.cli_name(),
+                mapping.unwrap_or("none")
+            )));
+        }
         let measured_with = mapping.and_then(Composer::from_luminance_mapping);
         if sidecar.version >= 3 && measured_with.is_none() && is_dovi84_family(mapping) {
             return Err(SidecarError::LuminanceMappingMismatch(format!(
@@ -2449,7 +2456,7 @@ mod tests {
         let mut sidecar = v2_sidecar_json();
         sidecar["version"] = json!(3);
         sidecar["source"]["transfer_function"] = json!("HLG (ARIB STD-B67)");
-        sidecar["analysis"]["luminance_mapping"] = json!("dovi84-v2");
+        sidecar["analysis"]["luminance_mapping"] = json!(Composer::Preset.luminance_mapping());
         sidecar
     }
 
@@ -2518,9 +2525,35 @@ mod tests {
     }
 
     #[test]
+    fn legacy_dovi84_mappings_are_re_analyzed() {
+        for (legacy, measured_with) in dovi84_composer::LEGACY_LUMINANCE_MAPPINGS {
+            let mut fixture = v3_hlg_sidecar_json();
+            fixture["analysis"]["luminance_mapping"] = json!(legacy);
+            let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+            // Under either composer: the legacy name, not the composer, decides the message.
+            for composer in Composer::ALL {
+                let expect = SidecarExpectation::default().with_hlg_composer(Some(composer));
+                let error = validate_l1_sidecar(&sidecar, &expect).unwrap_err();
+                let message = error.to_string();
+                assert!(matches!(error, SidecarError::LuminanceMappingMismatch(_)));
+                assert!(message.contains("pre-spec 4:2:0"), "{message}");
+                assert!(message.contains(measured_with.cli_name()), "{message}");
+                assert!(message.contains(composer.luminance_mapping()), "{message}");
+                assert!(message.contains("re-analysis required"), "{message}");
+                assert!(dv_profile_for(HdrFormat::Hlg, Some(&sidecar), composer).is_err());
+            }
+            // Still an 8.4 mapping: never valid for PQ.
+            assert!(matches!(
+                validate_l1_sidecar(&sidecar, &SidecarExpectation::default()),
+                Err(SidecarError::LuminanceMappingMismatch(_))
+            ));
+        }
+    }
+
+    #[test]
     fn unknown_dovi84_revision_is_rejected_for_hlg() {
         let mut fixture = v3_hlg_sidecar_json();
-        fixture["analysis"]["luminance_mapping"] = json!("dovi84-v3");
+        fixture["analysis"]["luminance_mapping"] = json!("dovi84-v9");
         let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
         assert!(matches!(
             validate_l1_sidecar(&sidecar, &hlg_expectation()),
@@ -2548,12 +2581,12 @@ mod tests {
             (
                 &preset,
                 Composer::Bt2100V1,
-                "preset HLG composer (dovi84-v2)",
+                "preset HLG composer (dovi84-v3)",
             ),
             (
                 &bt2100,
                 Composer::Preset,
-                "bt2100 HLG composer (dovi84-bt2100-v1)",
+                "bt2100 HLG composer (dovi84-bt2100-v1-spec420)",
             ),
         ] {
             let error = validate_l1_sidecar(sidecar, &expect(composer)).unwrap_err();

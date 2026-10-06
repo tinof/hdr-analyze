@@ -30,7 +30,10 @@ use crate::crop::CropRect;
 /// reusing them, and accept an HLG sidecar only when it names the selected composer exactly. The HLG value names the composer the
 /// decode used (`dovi84_composer::Composer::luminance_mapping`): `"dovi84-v2"` for the preset,
 /// `"dovi84-bt2100-v1"` for the BT.2100 fit (`--hlg-composer bt2100`), a new value of the same
-/// field, so the version stays 4. Version 2 added analyzer/source/analysis
+/// field, so the version stays 4. Since the chroma of the HLG decode is composed at chroma
+/// resolution and upsampled (ROADMAP P8), the names are `"dovi84-v3"` and
+/// `"dovi84-bt2100-v1-spec420"`; the earlier two are legacy and re-analyzed
+/// (`dovi84_composer::LEGACY_LUMINANCE_MAPPINGS`), and the version stays 5. Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
 pub const L1_SIDECAR_VERSION: u32 = 5;
@@ -108,8 +111,9 @@ pub struct AnalysisMetadata {
     pub gpu: bool,
     pub no_crop: bool,
     /// How signal codes were mapped to PQ: `"pq"` (PQ/unspecified input, measured directly)
-    /// or the HLG composer's name (`"dovi84-v2"` preset, `"dovi84-bt2100-v1"` BT.2100 fit;
-    /// HLG through the DV Profile 8.4 decode). Added in version 3.
+    /// or the HLG composer's measurement name (`"dovi84-v3"` preset,
+    /// `"dovi84-bt2100-v1-spec420"` BT.2100 fit; HLG through the DV Profile 8.4 decode).
+    /// Added in version 3.
     pub luminance_mapping: String,
 }
 
@@ -394,8 +398,8 @@ mod tests {
     #[test]
     fn hlg_sidecar_round_trips_dovi84_luminance_mapping() {
         for (composer, mapping) in [
-            (Composer::Preset, "dovi84-v2"),
-            (Composer::Bt2100V1, "dovi84-bt2100-v1"),
+            (Composer::Preset, "dovi84-v3"),
+            (Composer::Bt2100V1, "dovi84-bt2100-v1-spec420"),
         ] {
             let dir = tempfile::tempdir().unwrap();
             let output = dir.path().join("hlg.bin");

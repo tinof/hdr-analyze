@@ -252,20 +252,36 @@ fn check_parity(
             frame_count + 1,
             "{label}: frame-stats rows"
         );
-        if let Some((line, (cpu_row, gpu_row))) = cpu
+        // The last column, the unrounded max-RGB average, comes from an f64 sum on the CPU and a
+        // u64 fixed-point sum (truncated to 2^-32 per pixel) on the GPU, so it agrees only to
+        // within that truncation; every other column must be equal.
+        let split = |row: &str| -> (String, Option<f64>) {
+            match row.rsplit_once(',') {
+                Some((head, last)) => (head.to_string(), last.parse().ok()),
+                None => (row.to_string(), None),
+            }
+        };
+        assert_eq!(
+            cpu.frame_stats.lines().count(),
+            gpu.frame_stats.lines().count(),
+            "{label}: frame statistics differ in length"
+        );
+        for (line, (cpu_row, gpu_row)) in cpu
             .frame_stats
             .lines()
             .zip(gpu.frame_stats.lines())
             .enumerate()
-            .find(|(_, (cpu_row, gpu_row))| cpu_row != gpu_row)
         {
-            panic!("{label}: frame statistics differ at line {line}:\n  cpu {cpu_row}\n  gpu {gpu_row}");
+            let ((cpu_head, cpu_avg), (gpu_head, gpu_avg)) = (split(cpu_row), split(gpu_row));
+            let averages_agree = match (cpu_avg, gpu_avg) {
+                (Some(a), Some(b)) => (a - b).abs() <= 1e-9,
+                _ => line == 0 && cpu_row == gpu_row,
+            };
+            assert!(
+                cpu_head == gpu_head && averages_agree,
+                "{label}: frame statistics differ at line {line}:\n  cpu {cpu_row}\n  gpu {gpu_row}"
+            );
         }
-        assert_eq!(
-            cpu.frame_stats.len(),
-            gpu.frame_stats.len(),
-            "{label}: frame statistics differ in length"
-        );
         let corrected = cpu
             .frame_stats
             .lines()
