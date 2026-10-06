@@ -16,7 +16,9 @@ the stated outcome; **Core complete** meets the original gate but retains named 
 **How to update.** Change the item's status and open steps in place. Add one row to the progress
 log (one sentence plus the PR link) and the full text of the step to
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md). Measurements go to the log or to the doc the item
-links, not into the item.
+links, not into the item. `/roadmap-next` keeps **Next up** current and adds a **Checked** bullet
+(date, commit, `file:line`) to each item it examined, so a later session re-checks only what
+changed since that commit.
 
 ## Current status (updated 2026-10-05)
 
@@ -60,6 +62,12 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
+### Next up (checked 2026-10-05 at main@9edee09)
+
+1. **E8 + E9** on one branch: same crate, same unit-test gate, no sidecar L1 change.
+2. **P9 step 0:** an HDR10+-only fixture and the frame alignment of pixel measurements to HDR10+
+   scenes, before any hybrid flag (see P9 Checked).
+
 ### Waiting for the owner
 
 Steps that need a decision or a hardware test from the owner. Other steps of the same item stay
@@ -80,6 +88,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
 | 2026-10-04 | L1 lines up with the picture in open-GOP cuts (RASL leading pictures); sidecar v5. | E7 | [#26](https://github.com/tinof/hdr-analyze/pull/26) |
@@ -207,9 +216,9 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Status:** Core complete. Only PQ and HLG transfers are analyzed; tagged SDR transfers, including
   the BT.2020 10/12-bit tags that share the BT.709 curve, are refused. Full-range and non-BT.2020
   matrix tags warn.
-- **Open:** for HLG, refuse such input instead of warning, because the stream is copied into
-  Profile 8.4 and the composer assumes limited-range BT.2020 (with P8); for PQ, normalize
-  full-range input or refuse it.
+- **Open:** for PQ, normalize full-range input or refuse it. (The HLG half shipped with P8:
+  `mkvdovi` refuses full-range or non-BT.2020 HLG, `metadata::check_hlg_colour_contract`; the
+  analyzer itself still only warns.)
 
 ### P8: HLG → Profile 8.4 composer
 
@@ -220,10 +229,23 @@ and broader hardware acceleration (E5). Neutral trims stay.
   neutrals (75% grey ΔE_ITP 6.8, up to 10.3 near black) and decodes nominal white to about
   1150 nits.
 - **Open:** the WS6 playback test must show that devices apply a composer that is not the preset,
-  and how visible the tint is on a TV. 4:2:0 chroma siting of the analyzer's decode (both
-  composers) against a renderer on non-flat patterns. Real HLG material for both: five cuts
-  since 2026-10-05 (live sport at 50p, a concert, a nature series, a broadcast capture, a drama;
-  WS8 item 5).
+  and how visible the tint is on a TV. Real HLG material for both: five cuts since 2026-10-05
+  (live sport at 50p, a concert, a nature series, a broadcast capture, a drama; WS8 item 5).
+- **Open: spec 4:2:0 decode in the analyzer** (both composers). Measured 2026-10-05
+  ([`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md) §9): the analyzer replicates chroma over the
+  quad and reshapes it with each pixel's own luma in `code / 1023` float; the spec composer runs
+  the MMR at chroma resolution on down-sampled luma in `code / 1024` fixed point. Per scene on the
+  HLG cuts that moves L1 max by up to 18 codes and the average by up to 5, above the 4-code limit.
+  The change must: take the spec's structure and arithmetic (the tool's `spec-fixed` variant);
+  choose and justify an upsampler for the composed chroma, which the spec leaves to the display
+  (replicated against bilinear: 6.5 against 18.3 codes of L1 max on one cut); re-check the
+  `bt2100` neutral criteria under the spec's arithmetic; keep CPU and CUDA identical. It moves HLG
+  L1 for every file, so it needs a new `luminance_mapping` name, re-analysis of older sidecars and
+  its own branch. Gate: the analyzer reproduces the tool's `spec-fixed` variant within 0.5 code per
+  frame on the synthetic patterns and the five cuts (`scripts/validate_hlg_chroma_siting.sh`).
+- **Checked 2026-10-05 @9edee09:** `scripts/validate_hlg_dv84_color.sh` tests flat patches only,
+  so it cannot show a chroma-siting error. The local ffmpeg has the `libplacebo` filter with
+  `apply_dolbyvision`, so a renderer for the comparison is available on the dev host.
 
 ### P9: HDR10+ → Profile 8.1 L1
 
@@ -242,6 +264,12 @@ and broader hardware acceleration (E5). Neutral trims stay.
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
+- **Checked 2026-10-05 @9edee09:** a hybrid flag is premature until three things change.
+  `mkvdovi/src/pipeline.rs:1637` passes `--hdr10plus-json`, so `dovi_tool generate` ignores the
+  measured shots on that path (and `--verify` gets no sidecar for HDR10+, `pipeline.rs:895`).
+  `metadata.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path and cannot exercise
+  a hybrid branch. The sidecar has no per-frame peak (`l1_sidecar.rs` `FrameL1Metadata`: min and
+  the two averages only).
 
 ### P10: measured against delivered
 
@@ -268,6 +296,9 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Decision:** a targeted repair that keeps unaffected levels, against the finding that trims were
   authored for the authored L1 and shot list. Until decided, `--mdfix` should state in its output
   which authored levels it drops.
+- **Checked 2026-10-05 @9edee09:** the source RPU is classified from a 240-frame sample
+  (`rpu_check::extract_rpu_sample`), so the dropped-levels notice can only name levels seen in
+  that sample unless the step reads the whole RPU.
 
 ## `cm_analyze` parity
 
@@ -463,7 +494,12 @@ The detailed gap table and validation method live in
   (`hdr_analyzer_mvp/src/analysis/histogram.rs`) convert a bin index back with bin/255, so a
   1000-nit value reads as about 305 nits. It reaches the output only with
   `--peak-source histogram99/histogram999` or `--peak-domain luma` with a non-conservative
-  optimizer profile; default output is unaffected.
+  optimizer profile.
+- **Checked 2026-10-05 @9edee09:** `find_highlight_knee_nits` also feeds the optimizer's
+  `target_nits` on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`;
+  the sidecar L1 and the RPU change only under `--legacy-madvr-l1`. The CUDA parity test runs
+  `--disable-optimizer` (`cuda_parity.rs:94`) and does not cover it: the round-trip unit test is
+  the gate.
 - **Fix:** one shared bin-edge function for writer and readers, with a round-trip test.
 
 ### E9: `--pre-denoise` values
@@ -479,6 +515,14 @@ The detailed gap table and validation method live in
   code. The generator's own conversion (`dolby_vision::utils::nits_to_pq_12_bit`, also used for
   the P10 source range) is ×4095 too, so analyzer and generator agree (checked 2026-10-04). Still
   open: a check against retail RPUs.
+
+### E11: `l1_diff` and open-GOP cuts
+
+- **Status:** Open. `tools/l1_diff` does not read `source.leading_skipped_frames` (sidecar v5), so
+  on an open-GOP cut it stops with a frame-count mismatch (`main.rs:467`) instead of shifting our
+  frames by the skipped count. Blocks scoring the development cuts that start at a CRA.
+- **Fix:** offset by `leading_skipped_frames` when the reference covers the stream frames, with a
+  test on a synthetic open-GOP sidecar.
 
 ## Checked and kept (2026-10-03)
 

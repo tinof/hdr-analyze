@@ -165,7 +165,7 @@ pub fn mmr_features(y: f64, u: f64, v: f64) -> [f64; 22] {
     out
 }
 
-fn fixed(int: i64, frac: u64) -> f64 {
+pub fn fixed(int: i64, frac: u64) -> f64 {
     int as f64 + frac as f64 / DENOM
 }
 
@@ -248,8 +248,40 @@ impl Decoder {
     /// Raw R′G′B′ in normalized PQ (no source-range clamp) and whether a chroma output clamp
     /// engaged.
     pub fn rgb_pq(&self, y_code: u16, cb_code: u16, cr_code: u16) -> ([f32; 3], bool) {
-        let normalize = |code: u16| f32::from(code.min(1023)) / 1023.0;
-        let (y, u, v) = (normalize(y_code), normalize(cb_code), normalize(cr_code));
+        let (chroma, clamped) = self.reshape_chroma(
+            Self::normalize(y_code),
+            Self::normalize(cb_code),
+            Self::normalize(cr_code),
+        );
+        (self.compose(self.luma_term_f32(y_code), chroma), clamped)
+    }
+
+    /// A 10-bit code as the analyzer and libplacebo normalize it (`code / 1023`).
+    pub fn normalize(code: u16) -> f32 {
+        f32::from(code.min(1023)) / 1023.0
+    }
+
+    /// The stored luma term of a code.
+    pub fn luma_term_f32(&self, code: u16) -> f32 {
+        self.luma_term[usize::from(code.min(1023))]
+    }
+
+    /// R′G′B′ from a luma term and the two reshaped chroma components (normalized, before the
+    /// 0.5 offset), in the analyzer's operation order.
+    pub fn compose(&self, luma: f32, chroma: [f32; 2]) -> [f32; 3] {
+        let cb = chroma[0] - 0.5;
+        let cr = chroma[1] - 0.5;
+        let m = &self.m;
+        [
+            luma + m[0] * cb + m[1] * cr,
+            luma + m[2] * cb + m[3] * cr,
+            luma + m[4] * cb + m[5] * cr,
+        ]
+    }
+
+    /// The reshaped Cb and Cr (clamped to [0, 1]) for normalized MMR inputs, and whether the
+    /// output clamp engaged. `y` is the MMR's luma input, which need not be the pixel's own luma.
+    pub fn reshape_chroma(&self, y: f32, u: f32, v: f32) -> ([f32; 2], bool) {
         let uv = u * v;
         let uv_pow = [uv, uv * uv, uv * uv * uv];
         let u_pow = [u, u * u, u * u * u];
@@ -277,18 +309,8 @@ impl Decoder {
             clamped |= out != s;
             out
         };
-        let cb = reshape(&self.mmr[0]) - 0.5;
-        let cr = reshape(&self.mmr[1]) - 0.5;
-        let luma = self.luma_term[usize::from(y_code.min(1023))];
-        let m = &self.m;
-        (
-            [
-                luma + m[0] * cb + m[1] * cr,
-                luma + m[2] * cb + m[3] * cr,
-                luma + m[4] * cb + m[5] * cr,
-            ],
-            clamped,
-        )
+        let chroma = [reshape(&self.mmr[0]), reshape(&self.mmr[1])];
+        (chroma, clamped)
     }
 }
 

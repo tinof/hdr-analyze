@@ -6,6 +6,40 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-05: P8, 4:2:0 chroma of the HLG decode
+
+The P8 step "4:2:0 chroma siting of the analyzer's decode against a renderer on non-flat
+patterns" is done; it opens a decode change. Planning found that the reference is the spec
+composer, not a renderer: ETSI GS CCM 001 v1.1.1 §5.4.2.3.3 down-samples the BL luma to the chroma
+positions and runs the MMR at chroma resolution, in integer arithmetic with 10-bit inputs as
+`code / 1024`. The analyzer replicates each chroma sample over its quad and reshapes it with each
+pixel's own luma (`code / 1023`, f32); libplacebo upsamples chroma first and reshapes per pixel
+(`code / 1023`). Tables and method: [`HLG_COMPOSER.md`](HLG_COMPOSER.md) §9.
+
+- New `fit_hlg_composer chroma-siting` (analyzer, spec in the analyzer's arithmetic, spec in its
+  fixed point, renderer; nearest or bilinear for chroma location left and top-left) and
+  `scripts/validate_hlg_chroma_siting.sh` (synthetic edges, lines, 1×1 to 3×3 highlights, colour
+  ramp, flat controls; optional real cuts). Anchors on every run: the tool reproduces the
+  analyzer's per-frame maximum exactly and average within 0.5 code; its renderer variant matches
+  libplacebo (`upscaler=bilinear`) within 0.32 codes per pixel (`bt2100`) and 3.84 (preset),
+  including every pixel around the test highlights.
+- Acceptance limit, set in plan mode: per-scene |analyzer − spec| ≤ 4 codes for L1 max and avg on
+  every scene of the five HLG cuts, both composers. Measured (`bt2100` on every frame, preset on
+  every 4th): L1 max up to 18.3 (`bt2100`) and 18.2 (preset), on Wimbledon; average up to 4.9 and
+  3.5, on Glastonbury. Exceeded, so P8 gets the open step "spec 4:2:0 decode in the analyzer".
+- The structure (MMR at chroma resolution) accounts for up to 17.4 codes of L1 max and below
+  1 code of average; the arithmetic (`code / 1024`) for most of the average (−4.0 codes on flat
+  red through `bt2100`, on every pixel). The display's upsampler of the composed chroma is not
+  specified: replicated instead of bilinear gives 6.5 codes on Wimbledon instead of 18.3.
+- Two of the five cuts (Glastonbury, Champions League) reach the 3079 clamp in every scene, so
+  the L1 max evidence comes from three cuts. 18 codes of L1 max lies below the smallest WS7 point
+  (+75 codes).
+- Hypothesis, not tested: the PQ path replicates chroma over the quad too (`frame.rs`, the non-HLG
+  branch). Its matrix is linear, so only colour edges differ, but saturated small highlights may
+  contribute to the clean-source over-read on the MEL cuts (WS1).
+
+Where: this file; [`HLG_COMPOSER.md`](HLG_COMPOSER.md) §9
+
 ### 2026-10-05: WS8 item 5 done; findings for P9, WS1, E7
 
 Two deliveries (2026-10-04 and 2026-10-05) filled the per-format gaps. All cuts are stream copies
@@ -332,8 +366,9 @@ HLG → Profile 8.4 composer. 2026-10-03: `--hlg-composer bt2100` implemented as
 nits, colour-patch ΔE_ITP 11.8 against 26.1 in libplacebo's render; HLG colour input contract
 enforced). Default switched to `bt2100` the same day by owner decision; the WS6 playback test still
 has to show that devices apply it (`--hlg-composer preset` is the fallback). Background before the
-change: `mkvdovi` wrote the preset in every HLG output. Open: 4:2:0 chroma siting of the analyzer's
-decode (both composers) against a renderer on non-flat patterns. Background: the fixed,
+change: `mkvdovi` wrote the preset in every HLG output. 4:2:0 chroma siting measured 2026-10-05
+against the spec composer: up to 18 codes of L1 max per scene, so the analyzer decode is to move to
+the spec's (progress log, 2026-10-05). Background: the fixed,
 phone-derived preset of the `dolby_vision` crate. Its chroma MMR tints neutrals; recomputed from the
 preset coefficients through the 8.4 decode (12-bit PQ codes R′/G′/B′, ΔE_ITP against a neutral of
 the same luminance): code 200 → 879/868/793, 10.3; code 502 → 1819/1813/1851, 4.5; code 721 (75%) →
