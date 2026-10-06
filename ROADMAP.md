@@ -273,8 +273,8 @@ and broader hardware acceleration (E5). Neutral trims stay.
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
-- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline.rs:1635` passes
-  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline.rs:891`);
+- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline.rs:1637` passes
+  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline.rs:892`);
   `metadata.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path; the sidecar has no
   per-frame peak, and mkvdovi reads only per-frame minima (`metadata.rs:986` `L1SidecarFrames`).
   All 45 development manifests say `shotlist_checked: false`.
