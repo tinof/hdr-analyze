@@ -17,10 +17,10 @@ sidecar names `dovi84-v3` (preset) and `dovi84-bt2100-v1-spec420` (bt2100); the 
 legacy and re-analyzed; the sidecar stays at version 5. mkvdovi requires the analyzer's `--help` to
 name the selected composer's mapping, preset included.
 
-**Gate** (`scripts/validate_hlg_chroma_siting.sh <analyzer +cuda at 518d47a> --gate --cuts
+**Gate** (`scripts/validate_hlg_chroma_siting.sh <analyzer +cuda from #29> --gate --cuts
 ~/mkvdovi-work/corpus/dev`): exit 0, "P8 gate ok", wall 2:34:33. A NaN hole in the script's checks,
-found in review, was fixed afterwards (d2b842b); the saved outputs re-evaluated with the fixed
-checks give the same verdicts.
+found in review, was fixed afterwards in the same PR, with two more check fixes from the Codex
+review; the saved outputs re-evaluated with the fixed checks give the same verdicts.
 
 - Synthetic clips (256×256 patterns, left and top-left siting; a letterbox clip with 32-px bars),
   both composers, CPU and CUDA: analyzer against the tool's `spec-float` at its own siting, worst
@@ -83,7 +83,7 @@ mostly down.
   this branch on 16 configurations (CPU/CUDA × crop/no-crop × downscale 1/2 × max-RGB/luma) of a
   134-frame 4K PQ clip.
 - L1 regression reference: only `tools/l1_diff/corpus/hlg.reference.csv` shot 1 (frames 61–89)
-  average 1360 → 1359 (9dda8f5).
+  average 1360 → 1359 (#29).
 - mkvdovi by hand: a pre-P8 analyzer is refused up front; a legacy-name sidecar is re-analyzed with
   the "pre-spec 4:2:0" message; `--verify` passes; the source is kept.
 - CUDA throughput (RTX 4070, WSL2; `--hwaccel cuda --no-crop --disable-optimizer --transfer hlg`,
@@ -91,7 +91,7 @@ mostly down.
   downscale 1 and 2 (table in [`CUDA_PIPELINE.md`](CUDA_PIPELINE.md)). NVDEC-bound. Below the 10%
   follow-up threshold; no follow-up item.
 
-Where: branch `feat/hlg-spec-chroma-decode`; [`HLG_COMPOSER.md`](HLG_COMPOSER.md) §9
+Where: [#29](https://github.com/tinof/hdr-analyze/pull/29); [`HLG_COMPOSER.md`](HLG_COMPOSER.md) §9
 
 ### 2026-10-06: P8, spec arithmetic measured; decode target `spec-float`
 

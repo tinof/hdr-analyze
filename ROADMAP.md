@@ -93,7 +93,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
-| 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | branch `feat/hlg-spec-chroma-decode` |
+| 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | [#29](https://github.com/tinof/hdr-analyze/pull/29) |
 | 2026-10-06 | Spec fixed-point arithmetic measured: `bt2100` is not neutral at `code / 1024` (spread 5.9 codes); the decode change targets the spec structure in `code / 1023` (`spec-float`). | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](docs/ROADMAP_LOG.md) |
@@ -239,7 +239,7 @@ and broader hardware acceleration (E5). Neutral trims stay.
   and how visible the tint is on a TV. Real HLG material for both: five cuts since 2026-10-05
   (live sport at 50p, a concert, a nature series, a broadcast capture, a drama; WS8 item 5).
 - **Done 2026-10-06: spec 4:2:0 decode in the analyzer** (both composers;
-  `feat/hlg-spec-chroma-decode`). Max-RGB runs the chroma MMR at chroma resolution on down-sampled
+  [#29](https://github.com/tinof/hdr-analyze/pull/29)). Max-RGB runs the chroma MMR at chroma resolution on down-sampled
   luma in `code / 1023` f32 (`spec-float`; `code / 1024` leaves `bt2100` 5.9 codes off neutral) and
   upsamples the composed chroma bilinearly at the stream's chroma location; CPU and CUDA identical.
   New sidecar names `dovi84-v3` / `dovi84-bt2100-v1-spec420`; older sidecars are re-analyzed, and
