@@ -428,6 +428,43 @@ fn assert_composer_end_to_end(composer: Composer, extra: &[&str]) {
     }
 }
 
+/// `downscale` and `sample_rate` the analyzer recorded in the source's sidecar.
+fn sidecar_sampling(dir: &Path) -> (u64, u64) {
+    let sidecar_path = dir.join("hlg_sample_measurements.bin.l1.json");
+    let sidecar: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&sidecar_path).unwrap()).unwrap();
+    let analysis = &sidecar["analysis"];
+    (
+        analysis["downscale"].as_u64().unwrap(),
+        analysis["sample_rate"].as_u64().unwrap(),
+    )
+}
+
+#[test]
+fn accurate_reanalyzes_coarser_measurements() {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!("Skipping coarse-measurement re-analysis test: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    synthesize_hlg_mkv(dir.path(), CONFORMING_COLOUR);
+
+    let (success, log) = convert(dir.path(), &["--analysis-quality", "balanced"]);
+    assert!(success, "balanced conversion failed:\n{log}");
+    assert_eq!(sidecar_sampling(dir.path()), (2, 1));
+    std::fs::remove_file(dir.path().join(OUTPUT)).unwrap();
+
+    // Accurate re-analyzes the half-resolution measurements instead of reusing them with a warning.
+    let (success, log) = convert(dir.path(), &["--analysis-quality", "accurate"]);
+    assert!(success, "accurate conversion failed:\n{log}");
+    assert!(
+        log.contains("are not reused: they were analyzed at downscale 2 / sample-rate 1"),
+        "no re-analysis notice:\n{log}"
+    );
+    assert!(!log.contains("Using existing measurements file"), "{log}");
+    assert_eq!(sidecar_sampling(dir.path()), (1, 1));
+}
+
 #[test]
 fn hlg_composer_defaults_to_bt2100_on_every_frame() {
     assert_composer_end_to_end(Composer::Bt2100V1, &[]);

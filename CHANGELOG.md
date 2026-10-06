@@ -104,8 +104,10 @@ This document provides a historical record of completed milestones, feature impl
   run is limited by NVDEC decoding.
   - Under `--analysis-quality accurate` (the `auto` default with GPU analysis), existing
     measurements analyzed more coarsely (for example `balanced` on a CPU host) are re-analyzed
-    instead of reused with a warning. Delivered L1 and MaxCLL change for those files. Other presets
-    still reuse them with the warning.
+    instead of reused with a warning. Delivered L1 and MaxCLL change for those files, and the
+    re-analysis overwrites the `<stem>_measurements.bin` next to the input; a later `balanced` run
+    (for example on a CPU host sharing the files) reuses the full-resolution result. Other presets
+    still reuse coarser measurements with the warning.
   - An explicit `--analysis-quality balanced` or `fast` with GPU analysis is kept but warned about:
     it saves no time, drops the measured MaxCLL (`fast` also MaxFALL), and is not parity-checked.
   - `mkvdovi` warns when `--hwaccel cuda` resolves with an analyzer built without the `cuda`

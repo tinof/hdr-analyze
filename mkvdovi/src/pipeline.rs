@@ -1506,8 +1506,8 @@ fn warn_if_gpu_analysis_missing(sidecar: &metadata::L1Sidecar, args: &Args) {
     }
 }
 
-/// What the resolved `--analysis-quality` means on this host, or `None` when there is nothing
-/// to say. `quality` is the value before `auto` is resolved; never called for `accurate`.
+/// What `--analysis-quality` means on this host, or `None` when there is nothing to say.
+/// `quality` is the value given on the command line, before `auto` is resolved.
 fn analysis_quality_notice(quality: AnalysisQuality, gpu_analysis: bool) -> Option<&'static str> {
     match (quality, gpu_analysis) {
         (AnalysisQuality::Auto, true) => {
@@ -1522,7 +1522,9 @@ fn analysis_quality_notice(quality: AnalysisQuality, gpu_analysis: bool) -> Opti
         (AnalysisQuality::Fast, true) => Some(
             "--analysis-quality fast saves no time with GPU analysis (the run is limited by NVDEC decoding), skips frames, drops the measured MaxCLL and MaxFALL, and is not parity-checked (CUDA samples every second pixel, the CPU resizes). Use auto or accurate unless you want this on purpose.",
         ),
-        _ => None,
+        (AnalysisQuality::Balanced | AnalysisQuality::Fast, false) | (AnalysisQuality::Accurate, _) => {
+            None
+        }
     }
 }
 
