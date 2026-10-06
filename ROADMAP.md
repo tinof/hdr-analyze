@@ -93,7 +93,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
-| 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | this PR |
+| 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | [#31](https://github.com/tinof/hdr-analyze/pull/31) |
 | 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | this file |
 | 2026-10-06 | `l1_diff` lines references up with open-GOP cuts by `leading_skipped_frames`; exports are labelled in stream frames. | E11 | [#30](https://github.com/tinof/hdr-analyze/pull/30) |
 | 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | [#29](https://github.com/tinof/hdr-analyze/pull/29) |
