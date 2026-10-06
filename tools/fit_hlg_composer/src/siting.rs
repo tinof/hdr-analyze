@@ -24,6 +24,7 @@ use dovi84_composer::{Composer, COEFFICIENT_LOG2_DENOM};
 use rayon::prelude::*;
 
 use crate::model::{Decoder, LUMA_GAIN, LUMA_OFFSET};
+use crate::report::FlatDecode;
 
 /// Variant names, in output order. Index 0 is the analyzer, which the differences refer to.
 pub const VARIANTS: [&str; 9] = [
@@ -398,6 +399,57 @@ impl Variants {
     }
 }
 
+/// The spec composer on a flat field: every pixel the same code triple, so the down-sampled luma
+/// is the luma code itself (`(c + 2c + c + 2) >> 2 = c`, `(c + c + 1) >> 1 = c`) and every
+/// upsampler returns the one composed chroma value. This is what the criteria of
+/// docs/HLG_COMPOSER.md section 6 measure.
+impl Variants {
+    /// The two 16-bit composed chroma outputs of a flat field.
+    pub fn flat_chroma16(&self, y: u16, cb: u16, cr: u16) -> [u16; 2] {
+        [0, 1].map(|c| self.spec.chroma(c, y, cb, cr))
+    }
+
+    /// The 16-bit mapped luma of one code.
+    pub fn luma16(&self, code: u16) -> u16 {
+        self.spec.luma(code)
+    }
+
+    /// Raw spec-fixed R′G′B′ of a flat field, normalized PQ, no source-range clamp.
+    pub fn flat_rgb(&self, y: u16, cb: u16, cr: u16) -> [f32; 3] {
+        let chroma = self
+            .flat_chroma16(y, cb, cr)
+            .map(|c| f32::from(c) / OUTPUT_ONE);
+        self.decoder
+            .compose(self.fixed_luma_term[usize::from(y.min(1023))], chroma)
+    }
+
+    /// Spec-fixed max(R′,G′,B′) of a flat field, clamped to the source range as the analyzer.
+    pub fn flat_max_rgb(&self, y: u16, cb: u16, cr: u16) -> f32 {
+        self.max_rgb(self.flat_rgb(y, cb, cr))
+    }
+}
+
+impl FlatDecode for Variants {
+    /// The clamp flag reports a saturated 16-bit chroma output (0 or 0xFFFF), the spec's only
+    /// output clamp.
+    fn rgb_pq(&self, y: u16, cb: u16, cr: u16) -> ([f32; 3], bool) {
+        let saturated = self
+            .flat_chroma16(y, cb, cr)
+            .iter()
+            .any(|&c| c == 0 || c == 0xffff);
+        (self.flat_rgb(y, cb, cr), saturated)
+    }
+
+    fn luma_term(&self, code: u16) -> f64 {
+        f64::from(self.fixed_luma_term[usize::from(code.min(1023))])
+    }
+
+    /// The spec has no output clamp on the luma curve.
+    fn luma_clamp_active(&self, _code: u16) -> bool {
+        false
+    }
+}
+
 /// One 10-bit 4:2:0 frame, codes masked to 10 bits.
 pub struct Frame<'a> {
     pub width: usize,
@@ -722,6 +774,38 @@ mod tests {
         let mut histogram = vec![0_u64; DIFF_BINS];
         histogram[(1000.0 / DIFF_STEP) as usize] = 100;
         assert!((percentile(&histogram, 0.99) - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn flat_field_shortcut_equals_the_frame_decode() {
+        // On a flat field the down-sampled luma is the luma code and every upsampler returns the
+        // one composed value, so `flat_max_rgb` must equal the spec-fixed variants of `frame`.
+        for composer in Composer::ALL {
+            let variants = Variants::new(&composer.rpu_data_mapping()).unwrap();
+            for (y, cb, cr) in [
+                (64, 512, 512),
+                (721, 512, 512),
+                (502, 64, 960),
+                (300, 960, 64),
+            ] {
+                let (width, height) = (6, 4);
+                let luma = vec![y; width * height];
+                let (cb_plane, cr_plane) = (vec![cb; 6], vec![cr; 6]);
+                let frame = Frame {
+                    width,
+                    height,
+                    y: &luma,
+                    cb: &cb_plane,
+                    cr: &cr_plane,
+                };
+                let expected = variants.flat_max_rgb(y, cb, cr).to_bits();
+                for pixel in variants.frame(&frame) {
+                    for value in &pixel[4..=6] {
+                        assert_eq!(value.to_bits(), expected, "{composer:?} ({y}, {cb}, {cr})");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
