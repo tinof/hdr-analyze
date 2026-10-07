@@ -512,6 +512,10 @@ The detailed gap table and validation method live in
   inject.
 - **Open:** direct-MKV `dovi_tool` steps still accept exit status plus non-empty output, and
   verification is opt-in.
+- **Found 2026-10-07 (E13 baselines):** `--verify` hard-fails the Profile 7 MEL passthrough of a
+  retail disc whose RPU carries L6 MaxCLL and MaxFALL 0 ("must be a positive integer"); 0 means
+  "unknown" in the static metadata, so the check may be too strict for a passthrough RPU. Not yet
+  investigated.
 
 ### E8: histogram percentile reader
 
@@ -561,6 +565,28 @@ The detailed gap table and validation method live in
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested.
 - **Effect:** changes delivered L1 and MaxCLL for NVIDIA release users (`balanced` → `accurate`);
   needs a CHANGELOG entry.
+
+### E13: module size refactor
+
+- **Status:** Open; step 2 in progress (2026-10-07). Nine Rust files pass 1000 lines; with inline
+  test modules not counted, `mkvdovi/src/metadata.rs` (1707), `mkvdovi/src/pipeline.rs` (1785, of
+  which `convert_file` is about 910), `hdr_analyzer_mvp/src/pipeline.rs` (1348),
+  `analysis/frame.rs` (1026) and `analysis/gpu.rs` (951) pass the 800-line limit in CLAUDE.md
+  ("Module size").
+- **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
+  directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
+  for the untested high-risk mkvdovi paths (source deletion, format detection, static L6, the whole
+  `extra.json`); (3) mkvdovi: inline tests to `tests.rs`, then pure-move splits of `metadata.rs`
+  and `pipeline.rs`, before P9 step 0, which works in both files; (4) split `convert_file` by
+  phase, before the P9 hybrid flag; (5) analyzer: inline tests to `tests.rs`, pure-move splits of
+  `pipeline.rs` and `analysis/gpu.rs`, before E8 + E9, because E8 moves the default `.bin` and a
+  pure move can only be proved byte-identical before it. `tools/l1_diff` stays as it is while the
+  local `feat/dev-corpus` branch depends on it.
+- **Gate per move:** fmt, clippy (also `--features cuda`), tests; the L1 regression gate without
+  `--update`; `scripts/cuda-parity.sh` for analysis paths; for mkvdovi, `scripts/rpu-baseline.sh
+  compare --require-identical-l1` against the baselines captured at main@e6d63ed in
+  `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+, HLG, two MEL incl. an open-GOP
+  start; `--mdfix` on MEL and Profile 8).
 
 ## Checked and kept (2026-10-03)
 
