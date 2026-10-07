@@ -149,12 +149,18 @@ evidence for each priority is in its items and in
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list and peak from HDR10+; average, minimum and
    crop from pixels. Gate: opt-in, scored on the development tier before any default change.
    HDR10+ material is in (WS8 item 5, 2026-10-05), including a same-master Dolby Vision pair.
+   **Prerequisite:** E13 step 3 (split `mkvdovi/src/{metadata,pipeline}.rs`) before P9 step 0, and
+   E13 step 4 (`convert_file` by phase) before the hybrid flag; P9 works in those files.
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
    a playback test.
-4. **Narrow code defects** (E8, E9, P1, E10): histogram percentile reader, `--pre-denoise` values,
-   half-resolution CPU default, L1 scaling note. Gate: unit tests for the reader and the option;
-   measure the CPU default first.
+4. **Narrow code defects** (E8, E9, P1, E10, P6, E7): histogram percentile reader, `--pre-denoise`
+   values, half-resolution CPU default, L1 scaling note; a container MaxCLL/MaxFALL of 0 that hides
+   the stream's value (changes delivered L6, so first of the three found 2026-10-07); `--verify` on
+   a retail RPU with L6 0; a `Details.txt` thousands separator. Gate: unit tests for the reader and
+   the option; measure the CPU default first; for the L6 fixes, flip the expectations the E13
+   tests pin as suspicious (`mkvdovi/src/metadata.rs`). **Prerequisite:** E13 step 5 (analyzer
+   split) before E8 + E9, because E8 moves the default `.bin`.
 5. **`--mdfix` replaces the whole RPU** (P11): targeted repair or full regeneration. Open decision.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts. Gate: the simulator reproduces the recomputed numbers in WS7.
@@ -166,6 +172,9 @@ evidence for each priority is in its items and in
 9. **Research, default unchanged** (WS1, WS2, WS4): grain-robust peak; per-frame L1 inside detected
    transitions; L4; automatic trims. Each stays opt-in or unbuilt until its gate is met.
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md).
+- **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
+  are prerequisites of priorities 2 and 4 (see there). Each is a pure-move PR with the acceptance
+  gate in its item; no other branch should be open while a move is in flight.
 - **Conditional** (R2, WS5): Profile 5 through an established encoder, only if matched playback
   tests justify it.
 
@@ -233,6 +242,14 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 - **Status:** Partial. Warnings exist for L6/L9 fallbacks and suspicious HDR10+ scene peaks.
 - **Open:** broader missing/inconsistent-source detection.
+- **Open (found 2026-10-07, E13 tests):** a container MaxCLL or MaxFALL of 0 (MKV Colour element,
+  e.g. `mkvmerge --max-content-light 0:0`) hides the value the stream's SEI states: MediaInfo
+  reports the container "0" and moves the stream value to `MaxCLL_Original`/`MaxFALL_Original`,
+  which `read_static_metadata` never reads, so L6 gets the 1000/400 default. Read the
+  `*_Original` field when the container value is 0. Pinned today by
+  `static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value` and its MaxFALL twin.
+- **Open (minor):** the `Details.txt` override reads a thousands separator as a decimal comma
+  (`1,000` → 1.0); pinned by `details_file_light_levels_are_read_without_mediainfo_data`.
 
 ### P7: analyzer input contract
 
@@ -513,10 +530,11 @@ The detailed gap table and validation method live in
   inject.
 - **Open:** direct-MKV `dovi_tool` steps still accept exit status plus non-empty output, and
   verification is opt-in.
-- **Found 2026-10-07 (E13 baselines):** `--verify` hard-fails the Profile 7 MEL passthrough of a
-  retail disc whose RPU carries L6 MaxCLL and MaxFALL 0 ("must be a positive integer"); 0 means
-  "unknown" in the static metadata, so the check may be too strict for a passthrough RPU. Not yet
-  investigated.
+- **Open (found 2026-10-07, E13 baselines):** `--verify` hard-fails the Profile 7 MEL passthrough
+  of a retail disc whose RPU carries L6 MaxCLL and MaxFALL 0 ("must be a positive integer"). 0 means
+  "unknown" in the static metadata, so for a passthrough RPU (not one mkvdovi generated) the check
+  should warn, not fail. Reproduce with the MEL cut in `~/mkvdovi-work/corpus/dev` whose capture
+  failed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/capture-default.log`.
 
 ### E8: histogram percentile reader
 
@@ -599,9 +617,7 @@ The detailed gap table and validation method live in
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
   from `finish_success`.
-- **Found by the step 2 tests (pinned, not changed):** a container MaxCLL or MaxFALL of 0 (MKV
-  Colour element) hides the stream's stated value, which MediaInfo moves to `*_Original`, so L6
-  falls back to the default; a `Details.txt` thousands separator is read as a decimal comma.
+- **Found by the step 2 tests:** two L6 defects, now open steps under P6 (priority 4).
 
 ## Checked and kept (2026-10-03)
 
