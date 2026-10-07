@@ -586,7 +586,15 @@ The detailed gap table and validation method live in
   `--update`; `scripts/cuda-parity.sh` for analysis paths; for mkvdovi, `scripts/rpu-baseline.sh
   compare --require-identical-l1` against the baselines captured at main@e6d63ed in
   `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+, HLG, two MEL incl. an open-GOP
-  start; `--mdfix` on MEL and Profile 8).
+  start; `--mdfix` on MEL and Profile 8; HLG with `--hlg-composer preset`, the path without the
+  RPU rewrite).
+- **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
+  `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
+  spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
+  from `finish_success`.
+- **Found by the step 2 tests (pinned, not changed):** a container MaxCLL or MaxFALL of 0 (MKV
+  Colour element) hides the stream's stated value, which MediaInfo moves to `*_Original`, so L6
+  falls back to the default; a `Details.txt` thousands separator is read as a decimal comma.
 
 ## Checked and kept (2026-10-03)
 

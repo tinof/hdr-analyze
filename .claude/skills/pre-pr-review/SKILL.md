@@ -141,13 +141,14 @@ LOG=<scratchpad>/prepr-test.log
 cargo build -p hdr_analyzer_mvp && cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu > "$LOG" 2>&1
 gate_rc=$?
 grep -n -E 'test result: FAILED|error: test failed' "$LOG"
-if grep 'Skipping' "$LOG" | grep -v -E 'HDR_ANALYZE_REAL_SAMPLE|MKVDOVI_FEL_SAMPLE|sample not found at'; then
+if grep 'Skipping' "$LOG" | grep -v -E 'HDR_ANALYZE_REAL_SAMPLE|MKVDOVI_FEL_SAMPLE|MKVDOVI_CORPUS_DIR|sample not found at'; then
     echo 'unexpected skip: required coverage did not run'; gate_rc=1
 fi
 echo "test gate exit $gate_rc"; [ "$gate_rc" -eq 0 ]
 ```
 
-**Skips.** Expected, and allowed by the block: `HDR_ANALYZE_REAL_SAMPLE`, `MKVDOVI_FEL_SAMPLE`, and the
+**Skips.** Expected, and allowed by the block: `HDR_ANALYZE_REAL_SAMPLE`, `MKVDOVI_FEL_SAMPLE`,
+`MKVDOVI_CORPUS_DIR` (the opt-in corpus classification test in `metadata.rs`), and the
 `integration.rs` "sample not found". The CUDA parity test is skipped by name because its own gate
 runs it. Any other `Skipping` line (missing ffmpeg, dovi_tool, mkvmerge, libx265, a sibling
 analyzer, an HLG or open-GOP test) fails the gate: required coverage did not run.
