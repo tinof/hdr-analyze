@@ -94,7 +94,9 @@ capture_one() { # capture_one <out-dir> <input> [mkvdovi flags...]
         die 1 "mkvdovi failed for $input (conversion or --verify). Scratch kept: $scratch"
     fi
 
+    # --mdfix writes <stem>.mdfix.DV.mkv instead (pipeline::output_path_for).
     dv="$scratch/$stem.DV.mkv"
+    case " $* " in *" --mdfix "*) dv="$scratch/$stem.mdfix.DV.mkv" ;; esac
     [ -s "$dv" ] || die 1 "mkvdovi exited 0 but wrote no $dv. Log: $stage/mkvdovi.log"
     [ -e "$link" ] || die 1 "mkvdovi removed its input link; --keep-source was not honoured"
     [ "$(stat -c '%s %Y' "$input")" = "$size $mtime" ] || die 1 "input changed during capture: $input"
