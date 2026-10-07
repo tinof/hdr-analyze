@@ -3240,7 +3240,10 @@ mod tests {
         x265_params: &str,
     ) -> std::result::Result<PathBuf, String> {
         let output = dir.join(name);
+        // Run in `dir`, so file options inside the colon-separated x265 parameters can be
+        // relative (a Windows drive colon would split them).
         let result = Command::new("ffmpeg")
+            .current_dir(dir)
             .args([
                 "-hide_banner",
                 "-loglevel",
@@ -3491,9 +3494,8 @@ mod tests {
             "SceneInfo": [scene(0), scene(1), scene(2)],
             "SceneInfoSummary": {"SceneFirstFrameIndex": [0], "SceneFrameNumbers": [3]}
         });
-        let json_path = dir.path().join("hdr10plus.json");
-        fs::write(&json_path, hdr10plus.to_string()).unwrap();
-        let params = format!("{PQ_X265}:dhdr10-info={}", json_path.display());
+        fs::write(dir.path().join("hdr10plus.json"), hdr10plus.to_string()).unwrap();
+        let params = format!("{PQ_X265}:dhdr10-info=hdr10plus.json");
         let clip = match encode_clip(dir.path(), "clip.mkv", &params) {
             Ok(clip) => clip,
             // libx265 built without HDR10+ rejects the option by name; any other error fails.
@@ -3506,6 +3508,31 @@ mod tests {
             }
             Err(error) => panic!("HDR10+ encode failed: {error}"),
         };
+        // A libx265 built without HDR10_PLUS accepts the option, warns and writes plain HDR10.
+        let probe = Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-read_intervals",
+                "%+#1",
+            ])
+            .args([
+                "-show_frames",
+                "-show_entries",
+                "frame_side_data=side_data_type",
+            ])
+            .args(["-of", "csv=p=0"])
+            .arg(&clip)
+            .output()
+            .unwrap();
+        if !String::from_utf8_lossy(&probe.stdout).contains("SMPTE2094-40") {
+            eprintln!(
+                "Skipping hdr10plus_clip_is_hdr10plus: libx265 wrote no HDR10+ SEI (built without HDR10_PLUS)"
+            );
+            return;
+        }
         assert_eq!(hdr_format_of(&clip), HdrFormat::Hdr10Plus);
         // HDR10+ wins over a measurements file.
         fs::write(dir.path().join("clip_measurements.bin"), b"").unwrap();
