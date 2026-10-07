@@ -3387,6 +3387,33 @@ mod tests {
     }
 
     #[test]
+    fn static_metadata_skips_a_zero_container_max_fall_and_hides_the_stream_value() {
+        if let Some(reason) =
+            missing_clip_tools(&[("mediainfo", "--version"), ("mkvmerge", "--version")])
+        {
+            eprintln!("Skipping static_metadata_skips_a_zero_container_max_fall_and_hides_the_stream_value: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let raw = encode_clip(dir.path(), "clip.hevc", PQ_X265).unwrap();
+        let clip = dir.path().join("clip.mkv");
+        run_tool(
+            Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(&clip)
+                .args(["--max-frame-light", "0:0"])
+                .arg(&raw),
+        );
+        // The MaxFALL twin of the MaxCLL case above: the stream's 400 moves to MaxFALL_Original
+        // and the container's "0" is not stored (suspicious, as above).
+        assert_eq!(
+            read_static_metadata(clip.to_str().unwrap()),
+            meta(&[("max_dml", 1000.0), ("min_dml", 0.005), ("max_cll", 1000.0)])
+        );
+    }
+
+    #[test]
     fn hdr10_clip_without_measurements_is_hdr10_unsupported() {
         if let Some(reason) = missing_clip_tools(HDR_FORMAT_TOOLS) {
             eprintln!("Skipping hdr10_clip_without_measurements_is_hdr10_unsupported: {reason}");
