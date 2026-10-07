@@ -465,6 +465,44 @@ fn accurate_reanalyzes_coarser_measurements() {
     assert_eq!(sidecar_sampling(dir.path()), (1, 1));
 }
 
+/// The default for a non-DV input: a successful conversion deletes the source and its temp dir
+/// (the cleanup at the end of `convert_file`, not `finish_success`, which only the MEL fast path
+/// calls).
+#[test]
+fn successful_hlg_conversion_deletes_the_source_and_the_temp_dir() {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!("Skipping HLG source deletion test: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let source = synthesize_hlg_mkv(dir.path(), CONFORMING_COLOUR);
+
+    let conversion = mkvdovi_cmd()
+        .current_dir(dir.path())
+        .arg(SOURCE)
+        .args(["--hwaccel", "none"])
+        .output()
+        .unwrap();
+    let log = format!(
+        "{}{}",
+        String::from_utf8_lossy(&conversion.stdout),
+        String::from_utf8_lossy(&conversion.stderr)
+    );
+    assert!(conversion.status.success(), "mkvdovi failed:\n{log}");
+    assert!(dir.path().join(OUTPUT).exists(), "no output:\n{log}");
+    assert!(log.contains("Deleting source file"), "{log}");
+    assert!(
+        !source.exists(),
+        "the source must be deleted without --keep-source"
+    );
+    let temp_dirs: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("mkvdovi_temp_"))
+        .collect();
+    assert!(temp_dirs.is_empty(), "temp dir left behind: {temp_dirs:?}");
+}
+
 #[test]
 fn hlg_composer_defaults_to_bt2100_on_every_frame() {
     assert_composer_end_to_end(Composer::Bt2100V1, &[]);

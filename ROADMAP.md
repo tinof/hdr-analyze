@@ -93,6 +93,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-07 | E13 safety net: 34 characterization tests for mkvdovi (metadata, pipeline, HLG source deletion), CUDA gate on module dirs, final-RPU baselines at main@e6d63ed; no production code changed. | E13 | this branch |
 | 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | [#31](https://github.com/tinof/hdr-analyze/pull/31) |
 | 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | this file |
 | 2026-10-06 | `l1_diff` lines references up with open-GOP cuts by `leading_skipped_frames`; exports are labelled in stream frames. | E11 | [#30](https://github.com/tinof/hdr-analyze/pull/30) |
@@ -512,6 +513,10 @@ The detailed gap table and validation method live in
   inject.
 - **Open:** direct-MKV `dovi_tool` steps still accept exit status plus non-empty output, and
   verification is opt-in.
+- **Found 2026-10-07 (E13 baselines):** `--verify` hard-fails the Profile 7 MEL passthrough of a
+  retail disc whose RPU carries L6 MaxCLL and MaxFALL 0 ("must be a positive integer"); 0 means
+  "unknown" in the static metadata, so the check may be too strict for a passthrough RPU. Not yet
+  investigated.
 
 ### E8: histogram percentile reader
 
@@ -561,6 +566,42 @@ The detailed gap table and validation method live in
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested.
 - **Effect:** changes delivered L1 and MaxCLL for NVIDIA release users (`balanced` → `accurate`);
   needs a CHANGELOG entry.
+
+### E13: module size refactor
+
+- **Status:** Open; step 2 (safety net) done 2026-10-07, steps 3-5 open. Nine Rust files pass 1000 lines; with inline
+  test modules not counted, `mkvdovi/src/metadata.rs` (1707), `mkvdovi/src/pipeline.rs` (1785, of
+  which `convert_file` is about 910), `hdr_analyzer_mvp/src/pipeline.rs` (1348),
+  `analysis/frame.rs` (1026) and `analysis/gpu.rs` (951) pass the 800-line limit in CLAUDE.md
+  ("Module size").
+- **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
+  directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
+  for the untested high-risk mkvdovi paths (source deletion, format detection, static L6, the whole
+  `extra.json`); (3) mkvdovi: inline tests to `tests.rs`, then pure-move splits of `metadata.rs`
+  and `pipeline.rs`, before P9 step 0, which works in both files; (4) split `convert_file` by
+  phase, before the P9 hybrid flag; (5) analyzer: inline tests to `tests.rs`, pure-move splits of
+  `pipeline.rs` and `analysis/gpu.rs`, before E8 + E9, because E8 moves the default `.bin` and a
+  pure move can only be proved byte-identical before it. `tools/l1_diff` stays as it is while the
+  local `feat/dev-corpus` branch depends on it.
+- **Gate per move (acceptance gate for steps 3-5):** fmt, clippy (also `--features cuda`), tests;
+  the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
+  mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
+  at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+, HLG, two MEL
+  incl. an open-GOP start; `--mdfix` on MEL and Profile 8; HLG with `--hlg-composer preset`, the
+  path without the RPU rewrite), and
+  `MKVDOVI_CORPUS_DIR=~/mkvdovi-work/corpus/dev cargo test -p mkvdovi corpus_cuts_are_classified_like_their_manifests`,
+  the only test that reaches the Profile 7 MEL/FEL branch of `check_hdr_format`, which the step 3
+  moves cut through. Each command's result goes in the move's PR body: the pre-PR panel computes
+  only fmt, clippy and test (plus the CUDA gates) for mkvdovi paths. An automatic rpu-baseline gate
+  would need a baseline-path convention and an update mode for PRs that change the RPU on purpose;
+  it is not planned.
+- **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
+  `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
+  spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
+  from `finish_success`.
+- **Found by the step 2 tests (pinned, not changed):** a container MaxCLL or MaxFALL of 0 (MKV
+  Colour element) hides the stream's stated value, which MediaInfo moves to `*_Original`, so L6
+  falls back to the default; a `Details.txt` thousands separator is read as a decimal comma.
 
 ## Checked and kept (2026-10-03)
 

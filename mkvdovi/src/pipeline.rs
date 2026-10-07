@@ -2027,4 +2027,149 @@ mod tests {
         assert!(!feed_mkv_to_dovi_tool(DoviInput::Raw, false));
         assert!(!feed_mkv_to_dovi_tool(DoviInput::Auto, false));
     }
+
+    const ALL_HDR_FORMATS: [HdrFormat; 8] = [
+        HdrFormat::Hdr10Plus,
+        HdrFormat::Hdr10WithMeasurements,
+        HdrFormat::Hdr10Unsupported,
+        HdrFormat::Hlg,
+        HdrFormat::DolbyVisionMel,
+        HdrFormat::DolbyVisionFel,
+        HdrFormat::DolbyVisionP8,
+        HdrFormat::Unsupported,
+    ];
+
+    fn dv_format(format: HdrFormat) -> bool {
+        matches!(
+            format,
+            HdrFormat::DolbyVisionMel | HdrFormat::DolbyVisionFel | HdrFormat::DolbyVisionP8
+        )
+    }
+
+    #[test]
+    fn is_dolby_vision_is_true_only_for_mel_fel_and_p8() {
+        for format in ALL_HDR_FORMATS {
+            assert_eq!(is_dolby_vision(format), dv_format(format), "{format:?}");
+        }
+    }
+
+    #[test]
+    fn should_keep_source_truth_table() {
+        for (flags, keep_flag, mdfix_flag) in [
+            (vec![], false, false),
+            (vec!["--keep-source"], true, false),
+            (vec!["--mdfix"], false, true),
+            (vec!["--keep-source", "--mdfix"], true, true),
+        ] {
+            let mut argv = vec!["mkvdovi"];
+            argv.extend(flags);
+            let args = Args::try_parse_from(argv).unwrap();
+            assert_eq!(args.keep_source, keep_flag);
+            assert_eq!(args.mdfix, mdfix_flag);
+            for format in ALL_HDR_FORMATS {
+                let expected = keep_flag || mdfix_flag || dv_format(format);
+                assert_eq!(
+                    should_keep_source(&args, format),
+                    expected,
+                    "keep_source={keep_flag} mdfix={mdfix_flag} {format:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn output_path_for_appends_dv_next_to_the_input() {
+        let out = output_path_for(Path::new("/media/in/Movie.mkv"), false);
+        assert_eq!(out, PathBuf::from("/media/in/Movie.DV.mkv"));
+        // Without --mdfix an input already named .DV keeps the suffix and gains another.
+        let out = output_path_for(Path::new("/media/in/Movie.DV.mkv"), false);
+        assert_eq!(out, PathBuf::from("/media/in/Movie.DV.DV.mkv"));
+        // A bare file name resolves against an empty parent.
+        let out = output_path_for(Path::new("Movie.mkv"), false);
+        assert_eq!(out, PathBuf::from("Movie.DV.mkv"));
+    }
+
+    #[test]
+    fn output_path_for_mdfix_writes_a_distinct_mdfix_candidate() {
+        let out = output_path_for(Path::new("/media/in/Movie.mkv"), true);
+        assert_eq!(out, PathBuf::from("/media/in/Movie.mdfix.DV.mkv"));
+        // An input already ending .DV does not double the suffix.
+        let out = output_path_for(Path::new("/media/in/Movie.DV.mkv"), true);
+        assert_eq!(out, PathBuf::from("/media/in/Movie.mdfix.DV.mkv"));
+        // Only a trailing ".DV" stem is stripped, not one in the middle.
+        let out = output_path_for(Path::new("/media/in/Movie.DV.cut.mkv"), true);
+        assert_eq!(out, PathBuf::from("/media/in/Movie.DV.cut.mdfix.DV.mkv"));
+    }
+
+    /// Runs `finish_success` on a fresh source, output and temp dir; returns
+    /// whether the source and the temp dir still exist afterwards.
+    fn run_finish_success(
+        flags: &[&str],
+        format: HdrFormat,
+        create_source: bool,
+    ) -> (bool, bool, bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("in.mkv");
+        let output = dir.path().join("in.DV.mkv");
+        let temp = dir.path().join("mkvdovi_temp_in");
+        if create_source {
+            fs::write(&source, b"src").unwrap();
+        }
+        fs::write(&output, b"out").unwrap();
+        fs::create_dir(&temp).unwrap();
+        fs::write(temp.join("RPU.bin"), b"x").unwrap();
+
+        let mut argv = vec!["mkvdovi"];
+        argv.extend_from_slice(flags);
+        let args = Args::try_parse_from(argv).unwrap();
+        finish_success(
+            source.to_str().unwrap(),
+            &output,
+            &temp,
+            &args,
+            format,
+            Instant::now(),
+        );
+        (source.exists(), temp.exists(), output.exists())
+    }
+
+    #[test]
+    fn finish_success_deletes_source_for_non_dv_input_and_always_removes_temp_dir() {
+        for format in ALL_HDR_FORMATS.into_iter().filter(|f| !dv_format(*f)) {
+            let (source, temp, output) = run_finish_success(&[], format, true);
+            assert!(!source, "source should be deleted for {format:?}");
+            assert!(!temp, "temp dir should be removed for {format:?}");
+            assert!(output, "output must stay for {format:?}");
+        }
+    }
+
+    #[test]
+    fn finish_success_keeps_source_with_keep_source_or_mdfix() {
+        for flags in [&["--keep-source"][..], &["--mdfix"][..]] {
+            for format in ALL_HDR_FORMATS {
+                let (source, temp, output) = run_finish_success(flags, format, true);
+                assert!(source, "{flags:?} {format:?}");
+                assert!(!temp, "{flags:?} {format:?}");
+                assert!(output, "{flags:?} {format:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn finish_success_keeps_source_for_every_dolby_vision_variant() {
+        for format in ALL_HDR_FORMATS.into_iter().filter(|f| dv_format(*f)) {
+            let (source, temp, output) = run_finish_success(&[], format, true);
+            assert!(source, "source should be kept for {format:?}");
+            assert!(!temp, "temp dir should be removed for {format:?}");
+            assert!(output);
+        }
+    }
+
+    #[test]
+    fn finish_success_with_a_missing_source_only_warns_and_still_cleans_up() {
+        let (source, temp, output) = run_finish_success(&[], HdrFormat::Hdr10Plus, false);
+        assert!(!source);
+        assert!(!temp);
+        assert!(output);
+    }
 }

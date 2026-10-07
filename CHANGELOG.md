@@ -8,6 +8,13 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **Characterization tests for mkvdovi** (tests only, ROADMAP E13). 34 tests pin format detection,
+  static L6, the whole `extra.json`, source retention, output naming, and source deletion plus temp
+  cleanup after a successful HLG conversion. No behavior change.
+- **Claude Code Stop hook** (tooling). It notes a touched Rust file over 800 code lines once per
+  session (never blocking) and compiles a touched `.cu` kernel with `nvcc -ptx` when a CUDA toolkit
+  is found. The pre-PR panel's CUDA gate also triggers on module directories (`pipeline/`), so a
+  module split keeps the gate.
 - **`fit_hlg_composer chroma-siting` and `scripts/validate_hlg_chroma_siting.sh`** (tooling, ROADMAP
   P8). They measure how the analyzer's 4:2:0 handling of the HLG Profile 8.4 decode differs from the
   spec composer (ETSI GS CCM 001 §5.4.2.3.3: MMR at chroma resolution on down-sampled luma, integer
@@ -46,6 +53,9 @@ This document provides a historical record of completed milestones, feature impl
   crate does not read.
 
 ### Fixed
+
+- **`scripts/rpu-baseline.sh capture` with `--mdfix`** (tooling). It looked for `<stem>.DV.mkv`;
+  `--mdfix` writes `<stem>.mdfix.DV.mkv`, so the capture failed.
 
 - **`tools/l1_diff` lines references up with open-GOP cuts** (tooling, ROADMAP E11). It reads
   `source.leading_skipped_frames` from a v5 sidecar: a reference over the whole stream has its rows

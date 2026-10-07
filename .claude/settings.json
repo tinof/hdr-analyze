@@ -19,7 +19,7 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/rust-check.sh\" stop",
             "timeout": 600,
-            "statusMessage": "cargo clippy (changed Rust files)"
+            "statusMessage": "cargo clippy / nvcc (changed Rust and .cu files)"
           }
         ]
       }

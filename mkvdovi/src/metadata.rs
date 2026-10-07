@@ -3016,4 +3016,1018 @@ mod tests {
         ));
         assert!(!hints_indicate_hlg("PQ\nSMPTE ST 2086, HDR10 compatible"));
     }
+
+    fn meta(entries: &[(&str, f64)]) -> HashMap<String, f64> {
+        entries
+            .iter()
+            .map(|&(key, value)| (key.to_string(), value))
+            .collect()
+    }
+
+    const ALL_STATIC_KEYS: [&str; 4] = ["max_dml", "min_dml", "max_cll", "max_fall"];
+
+    #[test]
+    fn static_defaults_fill_every_requested_missing_key() {
+        for hlg_source in [false, true] {
+            let mut values = HashMap::new();
+            apply_static_defaults(&mut values, &ALL_STATIC_KEYS, hlg_source);
+            assert_eq!(
+                values,
+                meta(&[
+                    ("max_dml", 1000.0),
+                    ("min_dml", 0.005),
+                    ("max_cll", 1000.0),
+                    ("max_fall", 400.0),
+                ]),
+                "hlg_source {hlg_source}"
+            );
+        }
+    }
+
+    #[test]
+    fn static_defaults_never_override_a_present_value() {
+        for hlg_source in [false, true] {
+            let mut values = meta(&[("max_dml", 4000.0), ("max_cll", 0.5)]);
+            apply_static_defaults(&mut values, &ALL_STATIC_KEYS, hlg_source);
+            assert_eq!(
+                values,
+                meta(&[
+                    ("max_dml", 4000.0),
+                    ("min_dml", 0.005),
+                    ("max_cll", 0.5),
+                    ("max_fall", 400.0),
+                ]),
+                "hlg_source {hlg_source}"
+            );
+        }
+    }
+
+    #[test]
+    fn static_defaults_ignore_keys_not_requested() {
+        for hlg_source in [false, true] {
+            let mut values = meta(&[("min_dml", 0.0001)]);
+            apply_static_defaults(&mut values, &["max_cll", "min_dml"], hlg_source);
+            assert_eq!(
+                values,
+                meta(&[("min_dml", 0.0001), ("max_cll", 1000.0)]),
+                "hlg_source {hlg_source}"
+            );
+
+            let mut values = HashMap::new();
+            apply_static_defaults(&mut values, &[], hlg_source);
+            assert!(values.is_empty());
+
+            // Keys outside the four fallbacks are neither filled nor rejected.
+            let mut values = HashMap::new();
+            apply_static_defaults(&mut values, &["source_min_pq", "max_fall"], hlg_source);
+            assert_eq!(values, meta(&[("max_fall", 400.0)]));
+        }
+    }
+
+    #[test]
+    fn zero_light_levels_are_neither_inserted_nor_clear_a_stated_value() {
+        let mut values = HashMap::new();
+        insert_light_level(&mut values, "max_cll", 0.0);
+        assert!(values.is_empty());
+
+        let mut values = meta(&[("max_cll", 1000.0)]);
+        insert_light_level(&mut values, "max_cll", 0.0);
+        insert_light_level(&mut values, "max_fall", -3.0);
+        assert_eq!(values, meta(&[("max_cll", 1000.0)]));
+
+        insert_light_level(&mut values, "max_cll", 0.25);
+        assert_eq!(values, meta(&[("max_cll", 0.25)]));
+    }
+
+    #[test]
+    fn mastering_primaries_parse_only_the_parenthesized_spellings() {
+        let expected = Some((8500, 39850, 6550, 2300, 35400, 14600, 15635, 16450));
+        assert_eq!(
+            parse_mastering_display_color_primaries(
+                "G(x=0.1700, y=0.7970), B(x=0.1310, y=0.0460), R(x=0.7080, y=0.2920), WP(x=0.3127, y=0.3290)"
+            ),
+            expected
+        );
+        assert_eq!(
+            parse_mastering_display_color_primaries(
+                "G(0.1700,0.7970)B(0.1310,0.0460)R(0.7080,0.2920)WP(0.3127,0.3290)"
+            ),
+            expected
+        );
+        // Out-of-range coordinates clamp to 0..=50000.
+        assert_eq!(
+            parse_mastering_display_color_primaries("G(1.5,0)B(0,0)R(0,0)WP(0,0)"),
+            Some((50000, 0, 0, 0, 0, 0, 0, 0))
+        );
+        // A missing white point rejects the whole value.
+        assert_eq!(
+            parse_mastering_display_color_primaries("G(0.17,0.797)B(0.131,0.046)R(0.708,0.292)"),
+            None
+        );
+    }
+
+    #[test]
+    fn mastering_primaries_in_mediainfo_spellings_are_not_parsed() {
+        // Suspicious: MediaInfo 24.01 writes MasteringDisplay_ColorPrimaries either as a name or
+        // as "R: x=.. y=..", and neither matches, so read_static_metadata never stores md_* keys.
+        for spelling in [
+            "Display P3",
+            "BT.2020",
+            "R: x=0.682000 y=0.318000, G: x=0.260000 y=0.680000, B: x=0.148000 y=0.062000, White point: x=0.312000 y=0.328000",
+        ] {
+            assert_eq!(
+                parse_mastering_display_color_primaries(spelling),
+                None,
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn details_file_prefers_the_mkv_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("clip.mkv");
+        assert_eq!(find_details_file(&input), None);
+        // Only `<stem>_Details.txt` and `<stem>_mkv_Details.txt`; other spellings are ignored.
+        fs::write(dir.path().join("clip.mkv_Details.txt"), "MaxCLL: 1").unwrap();
+        fs::write(dir.path().join("Details.txt"), "MaxCLL: 1").unwrap();
+        assert_eq!(find_details_file(&input), None);
+
+        let plain = dir.path().join("clip_Details.txt");
+        fs::write(&plain, "").unwrap();
+        assert_eq!(find_details_file(&input), Some(plain));
+        let mkv = dir.path().join("clip_mkv_Details.txt");
+        fs::write(&mkv, "").unwrap();
+        assert_eq!(find_details_file(&input), Some(mkv));
+    }
+
+    #[test]
+    fn details_file_light_levels_are_read_without_mediainfo_data() {
+        // The input is not a video, so MediaInfo (if installed) reports no video track and only
+        // the Details.txt override contributes.
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("clip.mkv");
+        fs::write(&input, b"not a video").unwrap();
+        let read = || read_static_metadata(input.to_str().unwrap());
+        assert!(read().is_empty());
+
+        // Case-insensitive labels, a comma decimal, and a zero MaxFALL that is not a value.
+        fs::write(
+            dir.path().join("clip_Details.txt"),
+            "Video\nmaxcll : 1234,5 cd/m2\nMaxFALL:0\n",
+        )
+        .unwrap();
+        assert_eq!(read(), meta(&[("max_cll", 1234.5)]));
+
+        // Suspicious: a thousands separator is read as a decimal comma (1,000 -> 1.0), and a
+        // value with both separators does not parse at all. Only the first match counts.
+        fs::write(
+            dir.path().join("clip_mkv_Details.txt"),
+            "MaxCLL: 1,000\nMaxFALL: 1,234.5\nMaxFALL: 300\n",
+        )
+        .unwrap();
+        assert_eq!(read(), meta(&[("max_cll", 1.0)]));
+    }
+
+    /// Serializes `check_hdr_format` in tests: its Dolby Vision probes use one directory per
+    /// process under the system temp dir (`mkvdovi_dv_sniff_<pid>`, `mkvdovi_dv_probe_<pid>`) and
+    /// delete it afterwards, so two calls on parallel test threads would race.
+    static HDR_FORMAT_PROBE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn hdr_format_of(input: &Path) -> HdrFormat {
+        let _guard = HDR_FORMAT_PROBE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        check_hdr_format(input.to_str().unwrap())
+    }
+
+    /// Reason to skip a test on a generated clip, or `None` when ffmpeg with libx265 and every
+    /// `(tool, version argument)` in `tools` run.
+    fn missing_clip_tools(tools: &[(&str, &str)]) -> Option<String> {
+        for &(tool, arg) in [("ffmpeg", "-version")].iter().chain(tools) {
+            if Command::new(tool).arg(arg).output().is_err() {
+                return Some(format!("{tool} not found in PATH"));
+            }
+        }
+        let encoders = Command::new("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .ok()?;
+        if !String::from_utf8_lossy(&encoders.stdout).contains("libx265") {
+            return Some("ffmpeg has no libx265 encoder".into());
+        }
+        None
+    }
+
+    /// The tools `check_hdr_format` needs to take its MediaInfo path. Without MediaInfo it falls
+    /// back to ffprobe's transfer tag and classifies some inputs differently (HDR10+ as HDR10).
+    const HDR_FORMAT_TOOLS: &[(&str, &str)] =
+        &[("mediainfo", "--version"), ("ffprobe", "-version")];
+
+    /// HDR10 x265 parameters: BT.2020 PQ with a P3 1000-nit mastering display and 1000/400 nits
+    /// MaxCLL/MaxFALL SEI.
+    const PQ_X265: &str = "hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:\
+        master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):\
+        max-cll=1000,400";
+    const HLG_X265: &str = "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc";
+    const SDR_X265: &str = "colorprim=bt709:transfer=bt709:colormatrix=bt709";
+
+    /// Three 64x64 10-bit frames encoded with libx265 into `dir/name`; the extension picks the
+    /// container (`.mkv`, or `.hevc` for a raw stream). Err holds ffmpeg's message.
+    fn encode_clip(
+        dir: &Path,
+        name: &str,
+        x265_params: &str,
+    ) -> std::result::Result<PathBuf, String> {
+        let output = dir.join(name);
+        // Run in `dir`, so file options inside the colon-separated x265 parameters can be
+        // relative (a Windows drive colon would split them).
+        let result = Command::new("ffmpeg")
+            .current_dir(dir)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=64x64:r=24,format=yuv420p10le",
+                "-frames:v",
+                "3",
+                "-c:v",
+                "libx265",
+                "-preset",
+                "ultrafast",
+                "-x265-params",
+                &format!("log-level=error:{x265_params}"),
+                "-pix_fmt",
+                "yuv420p10le",
+                "-y",
+            ])
+            .arg(&output)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !result.status.success() {
+            return Err(String::from_utf8_lossy(&result.stderr).into_owned());
+        }
+        Ok(output)
+    }
+
+    fn run_tool(command: &mut Command) {
+        let output = command
+            .output()
+            .unwrap_or_else(|error| panic!("failed to start {command:?}: {error}"));
+        assert!(
+            output.status.success(),
+            "{command:?} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn static_metadata_of_an_hdr10_clip_is_the_mediainfo_luminance_and_light_levels() {
+        if let Some(reason) = missing_clip_tools(&[("mediainfo", "--version")]) {
+            eprintln!("Skipping static_metadata_of_an_hdr10_clip_is_the_mediainfo_luminance_and_light_levels: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = encode_clip(dir.path(), "clip.mkv", PQ_X265).unwrap();
+        // MediaInfo names the P3 primaries, which yields no md_* keys (see
+        // mastering_primaries_in_mediainfo_spellings_are_not_parsed).
+        assert_eq!(
+            read_static_metadata(clip.to_str().unwrap()),
+            meta(&[
+                ("max_dml", 1000.0),
+                ("min_dml", 0.005),
+                ("max_cll", 1000.0),
+                ("max_fall", 400.0),
+            ])
+        );
+    }
+
+    #[test]
+    fn static_metadata_of_unlisted_primaries_and_zero_light_levels_is_luminance_only() {
+        if let Some(reason) = missing_clip_tools(&[("mediainfo", "--version")]) {
+            eprintln!("Skipping static_metadata_of_unlisted_primaries_and_zero_light_levels_is_luminance_only: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        // MediaInfo 24.01 leaves MaxCLL/MaxFALL out for a 0,0 light-level SEI, so this pins that
+        // omission; the zero skip in read_static_metadata itself is pinned by
+        // static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value.
+        let params = "hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:\
+            master-display=G(13000,34000)B(7400,3100)R(34100,15900)WP(15600,16400)L(40000000,1):\
+            max-cll=0,0";
+        let clip = encode_clip(dir.path(), "clip.mkv", params).unwrap();
+        assert_eq!(
+            read_static_metadata(clip.to_str().unwrap()),
+            meta(&[("max_dml", 4000.0), ("min_dml", 0.0001)])
+        );
+    }
+
+    #[test]
+    fn static_metadata_of_a_clip_without_hdr_sei_is_empty() {
+        if let Some(reason) = missing_clip_tools(&[("mediainfo", "--version")]) {
+            eprintln!("Skipping static_metadata_of_a_clip_without_hdr_sei_is_empty: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = encode_clip(dir.path(), "clip.mkv", HLG_X265).unwrap();
+        assert!(read_static_metadata(clip.to_str().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn details_file_overrides_the_mediainfo_light_levels() {
+        if let Some(reason) = missing_clip_tools(&[("mediainfo", "--version")]) {
+            eprintln!("Skipping details_file_overrides_the_mediainfo_light_levels: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = encode_clip(dir.path(), "clip.mkv", PQ_X265).unwrap();
+        // A zero MaxFALL keeps the stream's value; the mastering display is never overridden.
+        fs::write(
+            dir.path().join("clip_Details.txt"),
+            "MaxCLL : 812,5 cd/m2\nMaxFALL : 0\nMaxDML: 4000\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_static_metadata(clip.to_str().unwrap()),
+            meta(&[
+                ("max_dml", 1000.0),
+                ("min_dml", 0.005),
+                ("max_cll", 812.5),
+                ("max_fall", 400.0),
+            ])
+        );
+    }
+
+    #[test]
+    fn static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value() {
+        if let Some(reason) =
+            missing_clip_tools(&[("mediainfo", "--version"), ("mkvmerge", "--version")])
+        {
+            eprintln!("Skipping static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let raw = encode_clip(dir.path(), "clip.hevc", PQ_X265).unwrap();
+        let clip = dir.path().join("clip.mkv");
+        run_tool(
+            Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(&clip)
+                .args(["--max-content-light", "0:0"])
+                .arg(&raw),
+        );
+        // MediaInfo reports the container's MaxCLL as "0" and moves the stream's 1000 to
+        // MaxCLL_Original, which is never read. The zero is not stored either, so max_cll ends up
+        // missing although the stream states 1000 (suspicious; the L6 default fills it later).
+        assert_eq!(
+            read_static_metadata(clip.to_str().unwrap()),
+            meta(&[("max_dml", 1000.0), ("min_dml", 0.005), ("max_fall", 400.0)])
+        );
+    }
+
+    #[test]
+    fn static_metadata_skips_a_zero_container_max_fall_and_hides_the_stream_value() {
+        if let Some(reason) =
+            missing_clip_tools(&[("mediainfo", "--version"), ("mkvmerge", "--version")])
+        {
+            eprintln!("Skipping static_metadata_skips_a_zero_container_max_fall_and_hides_the_stream_value: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let raw = encode_clip(dir.path(), "clip.hevc", PQ_X265).unwrap();
+        let clip = dir.path().join("clip.mkv");
+        run_tool(
+            Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(&clip)
+                .args(["--max-frame-light", "0:0"])
+                .arg(&raw),
+        );
+        // The MaxFALL twin of the MaxCLL case above: the stream's 400 moves to MaxFALL_Original
+        // and the container's "0" is not stored (suspicious, as above).
+        assert_eq!(
+            read_static_metadata(clip.to_str().unwrap()),
+            meta(&[("max_dml", 1000.0), ("min_dml", 0.005), ("max_cll", 1000.0)])
+        );
+    }
+
+    #[test]
+    fn hdr10_clip_without_measurements_is_hdr10_unsupported() {
+        if let Some(reason) = missing_clip_tools(HDR_FORMAT_TOOLS) {
+            eprintln!("Skipping hdr10_clip_without_measurements_is_hdr10_unsupported: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = encode_clip(dir.path(), "clip.mkv", PQ_X265).unwrap();
+        assert_eq!(hdr_format_of(&clip), HdrFormat::Hdr10Unsupported);
+    }
+
+    #[test]
+    fn hdr10_clip_with_measurements_next_to_it_is_hdr10_with_measurements() {
+        if let Some(reason) = missing_clip_tools(HDR_FORMAT_TOOLS) {
+            eprintln!("Skipping hdr10_clip_with_measurements_next_to_it_is_hdr10_with_measurements: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = encode_clip(dir.path(), "clip.mkv", PQ_X265).unwrap();
+        // Only the file's existence counts, not its content.
+        fs::write(dir.path().join("clip_measurements.bin"), b"").unwrap();
+        assert_eq!(hdr_format_of(&clip), HdrFormat::Hdr10WithMeasurements);
+    }
+
+    #[test]
+    fn hlg_clip_is_hlg() {
+        if let Some(reason) = missing_clip_tools(HDR_FORMAT_TOOLS) {
+            eprintln!("Skipping hlg_clip_is_hlg: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = encode_clip(dir.path(), "clip.mkv", HLG_X265).unwrap();
+        assert_eq!(hdr_format_of(&clip), HdrFormat::Hlg);
+        // A measurements file does not change an HLG classification.
+        fs::write(dir.path().join("clip_measurements.bin"), b"").unwrap();
+        assert_eq!(hdr_format_of(&clip), HdrFormat::Hlg);
+    }
+
+    #[test]
+    fn sdr_bt709_clip_is_unsupported() {
+        if let Some(reason) = missing_clip_tools(HDR_FORMAT_TOOLS) {
+            eprintln!("Skipping sdr_bt709_clip_is_unsupported: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = encode_clip(dir.path(), "clip.mkv", SDR_X265).unwrap();
+        assert_eq!(hdr_format_of(&clip), HdrFormat::Unsupported);
+    }
+
+    #[test]
+    fn hdr10plus_clip_is_hdr10plus() {
+        if let Some(reason) = missing_clip_tools(HDR_FORMAT_TOOLS) {
+            eprintln!("Skipping hdr10plus_clip_is_hdr10plus: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let scene = |frame: u64| {
+            json!({
+                "LuminanceParameters": {
+                    "AverageRGB": 1000,
+                    "LuminanceDistributions": {
+                        "DistributionIndex": [1, 5, 10, 25, 50, 75, 90, 95, 99],
+                        "DistributionValues": [0, 10, 100, 1000, 5000, 10000, 20000, 30000, 40000]
+                    },
+                    "MaxScl": [40000, 40000, 40000]
+                },
+                "NumberOfWindows": 1,
+                "TargetedSystemDisplayMaximumLuminance": 0,
+                "SceneFrameIndex": frame,
+                "SceneId": 0,
+                "SequenceFrameIndex": frame
+            })
+        };
+        let hdr10plus = json!({
+            "JSONInfo": {"HDR10plusProfile": "A", "Version": "1.0"},
+            "SceneInfo": [scene(0), scene(1), scene(2)],
+            "SceneInfoSummary": {"SceneFirstFrameIndex": [0], "SceneFrameNumbers": [3]}
+        });
+        fs::write(dir.path().join("hdr10plus.json"), hdr10plus.to_string()).unwrap();
+        let params = format!("{PQ_X265}:dhdr10-info=hdr10plus.json");
+        let clip = match encode_clip(dir.path(), "clip.mkv", &params) {
+            Ok(clip) => clip,
+            // libx265 built without HDR10+ rejects the option by name; any other error fails.
+            Err(error) if error.contains("dhdr10-info") => {
+                eprintln!(
+                    "Skipping hdr10plus_clip_is_hdr10plus: libx265 does not accept dhdr10-info: {}",
+                    error.trim()
+                );
+                return;
+            }
+            Err(error) => panic!("HDR10+ encode failed: {error}"),
+        };
+        // A libx265 built without HDR10_PLUS accepts the option, warns and writes plain HDR10.
+        let probe = Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-read_intervals",
+                "%+#1",
+            ])
+            .args([
+                "-show_frames",
+                "-show_entries",
+                "frame_side_data=side_data_type",
+            ])
+            .args(["-of", "csv=p=0"])
+            .arg(&clip)
+            .output()
+            .unwrap();
+        if !String::from_utf8_lossy(&probe.stdout).contains("SMPTE2094-40") {
+            eprintln!(
+                "Skipping hdr10plus_clip_is_hdr10plus: libx265 wrote no HDR10+ SEI (built without HDR10_PLUS)"
+            );
+            return;
+        }
+        assert_eq!(hdr_format_of(&clip), HdrFormat::Hdr10Plus);
+        // HDR10+ wins over a measurements file.
+        fs::write(dir.path().join("clip_measurements.bin"), b"").unwrap();
+        assert_eq!(hdr_format_of(&clip), HdrFormat::Hdr10Plus);
+    }
+
+    /// The tools for a generated Profile 8.1 clip, on top of `HDR_FORMAT_TOOLS`.
+    const PROFILE81_TOOLS: &[(&str, &str)] =
+        &[("dovi_tool", "--version"), ("mkvmerge", "--version")];
+
+    /// A three-frame HDR10 stream with a generated Profile 8.1 RPU injected: the raw HEVC
+    /// (`injected.hevc`) and its mkvmerge mux (`clip.mkv`, which carries the Dolby Vision
+    /// configuration record).
+    fn profile81_clip(dir: &Path) -> (PathBuf, PathBuf) {
+        let raw = encode_clip(dir, "clip.hevc", PQ_X265).unwrap();
+        let config = dir.join("generate.json");
+        fs::write(
+            &config,
+            json!({
+                "cm_version": "V40",
+                "length": 3,
+                "profile": "8.1",
+                "level6": {
+                    "max_display_mastering_luminance": 1000,
+                    "min_display_mastering_luminance": 50,
+                    "max_content_light_level": 1000,
+                    "max_frame_average_light_level": 400
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let rpu = dir.join("RPU.bin");
+        run_tool(
+            Command::new("dovi_tool")
+                .arg("generate")
+                .arg("-j")
+                .arg(&config)
+                .arg("-o")
+                .arg(&rpu),
+        );
+        let injected = dir.join("injected.hevc");
+        run_tool(
+            Command::new("dovi_tool")
+                .arg("inject-rpu")
+                .arg("-i")
+                .arg(&raw)
+                .arg("--rpu-in")
+                .arg(&rpu)
+                .arg("-o")
+                .arg(&injected),
+        );
+        let clip = dir.join("clip.mkv");
+        run_tool(
+            Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(&clip)
+                .arg(&injected),
+        );
+        (injected, clip)
+    }
+
+    /// MediaInfo's Dolby Vision fields for `input`, lowercased: what `check_hdr_format` matches
+    /// "dvhe.08" / "dolby vision" against.
+    fn mediainfo_dolby_vision_text(input: &Path) -> String {
+        let output = Command::new("mediainfo")
+            .arg("--Inform=Video;%HDR_Format%/%HDR_Format_Profile%/%HDR_Format_Compatibility%/%CodecID%")
+            .arg(input)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).to_lowercase()
+    }
+
+    #[test]
+    fn profile81_clip_is_dolby_vision_p8() {
+        if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+            eprintln!("Skipping profile81_clip_is_dolby_vision_p8: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (_, clip) = profile81_clip(dir.path());
+        assert_eq!(hdr_format_of(&clip), HdrFormat::DolbyVisionP8);
+    }
+
+    #[test]
+    fn profile81_raw_stream_is_dolby_vision_p8_from_the_rpu_alone() {
+        if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+            eprintln!(
+                "Skipping profile81_raw_stream_is_dolby_vision_p8_from_the_rpu_alone: {reason}"
+            );
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (injected, _) = profile81_clip(dir.path());
+        // MediaInfo sees plain HDR10 in a raw stream, so only the RPU sniff can say P8.
+        let mediainfo = mediainfo_dolby_vision_text(&injected);
+        assert!(
+            !mediainfo.contains("dvhe") && !mediainfo.contains("dolby vision"),
+            "MediaInfo now reports Dolby Vision for a raw stream, so this test no longer isolates \
+             the RPU path: {mediainfo}"
+        );
+        assert_eq!(hdr_format_of(&injected), HdrFormat::DolbyVisionP8);
+    }
+
+    #[test]
+    fn profile8_configuration_without_rpu_is_dolby_vision_p8_from_mediainfo_alone() {
+        if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+            eprintln!("Skipping profile8_configuration_without_rpu_is_dolby_vision_p8_from_mediainfo_alone: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (_, clip) = profile81_clip(dir.path());
+        // Drop the RPU NAL units (type 62); the copy keeps the container's configuration record.
+        let stripped = dir.path().join("stripped.mkv");
+        run_tool(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-i"])
+                .arg(&clip)
+                .args(["-c", "copy", "-bsf:v", "filter_units=remove_types=62", "-y"])
+                .arg(&stripped),
+        );
+        let mediainfo = mediainfo_dolby_vision_text(&stripped);
+        if !mediainfo.contains("dvhe.08") {
+            eprintln!(
+                "Skipping profile8_configuration_without_rpu_is_dolby_vision_p8_from_mediainfo_alone: \
+                 ffmpeg did not keep the Dolby Vision configuration: {}",
+                mediainfo.trim()
+            );
+            return;
+        }
+        assert!(
+            !rpu_check::try_extract_rpu_quiet(
+                stripped.to_str().unwrap(),
+                &dir.path().join("sniff_RPU.bin"),
+                Some(60)
+            ),
+            "the stripped clip still has an RPU, so this test no longer isolates the MediaInfo path"
+        );
+        assert_eq!(hdr_format_of(&stripped), HdrFormat::DolbyVisionP8);
+    }
+
+    /// Writes `generate_extra_json` output to a temp file and returns it byte for byte.
+    fn extra_json_text(
+        profile: &str,
+        metadata: &HashMap<String, f64>,
+        trim_targets: &[u32],
+        cm_v40_config: Option<&CmV40Config>,
+        level5_offsets: Option<Level5Offsets>,
+        l1_sidecar: Option<&L1Sidecar>,
+    ) -> String {
+        let output = tempfile::NamedTempFile::new().unwrap();
+        generate_extra_json(
+            output.path(),
+            profile,
+            metadata,
+            trim_targets,
+            cm_v40_config,
+            level5_offsets,
+            l1_sidecar,
+        )
+        .unwrap();
+        fs::read_to_string(output.path()).unwrap()
+    }
+
+    // The resume path compares regenerated extra.json bytes with the previous run's, so these
+    // goldens pin the whole file: key order, formatting, truncation and every block.
+    const EXTRA_JSON_81_GOLDEN: &str = r#"{
+  "cm_version": "V40",
+  "default_metadata_blocks": [
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 2081,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 2851,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 3079,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level9": {
+        "length": 1,
+        "source_primary_index": 0
+      }
+    },
+    {
+      "Level11": {
+        "content_type": 1,
+        "reference_mode_flag": false,
+        "whitepoint": 0
+      }
+    }
+  ],
+  "l1_avg_pq_cm_version": "V29",
+  "length": 22,
+  "level5": {
+    "active_area_bottom_offset": 136,
+    "active_area_left_offset": 0,
+    "active_area_right_offset": 4,
+    "active_area_top_offset": 140
+  },
+  "level6": {
+    "max_content_light_level": 997,
+    "max_display_mastering_luminance": 1000,
+    "max_frame_average_light_level": 91,
+    "min_display_mastering_luminance": 50
+  },
+  "profile": "8.1",
+  "shots": [
+    {
+      "duration": 12,
+      "metadata_blocks": [
+        {
+          "Level1": {
+            "avg_pq": 500,
+            "max_pq": 2400,
+            "min_pq": 1
+          }
+        }
+      ],
+      "start": 0
+    },
+    {
+      "duration": 10,
+      "metadata_blocks": [
+        {
+          "Level1": {
+            "avg_pq": 600,
+            "max_pq": 2500,
+            "min_pq": 2
+          }
+        }
+      ],
+      "start": 12
+    }
+  ],
+  "source_max_pq": 3079,
+  "source_min_pq": 62
+}"#;
+
+    #[test]
+    fn extra_json_for_profile_81_with_sidecar_shots_is_byte_identical() {
+        let metadata = meta(&[
+            ("min_dml", 0.005),
+            ("max_dml", 1000.0),
+            // Fractions are truncated in L6.
+            ("max_cll", 997.9),
+            ("max_fall", 91.6),
+        ]);
+        let config = CmV40Config {
+            source_primary_index: 0,
+            content_type: 1,
+            reference_mode: false,
+        };
+        // Four different offsets, so a swapped side changes the bytes.
+        let offsets = Level5Offsets {
+            left: 0,
+            right: 4,
+            top: 140,
+            bottom: 136,
+        };
+        let sidecar = L1Sidecar {
+            version: 5,
+            scenes: vec![
+                L1SidecarScene {
+                    start: 0,
+                    end: 9,
+                    min_pq_12bit: 1,
+                    avg_luma_pq_12bit: 480,
+                    avg_max_rgb_pq_12bit: 500,
+                    max_pq_12bit: 2400,
+                },
+                L1SidecarScene {
+                    start: 10,
+                    end: 19,
+                    min_pq_12bit: 2,
+                    avg_luma_pq_12bit: 590,
+                    avg_max_rgb_pq_12bit: 600,
+                    max_pq_12bit: 2500,
+                },
+            ],
+            source: accounted_source(22, 2),
+            ..Default::default()
+        };
+        let text = extra_json_text(
+            "8.1",
+            &metadata,
+            &[100, 600, 1000],
+            Some(&config),
+            Some(offsets),
+            Some(&sidecar),
+        );
+        assert_eq!(text, EXTRA_JSON_81_GOLDEN, "actual:\n{text}");
+    }
+
+    const EXTRA_JSON_84_GOLDEN: &str = r#"{
+  "cm_version": "V40",
+  "default_metadata_blocks": [
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 2081,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 2851,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level9": {
+        "length": 1,
+        "source_primary_index": 2
+      }
+    },
+    {
+      "Level11": {
+        "content_type": 3,
+        "reference_mode_flag": true,
+        "whitepoint": 0
+      }
+    }
+  ],
+  "l1_avg_pq_cm_version": "V29",
+  "length": 20,
+  "level6": {
+    "max_content_light_level": 1000,
+    "max_display_mastering_luminance": 1000,
+    "max_frame_average_light_level": 400,
+    "min_display_mastering_luminance": 50
+  },
+  "profile": "8.4",
+  "shots": [
+    {
+      "duration": 10,
+      "metadata_blocks": [
+        {
+          "Level1": {
+            "avg_pq": 520,
+            "max_pq": 2400,
+            "min_pq": 1
+          }
+        }
+      ],
+      "start": 0
+    },
+    {
+      "duration": 10,
+      "metadata_blocks": [
+        {
+          "Level1": {
+            "avg_pq": 610,
+            "max_pq": 2500,
+            "min_pq": 2
+          }
+        }
+      ],
+      "start": 10
+    }
+  ]
+}"#;
+
+    #[test]
+    fn extra_json_for_profile_84_hlg_is_byte_identical() {
+        let metadata = meta(&[
+            ("min_dml", 0.005),
+            ("max_dml", 1000.0),
+            ("max_cll", 1000.0),
+            ("max_fall", 400.0),
+        ]);
+        let config = CmV40Config {
+            source_primary_index: 2,
+            content_type: 3,
+            reference_mode: true,
+        };
+        let sidecar: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
+        let text = extra_json_text(
+            "8.4",
+            &metadata,
+            &[100, 600],
+            Some(&config),
+            None,
+            Some(&sidecar),
+        );
+        assert_eq!(text, EXTRA_JSON_84_GOLDEN, "actual:\n{text}");
+    }
+
+    /// The variant the manifest of a corpus cut implies. Both HDR10 variants count as HDR10,
+    /// because they differ only by a measurements file next to the input.
+    fn manifest_hdr_format(manifest: &Value) -> &'static str {
+        let dolby_vision = &manifest["dolby_vision"];
+        if manifest["transfer"] == "hlg" {
+            "HLG"
+        } else if dolby_vision["profile"] == 7 && dolby_vision["el_type"] == "MEL" {
+            "MEL"
+        } else if dolby_vision["profile"] == 7 && dolby_vision["el_type"] == "FEL" {
+            "FEL"
+        } else if dolby_vision["profile"] == 8 {
+            "P8"
+        } else if manifest["hdr_format"]
+            .as_str()
+            .is_some_and(|format| format.contains("2094"))
+        {
+            "HDR10+"
+        } else {
+            "HDR10"
+        }
+    }
+
+    fn hdr_format_label(format: HdrFormat) -> &'static str {
+        match format {
+            HdrFormat::Hdr10Plus => "HDR10+",
+            HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported => "HDR10",
+            HdrFormat::Hlg => "HLG",
+            HdrFormat::DolbyVisionMel => "MEL",
+            HdrFormat::DolbyVisionFel => "FEL",
+            HdrFormat::DolbyVisionP8 => "P8",
+            HdrFormat::Unsupported => "Unsupported",
+        }
+    }
+
+    /// Cuts whose classification today differs from the manifest rule, by directory name, with
+    /// the variant `check_hdr_format` returns.
+    const CORPUS_KNOWN_DIFFERENCES: &[(&str, &str)] = &[];
+
+    #[test]
+    fn corpus_cuts_are_classified_like_their_manifests() {
+        let Some(corpus) = std::env::var_os("MKVDOVI_CORPUS_DIR") else {
+            eprintln!(
+                "Skipping corpus_cuts_are_classified_like_their_manifests: MKVDOVI_CORPUS_DIR is not set"
+            );
+            return;
+        };
+        let mut cuts: Vec<PathBuf> = fs::read_dir(&corpus)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|dir| dir.join("manifest.json").is_file() && dir.join("input.mkv").is_file())
+            .collect();
+        cuts.sort();
+        assert!(
+            !cuts.is_empty(),
+            "no cuts under {}",
+            Path::new(&corpus).display()
+        );
+
+        let mut mismatches = Vec::new();
+        for cut in &cuts {
+            let name = cut.file_name().unwrap().to_string_lossy().into_owned();
+            let manifest: Value =
+                serde_json::from_reader(File::open(cut.join("manifest.json")).unwrap()).unwrap();
+            let expected = CORPUS_KNOWN_DIFFERENCES
+                .iter()
+                .find(|(cut_name, _)| *cut_name == name)
+                .map_or_else(|| manifest_hdr_format(&manifest), |&(_, today)| today);
+            let actual = hdr_format_label(hdr_format_of(&cut.join("input.mkv")));
+            eprintln!("{name}: expected {expected}, got {actual}");
+            if actual != expected {
+                mismatches.push(format!("{name}: expected {expected}, got {actual}"));
+            }
+        }
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    }
 }

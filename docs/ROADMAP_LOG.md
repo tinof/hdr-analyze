@@ -6,6 +6,37 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-07: E13 step 2, refactor safety net
+
+E13 step 2 is done. It adds the checks the pure-move splits of steps 3-5 are judged by, and
+changes no production code: every Rust hunk is in a `#[cfg(test)]` module or under `tests/`.
+
+- 34 new characterization tests: `mkvdovi/src/metadata.rs` (format detection, static L6, the whole
+  `extra.json`), `mkvdovi/src/pipeline.rs` unit tests (source retention, output naming), and one
+  e2e test in `mkvdovi/tests/hlg_profile84.rs`,
+  `successful_hlg_conversion_deletes_the_source_and_the_temp_dir`.
+- Mutation-checked during development. `metadata.rs`: 69 of 75 mutants caught; the survivors are
+  equivalent or reachable only by the opt-in corpus test. `pipeline.rs`: the unit tests on
+  `finish_success`/`should_keep_source` missed two mutants, both in the production deletion path.
+  For non-DV inputs, source deletion and temp cleanup are an inline copy at the end of
+  `convert_file`; `finish_success` is called only by the Profile 7 MEL fast path. The new e2e test
+  covers that copy: removing its `fs::remove_file(input_file)` or `remove_dir_all(&temp_dir)` makes
+  it fail.
+- The opt-in test `corpus_cuts_are_classified_like_their_manifests` (`MKVDOVI_CORPUS_DIR`)
+  classifies all 45 development cuts like their manifests.
+- Final-RPU baselines captured at main@e6d63ed in
+  `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/{default,mdfix,preset}`: HDR10, HDR10+, HLG with
+  `bt2100` and `preset`, two MEL incl. an open-GOP start, `--mdfix` on MEL and Profile 8.
+  `scripts/rpu-baseline.sh compare --require-identical-l1` of each baseline against itself exits 0.
+  The capture of `--mdfix` runs now finds the `*.mdfix.DV.mkv` output.
+- Tooling: the CUDA gate in `.claude/workflows/pre-pr-panel.js` also matches module directories
+  (`pipeline/` like `pipeline.rs`); the Stop hook notes a touched `.rs` file over 800 code lines
+  once per session and compiles a touched `.cu` kernel with `nvcc -ptx`; module-size rule in
+  CLAUDE.md.
+- Gates on f950ca8: fmt, clippy, test (no unexpected skips); all pass. No CUDA or L1 gate required
+  (no analyzer path touched).
+- Still open: E13 steps 3-5.
+
 ### 2026-10-06: P1, E1, CUDA as the main pipeline
 
 mkvdovi now treats CUDA as the main analysis pipeline. An explicit `--analysis-quality balanced` or
