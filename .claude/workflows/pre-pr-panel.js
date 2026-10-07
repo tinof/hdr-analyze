@@ -1,7 +1,7 @@
 export const meta = {
   name: 'pre-pr-panel',
   description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort plus Fable on high-risk diffs, each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
-  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /codex-ship step 1b). args: {base, files, item, acceptanceGate, scopeFile, kind?, moveProof?}; kind "pure-move" with a moveProof path runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; pre-pr-review step 5 and /codex-ship steps 4 and 6 call it that way to recompute gates after fixes.',
+  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /codex-ship step 1b). args: {base, files, item, acceptanceGate, scopeFile, kind?, moveProof?, moveFiles?}; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; pre-pr-review step 5 and /codex-ship steps 4 and 6 call it that way to recompute gates after fixes.',
   phases: [
     { title: 'Review', detail: 'correctness, repo contracts, tests and gates (Opus, high); whole diff (Fable, medium) on high-risk paths; or one move-integrity lens (Opus, high) on a pure move' },
     { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder' },
@@ -49,8 +49,16 @@ if (a.gatesOnly) return { gatesOnly: true, requiredGates }
 // Pure move (a module-size split with a passing line-exact move proof): one move-integrity lens
 // replaces the three lenses and Fable. The skill selects it only after rerunning the proof on HEAD;
 // without a proof path here the full panel runs. Gates stay as computed above.
-const pureMove = a.kind === 'pure-move' && typeof a.moveProof === 'string' && a.moveProof.length > 0
-if (a.kind === 'pure-move' && !pureMove) log('kind pure-move without moveProof: running the full panel')
+// Every non-Markdown file in scope must be one the split touches (moveFiles), so an unrelated edit
+// on the same branch never escapes the full panel.
+const moveFiles = new Set((Array.isArray(a.moveFiles) ? a.moveFiles : []).map(f => String(f).replace(/^\.\//, '')))
+const uncovered = files.filter(f => !/\.md$/.test(f) && !moveFiles.has(f))
+const pureMove = a.kind === 'pure-move' && typeof a.moveProof === 'string' && a.moveProof.length > 0 &&
+  moveFiles.size > 0 && uncovered.length === 0
+if (a.kind === 'pure-move' && !pureMove) {
+  log('kind pure-move rejected (' + (!a.moveProof ? 'no moveProof' : moveFiles.size === 0 ? 'no moveFiles' :
+    'not in moveFiles: ' + uncovered.join(', ')) + '): running the full panel')
+}
 
 // High-risk diffs add the Fable reviewer: the paths that require CUDA parity or the L1 regression
 // gate, plus the cross-binary contract modules named in CLAUDE.md. A module counts as a file or as
@@ -105,6 +113,7 @@ const MOVE_LENS = {
     'Review every allowed-edit pair: each must be structural only (visibility widened to at most pub(super), a path prefix such as crate::, super:: or std::result::, ' +
     'a rustfmt re-indent or re-wrap with identical tokens, string and raw-string contents included). Then check what the proof does not cover: ' +
     'use/mod/pub use lines in the new headers (glob re-exports that shadow or change which item a name resolves to, a missing re-export for a path that code, docs or .claude/ name), ' +
+    'every moved test module still declared (#[cfg(test)] mod tests;) under the right parent, ' +
     'include_str! paths (file-relative), #[cfg(feature = "cuda")] gating moved with its items, f32 operation order that mirrors kernels.cu, ' +
     'the resume_settings string, and references to moved paths or line numbers in ROADMAP.md, docs/ and .claude/. ' +
     'Any change that is not a move is a finding: say what it changes.',

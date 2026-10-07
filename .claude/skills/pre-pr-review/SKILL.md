@@ -93,32 +93,44 @@ Call the Workflow tool with `name: "pre-pr-panel"` and `args`:
 
 Keep these args: step 4 resumes with them.
 
-**Pure move.** Add `"kind": "pure-move", "moveProof": "<absolute path of the proof dir>"` to the args only when all
-of these hold:
-- the step is a module-size split (CLAUDE.md "Module size");
-- the scope file names a **line-exact** move proof, for example
-  `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/verify_move.py` with its split spec and
-  allowed-edit list: every moved line is identical, and every other changed line is an explicit
-  allowed-edit pair. A comparison that strips whitespace, commas or other tokens does not qualify.
-  rustfmt re-wraps (a signature that `pub(super)` pushed past 100 columns) are proved separately:
-  the move proof runs on the commit before formatting, and the formatting commit must be exactly
-  what `cargo fmt --all` makes of its parent (check out the parent, run it, `git diff` against the
-  formatting commit is empty). Without that split, re-wrapped lines fail the proof and the full
-  panel runs (in #33, `pipeline/analyzer.rs` would have fallen back to the full panel);
-- you rerun every proof command on the current HEAD, and each one exits 0 and prints
-  `PURE MOVE OK`.
-
-Otherwise, or if any proof reports a difference, omit `kind` and run the full panel. A split
-that also changes code (for example E13 step 4, `convert_file` by phase) is never a pure move.
-The mode replaces only the reviewers: one move-integrity lens instead of the three lenses and
-Fable. The gates and the item's acceptance checks (`rpu-baseline compare
---require-identical-l1`, the L1 gate without `--update`) still apply.
-
 It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Fable runs only on
 high-risk paths), `findings` (each verified by an independent Opus skeptic), `refuted` (claims a
 skeptic refuted; they go into the step 8 record), `unverified` and
 `requiredGates` (computed in code from the file list). Do not choose the gates by judgment; use
 that list.
+
+**Pure move.** Add `"kind": "pure-move"`, `"moveProof": "<absolute path of the proof dir>"` and
+`"moveFiles": [<paths>]` to the args only when all of these hold. Otherwise omit all three and
+run the full panel.
+- The step is a module-size split (CLAUDE.md "Module size"). A split that also changes code (for
+  example E13 step 4, `convert_file` by phase) is never a pure move.
+- **Coverage.** `moveFiles` lists every path the split touches: each spec's `src` and `files`,
+  the original file(s) the split deletes (e.g. `mkvdovi/src/pipeline.rs`) and any `tests.rs` the
+  split creates. Every non-Markdown file in scope (`git diff --name-only origin/<base>...HEAD`)
+  must be in `moveFiles`. The workflow checks this again and runs the full panel when a file is
+  missing.
+- **Line-exact proof.** The scope file names a move proof, for example
+  `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/verify_move.py` with its split spec and
+  allowed-edit list: every moved line is identical, and every other changed line is an explicit
+  allowed-edit pair. A comparison that strips whitespace, commas or other tokens does not qualify.
+- **Where it runs.** `verify_move.py` reads the working tree, so run it in a scratch worktree
+  (`git worktree add --detach <scratchpad>/wt <commit>`), never by checking out the main tree:
+  - with no formatting commit, on HEAD;
+  - with a formatting commit (rustfmt re-wraps lines that `pub(super)` pushed past 100 columns),
+    on that commit's parent. Then prove the formatting commit: in a worktree at `<fmt commit>^`,
+    `cargo fmt --all` followed by `git diff --quiet <fmt commit>` must succeed. The formatting
+    commit touches only `moveFiles`, and no non-Markdown commit follows it. Without this split,
+    re-wrapped lines fail the proof (in #33, `pipeline/analyzer.rs` would have).
+
+  Each move proof exits 0 and prints `PURE MOVE OK`.
+- **Test list.** `cargo test -p <crate> -- --list` on the pre-move commit and on HEAD gives the
+  same count and the same test names (compare the last path segment when module paths move).
+  The proof does not check `mod` lines, so a dropped `mod tests;` would otherwise lose tests
+  silently.
+
+The mode replaces only the reviewers: one move-integrity lens instead of the three lenses and
+Fable. The gates and the item's acceptance checks (`rpu-baseline compare
+--require-identical-l1`, the L1 gate without `--update`) still apply.
 
 ## 4. Verify and fix
 
@@ -130,7 +142,12 @@ that list.
    and the Codex findings (standalone mode). Gemini and Codex findings have no skeptic: check them
    yourself like `unverified` ones. `unverified` holds findings over the verification cap or whose verifier failed: check
    each of them yourself like any other. Merge two findings only when they describe the same
-   defect; distinct defects at the same file:line stay separate.
+   defect; distinct defects at the same file:line stay separate. Merge the workflow's `refuted`
+   list the same way: a refuted claim that describes the same defect as another finding adds its
+   lens to that entry's `finders` and is not a row of its own. Only an unmatched refuted claim
+   becomes a `refuted` entry in the step 8 record.
+   **Pure move:** a confirmed move-integrity finding of a change that is not a move voids the mode.
+   Rerun the workflow without `kind` (a fresh run, not a resume) before you fix anything.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
    reason that cites code) / deferred (real, out of scope). A deferred or rejected P0/P1 is not a
    blocker here: it goes into the record, and `/codex-ship` asks the user about it at its merge
@@ -262,7 +279,7 @@ Then write the echoed path with the Write tool:
  "rejectedP0P1": [{"where": "file:line", "reason": "..."}],
  "codexFocusedPass": "done | failed | skipped", "focusText": "...",
  "reviewers": [<the workflow's reviewers list>],
- "kind": "full | pure-move", "moveProof": "<proof dir, pure move only>",
+ "kind": "full | pure-move", "moveProof": "<proof dir, pure move only>", "moveFiles": [<pure move only>],
  "findings": [{"id": "F1", "where": "file:line", "priority": "P2",
                "verdict": "fixed | rejected | refuted | deferred | unverified",
                "finders": ["correctness", "gemini"]}],

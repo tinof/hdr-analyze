@@ -9,7 +9,9 @@ You may open repository files to judge the change, but at most 10 reads in total
 range (300 lines or more) rather than a small slice. Spend the first read on CLAUDE.md in the
 repository root: it names the cross-binary contracts. The scope file {{SCOPE}} names the roadmap
 item and its acceptance gate; read it only if you need them. Review only the change; read other
-code only to judge it.
+code only to judge it. Read only files inside the repository and the scope file: a path outside
+them (for example under `~/.claude/` or `~/mkvdovi-work/`) is denied and aborts the review, even
+when the diff names it. Judge such paths from the diff alone.
 
 Report only real defects you can point at: priority P0-P3, file, line, a concrete failure
 scenario, and a fix. No style notes. Cover all three areas:
