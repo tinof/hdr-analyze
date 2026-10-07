@@ -62,16 +62,17 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-06 at main@df54ad4)
+### Next up (checked 2026-10-07 at main@efcfba8)
 
-1. **E11:** `l1_diff` shifts by `leading_skipped_frames` (`fix-l1-diff-open-gop`, `tools/l1_diff`
-   only). Gate: the E11 Fix, with a synthetic open-GOP sidecar test. No file overlap with the P8
-   branch and no CUDA gate; unblocks scoring Joker against its retail L1 (see E11 Checked). Run the
-   L1 regression gate after P8's benchmark, not during it.
-2. **P9 step 0:** frame alignment of pixel measurements to HDR10+ scenes on the HDR10+-only cuts,
-   before any hybrid flag (see P9 Checked). Shares `mkvdovi/src/{metadata,pipeline}.rs` with the
-   P8 branch, so start it after P8 lands.
-3. **E8 + E9** (one branch): needs CUDA parity and edits `cli.rs` like the P8 branch; after P8.
+1. **E13 step 3:** mkvdovi inline tests to `tests.rs`, pure-move split of `metadata.rs` and
+   `pipeline.rs` (`feat/e13-mkvdovi-split`). Gate: the E13 per-move gate (rpu-baseline compare,
+   corpus classification test, L1 gate without `--update`). Prerequisite of P9 step 0 (priority 2).
+   First action: compare a build of unchanged main against every saved baseline (see E13 Checked).
+2. **P9 step 0**, after step 3 merges: frame alignment of pixel measurements to HDR10+ scenes on the
+   HDR10+-only cuts, before any hybrid flag (see P9 Checked). Then E13 step 4, then the hybrid flag.
+3. **E7: `--verify` L6 0 on a passthrough RPU** warns instead of failing (`fix-verify-passthrough-l6`,
+   `verify.rs` only, no file shared with the move). Gate: a unit test for both cases. Among the L6
+   findings the P6 container-0 fix comes first, but it lives in `metadata.rs`, so after step 3.
 
 ### Waiting for the owner
 
@@ -535,6 +536,10 @@ The detailed gap table and validation method live in
   "unknown" in the static metadata, so for a passthrough RPU (not one mkvdovi generated) the check
   should warn, not fail. Reproduce with the MEL cut in `~/mkvdovi-work/corpus/dev` whose capture
   failed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/capture-default.log`.
+- **Checked 2026-10-07 @efcfba8:** the check fails any 0 in `max_content_light_level` /
+  `max_frame_average_light_level` (`mkvdovi/src/verify.rs:661-674`). The passthrough is already
+  told apart: it passes no `DeliveryExpectation` (`delivery` is `None`, `verify.rs:150`). Warn only
+  for that case; generated RPUs and missing or malformed fields keep failing.
 
 ### E8: histogram percentile reader
 
@@ -618,6 +623,13 @@ The detailed gap table and validation method live in
   spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
   from `finish_success`.
 - **Found by the step 2 tests:** two L6 defects, now open steps under P6 (priority 4).
+- **Checked 2026-10-07 @efcfba8:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3
+  (r4 default failed on the E7 defect). All manifests say `repo.dirty: true`, preset g3 records
+  `a8d3a9ca` (on no branch); e6d63ed..main changed only test modules (`metadata.rs` @3016,
+  `pipeline.rs` @2027), so compare unchanged main against every case before a move. Step 5: analyzer
+  `pipeline.rs` has test modules at :649, :680 and :1410 with production code between them;
+  `gpu.rs:342` `include_str!("kernels.cu")` is file-relative; the L1 gate and CUDA parity pass
+  `--disable-optimizer`, so also diff an optimizer-enabled default `.bin`.
 
 ## Checked and kept (2026-10-03)
 
