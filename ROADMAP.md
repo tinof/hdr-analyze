@@ -62,7 +62,7 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-07 at main@efcfba8)
+### Next up (checked 2026-10-07 at main@513c211)
 
 1. **E13 step 3:** mkvdovi inline tests to `tests.rs`, pure-move split of `metadata.rs` and
    `pipeline.rs` (`feat/e13-mkvdovi-split`). Gate: the E13 per-move gate (rpu-baseline compare,
