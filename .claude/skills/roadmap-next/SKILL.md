@@ -72,15 +72,17 @@ Write the draft to `<scratchpad>/roadmap-next-draft.md`.
 ## 4. Codex second advisor
 
 Run in the background (`run_in_background: true`) and wait for the completion notification.
-Follow `~/.claude/rules/codex-routing.md`: `command codex`, never the bare alias.
+Follow `~/.claude/rules/codex-routing.md`: background Codex runs go through its stall watchdog
+(it kills a silent run after 8 minutes, retries once, and adds `--json` and `-o <prefix>.md`).
 
 ```
-command codex exec --sandbox read-only "Read ROADMAP.md and <scratchpad>/roadmap-next-draft.md in this repo. Rank the startable roadmap steps yourself, independently of the draft. Then: name risks the draft misses, prerequisites it assumed but did not check, and any step that should come first and why. Be specific: item ID, step, file paths." > <scratchpad>/roadmap-next-codex.md 2>&1
+~/.claude/skills/codex-ship/scripts/codex-watch.sh <scratchpad>/roadmap-next-codex exec --sandbox read-only "Read ROADMAP.md and <scratchpad>/roadmap-next-draft.md in this repo. Rank the startable roadmap steps yourself, independently of the draft. Then: name risks the draft misses, prerequisites it assumed but did not check, and any step that should come first and why. Be specific: item ID, step, file paths."
 ```
 
-Report the `model:` and `reasoning effort:` header lines. If the run fails (usage limit,
-unsupported model, sandbox error), say so and continue without it. Never replace it with a
-Claude subagent and call that the Codex opinion.
+The ranking is in `<scratchpad>/roadmap-next-codex.md`. `--json` prints no header, so report
+`model`, `effort`, `outcome` and `attempts` from `<scratchpad>/roadmap-next-codex.result.json`.
+If `ok` is false (stall, usage limit, unsupported model, sandbox error), say so with its `reason`
+and continue without it. Never replace it with a Claude subagent and call that the Codex opinion.
 
 Known false alarm: Codex runs in a read-only sandbox without GPU access, so its `nvidia-smi` or
 CUDA probes fail there. Ignore claims that the GPU is unavailable; step 1's probe decides.
@@ -111,8 +113,8 @@ Edit `ROADMAP.md` only with facts you verified in this run:
 Commit only when the tree allows it: on `main`, after `git pull --ff-only`, with no other
 uncommitted change to `ROADMAP.md`. Then `git add ROADMAP.md`,
 `git commit -m "docs(roadmap): next up <ID> <step> (checked @<sha>)"`, `git push origin main`
-(the pre-push hook runs the tests). On any other branch or a dirty `ROADMAP.md`, leave the edits
-uncommitted and say so. Never commit other files.
+(where the pre-commit hooks are installed, their push stage skips the tests for a Markdown-only
+push). On any other branch or a dirty `ROADMAP.md`, leave the edits uncommitted and say so. Never commit other files.
 
 ## 7. Answer
 

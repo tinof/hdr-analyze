@@ -1,9 +1,9 @@
 export const meta = {
   name: 'pre-pr-panel',
   description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort plus Fable on high-risk diffs, each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
-  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /codex-ship step 1b). args: {base, files, item, acceptanceGate, scopeFile}. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; pre-pr-review step 5 and /codex-ship steps 4 and 6 call it that way to recompute gates after fixes.',
+  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /codex-ship step 1b). args: {base, files, item, acceptanceGate, scopeFile, kind?, moveProof?}; kind "pure-move" with a moveProof path runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; pre-pr-review step 5 and /codex-ship steps 4 and 6 call it that way to recompute gates after fixes.',
   phases: [
-    { title: 'Review', detail: 'correctness, repo contracts, tests and gates (Opus, high); whole diff (Fable, medium) on high-risk paths' },
+    { title: 'Review', detail: 'correctness, repo contracts, tests and gates (Opus, high); whole diff (Fable, medium) on high-risk paths; or one move-integrity lens (Opus, high) on a pure move' },
     { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder' },
   ],
 }
@@ -46,11 +46,17 @@ log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'non
 // fixes, without a second copy of the path rules.
 if (a.gatesOnly) return { gatesOnly: true, requiredGates }
 
+// Pure move (a module-size split with a passing line-exact move proof): one move-integrity lens
+// replaces the three lenses and Fable. The skill selects it only after rerunning the proof on HEAD;
+// without a proof path here the full panel runs. Gates stay as computed above.
+const pureMove = a.kind === 'pure-move' && typeof a.moveProof === 'string' && a.moveProof.length > 0
+if (a.kind === 'pure-move' && !pureMove) log('kind pure-move without moveProof: running the full panel')
+
 // High-risk diffs add the Fable reviewer: the paths that require CUDA parity or the L1 regression
 // gate, plus the cross-binary contract modules named in CLAUDE.md. A module counts as a file or as
 // a directory of submodules (metadata.rs or metadata/), so a split never drops the reviewer.
-const highRisk = cuda || measurement ||
-  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)/)
+const highRisk = !pureMove && (cuda || measurement ||
+  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)/))
 
 const SCOPE = [
   `Scope: run \`git diff ${a.base}...HEAD\` for the committed part, and read the uncommitted files `,
@@ -93,9 +99,20 @@ const VERDICT = {
   required: ['refuted', 'reason'],
 }
 
+const MOVE_LENS = {
+  key: 'move-integrity', model: 'opus', effort: 'high',
+  prompt: `Lens: integrity of a pure move (CLAUDE.md "Module size"). The move proof is in ${a.moveProof}: the split spec, the allowed-edit pairs and the proof output. ` +
+    'Review every allowed-edit pair: each must be structural only (visibility widened to at most pub(super), a path prefix such as crate::, super:: or std::result::, ' +
+    'a rustfmt re-indent or re-wrap with identical tokens, string and raw-string contents included). Then check what the proof does not cover: ' +
+    'use/mod/pub use lines in the new headers (glob re-exports that shadow or change which item a name resolves to, a missing re-export for a path that code, docs or .claude/ name), ' +
+    'include_str! paths (file-relative), #[cfg(feature = "cuda")] gating moved with its items, f32 operation order that mirrors kernels.cu, ' +
+    'the resume_settings string, and references to moved paths or line numbers in ROADMAP.md, docs/ and .claude/. ' +
+    'Any change that is not a move is a finding: say what it changes.',
+}
+
 // Claude reviewers. Each one counts toward `complete`: a reviewer that returns nothing is missing
 // coverage, not a clean review.
-const LENSES = [
+const LENSES = pureMove ? [MOVE_LENS] : [
   {
     key: 'correctness', model: 'opus', effort: 'high',
     prompt: 'Lens: correctness. Logic errors, off-by-one, wrong units (PQ codes 10-bit vs 12-bit, nits, normalized), integer overflow, error paths that lose data or delete a source, resume/temp-dir state, concurrency in the external-tool runners.',
@@ -115,7 +132,7 @@ if (highRisk) {
     prompt: 'Whole-diff review, no fixed lens. Three narrow reviewers already cover correctness, the repo contracts in CLAUDE.md, and tests and gates. Look for what narrow lenses miss: a design or specification error, an interaction between two changed files, an assumption that holds in the tests but not on real media, a contract changed on one side only. Report only real defects.',
   })
 } else {
-  log('fable reviewer skipped: no high-risk path in this diff')
+  log(pureMove ? 'pure move: one move-integrity lens, no Fable' : 'fable reviewer skipped: no high-risk path in this diff')
 }
 
 
@@ -124,7 +141,7 @@ const MAX_VERIFY = 8
 // The skeptic always has a different lens than the finder; Fable findings are checked by Opus.
 // Gemini runs outside this workflow (pre-pr-gemini.sh, started by the skill), so the panel never
 // waits for it; the skill checks its findings itself, like Codex's.
-const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness', fable: 'contracts' }
+const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness', fable: 'contracts', 'move-integrity': 'contracts' }
 
 const results = await pipeline(
   LENSES,
@@ -139,7 +156,10 @@ if (failedLenses.length) log(`review incomplete: lens(es) ${failedLenses.join(',
 const reviewers = LENSES.map(l => (failedLenses.includes(l.key)
   ? { key: l.key, model: l.model, effort: l.effort, ran: false, reason: 'returned no result' }
   : { key: l.key, model: l.model, effort: l.effort, ran: true }))
-if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
+if (pureMove) {
+  for (const key of ['correctness', 'contracts', 'tests-and-gates']) reviewers.push({ key, model: 'opus', effort: 'high', ran: false, reason: 'pure move: replaced by move-integrity' })
+  reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'pure move' })
+} else if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
 
 // Barrier on purpose: cap the verification count, highest priority first. No dedupe here: two
 // findings at one location may be two different defects, and dropping one costs more than
@@ -164,6 +184,7 @@ const verified = await parallel(toVerify.map(f => () =>
 const checked = toVerify.map((f, i) => verified[i] || { ...f, verdict: 'unverified', verdictReason: 'verifier failed' })
 return {
   started: true,
+  kind: pureMove ? 'pure-move' : 'full',
   complete: failedLenses.length === 0,
   failedLenses,
   reviewers,
