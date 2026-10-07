@@ -94,6 +94,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-07 | E13 step 3: pure-move split of mkvdovi `metadata.rs` and `pipeline.rs` into submodules, tests in `tests.rs`; all 8 RPU baselines identical. | E13 | `feat/e13-mkvdovi-split` |
 | 2026-10-07 | E13 safety net: 34 characterization tests for mkvdovi (metadata, pipeline, HLG source deletion), CUDA gate on module dirs, final-RPU baselines at main@e6d63ed; no production code changed. | E13 | this branch |
 | 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | [#31](https://github.com/tinof/hdr-analyze/pull/31) |
 | 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | this file |
@@ -160,7 +161,7 @@ evidence for each priority is in its items and in
    the stream's value (changes delivered L6, so first of the three found 2026-10-07); `--verify` on
    a retail RPU with L6 0; a `Details.txt` thousands separator. Gate: unit tests for the reader and
    the option; measure the CPU default first; for the L6 fixes, flip the expectations the E13
-   tests pin as suspicious (`mkvdovi/src/metadata.rs`). **Prerequisite:** E13 step 5 (analyzer
+   tests pin as suspicious (`mkvdovi/src/metadata/tests.rs`). **Prerequisite:** E13 step 5 (analyzer
    split) before E8 + E9, because E8 moves the default `.bin`.
 5. **`--mdfix` replaces the whole RPU** (P11): targeted repair or full regeneration. Open decision.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
@@ -217,7 +218,7 @@ and broader hardware acceleration (E5). Neutral trims stay.
      frames.
 - **Done 2026-10-06** (former open items 2–4; evidence: unit tests `coarser_sampling`,
   `rejects_coarser_sidecar`, `analysis_quality_notice`, `gpu_analysis_missing` in
-  `mkvdovi/src/pipeline.rs`, e2e test `accurate_reanalyzes_coarser_measurements` in
+  `mkvdovi/src/pipeline/tests.rs`, e2e test `accurate_reanalyzes_coarser_measurements` in
   `mkvdovi/tests/hlg_profile84.rs`): mkvdovi warns on an explicit `balanced`/`fast` with GPU
   analysis; under `accurate` it re-analyzes a coarser sidecar instead of reusing it; it warns when a
   run that expected GPU analysis comes back with `analysis.gpu: false`.
@@ -298,10 +299,10 @@ and broader hardware acceleration (E5). Neutral trims stay.
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
-- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline.rs:1649` passes
-  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline.rs:901`);
-  `metadata.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path; the sidecar has no
-  per-frame peak, and mkvdovi reads only per-frame minima (`metadata.rs:986` `L1SidecarFrames`).
+- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline/dovi_steps.rs:319` passes
+  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline/mod.rs:897`);
+  `metadata/format.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path; the sidecar has no
+  per-frame peak, and mkvdovi reads only per-frame minima (`metadata/sidecar.rs:179` `L1SidecarFrames`).
   All 45 development manifests say `shotlist_checked: false`.
 
 ### P10: measured against delivered
@@ -594,11 +595,12 @@ The detailed gap table and validation method live in
 
 ### E13: module size refactor
 
-- **Status:** Open; step 2 (safety net) done 2026-10-07, steps 3-5 open. Nine Rust files pass 1000 lines; with inline
-  test modules not counted, `mkvdovi/src/metadata.rs` (1707), `mkvdovi/src/pipeline.rs` (1785, of
-  which `convert_file` is about 910), `hdr_analyzer_mvp/src/pipeline.rs` (1348),
-  `analysis/frame.rs` (1026) and `analysis/gpu.rs` (951) pass the 800-line limit in CLAUDE.md
-  ("Module size").
+- **Status:** Open; step 2 (safety net) done 2026-10-07; step 3 (mkvdovi split) done 2026-10-07,
+  evidence in the PR body and `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/`; steps 4-5
+  open. Still over the 800-line limit in CLAUDE.md ("Module size"), test modules not counted:
+  `mkvdovi/src/pipeline/mod.rs` (1037 lines, `convert_file` about 900; step 4),
+  `hdr_analyzer_mvp/src/pipeline.rs` (1348), `analysis/frame.rs` (1026) and `analysis/gpu.rs` (951).
+  The mkvdovi `metadata/` submodules are all under it.
 - **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
   directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
   for the untested high-risk mkvdovi paths (source deletion, format detection, static L6, the whole

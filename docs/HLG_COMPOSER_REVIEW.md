@@ -62,10 +62,10 @@ The named-composer model is sound, and sidecar version 4 does not need to become
 
 There are nevertheless two control-flow holes:
 
-- Fingerprint-less legacy directories are intentionally resumed at [pipeline.rs:121](../mkvdovi/src/pipeline.rs). Thus a `bt2100` run could reuse a preset `RPU.bin` from an older run despite adding the flag to `resume_settings()`. For non-default composers, a missing fingerprint must force a clean regeneration.
+- Fingerprint-less legacy directories are intentionally resumed at [pipeline/mod.rs](../mkvdovi/src/pipeline/mod.rs). Thus a `bt2100` run could reuse a preset `RPU.bin` from an older run despite adding the flag to `resume_settings()`. For non-default composers, a missing fingerprint must force a clean regeneration.
 - Verification currently silently skips sidecar checks when loading fails at [verify.rs:177](../mkvdovi/src/verify.rs), and only inspects frame zero structurally at [verify.rs:119](../mkvdovi/src/verify.rs). Composer verification must hard-fail an unreadable/mismatched HLG sidecar and compare the mapping on every RPU frame, not only the first.
 
-`dv_profile_for` and `check_luminance_mapping` must take the selected composer expectation explicitly. Do not broaden the current exact comparison at [metadata.rs:1165](../mkvdovi/src/metadata.rs) into a mere `dovi84-*` prefix check.
+`dv_profile_for` and `check_luminance_mapping` must take the selected composer expectation explicitly. Do not broaden the current exact comparison at [metadata/sidecar.rs](../mkvdovi/src/metadata/sidecar.rs) into a mere `dovi84-*` prefix check.
 
 ## RPU rewriting
 
@@ -77,10 +77,10 @@ Required safeguards:
 - Assert `use_prev_vdr_rpu_flag == false` and a mapping is present on every generated frame. Merely setting `rpu_data_mapping` does nothing when that header flag is true; writing is gated at [dovi_rpu.rs:271](https://docs.rs/crate/dolby_vision/3.4.0/source/src/rpu/dovi_rpu.rs).
 - Match the binary RPU format exactly: `00 00 00 01` followed by `write_hevc_unspec62_nalu()[2..]`, not the full encoded NAL. That stripping is explicit in [generate.rs:205](https://docs.rs/crate/dolby_vision/3.4.0/source/src/rpu/generate.rs).
 - Write to a sibling temporary file, reparse it, verify frame count/mappings/CRC, then rename it atomically.
-- Move `resume::mark_done` until after rewriting and validation. Currently it is written immediately after external generation at [pipeline.rs:1538](../mkvdovi/src/pipeline.rs), contrary to the design note’s ordering.
+- Move `resume::mark_done` until after rewriting and validation. Currently it is written immediately after external generation at [pipeline/dovi_steps.rs](../mkvdovi/src/pipeline/dovi_steps.rs), contrary to the design note’s ordering.
 - Keep the runtime byte-identical unmodified round trip. It protects against a newer external `dovi_tool` producing metadata the pinned crate cannot preserve.
 
-`dovi_tool editor` is not a better current alternative: its supported edits do not expose arbitrary replacement composer curves. A cleaner option is to deserialize the complete HLG `extra.json`, call the crate’s `GenerateConfig` in-process, replace mappings in the generated list, and serialize once. HLG already embeds complete length/shots in the configuration at [metadata.rs:1291](../mkvdovi/src/metadata.rs). That avoids parse–rewrite risk and should be compared byte-for-byte against external `dovi_tool generate` for the preset path.
+`dovi_tool editor` is not a better current alternative: its supported edits do not expose arbitrary replacement composer curves. A cleaner option is to deserialize the complete HLG `extra.json`, call the crate’s `GenerateConfig` in-process, replace mappings in the generated list, and serialize once. HLG already embeds complete length/shots in the configuration at [metadata/rpu_config.rs](../mkvdovi/src/metadata/rpu_config.rs). That avoids parse–rewrite risk and should be compared byte-for-byte against external `dovi_tool generate` for the preset path.
 
 ## Input contract and chroma siting
 

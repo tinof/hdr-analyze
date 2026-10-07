@@ -58,8 +58,8 @@ trims are a separate, higher-risk tone-mapping problem.
 | Active area | `crop.rs`, `ffmpeg_io.rs`, `pipeline.rs` | Multi-position crop probe with low-signal rejection, tolerance clustering, and conservative variable-AR union |
 | Scene detection | `analysis/scene.rs` | Histogram-distance cuts and minimum scene length |
 | Optimizer | `optimizer.rs` | madVR `target_nits`; this is not itself a Dolby metadata level |
-| DV configuration | `mkvdovi/src/metadata.rs` | Neutral L2, L6, L9, L11 |
-| RPU assembly | `mkvdovi/src/pipeline.rs` | `dovi_tool generate` with explicit per-scene L1 shots from the sidecar, L5 from the committed crop, L254 from `dovi_tool` |
+| DV configuration | `mkvdovi/src/metadata/` | Neutral L2, L6, L9, L11 |
+| RPU assembly | `mkvdovi/src/pipeline/dovi_steps.rs` | `dovi_tool generate` with explicit per-scene L1 shots from the sidecar, L5 from the committed crop, L254 from `dovi_tool` |
 
 Key facts:
 
