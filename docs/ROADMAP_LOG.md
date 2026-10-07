@@ -6,6 +6,25 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-07: E13 step 3, mkvdovi module split
+
+E13 step 3 is done. Four commits, each a pure move with no behavior change:
+
+- Inline tests moved to `mkvdovi/src/metadata/tests.rs` and `mkvdovi/src/pipeline/tests.rs`.
+- `metadata.rs` split into `metadata/{mod,format,probe,rpu_config,sidecar,static_metadata}.rs`;
+  `pipeline.rs` into `pipeline/{mod,analyzer,dovi_steps,hdr10plus}.rs`. Re-exports keep every
+  `metadata::X` and `pipeline::X` path valid.
+- `pipeline/mod.rs` stays at 1037 lines, over the 800-line limit: `convert_file` alone is about
+  900 lines, and step 4 splits it by phase.
+- Gates on 281b927: fmt, clippy (also `--features cuda`), workspace tests (result lines and the 5
+  `Skipping` lines identical to main@f104c78), the corpus classification test
+  (`MKVDOVI_CORPUS_DIR`), the L1 regression gate without `--update`: all pass. All 8
+  `scripts/rpu-baseline.sh compare --require-identical-l1` runs against
+  `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` pass (default d1, g3, h1, r1, r2; mdfix r4, r5;
+  preset g3); unchanged main@f104c78 also passed all 8 before the move. Logs in
+  `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/` and in the PR body.
+- Still open: E13 steps 4-5.
+
 ### 2026-10-07: E13 step 2, refactor safety net
 
 E13 step 2 is done. It adds the checks the pure-move splits of steps 3-5 are judged by, and

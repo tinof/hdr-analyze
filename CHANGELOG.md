@@ -8,6 +8,9 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **mkvdovi module split** (internal refactor, ROADMAP E13 step 3). `metadata.rs` and
+  `pipeline.rs` are now module directories with their tests in `tests.rs`; a pure move, no
+  behavior change.
 - **Characterization tests for mkvdovi** (tests only, ROADMAP E13). 34 tests pin format detection,
   static L6, the whole `extra.json`, source retention, output naming, and source deletion plus temp
   cleanup after a successful HLG conversion. No behavior change.
