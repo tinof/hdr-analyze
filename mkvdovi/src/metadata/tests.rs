@@ -1,4 +1,19 @@
 use super::*;
+use dovi84_composer::Composer;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use super::format::{classify_hdr_hints, hints_indicate_hlg, hlg_colour_contract, ColourField};
+use super::probe::{parse_mediainfo_duration_seconds, video_track_frame_count};
+use super::rpu_config::nits_to_pq_code;
+use super::static_metadata::{
+    detect_source_primaries_from_mediainfo, insert_light_level,
+    parse_mastering_display_color_primaries,
+};
+use crate::rpu_check::{self, Level5Offsets};
 
 #[test]
 fn classify_hlg_from_original_transfer_characteristics() {
@@ -1522,7 +1537,7 @@ const SDR_X265: &str = "colorprim=bt709:transfer=bt709:colormatrix=bt709";
 
 /// Three 64x64 10-bit frames encoded with libx265 into `dir/name`; the extension picks the
 /// container (`.mkv`, or `.hevc` for a raw stream). Err holds ffmpeg's message.
-fn encode_clip(dir: &Path, name: &str, x265_params: &str) -> std::result::Result<PathBuf, String> {
+fn encode_clip(dir: &Path, name: &str, x265_params: &str) -> Result<PathBuf, String> {
     let output = dir.join(name);
     // Run in `dir`, so file options inside the colon-separated x265 parameters can be
     // relative (a Windows drive colon would split them).
