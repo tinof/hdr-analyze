@@ -3309,6 +3309,9 @@ mod tests {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
+        // MediaInfo 24.01 leaves MaxCLL/MaxFALL out for a 0,0 light-level SEI, so this pins that
+        // omission; the zero skip in read_static_metadata itself is pinned by
+        // static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value.
         let params = "hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:\
             master-display=G(13000,34000)B(7400,3100)R(34100,15900)WP(15600,16400)L(40000000,1):\
             max-cll=0,0";
@@ -3352,6 +3355,34 @@ mod tests {
                 ("max_cll", 812.5),
                 ("max_fall", 400.0),
             ])
+        );
+    }
+
+    #[test]
+    fn static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value() {
+        if let Some(reason) =
+            missing_clip_tools(&[("mediainfo", "--version"), ("mkvmerge", "--version")])
+        {
+            eprintln!("Skipping static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let raw = encode_clip(dir.path(), "clip.hevc", PQ_X265).unwrap();
+        let clip = dir.path().join("clip.mkv");
+        run_tool(
+            Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(&clip)
+                .args(["--max-content-light", "0:0"])
+                .arg(&raw),
+        );
+        // MediaInfo reports the container's MaxCLL as "0" and moves the stream's 1000 to
+        // MaxCLL_Original, which is never read. The zero is not stored either, so max_cll ends up
+        // missing although the stream states 1000 (suspicious; the L6 default fills it later).
+        assert_eq!(
+            read_static_metadata(clip.to_str().unwrap()),
+            meta(&[("max_dml", 1000.0), ("min_dml", 0.005), ("max_fall", 400.0)])
         );
     }
 
@@ -3438,13 +3469,15 @@ mod tests {
         let params = format!("{PQ_X265}:dhdr10-info={}", json_path.display());
         let clip = match encode_clip(dir.path(), "clip.mkv", &params) {
             Ok(clip) => clip,
-            Err(error) => {
+            // libx265 built without HDR10+ rejects the option by name; any other error fails.
+            Err(error) if error.contains("dhdr10-info") => {
                 eprintln!(
                     "Skipping hdr10plus_clip_is_hdr10plus: libx265 does not accept dhdr10-info: {}",
                     error.trim()
                 );
                 return;
             }
+            Err(error) => panic!("HDR10+ encode failed: {error}"),
         };
         assert_eq!(hdr_format_of(&clip), HdrFormat::Hdr10Plus);
         // HDR10+ wins over a measurements file.
@@ -3452,20 +3485,16 @@ mod tests {
         assert_eq!(hdr_format_of(&clip), HdrFormat::Hdr10Plus);
     }
 
-    #[test]
-    fn profile81_clip_is_dolby_vision_p8() {
-        let tools = [
-            HDR_FORMAT_TOOLS,
-            &[("dovi_tool", "--version"), ("mkvmerge", "--version")],
-        ]
-        .concat();
-        if let Some(reason) = missing_clip_tools(&tools) {
-            eprintln!("Skipping profile81_clip_is_dolby_vision_p8: {reason}");
-            return;
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let raw = encode_clip(dir.path(), "clip.hevc", PQ_X265).unwrap();
-        let config = dir.path().join("generate.json");
+    /// The tools for a generated Profile 8.1 clip, on top of `HDR_FORMAT_TOOLS`.
+    const PROFILE81_TOOLS: &[(&str, &str)] =
+        &[("dovi_tool", "--version"), ("mkvmerge", "--version")];
+
+    /// A three-frame HDR10 stream with a generated Profile 8.1 RPU injected: the raw HEVC
+    /// (`injected.hevc`) and its mkvmerge mux (`clip.mkv`, which carries the Dolby Vision
+    /// configuration record).
+    fn profile81_clip(dir: &Path) -> (PathBuf, PathBuf) {
+        let raw = encode_clip(dir, "clip.hevc", PQ_X265).unwrap();
+        let config = dir.join("generate.json");
         fs::write(
             &config,
             json!({
@@ -3482,7 +3511,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let rpu = dir.path().join("RPU.bin");
+        let rpu = dir.join("RPU.bin");
         run_tool(
             Command::new("dovi_tool")
                 .arg("generate")
@@ -3491,7 +3520,7 @@ mod tests {
                 .arg("-o")
                 .arg(&rpu),
         );
-        let injected = dir.path().join("injected.hevc");
+        let injected = dir.join("injected.hevc");
         run_tool(
             Command::new("dovi_tool")
                 .arg("inject-rpu")
@@ -3502,7 +3531,7 @@ mod tests {
                 .arg("-o")
                 .arg(&injected),
         );
-        let clip = dir.path().join("clip.mkv");
+        let clip = dir.join("clip.mkv");
         run_tool(
             Command::new("mkvmerge")
                 .arg("-q")
@@ -3510,7 +3539,86 @@ mod tests {
                 .arg(&clip)
                 .arg(&injected),
         );
+        (injected, clip)
+    }
+
+    /// MediaInfo's Dolby Vision fields for `input`, lowercased: what `check_hdr_format` matches
+    /// "dvhe.08" / "dolby vision" against.
+    fn mediainfo_dolby_vision_text(input: &Path) -> String {
+        let output = Command::new("mediainfo")
+            .arg("--Inform=Video;%HDR_Format%/%HDR_Format_Profile%/%HDR_Format_Compatibility%/%CodecID%")
+            .arg(input)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).to_lowercase()
+    }
+
+    #[test]
+    fn profile81_clip_is_dolby_vision_p8() {
+        if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+            eprintln!("Skipping profile81_clip_is_dolby_vision_p8: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (_, clip) = profile81_clip(dir.path());
         assert_eq!(hdr_format_of(&clip), HdrFormat::DolbyVisionP8);
+    }
+
+    #[test]
+    fn profile81_raw_stream_is_dolby_vision_p8_from_the_rpu_alone() {
+        if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+            eprintln!(
+                "Skipping profile81_raw_stream_is_dolby_vision_p8_from_the_rpu_alone: {reason}"
+            );
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (injected, _) = profile81_clip(dir.path());
+        // MediaInfo sees plain HDR10 in a raw stream, so only the RPU sniff can say P8.
+        let mediainfo = mediainfo_dolby_vision_text(&injected);
+        assert!(
+            !mediainfo.contains("dvhe") && !mediainfo.contains("dolby vision"),
+            "MediaInfo now reports Dolby Vision for a raw stream, so this test no longer isolates \
+             the RPU path: {mediainfo}"
+        );
+        assert_eq!(hdr_format_of(&injected), HdrFormat::DolbyVisionP8);
+    }
+
+    #[test]
+    fn profile8_configuration_without_rpu_is_dolby_vision_p8_from_mediainfo_alone() {
+        if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+            eprintln!("Skipping profile8_configuration_without_rpu_is_dolby_vision_p8_from_mediainfo_alone: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (_, clip) = profile81_clip(dir.path());
+        // Drop the RPU NAL units (type 62); the copy keeps the container's configuration record.
+        let stripped = dir.path().join("stripped.mkv");
+        run_tool(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-i"])
+                .arg(&clip)
+                .args(["-c", "copy", "-bsf:v", "filter_units=remove_types=62", "-y"])
+                .arg(&stripped),
+        );
+        let mediainfo = mediainfo_dolby_vision_text(&stripped);
+        if !mediainfo.contains("dvhe.08") {
+            eprintln!(
+                "Skipping profile8_configuration_without_rpu_is_dolby_vision_p8_from_mediainfo_alone: \
+                 ffmpeg did not keep the Dolby Vision configuration: {}",
+                mediainfo.trim()
+            );
+            return;
+        }
+        assert!(
+            !rpu_check::try_extract_rpu_quiet(
+                stripped.to_str().unwrap(),
+                &dir.path().join("sniff_RPU.bin"),
+                Some(60)
+            ),
+            "the stripped clip still has an RPU, so this test no longer isolates the MediaInfo path"
+        );
+        assert_eq!(hdr_format_of(&stripped), HdrFormat::DolbyVisionP8);
     }
 
     /// Writes `generate_extra_json` output to a temp file and returns it byte for byte.
@@ -3591,9 +3699,9 @@ mod tests {
   "l1_avg_pq_cm_version": "V29",
   "length": 22,
   "level5": {
-    "active_area_bottom_offset": 140,
+    "active_area_bottom_offset": 136,
     "active_area_left_offset": 0,
-    "active_area_right_offset": 0,
+    "active_area_right_offset": 4,
     "active_area_top_offset": 140
   },
   "level6": {
@@ -3649,11 +3757,12 @@ mod tests {
             content_type: 1,
             reference_mode: false,
         };
+        // Four different offsets, so a swapped side changes the bytes.
         let offsets = Level5Offsets {
             left: 0,
-            right: 0,
+            right: 4,
             top: 140,
-            bottom: 140,
+            bottom: 136,
         };
         let sidecar = L1Sidecar {
             version: 5,
