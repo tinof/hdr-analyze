@@ -553,7 +553,9 @@ The detailed gap table and validation method live in
   on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
   (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
   `--disable-optimizer`, so a round-trip and optimizer unit test is the gate. The bin edges are
-  written in `frame.rs:667` and `gpu.rs` `build_luminance_bin_lut`; `frame.rs:970` bins uniformly.
+  written in `frame.rs:667` (`analyze_native_frame_cropped`) and `gpu.rs`
+  `build_luminance_bin_lut`; `frame.rs:970` (`analyze_native_frame`) bins uniformly. Line numbers
+  are from before the E13 step 5 split; the function names stay valid.
 - **Fix:** one shared bin-edge function for writer and readers, with a round-trip test.
 
 ### E9: `--pre-denoise` values
@@ -603,8 +605,10 @@ The detailed gap table and validation method live in
   `extra.json`); (3) mkvdovi: inline tests to `tests.rs`, then pure-move splits of `metadata.rs`
   and `pipeline.rs`, before P9 step 0, which works in both files; (4) split `convert_file` by
   phase, before the P9 hybrid flag; (5) analyzer: inline tests to `tests.rs`, pure-move splits of
-  `pipeline.rs` and `analysis/gpu.rs`, before E8 + E9, because E8 moves the default `.bin` and a
-  pure move can only be proved byte-identical before it. `tools/l1_diff` stays as it is while the
+  `pipeline.rs`, `analysis/gpu.rs` and `analysis/frame.rs` (the peak estimators and grain
+  statistics are the candidate submodule; `pixel_pq_bin` and the max-RGB mix mirror `kernels.cu`
+  operation for operation and move unchanged), before E8 + E9, because E8 moves the default `.bin`,
+  edits `frame.rs` itself, and a pure move can only be proved byte-identical before it. `tools/l1_diff` stays as it is while the
   local `feat/dev-corpus` branch depends on it.
 - **Gate per move (acceptance gate for steps 3-5):** fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
