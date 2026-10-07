@@ -26,10 +26,12 @@ const workspaceRust = files.some(f => !f.startsWith('tools/') && /\.rs$|(^|\/)Ca
 if (workspaceRust) { gates.add('fmt'); gates.add('clippy'); gates.add('test') }
 // CPU/GPU analysis path: the kernel, its host side, the decode path, the orchestration that hands
 // frames to it, the composer coefficients both backends use, and build inputs that change them.
+// A module counts as a file or as a directory of submodules (pipeline.rs or pipeline/), so a
+// split never drops the gate.
 // Build inputs that can change measured output without touching Cargo.lock: the workspace and crate
 // manifests (features, dependency versions, profiles), compiler flags and the toolchain.
 const BUILD = /^Cargo\.(toml|lock)$|^hdr_analyzer_mvp\/Cargo\.toml$|^dovi84_composer\/Cargo\.toml$|^\.cargo\/config\.toml$|^rust-toolchain\.toml$/
-const cuda = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/(analysis\/|ffmpeg_io\.rs$|pipeline\.rs$|cli\.rs$|crop\.rs$)|^dovi84_composer\/src\/|^scripts\/cuda-parity\.sh$|^hdr_analyzer_mvp\/tests\/cuda_parity\.rs$/)
+const cuda = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/(analysis\/|(ffmpeg_io|pipeline|cli|crop)(\.rs$|\/))|^dovi84_composer\/src\/|^scripts\/cuda-parity\.sh$|^hdr_analyzer_mvp\/tests\/cuda_parity\.rs$/)
 if (cuda) { gates.add('clippy-cuda'); gates.add('cuda-parity') }
 // Measurement change: anything that can move the analyzer's L1 output or how it is scored.
 const measurement = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/|^dovi84_composer\/src\/|^tools\/l1_diff\/|^scripts\/ci\/l1-regression-gate\.sh$/)

@@ -6,8 +6,12 @@
 #                        errors anywhere + warnings in touched files as Stop hook feedback.
 #                        Touched CUDA kernels (.cu) are also compiled with nvcc, when present:
 #                        NVRTC compiles them only at runtime, so nothing else catches an error.
+#                        A touched .rs file over SIZE_LIMIT code lines (inline #[cfg(test)] mod
+#                        blocks not counted) gets a one-time note per session (CLAUDE.md
+#                        "Module size"); it never blocks and does not count as a feedback round.
 #
-# State: ${TMPDIR:-/tmp}/claude-rust-check/<session_id>/{files,blocks}
+# State: ${TMPDIR:-/tmp}/claude-rust-check/<session_id>/{files,blocks}, plus
+#        <session_id>.size-noted (kept across rounds: files already given the size note)
 # No touched files -> the Stop hook exits immediately without starting cargo.
 set -uo pipefail
 
@@ -15,12 +19,14 @@ MAX_BLOCKS=3
 MAX_LINES=40
 CLIPPY_TIMEOUT=540
 NVCC_TIMEOUT=60
+SIZE_LIMIT=800
 
 mode="${1:-}"
 input="$(cat)"
 session="$(jq -r '.session_id // "default"' <<<"$input" 2>/dev/null)"
 [ -n "$session" ] || session=default
 state="${TMPDIR:-/tmp}/claude-rust-check/${session//[^A-Za-z0-9_-]/_}"
+size_noted="$state.size-noted"
 
 emit_system_message() {
     jq -n --arg m "rust-check: $1" '{systemMessage: $m}'
@@ -146,7 +152,41 @@ for root in "${!roots[@]}"; do
     done
 done
 
+# 4. Module size: production lines of each touched .rs file, once per file per session.
+#    Integration tests (tests/), extracted test modules (tests.rs) and build.rs are exempt.
+size_notes=()
+for root in "${!roots[@]}"; do
+    for f in "${touched[@]}"; do
+        case "$f" in "$root"/*) ;; *) continue ;; esac
+        r="${f#"$root"/}"
+        [[ "$r" == *.rs && -f "$f" ]] || continue
+        [[ "$r" =~ (^|/)tests/ || "$r" =~ (^|/)(tests|build)\.rs$ ]] && continue
+        grep -qxF -- "$f" "$size_noted" 2>/dev/null && continue
+        code_lines="$(awk '
+            skip { if ($0 ~ /^}/) skip = 0; next }
+            /^#\[cfg\(test\)\]$/ { pending = 1; next }
+            pending && /^mod [A-Za-z0-9_]+ *\{/ { pending = 0; skip = 1; next }
+            { if (pending) { n++; pending = 0 } n++ }
+            END { print n + 0 }' "$f")"
+        [ "$code_lines" -gt "$SIZE_LIMIT" ] || continue
+        size_notes+=("$r: $code_lines code lines (limit $SIZE_LIMIT, inline test modules not counted)")
+        mkdir -p "$(dirname -- "$size_noted")" && printf '%s\n' "$f" >>"$size_noted"
+    done
+done
+size_body=""
+if [ "${#size_notes[@]}" -gt 0 ]; then
+    size_body="Module size (CLAUDE.md \"Module size\"): $(printf '%s; ' "${size_notes[@]}")"
+    size_body+="Unless the split is the task itself, do not split it inside this change: at the end of your reply, tell the user and propose the split as its own pure-move step."
+fi
+
 if [ "${#report[@]}" -eq 0 ]; then
+    if [ -n "$size_body" ]; then
+        # A note, not a failure: one message, no feedback round counted.
+        [ -n "$infra_error" ] && emit_system_message "$infra_error"
+        rm -rf -- "$state"
+        jq -n --arg m "$size_body" '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $m}}'
+        exit 0
+    fi
     if [ -n "$infra_error" ]; then
         # Environment problem, not a code problem: tell the user, do not make Claude loop on it.
         emit_system_message "$infra_error"
@@ -162,6 +202,7 @@ total="${#report[@]}"
 body="$(printf '%s\n' "${report[@]:0:$MAX_LINES}")"
 [ "$total" -gt "$MAX_LINES" ] && body+=$'\n'"... $((total - MAX_LINES)) more"
 [ "$extra_warnings" -gt 0 ] && body+=$'\n'"$extra_warnings more warning(s) in untouched files (CI runs clippy with -D warnings)"
+[ -n "$size_body" ] && body+=$'\n'"$size_body"
 
 echo "$((blocks + 1))" >"$state/blocks"
 if [ "$blocks" -ge "$MAX_BLOCKS" ]; then
