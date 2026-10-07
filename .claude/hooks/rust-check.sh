@@ -181,10 +181,12 @@ fi
 
 if [ "${#report[@]}" -eq 0 ]; then
     if [ -n "$size_body" ]; then
-        # A note, not a failure: one message, no feedback round counted.
-        [ -n "$infra_error" ] && emit_system_message "$infra_error"
+        # A note, not a failure: no feedback round counted. One JSON object on stdout, so an
+        # infra error goes in the same object as the note.
         rm -rf -- "$state"
-        jq -n --arg m "$size_body" '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $m}}'
+        jq -n --arg m "$size_body" --arg e "$infra_error" \
+            '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $m}}
+             + (if $e != "" then {systemMessage: ("rust-check: " + $e)} else {} end)'
         exit 0
     fi
     if [ -n "$infra_error" ]; then
