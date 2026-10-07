@@ -1,10 +1,10 @@
 export const meta = {
   name: 'pre-pr-panel',
-  description: 'Pre-PR review of a roadmap change: three review lenses, each finding checked by an independent skeptic, plus the gates the touched paths require',
+  description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort plus Fable on high-risk diffs, each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
   whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /codex-ship step 1b). args: {base, files, item, acceptanceGate, scopeFile}. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; pre-pr-review step 5 and /codex-ship steps 4 and 6 call it that way to recompute gates after fixes.',
   phases: [
-    { title: 'Review', detail: 'correctness, repo contracts, tests and gates; one Opus reviewer each' },
-    { title: 'Verify', detail: 'one skeptic per finding, with a different lens than the finder' },
+    { title: 'Review', detail: 'correctness, repo contracts, tests and gates (Opus, high); whole diff (Fable, medium) on high-risk paths' },
+    { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder' },
   ],
 }
 
@@ -43,6 +43,12 @@ log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'non
 // Gate list only, no reviewers: lets the skills recompute gates for a file list that grew after
 // fixes, without a second copy of the path rules.
 if (a.gatesOnly) return { gatesOnly: true, requiredGates }
+
+// High-risk diffs add the Fable reviewer: the paths that require CUDA parity or the L1 regression
+// gate, plus the cross-binary contract modules named in CLAUDE.md. A module counts as a file or as
+// a directory of submodules (metadata.rs or metadata/), so a split never drops the reviewer.
+const highRisk = cuda || measurement ||
+  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)/)
 
 const SCOPE = [
   `Scope: run \`git diff ${a.base}...HEAD\` for the committed part, and read the uncommitted files `,
@@ -85,34 +91,53 @@ const VERDICT = {
   required: ['refuted', 'reason'],
 }
 
+// Claude reviewers. Each one counts toward `complete`: a reviewer that returns nothing is missing
+// coverage, not a clean review.
 const LENSES = [
   {
-    key: 'correctness',
+    key: 'correctness', model: 'opus', effort: 'high',
     prompt: 'Lens: correctness. Logic errors, off-by-one, wrong units (PQ codes 10-bit vs 12-bit, nits, normalized), integer overflow, error paths that lose data or delete a source, resume/temp-dir state, concurrency in the external-tool runners.',
   },
   {
-    key: 'contracts',
+    key: 'contracts', model: 'opus', effort: 'high',
     prompt: 'Lens: repo contracts from CLAUDE.md. The L1 sidecar schema and version on both sides (hdr_analyzer_mvp/src/l1_sidecar.rs, mkvdovi metadata::L1_SIDECAR_MAX_VERSION, tools/l1_diff), the +cuda version probe, luminance_mapping names, --help option probes (external::analyzer_lists_option), resume_settings for artifact-affecting flags, CPU/CUDA bit-identical arithmetic and buffer layouts (kernels.cu vs gpu.rs), mkvdovi never re-encodes video, no silent clamp, HLG colour contract.',
   },
   {
-    key: 'tests-and-gates',
+    key: 'tests-and-gates', model: 'opus', effort: 'high',
     prompt: `Lens: tests and gates. Does the change carry tests for what it changes? Would a test skip silently on this host (missing tool, missing sibling analyzer)? If L1 moves, are the tools/l1_diff/corpus references updated on purpose with the reason stated? The gates computed for this diff are: ${requiredGates.join(', ') || 'none'}; name a gate that is missing for this change. Is there evidence for the item's acceptance gate, or is the step being marked done without it?`,
   },
 ]
+if (highRisk) {
+  LENSES.push({
+    key: 'fable', model: 'fable', effort: 'medium',
+    prompt: 'Whole-diff review, no fixed lens. Three narrow reviewers already cover correctness, the repo contracts in CLAUDE.md, and tests and gates. Look for what narrow lenses miss: a design or specification error, an interaction between two changed files, an assumption that holds in the tests but not on real media, a contract changed on one side only. Report only real defects.',
+  })
+} else {
+  log('fable reviewer skipped: no high-risk path in this diff')
+}
+
 
 const ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 }
-const MAX_VERIFY = 6
-const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness' }
+const MAX_VERIFY = 8
+// The skeptic always has a different lens than the finder; Fable findings are checked by Opus.
+// Gemini runs outside this workflow (pre-pr-gemini.sh, started by the skill), so the panel never
+// waits for it; the skill checks its findings itself, like Codex's.
+const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness', fable: 'contracts' }
 
 const results = await pipeline(
   LENSES,
   l => agent(`${l.prompt}\n\n${SCOPE}`, {
-    label: `review:${l.key}`, phase: 'Review', schema: FINDINGS, model: 'opus', effort: 'low',
+    label: `review:${l.key}`, phase: 'Review', schema: FINDINGS, model: l.model, effort: l.effort,
   }).then(r => (r ? { lens: l.key, findings: r.findings.map(f => ({ ...f, lens: l.key })) } : { lens: l.key, failed: true })),
 )
 // A lens that returned nothing (skipped, API error) is missing coverage, not a clean review.
 const failedLenses = LENSES.map((l, i) => (results[i] && !results[i].failed ? null : l.key)).filter(Boolean)
 if (failedLenses.length) log(`review incomplete: lens(es) ${failedLenses.join(', ')} returned no result`)
+// Who reviewed, for the report and the record: `ran` is false for a reviewer that returned nothing.
+const reviewers = LENSES.map(l => (failedLenses.includes(l.key)
+  ? { key: l.key, model: l.model, effort: l.effort, ran: false, reason: 'returned no result' }
+  : { key: l.key, model: l.model, effort: l.effort, ran: true }))
+if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
 
 // Barrier on purpose: cap the verification count, highest priority first. No dedupe here: two
 // findings at one location may be two different defects, and dropping one costs more than
@@ -129,7 +154,7 @@ const verified = await parallel(toVerify.map(f => () =>
     `Finding [${f.priority}] ${f.file}:${f.line}: ${f.summary}. Scenario: ${f.scenario}. ` +
     `Open the code, trace the scenario, and decide whether it really fails. Default to refuted=true ` +
     `if the scenario cannot happen or the code already handles it. ${SCOPE}`,
-    { label: `verify:${f.file}:${f.line}`, phase: 'Verify', schema: VERDICT, model: 'opus', effort: 'low' },
+    { label: `verify:${f.file}:${f.line}`, phase: 'Verify', schema: VERDICT, model: 'opus', effort: 'medium' },
   ).then(v => ({ ...f, verdict: v ? (v.refuted ? 'refuted' : 'confirmed') : 'unverified', verdictReason: v ? v.reason : 'verifier failed' }))
 ))
 
@@ -139,6 +164,7 @@ return {
   started: true,
   complete: failedLenses.length === 0,
   failedLenses,
+  reviewers,
   requiredGates,
   findings: checked.filter(f => f.verdict === 'confirmed'),
   refuted: checked.filter(f => f.verdict === 'refuted'),

@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "nonce": {
+      "type": "string",
+      "description": "The value after REVIEW-NONCE: on the first line of the diff file"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
+          "file": {"type": "string"},
+          "line": {"type": "integer"},
+          "summary": {"type": "string"},
+          "scenario": {"type": "string"},
+          "fix": {"type": "string"}
+        },
+        "required": ["priority", "file", "line", "summary", "scenario"]
+      }
+    }
+  },
+  "required": ["nonce", "findings"]
+}

@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (Claude reviewers on three lenses, each finding verified), optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /codex-ship runs it in ship mode (step 1b); the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /codex-ship runs it in ship mode (step 1b); the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
 allowed-tools: Workflow(pre-pr-panel)
@@ -9,20 +9,20 @@ allowed-tools: Workflow(pre-pr-panel)
 # pre-pr-review
 
 **Modes.**
-- **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including step 2
-  (Codex focused pass). End as step 8 says.
-- **Ship mode:** `/codex-ship` step 1b told you to follow this file. Skip step 2: the focus text
-  from step 7 goes to `/codex-ship`'s steered Codex pass instead, so the same diff never gets two
-  steered Codex runs. A blocker from step 4 or 5 stops `/codex-ship` before its push.
+- **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including both
+  passes of step 2 (Codex and Gemini). End as step 8 says.
+- **Ship mode:** `/codex-ship` step 1b told you to follow this file. Skip step 2a (Codex focused
+  pass): the focus text from step 7 goes to `/codex-ship`'s steered Codex pass instead, so the same
+  diff never gets two steered Codex runs. Still run step 2b (Gemini). A blocker from step 4 or 5 stops `/codex-ship` before its push.
 
 Both modes end with the record in step 8. `/codex-ship` step 1b reuses that record instead of
 running this review again while HEAD is unchanged, so a standalone run followed by `/codex-ship`
 costs one review, not two.
 
-Either way, the user's command is the opt-in for the `pre-pr-panel` review run in step 3 (and its
-one rerun in step 4), and for its `gatesOnly` calls, which start no agents.
-Codex runs read-only and follows `~/.claude/rules/codex-routing.md` (`command codex`). Claude
-makes every fix.
+Either way, the user's command is the opt-in for the Gemini pass in step 2b, the `pre-pr-panel`
+review run in step 3 (and its resume in step 4), and its `gatesOnly` calls, which start no agents.
+Codex runs read-only and follows `~/.claude/rules/codex-routing.md` (`command codex`). Gemini runs
+read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
 
 ## 1. Scope, once
 
@@ -45,15 +45,35 @@ makes every fix.
 5. Write `<scratchpad>/prepr-scope.md`: base, diff command, file list, item, step, acceptance
    gate. Every reviewer, Claude or Codex, gets this same scope.
 
-## 2. Codex focused pass (standalone mode only)
+## 2. External passes
 
-Background Bash; wait for the completion notification, do not poll:
+Start them in the background right after step 1, and go on to step 3 at once: the workflow does
+not wait for them. Their completion notifications arrive while it runs; do not poll. Collect
+their findings before step 4.
+
+### 2a. Codex focused pass (standalone mode only)
 
 ```
 command codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none." > <scratchpad>/prepr-codex.md 2>&1
 ```
 
 Report the `model:` / `reasoning effort:` header lines. A failed run is reported as failed;
+never substitute a Claude review for it.
+
+### 2b. Gemini pass (both modes; skipped for a docs-only diff)
+
+Skip it when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as a background Bash:
+
+```
+.claude/workflows/pre-pr-gemini.sh origin/<base> <scratchpad> <scratchpad>/prepr-scope.md
+```
+
+The script runs `agy` (Antigravity CLI) with `gemini-3.8-flash-medium` in print mode, which
+denies every terminal command and file write. The diff goes inside the prompt; a large diff takes
+about 3–4 minutes. It stops `agy` after `PRE_PR_GEMINI_TIMEOUT` seconds (default 900), checks the
+result itself (status, schema, no denied action, a nonce that proves Gemini read the diff) and
+writes `<scratchpad>/prepr-gemini.result.json`: `ok` with `findings`, or `ok: false` with a
+`reason`. Report its `model` and `seconds`, or the `reason`. A failed Gemini pass is not a blocker;
 never substitute a Claude review for it.
 
 ## 3. Workflow
@@ -65,15 +85,22 @@ Call the Workflow tool with `name: "pre-pr-panel"` and `args`:
  "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md"}
 ```
 
-It returns `complete`, `failedLenses`, `findings` (each verified by an independent skeptic), `unverified` and `requiredGates` (computed in
-code from the file list). Do not choose the gates by judgment; use that list.
+Keep these args: step 4 resumes with them.
+
+It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Fable runs only on
+high-risk paths), `findings` (each verified by an independent Opus skeptic), `unverified` and
+`requiredGates` (computed in code from the file list). Do not choose the gates by judgment; use
+that list.
 
 ## 4. Verify and fix
 
-1. If the workflow returns `complete: false` (a review lens failed), rerun the workflow once; if
-   it is still incomplete, report the missing lenses as a blocker.
-2. Merge the workflow's `findings` **and** `unverified` lists with the Codex findings (standalone
-   mode). `unverified` holds findings over the verification cap or whose verifier failed: check
+1. If the workflow returns `complete: false` (a Claude reviewer failed), **resume** it once:
+   `Workflow({scriptPath, resumeFromRunId, args})` with the script path and run ID from step 3's
+   tool result and the identical args. Reviewers that finished come back from the cache; the
+   failed reviewer and every skeptic run again (verified 2026-10-07: 2 of 3 Opus lenses cached). If it is still incomplete, report the missing lenses as a blocker.
+2. Merge the workflow's `findings` **and** `unverified` lists with the Gemini findings (step 2b)
+   and the Codex findings (standalone mode). Gemini and Codex findings have no skeptic: check them
+   yourself like `unverified` ones. `unverified` holds findings over the verification cap or whose verifier failed: check
    each of them yourself like any other. Merge two findings only when they describe the same
    defect; distinct defects at the same file:line stay separate.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
@@ -150,8 +177,9 @@ alone.
 
 ## 7. Report
 
-Write `<scratchpad>/pre-pr-review.md`: findings table (priority, file:line, verdict, fix commit
-or reason), gate results, blockers, docs changed. Then return **focus text** for the Codex
+Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort, from
+`reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finder, verdict, fix
+commit or reason), gate results, blockers, docs changed. Then return **focus text** for the Codex
 review: the contract areas this diff touches plus anything still uncertain, in one or two
 sentences.
 
@@ -198,12 +226,14 @@ Then write the echoed path with the Write tool:
  "deferredP0P1": [{"where": "file:line", "reason": "..."}],
  "rejectedP0P1": [{"where": "file:line", "reason": "..."}],
  "codexFocusedPass": "done | failed | skipped", "focusText": "...",
+ "reviewers": [<the workflow's reviewers list>],
+ "geminiPass": "done | failed | skipped", "geminiReason": "<reason when failed>",
  "report": "<full sha>.md", "scope": "<full sha>.scope.md"}
 ```
 
 - `requiredGates` is the union from step 5, and `gateResults` has one entry for each of its
   gates.
-- `complete` is false when a lens was still missing after the rerun in step 4.
+- `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass` and `geminiReason` are informational and do not affect reuse.
 - `deferredP0P1` and `rejectedP0P1` do not block reuse. `/codex-ship` asks the user about them at
   its merge gate.
 - Write the record also when there are blockers. `/codex-ship` reads it and refuses to reuse it.
