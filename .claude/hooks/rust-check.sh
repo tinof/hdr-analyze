@@ -163,7 +163,7 @@ for root in "${!roots[@]}"; do
         [[ "$r" =~ (^|/)tests/ || "$r" =~ (^|/)(tests|build)\.rs$ ]] && continue
         grep -qxF -- "$f" "$size_noted" 2>/dev/null && continue
         code_lines="$(awk '
-            skip { if ($0 ~ /^}/) skip = 0; next }
+            skip { if ($0 ~ /^}$/) skip = 0; next }
             /^#\[cfg\(test\)\]$/ { pending = 1; next }
             pending && /^mod [A-Za-z0-9_]+ *\{/ { pending = 0; skip = 1; next }
             { if (pending) { n++; pending = 0 } n++ }
