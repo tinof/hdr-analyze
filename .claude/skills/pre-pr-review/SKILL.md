@@ -91,7 +91,18 @@ Gemini pass is not a blocker; never substitute a Claude review for it. The scrip
 
 ## 3. Workflow
 
-Call the Workflow tool with `name: "pre-pr-panel"` and `args`:
+Call the Workflow tool with
+`scriptPath: "<git rev-parse --show-toplevel>/.claude/workflows/pre-pr-panel.js"` (an absolute
+path in the checkout under review) and `args`. Never call it by `name`: a named run loads the
+script from the checkout the session started in, which can be on another branch (verified
+2026-10-08: two named runs during #35 used the pre-#35 copy, so the gate list came back empty).
+
+```json
+{"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
+ "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md"}
+```
+
+Keep these args: step 4 resumes with them.
 
 ```json
 {"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
@@ -166,7 +177,7 @@ Fable. The gates and the item's acceptance checks (`rpu-baseline compare
 
 Run the gates after the last fix, on the final file list. Fixes can touch files outside the first
 scope, and those files can add gates. So first commit the fixes (step 6 gives the message), then
-recompute the list: call the Workflow tool with `name: "pre-pr-panel"` and
+recompute the list: call the Workflow tool with the same `scriptPath` as step 3 and
 `args: {"base": "origin/<base>", "files": [<git diff --name-only origin/<base>...HEAD>], "gatesOnly": true}`.
 That returns `requiredGates` from the same path rules and starts no agents. Use the union of
 that list and step 3's list. Do the same after every later fix round, here or in `/codex-ship`
