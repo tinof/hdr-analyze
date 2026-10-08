@@ -26,8 +26,12 @@ every per-frame `LuminanceParameters`.
 show an offset; only scene boundaries can. For each cut, HDR10+ scene starts (frame 0 excluded) were
 compared with the analyzer's cuts at offsets −5…+5. `aligned` means best offset 0, at least 3
 matches, and every other offset at most half as many; fewer than 3 non-zero starts is
-`inconclusive`. Every boundary that only one source has (27, incl. the retail RPU's scene refreshes
-on the Alita and Shining cuts) was checked by eye on four labelled frames n−2…n+1. Frame indices were
+`inconclusive` in the scan. A cut with fewer than 3 starts still counts as aligned by
+corroboration when every start matches at offset 0, no other offset matches, and each start is
+also in the retail RPU and visibly a cut exactly at n. The Shining mountain road (2 starts, scan
+verdict `inconclusive`) is the one cut aligned this way. 25 boundaries that at least one source
+lacks (HDR10+, the analyzer or, on the Alita and Shining cuts, the retail RPU's scene refreshes),
+plus the two Shining mountain road starts, were checked by eye on four labelled frames n−2…n+1. Frame indices were
 verified by joining `showinfo` before and after `select` on pts. One reviewer per cut classified the
 frames, and a second reviewer tried to refute the verdicts.
 
@@ -59,14 +63,15 @@ Boundary coverage, after the visual check:
 - **HDR10+ is the only source with a real cut:** Alita Iron City 1044, a different take of the
   same close-up (medium confidence, confirmed by the second reviewer), which both the analyzer and
   the retail RPU miss. Alita Iron City 1168, which HDR10+ and the analyzer share but the RPU lacks,
-  is undecided by eye: same framing, the light drops. It does not affect the alignment verdict.
+  was looked at on one sheet after the two-reviewer check, not by the reviewers: same framing, the
+  light drops, undecided. It does not affect the alignment verdict.
 - **The analyzer:** it misses Alita 1044, 1123 and 1381 (all `below-threshold`: they fail
   `score > 3.0` or `score > 16 × baseline`, `analysis/scene.rs:125-129`; no miss is due to the
   12-frame minimum scene length) and cuts once inside a shot (Deadloch shoreline 456, an arm
   passing the camera). Evidence for E4.
 - **The retail RPU shot list is not a shot list:** on The Shining mountain road, 5 of its 7
-  non-zero scene refreshes (122, 303, 374, 551, 1381) fall inside one aerial shot, where the
-  opening credits change. Corpus `truth/shotlist.txt` with `shotlist_origin: rpu-scene-refresh`
+  non-zero scene refreshes fall inside a shot where the opening credits change: 122 in the shot
+  0–263, 303, 374 and 551 in 264–1000, 1381 in 1001–1460. Only 264 and 1001 are picture cuts. Corpus `truth/shotlist.txt` with `shotlist_origin: rpu-scene-refresh`
   needs that caveat when it scores scene detection.
 
 What this means for P9. Taking pixel measurements onto the HDR10+ frame grid needs no shift. But a

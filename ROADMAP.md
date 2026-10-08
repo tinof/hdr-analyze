@@ -307,8 +307,9 @@ and broader hardware acceleration (E5). Neutral trims stay.
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
 - **Done 2026-10-08: step 0, HDR10+ scene boundaries against the picture.** HDR10+ frame n is
-  picture frame n: offset 0 on all six multi-scene HDR10+ cuts, none off by one, v5 runs and
-  mkvdovi's extraction path ([log](docs/ROADMAP_LOG.md) 2026-10-08). The scene list is not a shot
+  picture frame n: offset 0 on all six multi-scene HDR10+ cuts (five by the scan, one by
+  corroboration), none off by one, v5 runs and mkvdovi's extraction path
+  ([log](docs/ROADMAP_LOG.md) 2026-10-08). The scene list is not a shot
   list: 24% of the frames sit in HDR10+ scenes holding more than one shot (Alita, The Shining), and
   some HDR10+ starts split a shot (Alien).
 - **Open (next design step):** decide which scene list carries the pixel average and minimum
