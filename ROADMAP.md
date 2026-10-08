@@ -64,15 +64,14 @@ doing.
 
 ### Next up (checked 2026-10-08 at main@43401ed)
 
-1. **P9 step 0 (priority 2): HDR10+ scene boundaries against the picture**, a measurement, no code
-   on `main`. First re-run the eight HDR10+ cuts at `accurate` (their sidecars are v4). Gate, result
-   in the log: HDR10+ scene starts vs the analyzer's cuts after `leading_skipped_frames` on the six
-   multi-scene cuts (offset 0, or a defect item); single-scene cuts are inconclusive; boundary
-   coverage (shots inside one HDR10+ scene) reported separately. Per-frame correlation cannot work.
-2. **P6 container-0 MaxCLL/MaxFALL, then E7 passthrough L6 0** (priority 4), one branch
+1. **P6 container-0 MaxCLL/MaxFALL, then E7 passthrough L6 0** (priority 4), one branch
    `fix-l6-zero-light-levels`, two commits: no L1 change, unit-test gate (flip the pinned tests, an
-   E7 test for both cases). Before step 4, because the E7 defect blocks the r4 MEL default baseline
-   that step 4's rpu-baseline gate needs.
+   E7 test for both cases). Before E13 step 4, because the E7 defect blocks the r4 MEL default
+   baseline that step 4's rpu-baseline gate needs.
+2. **P9: which scene list carries the pixel average** (priority 2), offline on the development
+   corpus, no code on `main`, so it can run beside a code branch. Step 0 (2026-10-08) found offset 0
+   but HDR10+ scenes holding several shots in 24% of the frames. Gate: L1 average per frame against
+   the Alita retail RPU for HDR10+ scenes, analyzer cuts and their union; result in the log.
 3. **E13 step 4: split `convert_file` by phase** (`feat/e13-convert-file-phases`), before the P9
    hybrid flag. Gate: the E13 per-move gate plus an r4 default baseline captured after E7. A
    function extraction, not a line-exact move, so the pure-move panel mode does not apply.
@@ -97,6 +96,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-08 | P9 step 0: HDR10+ scene starts line up with the picture (offset 0 on six cuts, v5 runs, mkvdovi extraction path); 24% of frames in HDR10+ scenes holding several shots. | P9 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-07 | E13 step 3: pure-move split of mkvdovi `metadata.rs` and `pipeline.rs` into submodules, tests in `tests.rs`; all 8 RPU baselines identical. | E13 | `feat/e13-mkvdovi-split` |
 | 2026-10-07 | E13 safety net: 34 characterization tests for mkvdovi (metadata, pipeline, HLG source deletion), CUDA gate on module dirs, final-RPU baselines at main@e6d63ed; no production code changed. | E13 | this branch |
 | 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | [#31](https://github.com/tinof/hdr-analyze/pull/31) |
@@ -291,7 +291,7 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Open.
+- **Status:** Open; step 0 (frame alignment) done 2026-10-08.
 - `dovi_tool generate --hdr10plus-json` takes L1 from the first frame of each HDR10+ scene
   (minimum 0, average rounded to whole nits, no measured crop). On the HDR10+ test cut the average
   reads 156 to 505 codes above the analyzer's mean; the cause is not separated.
@@ -306,6 +306,14 @@ and broader hardware acceleration (E5). Neutral trims stay.
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
+- **Done 2026-10-08: step 0, HDR10+ scene boundaries against the picture.** HDR10+ frame n is
+  picture frame n: offset 0 on all six multi-scene HDR10+ cuts, none off by one, v5 runs and
+  mkvdovi's extraction path ([log](docs/ROADMAP_LOG.md) 2026-10-08). The scene list is not a shot
+  list: 24% of the frames sit in HDR10+ scenes holding more than one shot (Alita, The Shining), and
+  some HDR10+ starts split a shot (Alien).
+- **Open (next design step):** decide which scene list carries the pixel average and minimum
+  (HDR10+, the analyzer's cuts, or their union with the HDR10+ peak per piece), scored on the Alita
+  cuts against the retail RPU; then E13 step 4, then the hybrid flag.
 - **Checked 2026-10-08 @43401ed:** still valid: `pipeline/dovi_steps.rs:319` passes `--hdr10plus-json`
   (shots ignored, no HDR10+ `--verify` sidecar, `pipeline/mod.rs:897`), DV is detected first
   (`metadata/format.rs:52`, Alita and Shining take the MEL path), mkvdovi reads only per-frame minima
