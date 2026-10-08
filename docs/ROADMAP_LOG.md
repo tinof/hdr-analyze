@@ -46,8 +46,9 @@ frames, and a second reviewer tried to refute the verdicts.
 | The Shining hedge maze | 0 | – | – | inconclusive (one HDR10+ scene) |
 | Alien Nostromo corridor | 0 | – | – | inconclusive (one HDR10+ scene) |
 
-Both analyzer configurations give the same cuts on every cut. Not one boundary is off by one frame,
-by eye or in the scan.
+Both analyzer configurations give the same cuts on every cut. The scan and the visual check found no
+systematic shift and no confirmed off-by-one; Alien derelict 298 stays ambiguous (the change may start
+at 297, or be a whip pan), and the analyzer has no cut there to compare.
 
 Boundary coverage, after the visual check:
 
