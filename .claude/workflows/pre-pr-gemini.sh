@@ -180,6 +180,8 @@ while :; do
     while kill -0 "$pid" 2> /dev/null; do
         sleep "$poll" &
         wait $!
+        # agy may have finished during the sleep: then its result counts, whatever the clock says.
+        kill -0 "$pid" 2> /dev/null || break
         [ -n "$conv" ] || conv=$(jq -R -r 'fromjson? | select(.event == "init") | .conversation_id // empty' \
             "$a.stream.ndjson" 2> /dev/null | head -n 1)
         now=$(date +%s)

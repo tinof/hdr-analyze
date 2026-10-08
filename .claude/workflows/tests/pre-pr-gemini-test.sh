@@ -188,6 +188,9 @@ fi
 if want budget; then
     run_case floor hang,ok PRE_PR_GEMINI_RETRY_FLOOR=100
     check "below the retry floor: no retry" '.ok == false and (.attempts | length) == 1 and (.reason | test("s left, a retry needs 100 s"))'
+    # agy finishes during the poll sleep that crosses the deadline: its result must count.
+    run_case lastpoll ok PRE_PR_GEMINI_TIMEOUT=4 PRE_PR_GEMINI_POLL=5
+    check "a run that ended before the wakeup is not a timeout" '.ok == true and .attempts[0].outcome == "completed"'
     run_case budget hang,hang PRE_PR_GEMINI_TIMEOUT=9 PRE_PR_GEMINI_IDLE=5
     check "second attempt gets only the remaining time" \
         '.ok == false and (.attempts | length) == 2 and .attempts[1].outcome == "timeout" and .seconds <= 12'
