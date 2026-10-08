@@ -191,9 +191,11 @@ if want budget; then
     # agy finishes during the poll sleep that crosses the deadline: its result must count.
     run_case lastpoll ok PRE_PR_GEMINI_TIMEOUT=4 PRE_PR_GEMINI_POLL=5
     check "a run that ended before the wakeup is not a timeout" '.ok == true and .attempts[0].outcome == "completed"'
-    run_case budget hang,hang PRE_PR_GEMINI_TIMEOUT=9 PRE_PR_GEMINI_IDLE=5
+    # Attempt 1 stalls at about IDLE + 1 s, leaving about 5 s: room for slow runners, yet below
+    # IDLE, so attempt 2 can only end at the deadline.
+    run_case budget hang,hang PRE_PR_GEMINI_TIMEOUT=14 PRE_PR_GEMINI_IDLE=8
     check "second attempt gets only the remaining time" \
-        '.ok == false and (.attempts | length) == 2 and .attempts[1].outcome == "timeout" and .seconds <= 12'
+        '.ok == false and (.attempts | length) == 2 and .attempts[1].outcome == "timeout" and .seconds <= 17'
     no_leftovers
 fi
 

@@ -76,6 +76,17 @@ jobs:
       - name: Score the synthetic corpus against the committed references
         run: scripts/ci/l1-regression-gate.sh
 
+  # The Gemini pre-PR pass (.claude/workflows/pre-pr-gemini.sh) against a fake agy: no network,
+  # no model, about a minute. Linux only, because its cleanup scans /proc/*/environ.
+  gemini-harness:
+    name: Gemini pass harness (fake agy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run the fake-agy harness
+        run: .claude/workflows/tests/pre-pr-gemini-test.sh
+
   build:
     name: Build (xplat)
     runs-on: ${{ matrix.os }}
