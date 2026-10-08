@@ -1,6 +1,6 @@
 ---
 name: roadmap-next
-description: Pick the next ROADMAP.md step to work on. Checks readiness of each priority (media on disk, GPU, owner decisions, open PRs), drafts a ranking, gets an independent ranking from Codex as second advisor, reconciles both with the advisor tool, and recommends one step plus two alternates. Starts from the Next up block and the Checked bullets in ROADMAP.md and re-checks only what changed since their commit; writes what it verified back to ROADMAP.md and commits that to main. Run only when the user types /roadmap-next.
+description: Pick the next ROADMAP.md step to work on. Checks readiness of each priority (media on disk, GPU, owner decisions, open PRs), drafts a ranking, gets an independent ranking from Codex as second advisor, reconciles both with the advisor tool, and recommends one step plus two alternates. Starts from the Next up block and the Checked bullets in ROADMAP.md and re-checks only what changed since their commit; writes what it verified back to ROADMAP.md and commits that on the recommended step's new branch, so it lands with the step's PR (to main only when no step can start). Run only when the user types /roadmap-next.
 argument-hint: "[item ID or theme to focus on]"
 disable-model-invocation: true
 ---
@@ -9,8 +9,9 @@ disable-model-invocation: true
 
 The user typed `/roadmap-next $ARGUMENTS`. Recommend the next roadmap **step** (item ID plus
 step, e.g. "P11: dropped-levels notice"), not just an item. The only file it edits is
-`ROADMAP.md` (step 6), and typing the command authorizes that one docs commit to `main`. It
-never creates branches, opens PRs or touches code.
+`ROADMAP.md` (step 6), and typing the command authorizes that one docs commit: on a new branch
+for the recommended step, or to `main` when no step can start. That branch is the only one it
+creates; it never pushes it, opens PRs or touches code.
 
 **Roadmap memory.** What a run verifies is kept in `ROADMAP.md`, so the next run does not
 re-derive it: the **Next up** block (ranking, date, `main@<sha>`) and a **Checked** bullet in each
@@ -99,7 +100,7 @@ Edit `ROADMAP.md` only with facts you verified in this run:
 
 - **Next up:** replace the block: `### Next up (checked <YYYY-MM-DD> at main@<short sha of origin/main>)`,
   then the recommended step and the two alternates, each with its gate and why, at most four lines
-  each. In confirm mode, update only the date and sha.
+  each. In confirm mode, leave it as it is.
 - **Checked bullets:** for each item you examined and found something not already in it, add or
   replace one bullet `- **Checked <date> @<sha>:** …` with the finding and its `file:line`. One
   Checked bullet per item: replace the old one, do not stack them. At most five lines; numbers and
@@ -110,21 +111,36 @@ Edit `ROADMAP.md` only with facts you verified in this run:
   `file:line`, Fix). Do not fix code here.
 - **Owner list:** remove an entry only when a merged commit or the owner settled it.
 
-Commit only when the tree allows it: on `main`, after `git pull --ff-only`, with no other
-uncommitted change to `ROADMAP.md`. Then `git add ROADMAP.md`,
-`git commit -m "docs(roadmap): next up <ID> <step> (checked @<sha>)"`, `git push origin main`
-(where the pre-commit hooks are installed, their push stage skips the tests for a Markdown-only
-push). On any other branch or a dirty `ROADMAP.md`, leave the edits uncommitted and say so. Never commit other files.
+The roadmap memory goes into `main` with the step's PR (PRs are squash-merged), not as a
+separate commit on `main`:
+
+- **Confirm mode with nothing new:** write nothing and commit nothing. The next run diffs from
+  the existing Next up `<sha>`.
+- **A step can start (the usual case):** only on `main`, after `git pull --ff-only`, with no
+  other uncommitted change to `ROADMAP.md`: `git switch -c <branch>` (the branch named in the
+  answer, in the repo's style: `feat/…`, `fix-…`, `docs/…`, `chore/…`), `git add ROADMAP.md`,
+  `git commit -m "docs(roadmap): next up <ID> <step> (checked @<sha>)"`. Do not push: the branch
+  goes out with the step's code through `/codex-ship`, and `pre-pr-review` and `/codex-ship` keep
+  working on a branch that already exists. If the owner picks an alternate, rename the branch
+  (`git branch -m`); if they drop the step, cherry-pick the commit onto `main`.
+- **No step can start** (every candidate waits for the owner or is blocked), but the run wrote
+  corrections, new defects or Checked bullets: commit on `main` as above without the branch, then
+  `git push origin main` (where the pre-commit hooks are installed, their push stage skips the
+  tests for a Markdown-only push).
+- **Any other branch or a dirty `ROADMAP.md`:** leave the edits uncommitted and say so.
+
+Never commit other files.
 
 ## 7. Answer
 
 Keep it short:
 
-1. **Recommended:** item + step, why now, its acceptance gate, the branch name, and the first
-   action (usually "enter plan mode for <ID> <step>").
+1. **Recommended:** item + step, why now, its acceptance gate, the branch (created and checked
+   out in step 6, or the name to use when it stayed uncommitted), and the first action (usually
+   "enter plan mode for <ID> <step>").
 2. **Alternates:** two, one line each.
 3. **Where Codex disagreed** and what decided it (one or two lines; omit if they agreed).
 4. **Waiting for the owner:** the list, one line each, so the owner sees what only they can
    unblock.
 5. **Roadmap memory:** what you wrote back (Next up, Checked bullets, corrections, new items) and
-   the commit, or why it stayed uncommitted.
+   the commit and its branch, or why nothing was written or it stayed uncommitted.
