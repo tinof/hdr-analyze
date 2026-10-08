@@ -62,17 +62,20 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-07 at main@513c211)
+### Next up (checked 2026-10-08 at main@43401ed)
 
-1. **E13 step 3:** mkvdovi inline tests to `tests.rs`, pure-move split of `metadata.rs` and
-   `pipeline.rs` (`feat/e13-mkvdovi-split`). Gate: the E13 per-move gate (rpu-baseline compare,
-   corpus classification test, L1 gate without `--update`). Prerequisite of P9 step 0 (priority 2).
-   First action: compare a build of unchanged main against every saved baseline (see E13 Checked).
-2. **P9 step 0**, after step 3 merges: frame alignment of pixel measurements to HDR10+ scenes on the
-   HDR10+-only cuts, before any hybrid flag (see P9 Checked). Then E13 step 4, then the hybrid flag.
-3. **E7: `--verify` L6 0 on a passthrough RPU** warns instead of failing (`fix-verify-passthrough-l6`,
-   `verify.rs` only, no file shared with the move). Gate: a unit test for both cases. Among the L6
-   findings the P6 container-0 fix comes first, but it lives in `metadata.rs`, so after step 3.
+1. **P9 step 0 (priority 2): HDR10+ scene boundaries against the picture**, a measurement, no code
+   on `main`. First re-run the eight HDR10+ cuts at `accurate` (their sidecars are v4). Gate, result
+   in the log: HDR10+ scene starts vs the analyzer's cuts after `leading_skipped_frames` on the six
+   multi-scene cuts (offset 0, or a defect item); single-scene cuts are inconclusive; boundary
+   coverage (shots inside one HDR10+ scene) reported separately. Per-frame correlation cannot work.
+2. **P6 container-0 MaxCLL/MaxFALL, then E7 passthrough L6 0** (priority 4), one branch
+   `fix-l6-zero-light-levels`, two commits: no L1 change, unit-test gate (flip the pinned tests, an
+   E7 test for both cases). Before step 4, because the E7 defect blocks the r4 MEL default baseline
+   that step 4's rpu-baseline gate needs.
+3. **E13 step 4: split `convert_file` by phase** (`feat/e13-convert-file-phases`), before the P9
+   hybrid flag. Gate: the E13 per-move gate plus an r4 default baseline captured after E7. A
+   function extraction, not a line-exact move, so the pure-move panel mode does not apply.
 
 ### Waiting for the owner
 
@@ -151,7 +154,7 @@ evidence for each priority is in its items and in
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list and peak from HDR10+; average, minimum and
    crop from pixels. Gate: opt-in, scored on the development tier before any default change.
    HDR10+ material is in (WS8 item 5, 2026-10-05), including a same-master Dolby Vision pair.
-   **Prerequisite:** E13 step 3 (split `mkvdovi/src/{metadata,pipeline}.rs`) before P9 step 0, and
+   **Prerequisite:** E13 step 3 (split `mkvdovi/src/{metadata,pipeline}.rs`; met, #33) before P9 step 0, and
    E13 step 4 (`convert_file` by phase) before the hybrid flag; P9 works in those files.
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
@@ -252,6 +255,10 @@ and broader hardware acceleration (E5). Neutral trims stay.
   `static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value` and its MaxFALL twin.
 - **Open (minor):** the `Details.txt` override reads a thousands separator as a decimal comma
   (`1,000` → 1.0); pinned by `details_file_light_levels_are_read_without_mediainfo_data`.
+- **Checked 2026-10-08 @43401ed:** `read_static_metadata` (`mkvdovi/src/metadata/static_metadata.rs:19`)
+  reads no `*_Original` field; pinned tests at `metadata/tests.rs:1664`, `:1692` (container 0) and
+  `:1469` (Details.txt). None of the seven saved rpu-baseline inputs has a container 0, so the
+  baselines neither cover the fix nor need a re-capture after it; test a generated `extra.json` too.
 
 ### P7: analyzer input contract
 
@@ -299,11 +306,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
-- **Checked 2026-10-06 @ab13527:** a hybrid flag is premature: `pipeline/dovi_steps.rs:319` passes
-  `--hdr10plus-json` (measured shots ignored; no `--verify` sidecar for HDR10+, `pipeline/mod.rs:897`);
-  `metadata/format.rs` detects Dolby Vision before HDR10+, so Alita takes the MEL path; the sidecar has no
-  per-frame peak, and mkvdovi reads only per-frame minima (`metadata/sidecar.rs:179` `L1SidecarFrames`).
-  All 45 development manifests say `shotlist_checked: false`.
+- **Checked 2026-10-08 @43401ed:** still valid: `pipeline/dovi_steps.rs:319` passes `--hdr10plus-json`
+  (shots ignored, no HDR10+ `--verify` sidecar, `pipeline/mod.rs:897`), DV is detected first
+  (`metadata/format.rs:52`, Alita and Shining take the MEL path), mkvdovi reads only per-frame minima
+  (`metadata/sidecar.rs:179`). New: `AverageRGB` is one value per HDR10+ scene on all 8 cuts, so only
+  boundaries can be aligned; h1/h5 `shotlist.txt` equals the HDR10+ scene starts (not independent); all 8 `run/` sidecars are v4.
 
 ### P10: measured against delivered
 
@@ -629,13 +636,12 @@ The detailed gap table and validation method live in
   spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
   from `finish_success`.
 - **Found by the step 2 tests:** two L6 defects, now open steps under P6 (priority 4).
-- **Checked 2026-10-07 @efcfba8:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3
-  (r4 default failed on the E7 defect). All manifests say `repo.dirty: true`, preset g3 records
-  `a8d3a9ca` (on no branch); e6d63ed..main changed only test modules (`metadata.rs` @3016,
-  `pipeline.rs` @2027), so compare unchanged main against every case before a move. Step 5: analyzer
-  `pipeline.rs` has test modules at :649, :680 and :1410 with production code between them;
-  `gpu.rs:342` `include_str!("kernels.cu")` is file-relative; the L1 gate and CUDA parity pass
-  `--disable-optimizer`, so also diff an optimizer-enabled default `.bin`.
+- **Checked 2026-10-08 @43401ed:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3.
+  No r4 default baseline (failed on the E7 defect): capture one after the E7 fix, before step 4.
+  Step 4 (`convert_file`, `pipeline/mod.rs:43`): baselines do not cover resume or cleanup; keep the
+  `extra.json` compare before sentinel invalidation (`:676`) and both success paths (`finish_success`
+  `:994`). Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
+  optimizer-enabled default `.bin` (both gates pass `--disable-optimizer`).
 
 ## Checked and kept (2026-10-03)
 
