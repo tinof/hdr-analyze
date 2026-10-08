@@ -3,7 +3,6 @@ name: pre-pr-review
 description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /codex-ship runs it in ship mode (step 1b); the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
-allowed-tools: Workflow(pre-pr-panel)
 ---
 
 # pre-pr-review
@@ -91,7 +90,13 @@ Gemini pass is not a blocker; never substitute a Claude review for it. The scrip
 
 ## 3. Workflow
 
-Call the Workflow tool with `name: "pre-pr-panel"` and `args`:
+Call the Workflow tool with
+`scriptPath: "<git rev-parse --show-toplevel>/.claude/workflows/pre-pr-panel.js"` (an absolute
+path in the checkout under review) and `args`. Never call it by `name`: a named run loads the
+script from the checkout the session started in, which can be on another branch (verified
+2026-10-08: two named runs during #35 used the pre-#35 copy, so the gate list came back empty).
+No `Workflow(...)` permission rule matches a `scriptPath` call (Claude Code 2.1.294), so outside
+bypass or auto mode each call, its resume and each `gatesOnly` recompute ask for approval.
 
 ```json
 {"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
@@ -166,7 +171,7 @@ Fable. The gates and the item's acceptance checks (`rpu-baseline compare
 
 Run the gates after the last fix, on the final file list. Fixes can touch files outside the first
 scope, and those files can add gates. So first commit the fixes (step 6 gives the message), then
-recompute the list: call the Workflow tool with `name: "pre-pr-panel"` and
+recompute the list: call the Workflow tool with the same `scriptPath` as step 3 and
 `args: {"base": "origin/<base>", "files": [<git diff --name-only origin/<base>...HEAD>], "gatesOnly": true}`.
 That returns `requiredGates` from the same path rules and starts no agents. Use the union of
 that list and step 3's list. Do the same after every later fix round, here or in `/codex-ship`
