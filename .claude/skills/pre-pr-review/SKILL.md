@@ -75,12 +75,19 @@ Skip it when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as
 ```
 
 The script runs `agy` (Antigravity CLI) with `gemini-3.8-flash-medium` in print mode, which
-denies every terminal command and file write. The diff goes inside the prompt; a large diff takes
-about 3–4 minutes. It stops `agy` after `PRE_PR_GEMINI_TIMEOUT` seconds (default 900), checks the
-result itself (status, schema, no denied action, a nonce that proves Gemini read the diff) and
-writes `<scratchpad>/prepr-gemini.result.json`: `ok` with `findings`, or `ok: false` with a
-`reason`. Report its `model` and `seconds`, or the `reason`. A failed Gemini pass is not a blocker;
-never substitute a Claude review for it.
+denies every terminal command, file write and read outside the workspace, and with the repo agent
+`.agents/agents/pre-pr-reviewer.md` (tools `view_file`, `grep_search`, `finish`). The diff goes
+inside the prompt; a large diff takes about 3–6 minutes. An idle watchdog stops an attempt after
+480 s without output, and the whole pass stops after `PRE_PR_GEMINI_TIMEOUT` seconds (default
+1200). The script checks the result itself (status, schema, no denied action, a nonce that proves
+Gemini read the diff) and retries once, with a new nonce, after a denial (naming the denied path or
+tool), a stall or another failure that a retry can fix, when at least 300 s remain. It writes
+`<scratchpad>/prepr-gemini.result.json`: `ok` with `findings`, or `ok: false` with a `reason`; both
+carry `attempts` (per attempt: `outcome`, `seconds`, `steps`, tokens, `denied_path`/`denied_tool`)
+and `usage` totals (`partial: true` when an attempt ended without agy's usage report). Report its
+`model`, `seconds`, the number of attempts and `usage.thinking_tokens`, or the `reason`. A failed
+Gemini pass is not a blocker; never substitute a Claude review for it. The script's tests:
+`.claude/workflows/tests/pre-pr-gemini-test.sh` (a fake agy, about 1 minute).
 
 ## 3. Workflow
 
@@ -175,6 +182,7 @@ steps 4–6, and run the gates again. When the last run passes, save the commit 
 | `cuda-parity` | `scripts/cuda-parity.sh` |
 | `l1-regression` | `scripts/ci/l1-regression-gate.sh` (check mode) |
 | `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml` |
+| `gemini-harness` | `.claude/workflows/tests/pre-pr-gemini-test.sh` (fake agy; about 1 minute) |
 
 The `test` gate, as one Bash call. The build puts the current analyzer next to the debug mkvdovi
 the integration tests run. The log goes to a file, not through a pipe, and the last command
@@ -230,8 +238,9 @@ commit or reason), gate results, blockers, docs changed.
 **Reviewer yield.** The `findings` list in step 8 (and `/codex-ship`'s PR comment) is what decides
 whether a reviewer stays. When the records of 5 more code PRs since 2026-10-07 exist, and a finder
 (Gemini, or Fable on paths outside the CUDA-parity and L1 gates) has no confirmed finding whose
-`finders` is that finder alone, say so in the report as a candidate for removal. The owner
-decides; do not remove it here. Then return **focus text** for the Codex
+`finders` is that finder alone, say so in the report as a candidate for removal. For Gemini,
+give its cost next to its yield: the records' `geminiCost` summed (seconds, attempts, thinking
+tokens; say when any of them is `partial`). The owner decides; do not remove it here. Then return **focus text** for the Codex
 review: the contract areas this diff touches plus anything still uncertain, in one or two
 sentences.
 
@@ -284,6 +293,7 @@ Then write the echoed path with the Write tool:
                "verdict": "fixed | rejected | refuted | deferred | unverified",
                "finders": ["correctness", "gemini"]}],
  "geminiPass": "done | failed | skipped", "geminiReason": "<reason when failed>",
+ "geminiCost": {"seconds": 0, "attempts": 0, "thinkingTokens": 0, "outputTokens": 0, "partial": false},
  "report": "<full sha>.md", "scope": "<full sha>.scope.md"}
 ```
 
@@ -293,7 +303,7 @@ Then write the echoed path with the Write tool:
   reviewer that reported it in `finders` (`correctness`, `contracts`, `tests-and-gates`,
   `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
   claims (verdict `refuted`) and the ones you rejected, so a finder's false alarms count too.
-- `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass` and `geminiReason` are informational and do not affect reuse.
+- `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass`, `geminiReason` and `geminiCost` are informational and do not affect reuse. `geminiCost` comes from the Gemini result: `seconds`, the length of `attempts`, and `usage` (`thinking_tokens`, `output_tokens`, `partial`); omit it when the pass was skipped.
 - `deferredP0P1` and `rejectedP0P1` do not block reuse. `/codex-ship` asks the user about them at
   its merge gate.
 - Write the record also when there are blockers. `/codex-ship` reads it and refuses to reuse it.
