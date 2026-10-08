@@ -21,5 +21,7 @@ repos:
         entry: bash -lc 'cargo test --workspace -q'
         language: system
         pass_filenames: false
+        # Docs-only pushes (e.g. /roadmap-next's ROADMAP.md commit) skip the tests.
+        exclude: '\.md$|^docs/|^LICENSE$'
         stages: [push]
 

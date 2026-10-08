@@ -53,12 +53,18 @@ their findings before step 4.
 
 ### 2a. Codex focused pass (standalone mode only)
 
+Run it through the stall watchdog that `~/.claude/rules/codex-routing.md` requires for
+background Codex runs (it kills a silent run after 8 minutes, retries once, and adds `--json`
+and `-o <prefix>.md`):
+
 ```
-command codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none." > <scratchpad>/prepr-codex.md 2>&1
+~/.claude/skills/codex-ship/scripts/codex-watch.sh <scratchpad>/prepr-codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none."
 ```
 
-Report the `model:` / `reasoning effort:` header lines. A failed run is reported as failed;
-never substitute a Claude review for it.
+The review text is in `<scratchpad>/prepr-codex.md`. `--json` prints no header, so report
+`model`, `effort`, `outcome` and `attempts` from `<scratchpad>/prepr-codex.result.json`. A result
+with `ok: false` is a failed run: report its `outcome` and `reason`, and never substitute a
+Claude review for it.
 
 ### 2b. Gemini pass (both modes; skipped for a docs-only diff)
 
@@ -88,9 +94,43 @@ Call the Workflow tool with `name: "pre-pr-panel"` and `args`:
 Keep these args: step 4 resumes with them.
 
 It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Fable runs only on
-high-risk paths), `findings` (each verified by an independent Opus skeptic), `unverified` and
+high-risk paths), `findings` (each verified by an independent Opus skeptic), `refuted` (claims a
+skeptic refuted; they go into the step 8 record), `unverified` and
 `requiredGates` (computed in code from the file list). Do not choose the gates by judgment; use
 that list.
+
+**Pure move.** Add `"kind": "pure-move"`, `"moveProof": "<absolute path of the proof dir>"` and
+`"moveFiles": [<paths>]` to the args only when all of these hold. Otherwise omit all three and
+run the full panel.
+- The step is a module-size split (CLAUDE.md "Module size"). A split that also changes code (for
+  example E13 step 4, `convert_file` by phase) is never a pure move.
+- **Coverage.** `moveFiles` lists every path the split touches: each spec's `src` and `files`,
+  the original file(s) the split deletes (e.g. `mkvdovi/src/pipeline.rs`) and any `tests.rs` the
+  split creates. Every non-Markdown file in scope (`git diff --name-only origin/<base>...HEAD`)
+  must be in `moveFiles`. The workflow checks this again and runs the full panel when a file is
+  missing.
+- **Line-exact proof.** The scope file names a move proof, for example
+  `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/verify_move.py` with its split spec and
+  allowed-edit list: every moved line is identical, and every other changed line is an explicit
+  allowed-edit pair. A comparison that strips whitespace, commas or other tokens does not qualify.
+- **Where it runs.** `verify_move.py` reads the working tree, so run it in a scratch worktree
+  (`git worktree add --detach <scratchpad>/wt <commit>`), never by checking out the main tree:
+  - with no formatting commit, on HEAD;
+  - with a formatting commit (rustfmt re-wraps lines that `pub(super)` pushed past 100 columns),
+    on that commit's parent. Then prove the formatting commit: in a worktree at `<fmt commit>^`,
+    `cargo fmt --all` followed by `git diff --quiet <fmt commit>` must succeed. The formatting
+    commit touches only `moveFiles`, and no non-Markdown commit follows it. Without this split,
+    re-wrapped lines fail the proof (in #33, `pipeline/analyzer.rs` would have).
+
+  Each move proof exits 0 and prints `PURE MOVE OK`.
+- **Test list.** `cargo test -p <crate> -- --list` on the pre-move commit and on HEAD gives the
+  same count and the same test names (compare the last path segment when module paths move).
+  The proof does not check `mod` lines, so a dropped `mod tests;` would otherwise lose tests
+  silently.
+
+The mode replaces only the reviewers: one move-integrity lens instead of the three lenses and
+Fable. The gates and the item's acceptance checks (`rpu-baseline compare
+--require-identical-l1`, the L1 gate without `--update`) still apply.
 
 ## 4. Verify and fix
 
@@ -102,7 +142,12 @@ that list.
    and the Codex findings (standalone mode). Gemini and Codex findings have no skeptic: check them
    yourself like `unverified` ones. `unverified` holds findings over the verification cap or whose verifier failed: check
    each of them yourself like any other. Merge two findings only when they describe the same
-   defect; distinct defects at the same file:line stay separate.
+   defect; distinct defects at the same file:line stay separate. Merge the workflow's `refuted`
+   list the same way: a refuted claim that describes the same defect as another finding adds its
+   lens to that entry's `finders` and is not a row of its own. Only an unmatched refuted claim
+   becomes a `refuted` entry in the step 8 record.
+   **Pure move:** a confirmed move-integrity finding of a change that is not a move voids the mode.
+   Rerun the workflow without `kind` (a fresh run, not a resume) before you fix anything.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
    reason that cites code) / deferred (real, out of scope). A deferred or rejected P0/P1 is not a
    blocker here: it goes into the record, and `/codex-ship` asks the user about it at its merge
@@ -179,8 +224,14 @@ alone.
 ## 7. Report
 
 Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort, from
-`reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finder, verdict, fix
-commit or reason), gate results, blockers, docs changed. Then return **focus text** for the Codex
+`reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finders, verdict, fix
+commit or reason), gate results, blockers, docs changed.
+
+**Reviewer yield.** The `findings` list in step 8 (and `/codex-ship`'s PR comment) is what decides
+whether a reviewer stays. When the records of 5 more code PRs since 2026-10-07 exist, and a finder
+(Gemini, or Fable on paths outside the CUDA-parity and L1 gates) has no confirmed finding whose
+`finders` is that finder alone, say so in the report as a candidate for removal. The owner
+decides; do not remove it here. Then return **focus text** for the Codex
 review: the contract areas this diff touches plus anything still uncertain, in one or two
 sentences.
 
@@ -228,12 +279,20 @@ Then write the echoed path with the Write tool:
  "rejectedP0P1": [{"where": "file:line", "reason": "..."}],
  "codexFocusedPass": "done | failed | skipped", "focusText": "...",
  "reviewers": [<the workflow's reviewers list>],
+ "kind": "full | pure-move", "moveProof": "<proof dir, pure move only>", "moveFiles": [<pure move only>],
+ "findings": [{"id": "F1", "where": "file:line", "priority": "P2",
+               "verdict": "fixed | rejected | refuted | deferred | unverified",
+               "finders": ["correctness", "gemini"]}],
  "geminiPass": "done | failed | skipped", "geminiReason": "<reason when failed>",
  "report": "<full sha>.md", "scope": "<full sha>.scope.md"}
 ```
 
 - `requiredGates` is the union from step 5, and `gateResults` has one entry for each of its
   gates.
+- `findings` has one entry per defect after the duplicate merge in step 4.2, with **every**
+  reviewer that reported it in `finders` (`correctness`, `contracts`, `tests-and-gates`,
+  `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
+  claims (verdict `refuted`) and the ones you rejected, so a finder's false alarms count too.
 - `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass` and `geminiReason` are informational and do not affect reuse.
 - `deferredP0P1` and `rejectedP0P1` do not block reuse. `/codex-ship` asks the user about them at
   its merge gate.
