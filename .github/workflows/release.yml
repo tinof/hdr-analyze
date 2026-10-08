@@ -6,7 +6,8 @@ name: Release
 # install.sh keeps installing the last stable release. The process is in docs/RELEASING.md.
 #
 # A pull request that changes the release machinery, and a manual run, do everything except
-# publishing, for the version in the manifests (a dry run).
+# publishing, for the version in the manifests (a dry run). scripts/release-check.sh requires a
+# successful run of this workflow on the commit about to be tagged: `gh workflow run release.yml`.
 
 on:
   push:
@@ -21,6 +22,11 @@ on:
       - scripts/ci/check-test-skips.sh
       - scripts/ci/bundle-windows-ffmpeg.sh
       - scripts/install.sh
+      # The aarch64 Linux linker setting and the toolchain; ci.yml builds neither ARM64 Linux nor
+      # macOS Intel. Cargo.lock and the manifests are left out on purpose: every dependency bump
+      # would run five release builds. The pre-flight requires a dispatch run before each tag.
+      - .cargo/config.toml
+      - rust-toolchain.toml
   workflow_dispatch:
 
 permissions:
@@ -94,9 +100,11 @@ jobs:
       - name: cargo fmt (check)
         run: cargo fmt --all -- --check
       - name: cargo clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: cargo clippy, analyzer with the cuda feature (deny warnings)
-        run: cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings
+        run: cargo clippy --locked -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings
+      # --locked everywhere: a Cargo.lock that does not match the manifests fails here, before
+      # any build, instead of each runner resolving its own dependency versions.
       # Without these tools the HLG, open-GOP and clip-based tests skip and pass.
       - name: Install the tools the integration tests need
         shell: bash
@@ -114,8 +122,8 @@ jobs:
       - name: cargo test, every skip accounted for
         shell: bash
         run: |
-          cargo build -p hdr_analyzer_mvp
-          cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee "$RUNNER_TEMP/test.log"
+          cargo build --locked -p hdr_analyzer_mvp
+          cargo test --locked --workspace -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee "$RUNNER_TEMP/test.log"
           scripts/ci/check-test-skips.sh "$RUNNER_TEMP/test.log" 'built without HDR10_PLUS|does not accept dhdr10-info'
 
   security-audit:
@@ -170,7 +178,7 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends clang
 
       - name: Build all binaries
-        run: cargo build --verbose --release --workspace --target ${{ matrix.target }}
+        run: cargo build --locked --verbose --release --workspace --target ${{ matrix.target }}
 
       - name: Build archive
         shell: bash

@@ -81,7 +81,8 @@ built it from this repository: \`gh attestation verify <archive> -R $repo\`.
 - **Replace all three binaries together.** \`mkvdovi\` checks the analyzer's version and \`--help\`
   text, and the L1 sidecar format it writes.
 - **Finish running conversions before you upgrade.** A \`mkvdovi_temp_*\` directory left by another
-  version is not resumed; the conversion starts again.
+  version (0.4.0 or later) is not resumed; the conversion starts again. A directory from an older
+  version is resumed with a warning: delete it or pass \`--no-resume\`.
 
 ## Changes in $base
 $section

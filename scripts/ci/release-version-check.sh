@@ -6,7 +6,8 @@
 # The tag without its "v" must equal the version of every shipped crate exactly, so an rc
 # carries its suffix in the manifests too: mkvdovi fingerprints resume directories with its
 # version, and an rc and the final release must not share one. CHANGELOG.md needs a dated
-# `## [X.Y.Z]` section for the base version, with each `###` heading at most once.
+# `## [X.Y.Z]` section for the base version that is not empty and has each `###` heading at
+# most once.
 set -euo pipefail
 
 tag=${1:?usage: $0 vX.Y.Z[-rc.N]}
@@ -39,6 +40,14 @@ if ! grep -Eq "^## \[$base\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
     echo "error: CHANGELOG.md has no dated section '## [$base] - YYYY-MM-DD'" >&2
     failed=1
 else
+    body=$(awk -v hdr="## [$base]" '
+        index($0, hdr) == 1 { on = 1; next }
+        on && /^## \[/ { exit }
+        on && NF { print }' CHANGELOG.md)
+    if [[ -z $body ]]; then
+        echo "error: CHANGELOG.md section [$base] is empty; move the entries under it" >&2
+        failed=1
+    fi
     duplicates=$(awk -v hdr="## [$base]" '
         index($0, hdr) == 1 { on = 1; next }
         on && /^## \[/ { exit }

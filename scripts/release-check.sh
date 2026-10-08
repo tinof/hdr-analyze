@@ -5,7 +5,8 @@
 #
 # Checks: HEAD is origin/main with a clean tree, the tag does not exist yet, versions,
 # Cargo.lock and CHANGELOG.md match the tag (scripts/ci/release-version-check.sh), Cargo.lock
-# needs no update, and CI passed on HEAD. Lists the local gates CI cannot run.
+# needs no update, and both CI and a Release dry run (`gh workflow run release.yml`) passed on
+# HEAD. Lists the local gates CI cannot run.
 # The process is in docs/RELEASING.md.
 set -uo pipefail
 
@@ -57,6 +58,16 @@ if [[ $ci == success ]]; then
     ok "CI passed on ${head:0:7}"
 else
     bad "CI on ${head:0:7}: $ci (wait for a green run on main)"
+fi
+
+# The release gate (integration tests with their tools, all five builds) runs only in
+# release.yml. A dry run on this commit proves it before the tag makes it public.
+dry=$(gh run list --workflow release.yml --commit "$head" --json status,conclusion,event \
+    --jq '[.[] | select(.status == "completed" and .event != "push")][0].conclusion // "none"' 2>/dev/null || echo "unknown")
+if [[ $dry == success ]]; then
+    ok "Release dry run passed on ${head:0:7}"
+else
+    bad "Release dry run on ${head:0:7}: $dry (run: gh workflow run release.yml --ref main, then wait)"
 fi
 
 cat <<EOF
