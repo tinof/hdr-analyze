@@ -8,6 +8,15 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- **Linux ARM64 release archive, checksums and build provenance** (release workflow). Releases
+  now include `aarch64-unknown-linux-gnu` (and `install.sh` installs it), a `SHA256SUMS` file, and
+  a GitHub attestation per asset (`gh attestation verify <archive> -R tinof/hdr-analyze`). A
+  release is published only after every build and test job has passed, with all assets attached;
+  `vX.Y.Z-rc.N` tags become pre-releases that `install.sh` does not install. The release notes
+  are the version's CHANGELOG section (they had repeated the v0.3.0 notes since then). The release
+  test job runs the HLG and open-GOP integration tests with their tools installed and fails on an
+  unexpected skip. Process and version rules: [`docs/RELEASING.md`](docs/RELEASING.md).
+
 - **mkvdovi module split** (internal refactor, ROADMAP E13 step 3). `metadata.rs` and
   `pipeline.rs` are now module directories with their tests in `tests.rs`; a pure move, no
   behavior change.

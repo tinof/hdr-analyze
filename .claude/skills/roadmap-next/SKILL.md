@@ -30,6 +30,8 @@ is waiting for the owner.
   `git diff --stat <sha>..origin/main`.
 - `git log --oneline -15 origin/main`, `git status --short`, current branch.
 - `gh pr list --state open --json number,title,headRefName`.
+- Releases: `ROADMAP.md`'s **Release plan**, the last tag (`git describe --tags --abbrev=0
+  origin/main`), and the entries under `CHANGELOG.md`'s `## [Unreleased]`.
 - GPU: `nvidia-smi -L || /usr/lib/wsl/lib/nvidia-smi -L`.
 
 ## 2. Readiness per step
@@ -100,7 +102,11 @@ Edit `ROADMAP.md` only with facts you verified in this run:
 
 - **Next up:** replace the block: `### Next up (checked <YYYY-MM-DD> at main@<short sha of origin/main>)`,
   then the recommended step and the two alternates, each with its gate and why, at most four lines
-  each. In confirm mode, leave it as it is.
+  each. End each entry with `Release: minor | patch | none`, classified by the Versions table in
+  `docs/RELEASING.md`. In confirm mode, leave it as it is.
+- **Release plan:** move a step that shipped in a tag out of the plan; add a newly ranked step to
+  the release it will go into, with its bump. Keep the table's columns (Release, Content,
+  Trigger / gate). It is committed with the rest of the roadmap memory below.
 - **Checked bullets:** for each item you examined and found something not already in it, add or
   replace one bullet `- **Checked <date> @<sha>:** …` with the finding and its `file:line`. One
   Checked bullet per item: replace the old one, do not stack them. At most five lines; numbers and
@@ -142,5 +148,7 @@ Keep it short:
 3. **Where Codex disagreed** and what decided it (one or two lines; omit if they agreed).
 4. **Waiting for the owner:** the list, one line each, so the owner sees what only they can
    unblock.
-5. **Roadmap memory:** what you wrote back (Next up, Checked bullets, corrections, new items) and
+5. **Release:** whether merged, unreleased changes meet a trigger in `docs/RELEASING.md` ("When
+   to release"), and which version that would be. One line; "none due" when nothing does.
+6. **Roadmap memory:** what you wrote back (Next up, Checked bullets, corrections, new items) and
    the commit and its branch, or why nothing was written or it stayed uncommitted.

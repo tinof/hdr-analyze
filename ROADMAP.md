@@ -88,6 +88,21 @@ startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 - **P11: targeted repair or full regeneration.** The notice that lists the dropped authored levels
   does not wait for this.
 
+### Release plan (2026-10-08)
+
+Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
+`/roadmap-next` keeps this table current. Latest release: v0.5.1 (2026-10-01).
+
+| Release | Content | Trigger / gate |
+|---|---|---|
+| **v0.6.0** (now) | Everything under `[Unreleased]`: P8 spec 4:2:0 decode and the bt2100 default, E7 open-GOP alignment, P10 source range and `--verify` against the RPU, FEL removal, CUDA as main pipeline, WS2 unfiltered averages, measured L6 light levels | MINOR (Breaking entries, sidecar v5). Owner decision 2026-10-08: ship before the P8 playback test, notes say bt2100 playback is unverified and `--hlg-composer preset` is the fallback. `v0.6.0-rc.1` first, to test the new release workflow |
+| v0.6.1 | P6 container-0 MaxCLL/MaxFALL, E7 passthrough L6 0 (Next up 1) | PATCH: corrects delivered L6, no contract change. If it merges before the v0.6.0 release PR, it ships in v0.6.0 instead |
+| none | P9 scene-list measurement (offline; step 0 done 2026-10-08), E13 steps 4 and 5 (refactors) | No user-visible change |
+| **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
+| next minor | P8 playback result, if devices ignore bt2100 (the default goes back to `preset`) | MINOR, released quickly |
+| a minor | E8 and E9 (they move the default `.bin`) | MINOR |
+| 1.0.0 | P8 playback verified (WS6), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
+
 ## Progress log
 
 Newest first. One line per step that changed the state of a roadmap item. The full text is in
@@ -679,4 +694,5 @@ The review re-examined these decisions and found no evidence to change them:
   when one is.
 
 During the `0.x` series, minor releases may include breaking changes under the project's documented
-[semantic-versioning](https://semver.org/) policy.
+[semantic-versioning](https://semver.org/) policy: the Versions table in
+[`docs/RELEASING.md`](docs/RELEASING.md).
