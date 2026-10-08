@@ -40,8 +40,10 @@ for (const f of files) {
   const m = /^tools\/([^/]+)\/(.+)$/.exec(f)
   if (m && /\.rs$|Cargo\.(toml|lock)$/.test(m[2])) gates.add('tool:' + m[1])
 }
+// The Gemini pass and its fake-agy harness (no network, no model).
+if (any(/^\.claude\/workflows\/(pre-pr-gemini\.|tests\/)|^\.agents\/agents\/pre-pr-reviewer\.md$/)) gates.add('gemini-harness')
 const requiredGates = [...gates]
-log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust or analysis paths touched)'))
+log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis or Gemini-pass paths touched)'))
 // Gate list only, no reviewers: lets the skills recompute gates for a file list that grew after
 // fixes, without a second copy of the path rules.
 if (a.gatesOnly) return { gatesOnly: true, requiredGates }

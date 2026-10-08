@@ -11,6 +11,7 @@ echo "$n" > "$FAKE_DIR/count"
 printf '%s\n' "$@" > "$FAKE_DIR/a$n.args"
 command cat > "$FAKE_DIR/a$n.stdin"
 echo "$PRE_PR_GEMINI_ATTEMPT" > "$FAKE_DIR/a$n.marker"
+ps -o comm= -p "$PPID" > "$FAKE_DIR/a$n.parent"
 IFS=, read -r -a plan <<< "${FAKE_AGY_PLAN:-ok}"
 idx=$(( n <= ${#plan[@]} ? n - 1 : ${#plan[@]} - 1 ))
 scenario=${plan[$idx]}

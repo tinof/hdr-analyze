@@ -84,6 +84,7 @@ if want ok; then
     check "no agent file in this repo" '.agent == null'
     check_sh "the stdout is the result" 'cmp -s "$out/stdout" "$res"'
     check_sh "print mode stays read-only" 'grep -qx -- --sandbox "$fake/a1.args" && grep -qx plan "$fake/a1.args"'
+    check_sh "agy runs under the timeout backstop" '[ "$(command cat "$fake/a1.parent")" = timeout ]'
 fi
 
 if want agent; then
@@ -207,6 +208,27 @@ if want signal; then
     rc=$?
     check "interrupted: exit 0, one attempt, valid result" \
         '.ok == false and (.attempts | length) == 1 and .attempts[0].outcome == "interrupted" and (.reason | test("SIGTERM"))'
+    check_sh "no second attempt started" '[ "$(command cat "$fake/count")" = 1 ]'
+    no_leftovers
+fi
+
+if want signal; then
+    # A second TERM during cleanup (grace 3 s keeps it inside the window) must not stop the result.
+    name=signal2 out="$work/signal2/out" fake="$work/signal2/fake"
+    mkdir -p "$out" "$fake"
+    res="$out/prepr-gemini.result.json"
+    (cd "$repo" && exec env PATH="$bin:/usr/bin:/bin" FAKE_DIR="$fake" FAKE_AGY_PLAN=hangterm,ok \
+        PRE_PR_GEMINI_AGY_HOME="$work/signal2/agyhome" PRE_PR_GEMINI_IDLE=100 PRE_PR_GEMINI_POLL=1 \
+        PRE_PR_GEMINI_KILL_GRACE=3 "$script" HEAD~1 "$out" "$work/scope.md") > "$out/stdout" 2>&1 &
+    spid=$!
+    sleep 3
+    kill -TERM "$spid"
+    sleep 1
+    kill -TERM "$spid" 2> /dev/null
+    wait "$spid"
+    rc=$?
+    check "second signal during cleanup: still exit 0 and a result" \
+        '.ok == false and (.attempts | length) == 1 and .attempts[0].outcome == "interrupted"'
     check_sh "no second attempt started" '[ "$(command cat "$fake/count")" = 1 ]'
     no_leftovers
 fi

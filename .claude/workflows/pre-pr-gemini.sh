@@ -26,10 +26,13 @@
 # SQLite store (<agy home>/conversations/<id>.db and its -wal). agy emits no stream event while the
 # model thinks (2026-10-08: 222 s in a review, 341 s in a probe); in that probe the WAL was written at
 # least every 19 s. If a hang kept writing the WAL, it would end at the total limit instead, as
-# before this watchdog. The idle limit is 480 s. The repo agent .agents/agents/pre-pr-reviewer.md limits the tools to
-# view_file, grep_search and finish (no terminal, no writes, no web); it is used when present.
-# Every attempt runs with PRE_PR_GEMINI_ATTEMPT=<token>.<N> in its environment, and cleanup kills
-# each process that carries it, so a child that left agy's process group dies too.
+# before this watchdog. The idle limit is 480 s. The repo agent .agents/agents/pre-pr-reviewer.md
+# limits the tools to view_file, grep_search and finish (no terminal, no writes, no web); it is used
+# when present. Every attempt runs with PRE_PR_GEMINI_ATTEMPT=<token>.<N> in its environment, and
+# cleanup kills each process that carries it, so a child that left agy's process group dies too.
+# Inside the attempt's session, `timeout` ends agy 60 s after the deadline even when this wrapper
+# was killed (SIGKILL runs no trap). A second signal during cleanup is ignored, so an interrupted
+# pass still writes its result.
 #
 # Environment: PRE_PR_GEMINI_MODEL (gemini-3.8-flash-medium), PRE_PR_GEMINI_TIMEOUT (s for all
 # attempts, 1200), PRE_PR_GEMINI_IDLE (s, 480), PRE_PR_GEMINI_RETRIES (1), PRE_PR_GEMINI_RETRY_FLOOR
@@ -112,7 +115,7 @@ stop_attempt() {
 }
 
 on_signal() {
-    trap - INT TERM HUP
+    trap '' INT TERM HUP
     local s=$(( $(date +%s) - ${attempt_start:-$started} ))
     stop_attempt "$pid" "$marker"
     if [ -n "$marker" ]; then
@@ -165,8 +168,10 @@ while :; do
     marker="$token.$n"
     attempt_start=$(date +%s)
     # setsid: its own process group, so the group kill reaches agy's children; the marker reaches
-    # the ones that start their own session.
-    (cd "$root" && exec env PRE_PR_GEMINI_ATTEMPT="$marker" setsid agy --input-format stream-json \
+    # the ones that start their own session. timeout (no --foreground, so it signals the whole
+    # group) is the backstop for a wrapper that died without cleaning up.
+    backstop=$(( deadline - attempt_start + 60 ))
+    (cd "$root" && exec env PRE_PR_GEMINI_ATTEMPT="$marker" setsid timeout -k 30 "$backstop" agy --input-format stream-json \
         --output-format stream-json --model "$model" --mode plan --sandbox "${agent_args[@]}" \
         --add-dir "$(dirname "$scope")" --json-schema "$here/pre-pr-gemini.schema.json" \
         --log-file "$a.agy.log") < "$a.message.ndjson" > "$a.stream.ndjson" 2> "$a.err" &

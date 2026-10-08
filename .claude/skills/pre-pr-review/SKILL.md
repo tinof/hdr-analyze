@@ -182,6 +182,7 @@ steps 4–6, and run the gates again. When the last run passes, save the commit 
 | `cuda-parity` | `scripts/cuda-parity.sh` |
 | `l1-regression` | `scripts/ci/l1-regression-gate.sh` (check mode) |
 | `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml` |
+| `gemini-harness` | `.claude/workflows/tests/pre-pr-gemini-test.sh` (fake agy; about 1 minute) |
 
 The `test` gate, as one Bash call. The build puts the current analyzer next to the debug mkvdovi
 the integration tests run. The log goes to a file, not through a pipe, and the last command
