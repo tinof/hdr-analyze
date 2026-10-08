@@ -6,6 +6,90 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-08: P9 step 0, HDR10+ scene boundaries against the picture
+
+P9 step 0 is done: on every HDR10+ cut with enough boundaries, HDR10+ metadata frame n describes
+picture frame n (offset 0). The HDR10+ scene list is a separate question: it lines up with the
+picture, but it is not a shot list.
+
+Method. The eight HDR10+ development cuts (Deadloch ×2, Alita ×2, The Shining ×2, Alien ×2) were
+re-analyzed with the v5 analyzer (`0.5.1 (+cuda)`) in two configurations: the corpus peak flags
+(`--hwaccel cuda --transfer pq --downscale 1 --disable-optimizer --no-crop`) and what
+`run_hdr_analyzer` passes under `accurate` (`--downscale 1 --sample-rate 1 --optimizer-profile
+conservative --hwaccel cuda`). Every sidecar is version 5 with `analysis.gpu: true`, and on every cut
+decoded frames = `source.stream_frames` = HDR10+ JSON length, with `leading_skipped_frames` 0. The
+HDR10+ JSON was extracted the way mkvdovi does it (`ffmpeg -c:v copy -f hevc`, then `hdr10plus_tool
+extract -i`, `pipeline/hdr10plus.rs`). It is identical to the corpus JSON on all eight cuts, down to
+every per-frame `LuminanceParameters`.
+
+`AverageRGB` holds one value per HDR10+ scene on all eight cuts, so per-frame correlation cannot
+show an offset; only scene boundaries can. For each cut, HDR10+ scene starts (frame 0 excluded) were
+compared with the analyzer's cuts at offsets −5…+5. `aligned` means best offset 0, at least 3
+matches, and every other offset at most half as many; fewer than 3 non-zero starts is
+`inconclusive` in the scan. A cut with fewer than 3 starts still counts as aligned by
+corroboration when every start matches at offset 0, no other offset matches, and each start is
+also in the retail RPU and visibly a cut exactly at n. The Shining mountain road (2 starts, scan
+verdict `inconclusive`) is the one cut aligned this way. 25 boundaries that at least one source
+lacks (HDR10+, the analyzer or, on the Alita and Shining cuts, the retail RPU's scene refreshes),
+plus the two Shining mountain road starts, were checked by eye on four labelled frames n−2…n+1. Frame indices were
+verified by joining `showinfo` before and after `select` on pts. One reviewer per cut classified the
+frames, and a second reviewer tried to refute the verdicts.
+
+| Cut | Non-zero HDR10+ starts | Match at k = 0 | Any other k (−5…+5) | Verdict |
+|---|---|---|---|---|
+| Deadloch beach day | 13 | 13 | 0 | aligned; the delivered RPU (E13 baseline) has the same 14 starts |
+| Deadloch shoreline night | 21 | 20 | 0 | aligned |
+| Alita airlock night | 12 | 12 | 0 | aligned; also 12/12 against the retail RPU |
+| Alita Iron City day | 15 | 14 | 0 | aligned; 13 of 15 against the retail RPU, which lacks 1044 and 1168 (1168 is in the analyzer's cuts) |
+| The Shining mountain road | 2 | 2 | 0 | aligned by corroboration: 264 and 1001 are in the RPU, in the analyzer's cuts and visually a cut exactly at n |
+| Alien derelict chamber | 18 | 12 | 0 | aligned |
+| The Shining hedge maze | 0 | – | – | inconclusive (one HDR10+ scene) |
+| Alien Nostromo corridor | 0 | – | – | inconclusive (one HDR10+ scene) |
+
+Both analyzer configurations give the same cuts on every cut. The scan and the visual check found no
+systematic shift and no confirmed off-by-one; Alien derelict 298 stays ambiguous (the change may start
+at 297, or be a whip pan), and the analyzer has no cut there to compare.
+
+Boundary coverage, after the visual check:
+
+- **HDR10+ scenes that span several shots:** 11 real picture cuts lie inside an HDR10+ scene:
+  Alita airlock 58, 640, 926, 1120, 1456 (5 of 13 scenes, 54% of the frames); Alita Iron City 108,
+  1082, 1123, 1381 (3 of 16 scenes, 38%); Shining hedge maze 1178 (the single scene); Alien
+  derelict 292 (scene 270–297). In total 2,835 of 11,841 frames (24%) sit in an HDR10+ scene that
+  holds more than one shot. A per-scene average taken over such a scene mixes shots.
+- **HDR10+ starts without a picture cut:** Deadloch shoreline 709 and Alien derelict 323, 332,
+  1008, 1393 split a shot (motion, a flare). Alien 1026 is ambiguous: a camera move with a lens
+  flare, most likely the same shot. Alien 298 is a cut at low confidence (fast, dark handheld
+  motion).
+- **HDR10+ is the only source with a real cut:** Alita Iron City 1044, a different take of the
+  same close-up (medium confidence, confirmed by the second reviewer), which both the analyzer and
+  the retail RPU miss. Alita Iron City 1168, which HDR10+ and the analyzer share but the RPU lacks,
+  was looked at on one sheet after the two-reviewer check, not by the reviewers: same framing, the
+  light drops, undecided. It does not affect the alignment verdict.
+- **The analyzer:** it misses Alita 1044, 1123 and 1381 (all `below-threshold`: they fail
+  `score > 3.0` or `score > 16 × baseline`, `analysis/scene.rs:125-129`; no miss is due to the
+  12-frame minimum scene length) and cuts once inside a shot (Deadloch shoreline 456, an arm
+  passing the camera). Evidence for E4.
+- **The retail RPU shot list is not a shot list:** on The Shining mountain road, 5 of its 7
+  non-zero scene refreshes fall inside a shot where the opening credits change: 122 in the shot
+  0–263, 303, 374 and 551 in 264–1000, 1381 in 1001–1460. Only 264 and 1001 are picture cuts. Corpus `truth/shotlist.txt` with `shotlist_origin: rpu-scene-refresh`
+  needs that caveat when it scores scene detection.
+
+What this means for P9. Taking pixel measurements onto the HDR10+ frame grid needs no shift. But a
+hybrid mode that takes the scene list from HDR10+ and the average from pixels would average across
+shots in about a quarter of these frames and split shots elsewhere. The next P9 design step has to
+decide which scene list carries the pixel average: HDR10+, the analyzer's cuts, or their union with
+the HDR10+ peak spread over the pieces. It also has to say what that does to the L1 average on the
+Alita cuts, where the retail RPU is the reference.
+
+Limits. HDR10+ values are scene-constant, so the order of frames inside a scene cannot be tested,
+and does not matter for L1. Alita and The Shining carry Dolby Vision as well and take the MEL path
+in mkvdovi (`metadata/format.rs:52`), so they test the alignment, not mkvdovi's HDR10+ path.
+Three HDR10+ titles from discs and one from a streamer; no open-GOP start among them.
+
+Where: evidence (runs, `align.py`, `alignment.json`, `disputed.json`, `visual.json`, frame sheets)
+in `~/mkvdovi-work/p9-step0-2026-10-08/`, outside the repository.
+
 ### 2026-10-07: E13 step 3, mkvdovi module split
 
 E13 step 3 is done. Four commits, each a pure move with no behavior change:
