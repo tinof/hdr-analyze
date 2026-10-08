@@ -55,25 +55,29 @@ plan current, so the decision is made per step, not afterwards.
 2. **Versions.** Set `version` in `hdr_analyzer_mvp`, `mkvdovi`, `verifier` and `dovi84_composer`
    (with the `-rc.N` suffix for a candidate), then `cargo build` to update `Cargo.lock`.
 3. **PR.** One commit `chore(release): vX.Y.Z`, a pull request, CI green, merge.
-4. **Pre-flight.** On an up-to-date `main`: `scripts/release-check.sh vX.Y.Z`. It checks the
-   versions, `Cargo.lock`, the CHANGELOG section, that the tag is new and that CI passed. When the
+4. **Dry run.** `gh workflow run release.yml --ref main`, then wait for it to pass
+   (`gh run watch`). It runs the release gate on the merged commit without publishing.
+5. **Pre-flight.** On an up-to-date `main`: `scripts/release-check.sh vX.Y.Z`. It checks the
+   versions, `Cargo.lock`, the CHANGELOG section, that the tag is new, that CI passed and that a
+   Release dry run (a non-push `release.yml` run) passed on HEAD. When the
    release changes analysis or mkvdovi, also run `scripts/cuda-parity.sh` and
    `scripts/rpu-baseline.sh compare` on the CUDA host.
-5. **Tag.** `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-6. **Watch** the Release run. The release appears only after every job passed. Then open the page,
+6. **Tag.** `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+7. **Watch** the Release run. The release appears only after every job passed. Then open the page,
    try `install.sh` on Linux and the Windows zip.
-7. **Baselines.** Capture the RPU baselines for the new version
+8. **Baselines.** Capture the RPU baselines for the new version
    (`~/mkvdovi-work/rpu-baseline/<version>/`).
 
 For a candidate, after the test: a commit sets the manifests to `X.Y.Z` (plus `Cargo.lock`), then
-steps 4 and 5 for `vX.Y.Z`. A fix found in `rc.1` goes to `main` with the manifests at `-rc.2`.
+steps 4 to 6 for `vX.Y.Z`: the final-version commit needs its own dry run. A fix found in `rc.1` goes to `main` with the manifests at `-rc.2`.
 
 ## What the workflow does
 
 - **check**: the tag must be `vX.Y.Z` or `vX.Y.Z-rc.N`, equal to every shipped crate's version and
-  `Cargo.lock`, with a dated CHANGELOG section that repeats no heading
+  `Cargo.lock`, with a dated, non-empty CHANGELOG section that repeats no heading
   (`scripts/ci/release-version-check.sh`).
-- **test**: fmt, clippy (also with `--features cuda`), then the full test suite with ffmpeg,
+- **test**: every cargo call here and in **build** passes `--locked`, so a `Cargo.lock` that does
+  not match the manifests fails before any build. fmt, clippy (also with `--features cuda`), then the full test suite with ffmpeg,
   mkvtoolnix, mediainfo and a pinned `dovi_tool` installed. Any `Skipping` line outside an
   allow-list fails the job (`scripts/ci/check-test-skips.sh`), so the HLG and open-GOP tests cannot
   pass by skipping.
@@ -83,8 +87,11 @@ steps 4 and 5 for `vX.Y.Z`. A fix found in `rc.1` goes to `main` with the manife
   release as a draft with every asset, then publishes it. The notes are a fixed header plus the
   CHANGELOG section (`scripts/ci/release-notes.sh`).
 
-A pull request that changes the release workflow or its scripts runs everything except publishing,
-for the version in the manifests. So does a manual run (`workflow_dispatch`).
+A pull request that changes the release workflow, its scripts, `.cargo/config.toml` or
+`rust-toolchain.toml` runs everything except publishing, for the version in the manifests (a dry
+run). So does a manual run (`workflow_dispatch`). `Cargo.lock` and the manifests are left out on
+purpose, so a dependency bump does not start five release builds; the pre-flight requires a dry
+run on the commit to be tagged instead.
 
 ## When something goes wrong
 
