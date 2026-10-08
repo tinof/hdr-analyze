@@ -3,7 +3,6 @@ name: pre-pr-review
 description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /codex-ship runs it in ship mode (step 1b); the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
-allowed-tools: Workflow(pre-pr-panel)
 ---
 
 # pre-pr-review
@@ -96,13 +95,8 @@ Call the Workflow tool with
 path in the checkout under review) and `args`. Never call it by `name`: a named run loads the
 script from the checkout the session started in, which can be on another branch (verified
 2026-10-08: two named runs during #35 used the pre-#35 copy, so the gate list came back empty).
-
-```json
-{"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
- "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md"}
-```
-
-Keep these args: step 4 resumes with them.
+No `Workflow(...)` permission rule matches a `scriptPath` call (Claude Code 2.1.294), so outside
+bypass or auto mode each call, its resume and each `gatesOnly` recompute ask for approval.
 
 ```json
 {"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
