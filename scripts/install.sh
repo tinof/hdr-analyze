@@ -38,11 +38,6 @@ detect_platform() {
         *)            error "Unsupported architecture: $arch" ;;
     esac
 
-    # Linux ARM64 not currently supported
-    if [[ "$os" == "unknown-linux-gnu" && "$arch" == "aarch64" ]]; then
-        error "Linux ARM64 is not currently supported. Please build from source."
-    fi
-
     target="${arch}-${os}"
     echo "$target"
 }

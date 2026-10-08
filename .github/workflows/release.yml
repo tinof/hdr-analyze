@@ -1,16 +1,35 @@
 name: Release
 
+# A pushed vX.Y.Z or vX.Y.Z-rc.N tag builds, tests and publishes a release. Nothing is public
+# until every job has passed: the publish job creates the release as a draft with all assets,
+# then publishes it. An -rc.N tag becomes a pre-release, which never counts as "latest", so
+# install.sh keeps installing the last stable release. The process is in docs/RELEASING.md.
+#
+# A pull request that changes the release machinery, and a manual run, do everything except
+# publishing, for the version in the manifests (a dry run).
+
 on:
   push:
     tags:
       - 'v*.*.*'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - .github/workflows/release.yml
+      - .github/actions/setup-ffmpeg/**
+      - scripts/ci/release-*.sh
+      - scripts/ci/check-test-skips.sh
+      - scripts/ci/bundle-windows-ffmpeg.sh
+      - scripts/install.sh
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a run that may be publishing.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,122 +37,110 @@ env:
   # even an empty one, replaces it, so release binaries target the default baseline CPU
   # instead of whatever CPU this runner has (which crashes on other machines).
   RUSTFLAGS: ""
+  # dovi_tool for the mkvdovi integration tests; bump both together.
+  DOVI_TOOL_VERSION: 2.3.4
+  DOVI_TOOL_SHA256: 1844258e13c26607b32224bf1fa82b595d3b35949f5467405fda560daad32b3f
 
 jobs:
-  create-release:
-    name: Create Release
+  check:
+    name: Check tag, versions and notes
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+      publish: ${{ steps.tag.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve the tag
+        id: tag
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [[ $EVENT == push && $GITHUB_REF_TYPE == tag ]]; then
+            tag=$GITHUB_REF_NAME
+            publish=true
+          else
+            # Dry run: check the version in the manifests as if it were tagged.
+            tag="v$(sed -n 's/^version = "\(.*\)"$/\1/p' mkvdovi/Cargo.toml | head -n 1)"
+            publish=false
+          fi
+          prerelease=false
+          [[ $tag == *-* ]] && prerelease=true
+          {
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tag $tag, pre-release $prerelease, publish $publish"
+      - name: Versions, Cargo.lock and CHANGELOG.md match the tag
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: scripts/ci/release-version-check.sh "$TAG"
+      - name: Release notes can be generated
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: scripts/ci/release-notes.sh "$TAG" > /dev/null
+
+  test:
+    name: Lint and test (no unexpected skips)
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-ffmpeg
+      - name: cargo fmt (check)
+        run: cargo fmt --all -- --check
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo clippy, analyzer with the cuda feature (deny warnings)
+        run: cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings
+      # Without these tools the HLG, open-GOP and clip-based tests skip and pass.
+      - name: Install the tools the integration tests need
+        shell: bash
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg mkvtoolnix mediainfo
+          archive="$RUNNER_TEMP/dovi_tool.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/quietvoid/dovi_tool/releases/download/${DOVI_TOOL_VERSION}/dovi_tool-${DOVI_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          echo "${DOVI_TOOL_SHA256}  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/tools"
+          tar xzf "$archive" -C "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      # The HLG tests use the hdr_analyzer_mvp built next to mkvdovi. There is no GPU, so the
+      # CUDA parity test is skipped by name. Ubuntu's libx265 has no HDR10_PLUS support.
+      - name: cargo test, every skip accounted for
+        shell: bash
+        run: |
+          cargo build -p hdr_analyzer_mvp
+          cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee "$RUNNER_TEMP/test.log"
+          scripts/ci/check-test-skips.sh "$RUNNER_TEMP/test.log" 'built without HDR10_PLUS|does not accept dhdr10-info'
+
+  security-audit:
+    name: Security audit
+    needs: check
     runs-on: ubuntu-latest
     steps:
-      - name: Create or Update Release
-        uses: softprops/action-gh-release@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          name: HDR-Analyze Suite ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          generate_release_notes: false
-          body: |
-            ## HDR-Analyze Suite ${{ github.ref_name }}
-            
-            This release includes **three tools** for HDR video analysis and processing:
-            
-            ### 🎬 Included Tools
-            
-            | Tool | Description |
-            |------|-------------|
-            | `hdr_analyzer_mvp` | HDR10/HLG frame analyzer and measurement generator |
-            | `mkvdovi` | HDR10/HDR10+ to Profile 8.1 and HLG to Profile 8.4 converter (CM v4.0 metadata) |
-            | `verifier` | madVR measurement file verification utility |
-            
-            ### 📦 Download
-            
-            Choose the appropriate archive for your platform:
-            
-            | Platform | Archive |
-            |----------|---------|
-            | **Windows (x64)** | `hdr-analyze-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip` |
-            | **macOS (Intel)** | `hdr-analyze-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz` |
-            | **macOS (Apple Silicon)** | `hdr-analyze-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
-            | **Linux (x64)** | `hdr-analyze-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
-            
-            ### ⚡ One-Line Install
-            
-            **Linux/macOS:**
-            ```bash
-            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | bash
-            ```
-            
-            **Windows:** download the zip above, extract it, and keep the FFmpeg DLLs next to the
-            `.exe` files. `install.ps1` is also attached to this release but has not been tested on
-            Windows yet.
-            
-            ### ⚙️ Prerequisites
-            
-            - **FFmpeg** must be installed and available in your system PATH (the Windows zip
-              bundles the LGPL FFmpeg libraries the analyzer links against; `mkvdovi` still
-              calls the `ffmpeg` command-line tool)
-            - **mkvdovi** also requires `mkvmerge`, `dovi_tool` 2.3.2 or newer (2.3.4+ recommended),
-              and `hdr10plus_tool` when converting HDR10+ sources
-            
-            ### 🚀 Quick Start
-            
-            ```bash
-            # HDR10 analysis
-            ./hdr_analyzer_mvp -i input.mkv -o measurements.bin
-            
-            # Convert to Profile 8.1 while preserving the source for A/B testing
-            ./mkvdovi --keep-source --verify input.mkv
-            
-            # Verify binary files
-            ./verifier --help
-            ```
-            
-            ### 📝 What's New
-            
-            - **Transitional `mkvdolby` alias removed.** The converter is `mkvdovi`; archives no
-              longer ship the pre-v0.3.0 alias. Update any scripts that still invoke `mkvdolby`.
-            - **Measured PQ max-RGB peaks:** direct PQ peaks now default to BT.2020 NCL max-RGB,
-              validated against synthetic truth and licensed reference tooling; use
-              `--peak-domain luma` for the legacy Y-luma measurement.
-            - **Resilient long conversions:** live byte progress, stall warnings, graceful
-              interruption, and automatic resume from completed artifacts.
-            - **Published validation and provenance:** reproducible accuracy tables and a documented
-              source-material boundary for licensed-tool comparisons.
-
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for detailed changes.
-            
-            ### 🆘 Support
-            
-            - [Report Issues](https://github.com/${{ github.repository }}/issues)
-            - [Documentation](https://github.com/${{ github.repository }}/blob/main/README.md)
-
-  upload-install-scripts:
-    name: Upload Install Scripts
-    needs: create-release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Upload Install Scripts
-        uses: softprops/action-gh-release@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          files: |
-            scripts/install.sh
-            scripts/install.ps1
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+      - name: Run security audit
+        run: cargo audit
 
   build:
     name: Build (${{ matrix.target }})
-    needs: create-release
+    needs: [check, test]
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
             os: macos-15-intel
           - target: aarch64-apple-darwin
@@ -143,33 +150,33 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      TAG: ${{ needs.check.outputs.tag }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: Setup Cache
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-
-      - name: Setup FFmpeg
-        id: ffmpeg
+      - id: ffmpeg
         uses: ./.github/actions/setup-ffmpeg
+      # .cargo/config.toml links aarch64 Linux through clang. The empty RUSTFLAGS drops its
+      # `-fuse-ld=lld`, so the default linker is used.
+      - name: Install clang (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get install -y --no-install-recommends clang
 
-      - name: Build All Binaries
+      - name: Build all binaries
         run: cargo build --verbose --release --workspace --target ${{ matrix.target }}
 
-      - name: Build Archive
+      - name: Build archive
         shell: bash
         run: |
-          staging="hdr-analyze-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir -p "$staging/bin"
+          staging="hdr-analyze-$TAG-${{ matrix.target }}"
+          mkdir -p "$staging/bin" dist
           ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           for bin in hdr_analyzer_mvp mkvdovi verifier; do
             cp "target/${{ matrix.target }}/release/$bin$ext" "$staging/bin/"
@@ -182,154 +189,107 @@ jobs:
           fi
           cp README.md CHANGELOG.md CONTRIBUTING.md ROADMAP.md LICENSE "$staging/"
           cp -R docs "$staging/docs"
+          # Every binary must start from the archive and report the tagged version.
+          for bin in hdr_analyzer_mvp mkvdovi verifier; do
+            out=$("$staging/bin/$bin$ext" --version)
+            echo "$out"
+            [[ $out == *"${TAG#v}"* ]] || { echo "::error::$bin reports '$out', expected ${TAG#v}"; exit 1; }
+          done
           if [ "$RUNNER_OS" = "Windows" ]; then
-            asset="$staging.zip"
-            7z a "$asset" "$staging"
+            7z a "dist/$staging.zip" "$staging"
           else
-            asset="$staging.tar.gz"
-            tar czf "$asset" "$staging"
+            tar czf "dist/$staging.tar.gz" "$staging"
           fi
-          echo "ASSET=$asset" >> "$GITHUB_ENV"
 
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v3
+      - uses: actions/upload-artifact@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          files: ${{ env.ASSET }}
+          name: hdr-analyze-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
 
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
+  publish:
+    name: Publish release
+    needs: [check, test, security-audit, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ needs.check.outputs.tag }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+      PUBLISH: ${{ needs.check.outputs.publish }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Setup FFmpeg
-        uses: ./.github/actions/setup-ffmpeg
-
-      - name: Run Tests
-        run: cargo test --verbose --workspace
-
-      - name: Run Clippy
-        run: cargo clippy --workspace --release -- -D warnings
-
-      - name: Check Formatting
-        run: cargo fmt --all -- --check
-
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@cargo-audit
-
-      - name: Run Security Audit
-        run: cargo audit
-
-  update-release-notes:
-    name: Update Release Notes
-    needs: [create-release, build, test, security-audit]
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Update Release with Build Status
-        uses: actions/github-script@v8
+      - uses: actions/download-artifact@v8
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const tag_name = context.ref.replace('refs/tags/', '');
+          pattern: hdr-analyze-*
+          path: dist
+          merge-multiple: true
 
-            const { data: release } = await github.rest.repos.getReleaseByTag({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag: tag_name
-            });
+      - name: Assets, checksums and notes
+        shell: bash
+        run: |
+          cp scripts/install.sh scripts/install.ps1 dist/
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          RUSTC_VERSION="$(rustc --version)" scripts/ci/release-notes.sh "$TAG" > "$RUNNER_TEMP/notes.md"
+          {
+            echo "## Assets for $TAG (publish: $PUBLISH)"
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/notes.md"
 
-            const updatedBody = release.body + `
+      - name: Attest build provenance
+        if: env.PUBLISH == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
 
-            ---
+      # gh uploads every asset while the release is a draft and publishes it last. With
+      # immutable releases on, a published release can no longer take assets.
+      - name: Create the draft, upload assets, publish
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [[ $draft != true ]]; then
+              echo "::error::Release $TAG is already published. Never re-tag; release the next version."
+              exit 1
+            fi
+            # A draft left by an earlier failed attempt was never public.
+            gh release delete "$TAG" --yes
+          fi
+          if [[ $PRERELEASE == true ]]; then
+            flags=(--prerelease --latest=false)
+          else
+            flags=(--latest)
+          fi
+          gh release create "$TAG" --draft --verify-tag \
+            --title "HDR-Analyze Suite $TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
+          gh release edit "$TAG" --draft=false "${flags[@]}"
+          echo "Published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
 
-            ### ✅ Build Status
-
-            All builds completed successfully:
-            - ✅ Cross-platform builds (Windows, macOS Intel, macOS ARM, Linux)
-            - ✅ All three tools built: \`hdr_analyzer_mvp\`, \`mkvdovi\`, \`verifier\`
-            - ✅ Test suite passed
-            - ✅ Code quality checks (clippy, formatting)
-            - ✅ Security audit passed
-
-            ### 📋 Archive Contents
-
-            Each archive contains:
-            \`\`\`
-            hdr-analyze-${tag_name}-<platform>/
-            ├── bin/
-            │   ├── hdr_analyzer_mvp
-            │   ├── mkvdovi
-            │   ├── verifier
-            │   ├── mkvdovi_hifi_workflow.sh (Linux/macOS)
-            │   └── FFmpeg LGPL DLLs + FFMPEG-LICENSE.txt (Windows)
-            ├── docs/
-            ├── README.md
-            ├── CHANGELOG.md
-            ├── CONTRIBUTING.md
-            ├── ROADMAP.md
-            └── LICENSE
-            \`\`\`
-
-            ### 🔐 Verification
-
-            After downloading, verify the binaries:
-            \`\`\`bash
-            ./bin/hdr_analyzer_mvp --help
-            ./bin/mkvdovi --help
-            ./bin/verifier --help
-            \`\`\`
-            `;
-
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release.id,
-              body: updatedBody
-            });
-
-  notify-completion:
-    name: Notify Release Completion
-    needs: [create-release, build, test, security-audit, update-release-notes]
+  summary:
+    name: Release summary
+    needs: [check, test, security-audit, build, publish]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Release Status Summary
+      - name: Summary
         run: |
-          echo "## 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tag** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Build** | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tests** | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Security Audit** | ${{ needs.security-audit.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Included Tools" >> $GITHUB_STEP_SUMMARY
-          echo "- \`hdr_analyzer_mvp\` - HDR10+ analyzer" >> $GITHUB_STEP_SUMMARY
-          echo "- \`mkvdovi\` - Dolby Vision processor" >> $GITHUB_STEP_SUMMARY
-          echo "- \`verifier\` - Binary verifier" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📥 **Download**: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Release ${{ needs.check.outputs.tag }}"
+            echo ""
+            echo "| Job | Result |"
+            echo "|-----|--------|"
+            echo "| Check | ${{ needs.check.result }} |"
+            echo "| Lint and test | ${{ needs.test.result }} |"
+            echo "| Security audit | ${{ needs.security-audit.result }} |"
+            echo "| Build | ${{ needs.build.result }} |"
+            echo "| Publish | ${{ needs.publish.result }} (publish: ${{ needs.check.outputs.publish }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"

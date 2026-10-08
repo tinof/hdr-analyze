@@ -90,7 +90,6 @@ Dolby provides its own professional tools for this job. If you already use them 
 - There is no Profile 5 output and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
 - HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the default 8.4 preset curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)); `--hlg-composer preset` writes the `dolby_vision` crate's preset instead, which tints neutral greys slightly blue. No playback device has been tested with the fitted composer yet.
-- Linux ARM64 has no release archive; build it from source.
 - Playback on real displays has not been compared and published.
 
 ## Documentation

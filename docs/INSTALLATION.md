@@ -44,6 +44,7 @@ Download an archive from the [releases page](https://github.com/tinof/hdr-analyz
 | Platform | Archive |
 |----------|---------|
 | Linux x64 | `hdr-analyze-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM64 | `hdr-analyze-<version>-aarch64-unknown-linux-gnu.tar.gz` (from v0.6.0) |
 | macOS Intel | `hdr-analyze-<version>-x86_64-apple-darwin.tar.gz` |
 | macOS Apple Silicon | `hdr-analyze-<version>-aarch64-apple-darwin.tar.gz` |
 | Windows x64 | `hdr-analyze-<version>-x86_64-pc-windows-msvc.zip` |
@@ -69,13 +70,19 @@ hdr-analyze-<version>-<target>/
 Extract it and put `bin/` on your `PATH`, or copy its contents to a directory that is already on
 `PATH`.
 
+Every release also carries `SHA256SUMS` and a GitHub build provenance attestation (from v0.6.0).
+To check a download:
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify hdr-analyze-<version>-<target>.tar.gz -R tinof/hdr-analyze
+```
+
 ### What release archives do not include
 
 - GPU analysis. Release archives are built with `cargo build --release --workspace`, without the
   `cuda` feature, so the bundled `hdr_analyzer_mvp` analyzes on the CPU only. For CUDA analysis, see
   [CUDA analysis build](#cuda-analysis-build).
-- Linux ARM64. There is no release archive, and `install.sh` stops on that platform. Build from
-  source.
 - The runtime tools listed in the next section.
 
 ## Runtime tools
