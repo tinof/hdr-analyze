@@ -6,6 +6,36 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-09
+
+### Upgrade notes
+
+- **Replace all three binaries together.** `mkvdovi` 0.6.0 refuses an older `hdr_analyzer_mvp` for
+  HLG input before any analysis (it checks the analyzer's `--help` for the composer name), and an
+  older `mkvdovi` fails on the sidecars this analyzer writes for HLG.
+- **HLG output now uses the `bt2100` composer by default.** It keeps neutrals neutral and maps
+  nominal white to 1000 nits, but **no playback device has been tested with it yet**. If a player
+  shows HLG conversions wrongly, convert with `--hlg-composer preset`, which writes the RPU exactly
+  as `dovi_tool generate` does (the 0.5.1 behaviour). HLG measurements and temp directories from
+  0.5.x are re-analyzed and regenerated automatically.
+- **Some HLG files are refused** that 0.5.x converted: full range, a matrix other than BT.2020
+  non-constant luminance, or primaries other than BT.2020. The error lists every tag it read.
+- **Profile 7 FEL input is refused**, and the source is kept. `composite-pipe`, `--fel-crf`,
+  `--fel-preset`, `--fel-encoder`, `--fel-nvenc-preset` and `--encoder` are gone; remove them from
+  scripts. `mkvdovi` no longer encodes video on any path.
+- **Re-analyze HDR10 files measured by 0.5.x** to get this release's scene detection, unsmoothed
+  scene averages and open-GOP alignment: delete `<stem>_measurements.bin` and its `.l1.json` next to
+  the input. Otherwise `mkvdovi` reuses them, with a warning about smoothed averages and with the
+  old scene boundaries.
+- **Finish running conversions first.** A `mkvdovi_temp_*` directory from 0.5.x is not resumed; the
+  conversion starts again.
+- Delivered metadata changes for many files: scene boundaries (new detector, `--scene-threshold`
+  0.3 → 3.0, `--min-scene-length` 24 → 12), the L1 average of changing scenes, Profile 8.1 source
+  range for non-standard mastering displays, measured MaxCLL/MaxFALL where the source states none,
+  and L1 timing in sources cut at an open-GOP picture. Details below.
+- Release binaries analyze on the CPU, as before. GPU analysis needs a build with
+  `--features cuda`; prebuilt CUDA binaries are planned for 0.7.0.
+
 ### Added
 
 - **Linux ARM64 release archive, checksums and build provenance** (release workflow). Releases
@@ -64,67 +94,33 @@ This document provides a historical record of completed milestones, feature impl
   passthrough keeps the external checks only, because its RPU can carry levels the `dolby_vision`
   crate does not read.
 
-### Fixed
-
-- **`scripts/rpu-baseline.sh capture` with `--mdfix`** (tooling). It looked for `<stem>.DV.mkv`;
-  `--mdfix` writes `<stem>.mdfix.DV.mkv`, so the capture failed.
-
-- **`tools/l1_diff` lines references up with open-GOP cuts** (tooling, ROADMAP E11). It reads
-  `source.leading_skipped_frames` from a v5 sidecar: a reference over the whole stream has its rows
-  for the undecodable leading pictures skipped, and `--per-shot` and `--scenes` are re-based by the
-  same offset. `--export-reference` labels rows with stream frames (unchanged without leading
-  pictures). Stricter reference checks: frame labels must count up by one; a reference labelled in
-  decoded frames refuses `--per-shot` and `--scenes` when the cut has leading pictures; a cut beyond
-  the reference's frames is an error; any other count difference is still refused.
-
-- **L1 lines up with the picture in sources cut at an open-GOP CRA picture** (`hdr_analyzer_mvp`,
-  `mkvdovi`). A stream cut at a CRA picture (x265's default open GOP; `mkvmerge --split`,
-  stream-copy cuts, some captures) keeps the RASL pictures that follow the CRA in decode order
-  but come first in display order. They reference pictures from before the cut, so no decoder
-  outputs them, but `dovi_tool inject-rpu` still gives RPU `n` to presentation picture `n`.
-  Before this fix the measured L1 started on those RASL pictures. Every scene's L1 was shown as
-  many frames early as there were RASL pictures, and the last frames repeated the final RPU.
-  Measured on a real cut with two RASL pictures: displayed frame *k* carried the RPU for *k* + 2.
-  - The analyzer counts the RASL pictures of the first IRAP picture from the packets' NAL types.
-    It requires every picture of the stream to be either decoded or one of those. Any other loss,
-    such as a stream that does not start at a random access picture, stops the analysis with an
-    error instead of writing shifted measurements.
-  - Sidecar version 5 records `source.stream_frames` and `source.leading_skipped_frames`.
-  - `mkvdovi` moves every scene back by the leading count and lets the first scene cover the
-    leading pictures, so the RPU has exactly one entry per picture.
-  - `--verify` compares in the stream's frame numbers.
-  - A sidecar older than version 5 is reused only when its frame count matches the input exactly.
-  - When `dovi_tool inject-rpu` reports mismatched lengths for a measured RPU, the conversion
-    stops instead of muxing it.
-- **Profile 8.1 RPUs state the mastering display range** (`mkvdovi`). `extra.json` now passes
-  `source_min_pq` / `source_max_pq`, converted from the mastering display luminance with the
-  `dolby_vision` crate's PQ conversion (the one it uses for a Dolby CM XML). Before, `dovi_tool
-  generate` derived them from a coarse L6 lookup. Masters that change:
-  - a mastering peak other than 1000/2000/4000/10000 nits, which always got 3079 (1000 nits); for
-    example 600 nits is now 2851 and 1100 nits 3121;
-  - a mastering minimum other than 0.0001 or 0.005 nits; for example 0.001 nits was 7 and is now 26,
-    and 0.05 nits was 0 and is now 189.
-
-  The standard masters and the defaults used when the source states nothing (0.005 / 1000 nits)
-  give the same values as before, so those RPUs are unchanged. Values that cannot describe a
-  mastering display keep the lookup, with a warning: a peak outside 100–10000 nits (for example
-  a mastering SEI written in the wrong units, which reads as 0.1 nit) or a minimum outside 0–1 nit.
-  Profile 8.4 keeps the preset's 62/3079. A run interrupted under an earlier build regenerates its
-  RPU on resume, because the configuration now carries the range.
-
-### Removed
-
-- **Breaking: Profile 7 FEL conversion is removed from `mkvdovi`.** The BL+EL compositor
-  (`fel_composite.rs`) did not match the reconstruction in ETSI GS CCM 001 on real discs: on seven
-  of eight Profile 7 FEL test cuts the composed chroma missed the specified prediction by a mean of
-  69 to 534 10-bit codes. Removed with it:
-  - the `composite-pipe` subcommand;
-  - the flags `--fel-crf`, `--fel-preset`, `--fel-encoder`, `--fel-nvenc-preset` and `--encoder`;
-  - the Modal remote-encode backend and all libx265, NVENC and VideoToolbox encoding. `mkvdovi` no
-    longer encodes video: every remaining path copies the video stream bit-exactly;
-  - the notes in `docs/experimental/`. What is still useful from them is in
-    [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md), the plan for FEL input that keeps the base layer
-    bit-exact and re-encodes nothing.
+- **Measured MaxCLL/MaxFALL in L6.** The analyzer writes the content light levels (CTA-861.3,
+  active image area, frame average in linear light) to the L1 sidecar as `light_level`, and
+  `mkvdovi` uses them for a MaxCLL or MaxFALL the source does not state (or states as 0). This
+  mainly affects HLG, which carries no light-level metadata and so far got the defaults
+  1000 / 400. Source-stated values are unchanged. MaxCLL needs full-resolution analysis and both
+  need every frame analyzed; otherwise the defaults stay
+  ([`docs/FORMAT_COMPATIBILITY.md`](docs/FORMAT_COMPATIBILITY.md)). The block is an optional
+  addition to sidecar version 4.
+- **L1 regression gate in CI.** `scripts/ci/l1-regression-gate.sh` generates a six-shot synthetic
+  clip (grain, saturated colour, small specular, ramp, fade, one-frame flash), analyzes it as PQ
+  and as HLG, and scores the result against the references in `tools/l1_diff/corpus`. A change
+  that moves L1 fails the job until the references are rewritten with `--update` and reviewed.
+- **`tools/l1_diff` can fail.** `--max-peak-bias`, `--max-peak-error`, `--max-min-bias`,
+  `--max-min-error`, `--max-avg-bias`, `--max-avg-error` (12-bit PQ codes; the average limits
+  apply to the max-RGB average) and `--max-scene-mismatches` list every breach and return a
+  nonzero exit status. Before, the tool only printed statistics. `--export-reference` writes an
+  analyzer run as a reference CSV; the reference peak column may carry decimals. CI now lints and
+  tests the tool, which is outside the workspace.
+- **CPU/CUDA parity check.** `scripts/cuda-parity.sh` encodes the synthetic clip as PQ and HLG
+  HEVC, analyzes each with and without CUDA, and fails unless the measurement files are
+  byte-identical, the sidecars agree and the CUDA run reports `gpu: true`. Hosted CI has no GPU,
+  so run it on a CUDA host before a change to the analysis or decode path
+  (`hdr_analyzer_mvp/tests/cuda_parity.rs`, skipped without its environment variables).
+- **Final-RPU baseline.** `scripts/rpu-baseline.sh capture` converts inputs with
+  `mkvdovi --keep-source --verify` and stores the RPU extracted from the muxed file with a
+  manifest of input identity and tool versions. `compare` fails on any difference outside
+  Level 1 and reports Level 1 differences as numbers (`--require-identical-l1` makes them fail).
 
 ### Changed
 
@@ -258,7 +254,67 @@ This document provides a historical record of completed milestones, feature impl
   shots of 24. Its scene reference now comes from the clip's construction, not from analyzer
   output. The old clip could not detect a detector that cuts every 24 frames.
 
+### Removed
+
+- **Breaking: Profile 7 FEL conversion is removed from `mkvdovi`.** The BL+EL compositor
+  (`fel_composite.rs`) did not match the reconstruction in ETSI GS CCM 001 on real discs: on seven
+  of eight Profile 7 FEL test cuts the composed chroma missed the specified prediction by a mean of
+  69 to 534 10-bit codes. Removed with it:
+  - the `composite-pipe` subcommand;
+  - the flags `--fel-crf`, `--fel-preset`, `--fel-encoder`, `--fel-nvenc-preset` and `--encoder`;
+  - the Modal remote-encode backend and all libx265, NVENC and VideoToolbox encoding. `mkvdovi` no
+    longer encodes video: every remaining path copies the video stream bit-exactly;
+  - the notes in `docs/experimental/`. What is still useful from them is in
+    [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md), the plan for FEL input that keeps the base layer
+    bit-exact and re-encodes nothing.
+
 ### Fixed
+
+- **`scripts/rpu-baseline.sh capture` with `--mdfix`** (tooling). It looked for `<stem>.DV.mkv`;
+  `--mdfix` writes `<stem>.mdfix.DV.mkv`, so the capture failed.
+
+- **`tools/l1_diff` lines references up with open-GOP cuts** (tooling, ROADMAP E11). It reads
+  `source.leading_skipped_frames` from a v5 sidecar: a reference over the whole stream has its rows
+  for the undecodable leading pictures skipped, and `--per-shot` and `--scenes` are re-based by the
+  same offset. `--export-reference` labels rows with stream frames (unchanged without leading
+  pictures). Stricter reference checks: frame labels must count up by one; a reference labelled in
+  decoded frames refuses `--per-shot` and `--scenes` when the cut has leading pictures; a cut beyond
+  the reference's frames is an error; any other count difference is still refused.
+
+- **L1 lines up with the picture in sources cut at an open-GOP CRA picture** (`hdr_analyzer_mvp`,
+  `mkvdovi`). A stream cut at a CRA picture (x265's default open GOP; `mkvmerge --split`,
+  stream-copy cuts, some captures) keeps the RASL pictures that follow the CRA in decode order
+  but come first in display order. They reference pictures from before the cut, so no decoder
+  outputs them, but `dovi_tool inject-rpu` still gives RPU `n` to presentation picture `n`.
+  Before this fix the measured L1 started on those RASL pictures. Every scene's L1 was shown as
+  many frames early as there were RASL pictures, and the last frames repeated the final RPU.
+  Measured on a real cut with two RASL pictures: displayed frame *k* carried the RPU for *k* + 2.
+  - The analyzer counts the RASL pictures of the first IRAP picture from the packets' NAL types.
+    It requires every picture of the stream to be either decoded or one of those. Any other loss,
+    such as a stream that does not start at a random access picture, stops the analysis with an
+    error instead of writing shifted measurements.
+  - Sidecar version 5 records `source.stream_frames` and `source.leading_skipped_frames`.
+  - `mkvdovi` moves every scene back by the leading count and lets the first scene cover the
+    leading pictures, so the RPU has exactly one entry per picture.
+  - `--verify` compares in the stream's frame numbers.
+  - A sidecar older than version 5 is reused only when its frame count matches the input exactly.
+  - When `dovi_tool inject-rpu` reports mismatched lengths for a measured RPU, the conversion
+    stops instead of muxing it.
+- **Profile 8.1 RPUs state the mastering display range** (`mkvdovi`). `extra.json` now passes
+  `source_min_pq` / `source_max_pq`, converted from the mastering display luminance with the
+  `dolby_vision` crate's PQ conversion (the one it uses for a Dolby CM XML). Before, `dovi_tool
+  generate` derived them from a coarse L6 lookup. Masters that change:
+  - a mastering peak other than 1000/2000/4000/10000 nits, which always got 3079 (1000 nits); for
+    example 600 nits is now 2851 and 1100 nits 3121;
+  - a mastering minimum other than 0.0001 or 0.005 nits; for example 0.001 nits was 7 and is now 26,
+    and 0.05 nits was 0 and is now 189.
+
+  The standard masters and the defaults used when the source states nothing (0.005 / 1000 nits)
+  give the same values as before, so those RPUs are unchanged. Values that cannot describe a
+  mastering display keep the lookup, with a warning: a peak outside 100–10000 nits (for example
+  a mastering SEI written in the wrong units, which reads as 0.1 nit) or a minimum outside 0–1 nit.
+  Profile 8.4 keeps the preset's 62/3079. A run interrupted under an earlier build regenerates its
+  RPU on resume, because the configuration now carries the range.
 
 - **The L1 average of a scene that changes over time was wrong.** Each frame's average passed a
   forward-only smoothing filter before the scene mean was taken, so the scene average leaned
@@ -274,36 +330,6 @@ This document provides a historical record of completed milestones, feature impl
   interrupted run (for example after a re-analysis changed L1). Before, an RPU that was already
   complete in the temp directory was reused whatever the measurements now said. A muxed output
   left by that run is rebuilt as well.
-
-### Added
-
-- **Measured MaxCLL/MaxFALL in L6.** The analyzer writes the content light levels (CTA-861.3,
-  active image area, frame average in linear light) to the L1 sidecar as `light_level`, and
-  `mkvdovi` uses them for a MaxCLL or MaxFALL the source does not state (or states as 0). This
-  mainly affects HLG, which carries no light-level metadata and so far got the defaults
-  1000 / 400. Source-stated values are unchanged. MaxCLL needs full-resolution analysis and both
-  need every frame analyzed; otherwise the defaults stay
-  ([`docs/FORMAT_COMPATIBILITY.md`](docs/FORMAT_COMPATIBILITY.md)). The block is an optional
-  addition to sidecar version 4.
-- **L1 regression gate in CI.** `scripts/ci/l1-regression-gate.sh` generates a six-shot synthetic
-  clip (grain, saturated colour, small specular, ramp, fade, one-frame flash), analyzes it as PQ
-  and as HLG, and scores the result against the references in `tools/l1_diff/corpus`. A change
-  that moves L1 fails the job until the references are rewritten with `--update` and reviewed.
-- **`tools/l1_diff` can fail.** `--max-peak-bias`, `--max-peak-error`, `--max-min-bias`,
-  `--max-min-error`, `--max-avg-bias`, `--max-avg-error` (12-bit PQ codes; the average limits
-  apply to the max-RGB average) and `--max-scene-mismatches` list every breach and return a
-  nonzero exit status. Before, the tool only printed statistics. `--export-reference` writes an
-  analyzer run as a reference CSV; the reference peak column may carry decimals. CI now lints and
-  tests the tool, which is outside the workspace.
-- **CPU/CUDA parity check.** `scripts/cuda-parity.sh` encodes the synthetic clip as PQ and HLG
-  HEVC, analyzes each with and without CUDA, and fails unless the measurement files are
-  byte-identical, the sidecars agree and the CUDA run reports `gpu: true`. Hosted CI has no GPU,
-  so run it on a CUDA host before a change to the analysis or decode path
-  (`hdr_analyzer_mvp/tests/cuda_parity.rs`, skipped without its environment variables).
-- **Final-RPU baseline.** `scripts/rpu-baseline.sh capture` converts inputs with
-  `mkvdovi --keep-source --verify` and stores the RPU extracted from the muxed file with a
-  manifest of input identity and tool versions. `compare` fails on any difference outside
-  Level 1 and reports Level 1 differences as numbers (`--require-identical-l1` makes them fail).
 
 ## [0.5.1] - 2026-10-01
 
