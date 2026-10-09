@@ -53,7 +53,11 @@ plan current, so the decision is made per step, not afterwards.
    `Removed`). Put an **Upgrade notes** list at the top: the Breaking items, and anything users must
    do. Rename `[Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and add a new empty `## [Unreleased]`.
 2. **Versions.** Set `version` in `hdr_analyzer_mvp`, `mkvdovi`, `verifier` and `dovi84_composer`
-   (with the `-rc.N` suffix for a candidate), then `cargo build` to update `Cargo.lock`.
+   (with the `-rc.N` suffix for a candidate), then `cargo build` to update `Cargo.lock`. Also set
+   "Current version" in `README.md` and `version` in `CITATION.cff`, and refresh the tool
+   lockfiles that pin `dovi84_composer`:
+   `cargo update -p dovi84_composer --offline --manifest-path tools/fit_hlg_composer/Cargo.toml`.
+   `scripts/ci/release-version-check.sh` fails on any of them left behind.
 3. **PR.** One commit `chore(release): vX.Y.Z`, a pull request, CI green, merge.
 4. **Dry run.** `gh workflow run release.yml --ref main`, then wait for it to pass
    (`gh run watch`). It runs the release gate on the merged commit without publishing.
@@ -74,8 +78,9 @@ steps 4 to 6 for `vX.Y.Z`: the final-version commit needs its own dry run. A fix
 ## What the workflow does
 
 - **check**: the tag must be `vX.Y.Z` or `vX.Y.Z-rc.N`, equal to every shipped crate's version and
-  `Cargo.lock`, with a dated, non-empty CHANGELOG section that repeats no heading
-  (`scripts/ci/release-version-check.sh`).
+  `Cargo.lock`, to every `tools/*/Cargo.lock` entry for a shipped crate, to `Current version: X.Y.Z.`
+  in `README.md` and to `version: X.Y.Z` in `CITATION.cff`, with a dated, non-empty CHANGELOG
+  section that repeats no heading (`scripts/ci/release-version-check.sh`).
 - **test**: every cargo call here and in **build** passes `--locked`, so a `Cargo.lock` that does
   not match the manifests fails before any build. fmt, clippy (also with `--features cuda`), then the full test suite with ffmpeg,
   mkvtoolnix, mediainfo and a pinned `dovi_tool` installed. Any `Skipping` line outside an
@@ -105,14 +110,3 @@ run on the commit to be tagged instead.
   warning at the top of the bad release's notes, or mark it a pre-release so it stops being latest.
   Both stay editable on an immutable release; only the assets and the tag are locked. Deleting a
   published immutable release does not free its tag name for reuse.
-
-## Repository settings
-
-Set once by the owner:
-
-- **Tag ruleset** for `refs/tags/v*`: restrict deletions, block force pushes. Bypass: Repository
-  admin only.
-- **Immutable releases**: on (Settings → General → Releases). This needs the draft-first publish
-  the workflow does.
-- **Branch ruleset** for `main`: restrict deletions, block force pushes. No required pull request:
-  `/roadmap-next` still pushes roadmap corrections straight to `main` when no step can start.

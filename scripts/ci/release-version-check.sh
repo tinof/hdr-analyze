@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Check that a release tag matches the shipped crates, Cargo.lock and CHANGELOG.md.
+# Check that a release tag matches the shipped crates, every Cargo.lock that pins them
+# (root and tools/*), the version in README.md and CITATION.cff, and CHANGELOG.md.
 #
 # Usage: scripts/ci/release-version-check.sh vX.Y.Z[-rc.N]
 #
@@ -35,6 +36,29 @@ for crate in hdr_analyzer_mvp mkvdovi verifier dovi84_composer; do
         failed=1
     fi
 done
+
+# Excluded tool crates keep their own Cargo.lock; any shipped crate they pin must match too.
+for lock in tools/*/Cargo.lock; do
+    for crate in hdr_analyzer_mvp mkvdovi verifier dovi84_composer; do
+        locked=$(awk -v name="name = \"$crate\"" '
+            $0 == name { getline; gsub(/^version = "|"$/, ""); print; exit }' "$lock")
+        if [[ -n $locked && $locked != "$version" ]]; then
+            echo "error: $lock has $crate $locked, tag $tag needs $version" >&2
+            echo "       (cargo update -p $crate --offline --manifest-path ${lock%.lock}.toml)" >&2
+            failed=1
+        fi
+    done
+done
+
+# The version shown to readers and citers.
+if ! grep -Fq "Current version: $version." README.md; then
+    echo "error: README.md does not say 'Current version: $version.'" >&2
+    failed=1
+fi
+if ! grep -Fxq "version: $version" CITATION.cff; then
+    echo "error: CITATION.cff does not say 'version: $version'" >&2
+    failed=1
+fi
 
 if ! grep -Eq "^## \[$base\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
     echo "error: CHANGELOG.md has no dated section '## [$base] - YYYY-MM-DD'" >&2
