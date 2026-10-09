@@ -11,8 +11,9 @@ This document provides a historical record of completed milestones, feature impl
 ### Upgrade notes
 
 - **Replace all three binaries together.** `mkvdovi` 0.6.0 refuses an older `hdr_analyzer_mvp` for
-  HLG input before any analysis (it checks the analyzer's `--help` for the composer name), and an
-  older `mkvdovi` fails on the sidecars this analyzer writes for HLG.
+  HLG input before any analysis (it checks the analyzer's `--help` for the composer name), and
+  `mkvdovi` 0.5.x rejects every sidecar this analyzer writes ("unsupported L1 sidecar version 5";
+  0.5.x reads versions 1 to 3), HDR10 and HLG alike, and fails the file after the analysis.
 - **HLG output now uses the `bt2100` composer by default.** It keeps neutrals neutral and maps
   nominal white to 1000 nits, but **no playback device has been tested with it yet**. If a player
   shows HLG conversions wrongly, convert with `--hlg-composer preset`, which writes the RPU exactly
@@ -152,10 +153,9 @@ This document provides a historical record of completed milestones, feature impl
   `dovi84-bt2100-v1-spec420` (bt2100), version still 5; sidecars with the old names `dovi84-v2` and
   `dovi84-bt2100-v1` are re-analyzed with a "pre-spec 4:2:0" message. `mkvdovi` needs an
   `hdr_analyzer_mvp` from this release for every HLG composer, preset included: it looks for the
-  mapping name in the analyzer's `--help` and refuses an older analyzer before any analysis. An
-  older `mkvdovi` with this analyzer analyzes the file, then rejects the sidecar ("names a Dolby
-  Vision 8.4 HLG mapping this mkvdovi does not know (dovi84-v3); it may come from a newer
-  analyzer") and fails the file. `--dump-frame-stats` gains a last column, `avg_max_rgb_pq` (the
+  mapping name in the analyzer's `--help` and refuses an older analyzer before any analysis.
+  `mkvdovi` 0.5.x with this analyzer analyzes the file, then rejects the sidecar as "unsupported
+  L1 sidecar version 5" and fails the file. `--dump-frame-stats` gains a last column, `avg_max_rgb_pq` (the
   frame's unrounded max-RGB average), on PQ runs too; PQ `.bin` files and sidecars are unchanged.
   Measurements: [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) (2026-10-06).
 - **Breaking: HLG inputs that the 8.4 RPU cannot describe are refused**, including files earlier
