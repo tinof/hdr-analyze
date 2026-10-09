@@ -101,18 +101,7 @@ run on the commit to be tagged instead.
   fix on `main` and release `-rc.N+1`. For a final version, the owner (the bypass actor of the tag
   ruleset) deletes the tag (`git push --delete origin vX.Y.Z`); fix on `main`; tag again. A
   leftover draft is replaced by the next run.
-- **A defect is found after publishing**: never delete or re-tag. Release `X.Y.(Z+1)`. Put a
-  warning at the top of the bad release's notes, or mark it a pre-release so it stops being latest.
-  Both stay editable on an immutable release; only the assets and the tag are locked. Deleting a
+- **A defect is found after publishing**: never delete or re-tag. Release `X.Y.(Z+1)`. Put a  
+  warning at the top of the bad release's notes, or mark it a pre-release so it stops being latest.  
+  Both stay editable on an immutable release; only the assets and the tag are locked. Deleting a  
   published immutable release does not free its tag name for reuse.
-
-## Repository settings
-
-Set once by the owner:
-
-- **Tag ruleset** for `refs/tags/v*`: restrict deletions, block force pushes. Bypass: Repository
-  admin only.
-- **Immutable releases**: on (Settings → General → Releases). This needs the draft-first publish
-  the workflow does.
-- **Branch ruleset** for `main`: restrict deletions, block force pushes. No required pull request:
-  `/roadmap-next` still pushes roadmap corrections straight to `main` when no step can start.
