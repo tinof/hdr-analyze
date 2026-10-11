@@ -32,7 +32,9 @@ pub fn verify_post_mux(
 /// What an RPU mkvdovi generated must deliver, checked frame by frame on the RPU extracted from
 /// the muxed output. Only for generated RPUs: the `dolby_vision` crate wrote them, so it always
 /// parses them, while a passed-through source RPU (Profile 7 MEL) can carry levels the crate does
-/// not read (L253) and gets the external checks only.
+/// not read (L253) and gets the external checks only. `None` therefore also marks the RPU as
+/// passed through for the structural checks: its L6 MaxCLL/MaxFALL of 0 is warned about, not
+/// failed.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeliveryExpectation<'a> {
     /// The measured L1 the RPU was generated from. `None` when the RPU's L1 does not come from
@@ -173,7 +175,7 @@ pub fn verify_post_mux_with_options(
             let _ = std::fs::write(temp_dir.join("dovi_info_frame_0.log"), &frame_output);
             match parse_dovi_frame_json(&frame_output) {
                 Ok(frame) => {
-                    if !assert_rpu_invariants(&frame, expected_cm_version) {
+                    if !assert_rpu_invariants(&frame, expected_cm_version, delivery.is_none()) {
                         ok = false;
                     }
                 }
@@ -632,8 +634,15 @@ fn metadata_block<'a>(
 }
 
 /// Assert structural invariants from structured `dovi_tool info --frame 0` JSON.
-/// Returns false if any hard invariant is violated.
-fn assert_rpu_invariants(frame: &serde_json::Value, expected_cm_version: Option<&str>) -> bool {
+/// Returns false if any hard invariant is violated. `passthrough` is true for a source RPU that
+/// mkvdovi passed through unchanged (Profile 7 MEL): retail discs carry L6 MaxCLL/MaxFALL 0, which
+/// means "unknown" in the static metadata, so that is a warning there. A generated RPU must state
+/// both.
+fn assert_rpu_invariants(
+    frame: &serde_json::Value,
+    expected_cm_version: Option<&str>,
+    passthrough: bool,
+) -> bool {
     let mut failures = Vec::new();
 
     if frame
@@ -665,13 +674,21 @@ fn assert_rpu_invariants(frame: &serde_json::Value, expected_cm_version: Option<
                 "max_frame_average_light_level",
             ];
             for field in required_positive {
-                if level6.get(field).and_then(serde_json::Value::as_u64) == Some(0)
-                    || level6
-                        .get(field)
-                        .and_then(serde_json::Value::as_u64)
-                        .is_none()
-                {
-                    failures.push(format!("L6 field {field} must be a positive integer"));
+                match level6.get(field).and_then(serde_json::Value::as_u64) {
+                    Some(0) if passthrough && field != "max_display_mastering_luminance" => {
+                        println!(
+                            "{}",
+                            format!(
+                                "RPU invariant WARN: L6 field {field} is 0 (unknown) in the \
+                                 passed-through source RPU; kept as is"
+                            )
+                            .yellow()
+                        );
+                    }
+                    Some(0) | None => {
+                        failures.push(format!("L6 field {field} must be a positive integer"));
+                    }
+                    Some(_) => {}
                 }
             }
             if level6
@@ -1063,7 +1080,7 @@ mod tests {
 
     #[test]
     fn rpu_invariants_accept_valid_v40_frame() {
-        assert!(assert_rpu_invariants(&valid_frame(), Some("V40")));
+        assert!(assert_rpu_invariants(&valid_frame(), Some("V40"), false));
     }
 
     #[test]
@@ -1072,7 +1089,7 @@ mod tests {
         frame["vdr_dm_data"]["cmv29_metadata"]["ext_metadata_blocks"][0]["Level1"]["avg_pq"] =
             json!(3000);
 
-        assert!(!assert_rpu_invariants(&frame, Some("V40")));
+        assert!(!assert_rpu_invariants(&frame, Some("V40"), false));
     }
 
     #[test]
@@ -1080,6 +1097,47 @@ mod tests {
         let mut frame = valid_frame();
         frame["vdr_dm_data"]["cmv40_metadata"]["ext_metadata_blocks"] = json!([]);
 
-        assert!(!assert_rpu_invariants(&frame, Some("V40")));
+        assert!(!assert_rpu_invariants(&frame, Some("V40"), false));
+    }
+
+    fn set_level6(frame: &mut serde_json::Value, field: &str, value: serde_json::Value) {
+        let level6 =
+            &mut frame["vdr_dm_data"]["cmv29_metadata"]["ext_metadata_blocks"][1]["Level6"];
+        match value {
+            serde_json::Value::Null => {
+                level6.as_object_mut().unwrap().remove(field);
+            }
+            value => level6[field] = value,
+        }
+    }
+
+    #[test]
+    fn rpu_invariants_warn_on_zero_light_levels_only_in_a_passed_through_rpu() {
+        let mut frame = valid_frame();
+        set_level6(&mut frame, "max_content_light_level", json!(0));
+        set_level6(&mut frame, "max_frame_average_light_level", json!(0));
+
+        // A retail Profile 7 MEL RPU states 0 (unknown); a generated RPU must state both.
+        assert!(assert_rpu_invariants(&frame, Some("V40"), true));
+        assert!(!assert_rpu_invariants(&frame, Some("V40"), false));
+    }
+
+    #[test]
+    fn rpu_invariants_reject_zero_mastering_peak_and_missing_light_level_in_a_passed_through_rpu() {
+        let mut zero_peak = valid_frame();
+        set_level6(&mut zero_peak, "max_display_mastering_luminance", json!(0));
+        assert!(!assert_rpu_invariants(&zero_peak, Some("V40"), true));
+
+        let mut missing = valid_frame();
+        set_level6(
+            &mut missing,
+            "max_content_light_level",
+            serde_json::Value::Null,
+        );
+        assert!(!assert_rpu_invariants(&missing, Some("V40"), true));
+
+        let mut malformed = valid_frame();
+        set_level6(&mut malformed, "max_frame_average_light_level", json!(-1));
+        assert!(!assert_rpu_invariants(&malformed, Some("V40"), true));
     }
 }

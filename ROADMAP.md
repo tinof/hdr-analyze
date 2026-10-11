@@ -96,7 +96,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | Release | Content | Trigger / gate |
 |---|---|---|
 | **v0.6.0** (now) | Everything under `[Unreleased]`: P8 spec 4:2:0 decode and the bt2100 default, E7 open-GOP alignment, P10 source range and `--verify` against the RPU, FEL removal, CUDA as main pipeline, WS2 unfiltered averages, measured L6 light levels | MINOR (Breaking entries, sidecar v5). Owner decision 2026-10-08: ship before the P8 playback test, notes say bt2100 playback is unverified and `--hlg-composer preset` is the fallback. `v0.6.0-rc.1` first, to test the new release workflow |
-| v0.6.1 | P6 container-0 MaxCLL/MaxFALL, E7 passthrough L6 0 (Next up 1) | PATCH: corrects delivered L6, no contract change. If it merges before the v0.6.0 release PR, it ships in v0.6.0 instead |
+| v0.6.1 | P6 container-0 MaxCLL/MaxFALL and `Details.txt` thousands separator, E7 passthrough L6 0 (Next up 1; fixed 2026-10-11 on `fix-l6-zero-light-levels`) | PATCH: corrects delivered L6, no contract change. If it merges before the v0.6.0 release PR, it ships in v0.6.0 instead |
 | none | P9 scene-list measurement (offline; step 0 done 2026-10-08), E13 steps 4 and 5 (refactors) | No user-visible change |
 | **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
 | next minor | P8 playback result, if devices ignore bt2100 (the default goes back to `preset`) | MINOR, released quickly |
@@ -111,6 +111,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-11 | L6 fixes: MaxCLL/MaxFALL read from the stream behind a container 0, `Details.txt` thousands separators, `--verify` warns on L6 0 in a passed-through MEL RPU; r4 MEL default baseline captured. | P6, E7, E13 | `fix-l6-zero-light-levels` |
 | 2026-10-08 | P9 step 0: HDR10+ scene starts line up with the picture (offset 0 on six cuts, v5 runs, mkvdovi extraction path); 24% of frames in HDR10+ scenes holding several shots. | P9 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-07 | E13 step 3: pure-move split of mkvdovi `metadata.rs` and `pipeline.rs` into submodules, tests in `tests.rs`; all 8 RPU baselines identical. | E13 | `feat/e13-mkvdovi-split` |
 | 2026-10-07 | E13 safety net: 34 characterization tests for mkvdovi (metadata, pipeline, HLG source deletion), CUDA gate on module dirs, final-RPU baselines at main@e6d63ed; no production code changed. | E13 | this branch |
@@ -175,11 +176,9 @@ evidence for each priority is in its items and in
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
    a playback test.
 4. **Narrow code defects** (E8, E9, P1, E10, P6, E7): histogram percentile reader, `--pre-denoise`
-   values, half-resolution CPU default, L1 scaling note; a container MaxCLL/MaxFALL of 0 that hides
-   the stream's value (changes delivered L6, so first of the three found 2026-10-07); `--verify` on
-   a retail RPU with L6 0; a `Details.txt` thousands separator. Gate: unit tests for the reader and
-   the option; measure the CPU default first; for the L6 fixes, flip the expectations the E13
-   tests pin as suspicious (`mkvdovi/src/metadata/tests.rs`). **Prerequisite:** E13 step 5 (analyzer
+   values, half-resolution CPU default, L1 scaling note (the three L6 defects found 2026-10-07 were
+   fixed 2026-10-11). Gate: unit tests for the reader and the option; measure the CPU default
+   first. **Prerequisite:** E13 step 5 (analyzer
    split) before E8 + E9, because E8 moves the default `.bin`.
 5. **`--mdfix` replaces the whole RPU** (P11): targeted repair or full regeneration. Open decision.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
@@ -262,18 +261,12 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 - **Status:** Partial. Warnings exist for L6/L9 fallbacks and suspicious HDR10+ scene peaks.
 - **Open:** broader missing/inconsistent-source detection.
-- **Open (found 2026-10-07, E13 tests):** a container MaxCLL or MaxFALL of 0 (MKV Colour element,
-  e.g. `mkvmerge --max-content-light 0:0`) hides the value the stream's SEI states: MediaInfo
-  reports the container "0" and moves the stream value to `MaxCLL_Original`/`MaxFALL_Original`,
-  which `read_static_metadata` never reads, so L6 gets the 1000/400 default. Read the
-  `*_Original` field when the container value is 0. Pinned today by
-  `static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value` and its MaxFALL twin.
-- **Open (minor):** the `Details.txt` override reads a thousands separator as a decimal comma
-  (`1,000` → 1.0); pinned by `details_file_light_levels_are_read_without_mediainfo_data`.
-- **Checked 2026-10-08 @43401ed:** `read_static_metadata` (`mkvdovi/src/metadata/static_metadata.rs:19`)
-  reads no `*_Original` field; pinned tests at `metadata/tests.rs:1664`, `:1692` (container 0) and
-  `:1469` (Details.txt). None of the seven saved rpu-baseline inputs has a container 0, so the
-  baselines neither cover the fix nor need a re-capture after it; test a generated `extra.json` too.
+- Fixed 2026-10-11: a container MaxCLL/MaxFALL of 0 no longer hides the stream's value
+  (`track_light_level` reads `MaxCLL_Original`/`MaxFALL_Original`; a non-zero container value
+  still wins), and `Details.txt` thousands separators are read (`parse_details_number`).
+- **Checked 2026-10-11 (fix-l6-zero-light-levels):** none of the seven saved rpu-baseline inputs
+  has a container 0, so the baselines do not cover the container-0 fix; unit and clip tests do,
+  including the L6 of a generated `extra.json`.
 
 ### P7: analyzer input contract
 
@@ -563,15 +556,9 @@ The detailed gap table and validation method live in
   inject.
 - **Open:** direct-MKV `dovi_tool` steps still accept exit status plus non-empty output, and
   verification is opt-in.
-- **Open (found 2026-10-07, E13 baselines):** `--verify` hard-fails the Profile 7 MEL passthrough
-  of a retail disc whose RPU carries L6 MaxCLL and MaxFALL 0 ("must be a positive integer"). 0 means
-  "unknown" in the static metadata, so for a passthrough RPU (not one mkvdovi generated) the check
-  should warn, not fail. Reproduce with the MEL cut in `~/mkvdovi-work/corpus/dev` whose capture
-  failed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/capture-default.log`.
-- **Checked 2026-10-07 @efcfba8:** the check fails any 0 in `max_content_light_level` /
-  `max_frame_average_light_level` (`mkvdovi/src/verify.rs:661-674`). The passthrough is already
-  told apart: it passes no `DeliveryExpectation` (`delivery` is `None`, `verify.rs:150`). Warn only
-  for that case; generated RPUs and missing or malformed fields keep failing.
+- Fixed 2026-10-11: `--verify` warns, not fails, on L6 MaxCLL/MaxFALL 0 in a passed-through
+  Profile 7 MEL RPU (`delivery` is `None`); generated RPUs, missing or malformed fields and MaxDML 0
+  still fail.
 
 ### E8: histogram percentile reader
 
@@ -659,9 +646,10 @@ The detailed gap table and validation method live in
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
   from `finish_success`.
-- **Found by the step 2 tests:** two L6 defects, now open steps under P6 (priority 4).
+- **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
 - **Checked 2026-10-08 @43401ed:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3.
-  No r4 default baseline (failed on the E7 defect): capture one after the E7 fix, before step 4.
+  r4 MEL default baseline captured after the E7 fix (2026-10-11, step 4 prerequisite met):
+  `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/default/r4-skyfall-macau-casino-entrance`.
   Step 4 (`convert_file`, `pipeline/mod.rs:43`): baselines do not cover resume or cleanup; keep the
   `extra.json` compare before sentinel invalidation (`:676`) and both success paths (`finish_success`
   `:994`). Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an

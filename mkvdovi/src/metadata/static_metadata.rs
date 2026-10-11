@@ -14,6 +14,47 @@ pub(super) fn insert_light_level(meta: &mut HashMap<String, f64>, key: &str, val
     }
 }
 
+/// A MaxCLL / MaxFALL of a MediaInfo video track (`field` is `MaxCLL` or `MaxFALL`), as a number
+/// or the first number of a string such as "1000 cd/m2". When the container states 0 (e.g.
+/// `mkvmerge --max-content-light 0`), MediaInfo reports that 0 and moves the stream's own value to
+/// `<field>_Original`, which is read then. A non-zero container value wins, as for the colour
+/// fields (`ColourField::mediainfo_keys`).
+pub(super) fn track_light_level(track: &Value, field: &str) -> Option<f64> {
+    let re = Regex::new(r"([0-9.]+)").unwrap();
+    let parse = |val: &Value| {
+        val.as_f64()
+            .or_else(|| re.captures(val.as_str()?)?[1].parse::<f64>().ok())
+    };
+    [field.to_string(), format!("{field}_Original")]
+        .iter()
+        .filter_map(|key| track.get(key).and_then(parse))
+        .find(|&v| v > 0.0)
+}
+
+/// A Details.txt number with either decimal mark and optional thousands separators. With both `,`
+/// and `.`, the last one is the decimal mark (`1,234.5`, `1.234,5`). A lone `,` or `.` that
+/// groups three digits is a thousands separator (`1,000`, `1.000`): reading `1,000` as 1.0 would
+/// be an implausible MaxCLL/MaxFALL. When the grouped value would exceed the PQ peak of 10,000
+/// nits, the mark is a decimal mark instead (`812.000` -> 812, `12,500` -> 12.5); any other lone
+/// mark is a decimal mark too (`1234,5`, `812.5`). Trailing marks are ignored.
+pub(super) fn parse_details_number(s: &str) -> Option<f64> {
+    const PQ_PEAK_NITS: f64 = 10_000.0;
+    let s = s.trim_end_matches([',', '.']);
+    let decimal = |s: &str| s.replace(',', ".").parse::<f64>().ok();
+    match (s.rfind(','), s.rfind('.')) {
+        (Some(comma), Some(dot)) if comma > dot => decimal(&s.replace('.', "")),
+        (Some(_), Some(_)) => s.replace(',', "").parse().ok(),
+        (Some(_), None) | (None, Some(_)) => {
+            let grouped = Regex::new(r"^[0-9]{1,3}([,.][0-9]{3})+$").unwrap();
+            match s.replace([',', '.'], "").parse::<f64>() {
+                Ok(v) if grouped.is_match(s) && v <= PQ_PEAK_NITS => Some(v),
+                _ => decimal(s),
+            }
+        }
+        (None, None) => s.parse().ok(),
+    }
+}
+
 /// Static HDR metadata the source states (MediaInfo, then a Details.txt override for
 /// MaxCLL/MaxFALL), without defaults for what is missing.
 pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
@@ -66,31 +107,9 @@ pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
                             meta.insert("md_wpy".to_string(), wpy as f64);
                         }
                     }
-                    // MaxCLL
-                    if let Some(val) = track.get("MaxCLL") {
-                        if let Some(f) = val.as_f64() {
-                            insert_light_level(&mut meta, "max_cll", f);
-                        } else if let Some(s) = val.as_str() {
-                            let re = Regex::new(r"([0-9.]+)").unwrap();
-                            if let Some(caps) = re.captures(s) {
-                                if let Ok(v) = caps[1].parse::<f64>() {
-                                    insert_light_level(&mut meta, "max_cll", v);
-                                }
-                            }
-                        }
-                    }
-
-                    // MaxFALL
-                    if let Some(val) = track.get("MaxFALL") {
-                        if let Some(f) = val.as_f64() {
-                            insert_light_level(&mut meta, "max_fall", f);
-                        } else if let Some(s) = val.as_str() {
-                            let re = Regex::new(r"([0-9.]+)").unwrap();
-                            if let Some(caps) = re.captures(s) {
-                                if let Ok(v) = caps[1].parse::<f64>() {
-                                    insert_light_level(&mut meta, "max_fall", v);
-                                }
-                            }
+                    for (field, key) in [("MaxCLL", "max_cll"), ("MaxFALL", "max_fall")] {
+                        if let Some(v) = track_light_level(track, field) {
+                            insert_light_level(&mut meta, key, v);
                         }
                     }
                 }
@@ -104,16 +123,12 @@ pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
             let re_cll = Regex::new(r"(?i)MaxCLL\s*:\s*([0-9.,]+)").unwrap();
             let re_fall = Regex::new(r"(?i)MaxFALL\s*:\s*([0-9.,]+)").unwrap();
 
-            if let Some(caps) = re_cll.captures(&content) {
-                let s = caps[1].replace(',', ".");
-                if let Ok(v) = s.parse::<f64>() {
-                    insert_light_level(&mut meta, "max_cll", v);
-                }
-            }
-            if let Some(caps) = re_fall.captures(&content) {
-                let s = caps[1].replace(',', ".");
-                if let Ok(v) = s.parse::<f64>() {
-                    insert_light_level(&mut meta, "max_fall", v);
+            for (re, key) in [(re_cll, "max_cll"), (re_fall, "max_fall")] {
+                if let Some(v) = re
+                    .captures(&content)
+                    .and_then(|caps| parse_details_number(&caps[1]))
+                {
+                    insert_light_level(&mut meta, key, v);
                 }
             }
         }

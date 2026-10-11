@@ -6,6 +6,41 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-11: P6 and E7, L6 light-level fixes
+
+The three L6 defects the E13 step 2 tests found on 2026-10-07 are fixed on branch
+`fix-l6-zero-light-levels`. No L1 change.
+
+- P6, container 0: when the MKV Colour element states MaxCLL or MaxFALL 0, MediaInfo reports that
+  0 and moves the stream's value to `MaxCLL_Original`/`MaxFALL_Original`. `track_light_level`
+  (`mkvdovi/src/metadata/static_metadata.rs`) reads the `_Original` field when the container value
+  is missing or 0; a non-zero container value still wins. The pinned tests were flipped and renamed
+  (`static_metadata_reads_the_stream_max_cll_behind_a_zero_container_value` and its MaxFALL twin, a
+  clip with 812/213 nits, plus a check of the L6 in the generated `extra.json`), and
+  `track_light_level_reads_the_stream_value_behind_a_zero_container_value` is a hermetic test.
+- P6 minor, `Details.txt`: `parse_details_number` reads either decimal mark. With both marks the
+  last one is the decimal mark; a lone `,` or `.` that groups three digits is a thousands separator
+  (`1,000`, `1.000` → 1000), else a decimal mark. A value with three fraction digits (`812.500`) is
+  read as grouped, because light levels are whole nits; this rule came from the pre-PR review (one
+  P3, found by all four reviewers). The Codex review then found that it read `812.000` (812 on
+  main) as 812000 (P2); 251b294 bounds it by the PQ peak: grouping applies only while the value
+  stays within 10,000 nits (`10.000` → 10000), above it the mark is a decimal mark (`812.000` →
+  812, `812.500` → 812.5, `12,500` → 12.5), and `1,000,000` / `1.000.000` do not parse.
+- E7: `assert_rpu_invariants` (`mkvdovi/src/verify.rs`) takes `passthrough` (`delivery.is_none()`;
+  only the MEL path calls `verify_post_mux` without a delivery). There, L6 MaxCLL/MaxFALL 0 is a
+  warning; generated RPUs, missing or malformed fields and MaxDML 0 still fail. Tests:
+  `rpu_invariants_warn_on_zero_light_levels_only_in_a_passed_through_rpu` and
+  `rpu_invariants_reject_zero_mastering_peak_and_missing_light_level_in_a_passed_through_rpu`.
+- Gates on 251b294: fmt, clippy, workspace tests (303 passed, only allowed skips). No analyzer or
+  decode path touched, so no CUDA parity or L1 gate.
+- End to end: `scripts/rpu-baseline.sh capture` with `--verify` of the r4 Skyfall MEL cut
+  (`~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/inputs/r4-skyfall-macau-casino-entrance.mkv`)
+  passes with the two L6 0 warnings (it failed at e6d63ed); 1457 RPU frames, in
+  `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/default/r4-skyfall-macau-casino-entrance`. This is
+  the r4 MEL default baseline E13 step 4 waited for. The d1 HDR10 capture
+  `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/default/d1-hotd-s01e06` is identical to
+  `refactor-e6d63ed/default/d1-hotd-s01e06` (`compare --require-identical-l1` PASS).
+
 ### 2026-10-08: P9 step 0, HDR10+ scene boundaries against the picture
 
 P9 step 0 is done: on every HDR10+ cut with enough boundaries, HDR10+ metadata frame n describes

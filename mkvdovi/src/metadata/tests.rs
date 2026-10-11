@@ -10,8 +10,8 @@ use super::format::{classify_hdr_hints, hints_indicate_hlg, hlg_colour_contract,
 use super::probe::{parse_mediainfo_duration_seconds, video_track_frame_count};
 use super::rpu_config::nits_to_pq_code;
 use super::static_metadata::{
-    detect_source_primaries_from_mediainfo, insert_light_level,
-    parse_mastering_display_color_primaries,
+    detect_source_primaries_from_mediainfo, insert_light_level, parse_details_number,
+    parse_mastering_display_color_primaries, track_light_level,
 };
 use crate::rpu_check::{self, Level5Offsets};
 
@@ -1466,6 +1466,60 @@ fn details_file_prefers_the_mkv_spelling() {
 }
 
 #[test]
+fn track_light_level_reads_the_stream_value_behind_a_zero_container_value() {
+    let read = |track: Value| track_light_level(&track, "MaxCLL");
+    // A container 0 hides the stream's value in `_Original`.
+    assert_eq!(
+        read(json!({"MaxCLL": "0 cd/m2", "MaxCLL_Original": "812 cd/m2"})),
+        Some(812.0)
+    );
+    // A non-zero container value wins over the stream's.
+    assert_eq!(
+        read(json!({"MaxCLL": "812 cd/m2", "MaxCLL_Original": "1000 cd/m2"})),
+        Some(812.0)
+    );
+    assert_eq!(read(json!({"MaxCLL_Original": "1000 cd/m2"})), Some(1000.0));
+    assert_eq!(read(json!({"MaxCLL": 997})), Some(997.0));
+    assert_eq!(
+        read(json!({"MaxCLL": 0, "MaxCLL_Original": 433.5})),
+        Some(433.5)
+    );
+    // Zero means "unknown" in both places, so there is no value.
+    assert_eq!(
+        read(json!({"MaxCLL": "0 cd/m2", "MaxCLL_Original": "0 cd/m2"})),
+        None
+    );
+    assert_eq!(read(json!({"MaxFALL": "400 cd/m2"})), None);
+}
+
+#[test]
+fn details_file_numbers_take_either_decimal_mark_and_thousands_separators() {
+    for (text, value) in [
+        ("1000", Some(1000.0)),
+        ("812.5", Some(812.5)),
+        ("1234,5", Some(1234.5)),
+        ("12,5", Some(12.5)),
+        ("1,000", Some(1000.0)),
+        ("1.000", Some(1000.0)),
+        ("1.234", Some(1234.0)),
+        ("10.000", Some(10_000.0)),
+        // Grouped, these would exceed the 10,000-nit PQ peak, so the mark is a decimal mark.
+        ("812.000", Some(812.0)),
+        ("12,500", Some(12.5)),
+        ("1,000,000", None),
+        ("1.000.000", None),
+        ("1,234.5", Some(1234.5)),
+        ("1.234,5", Some(1234.5)),
+        ("812,", Some(812.0)),
+        ("1000.", Some(1000.0)),
+        (",", None),
+        ("1,2,3", None),
+    ] {
+        assert_eq!(parse_details_number(text), value, "{text}");
+    }
+}
+
+#[test]
 fn details_file_light_levels_are_read_without_mediainfo_data() {
     // The input is not a video, so MediaInfo (if installed) reports no video track and only
     // the Details.txt override contributes.
@@ -1483,14 +1537,13 @@ fn details_file_light_levels_are_read_without_mediainfo_data() {
     .unwrap();
     assert_eq!(read(), meta(&[("max_cll", 1234.5)]));
 
-    // Suspicious: a thousands separator is read as a decimal comma (1,000 -> 1.0), and a
-    // value with both separators does not parse at all. Only the first match counts.
+    // Thousands separators, with and without a decimal mark. Only the first match counts.
     fs::write(
         dir.path().join("clip_mkv_Details.txt"),
         "MaxCLL: 1,000\nMaxFALL: 1,234.5\nMaxFALL: 300\n",
     )
     .unwrap();
-    assert_eq!(read(), meta(&[("max_cll", 1.0)]));
+    assert_eq!(read(), meta(&[("max_cll", 1000.0), ("max_fall", 1234.5)]));
 }
 
 /// Serializes `check_hdr_format` in tests: its Dolby Vision probes use one directory per
@@ -1613,7 +1666,7 @@ fn static_metadata_of_unlisted_primaries_and_zero_light_levels_is_luminance_only
     let dir = tempfile::tempdir().unwrap();
     // MediaInfo 24.01 leaves MaxCLL/MaxFALL out for a 0,0 light-level SEI, so this pins that
     // omission; the zero skip in read_static_metadata itself is pinned by
-    // static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value.
+    // track_light_level_reads_the_stream_value_behind_a_zero_container_value.
     let params = "hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:\
             master-display=G(13000,34000)B(7400,3100)R(34100,15900)WP(15600,16400)L(40000000,1):\
             max-cll=0,0";
@@ -1660,58 +1713,88 @@ fn details_file_overrides_the_mediainfo_light_levels() {
     );
 }
 
-#[test]
-fn static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value() {
+/// `PQ_X265` with light levels other than the 1000/400 L6 defaults, so a test can tell the
+/// stream's values from the defaults.
+const PQ_X265_812_213: &str = "hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:\
+        master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):\
+        max-cll=812,213";
+
+/// A `PQ_X265_812_213` clip muxed by mkvmerge with `container_args` (a zero container light
+/// level). None (after printing why) when a tool is missing.
+fn clip_with_container_light_level(
+    test: &str,
+    dir: &Path,
+    container_args: [&str; 2],
+) -> Option<PathBuf> {
     if let Some(reason) =
         missing_clip_tools(&[("mediainfo", "--version"), ("mkvmerge", "--version")])
     {
-        eprintln!("Skipping static_metadata_skips_a_zero_container_max_cll_and_hides_the_stream_value: {reason}");
-        return;
+        eprintln!("Skipping {test}: {reason}");
+        return None;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let raw = encode_clip(dir.path(), "clip.hevc", PQ_X265).unwrap();
-    let clip = dir.path().join("clip.mkv");
+    let raw = encode_clip(dir, "clip.hevc", PQ_X265_812_213).unwrap();
+    let clip = dir.join("clip.mkv");
     run_tool(
         Command::new("mkvmerge")
             .arg("-q")
             .arg("-o")
             .arg(&clip)
-            .args(["--max-content-light", "0:0"])
+            .args(container_args)
             .arg(&raw),
     );
-    // MediaInfo reports the container's MaxCLL as "0" and moves the stream's 1000 to
-    // MaxCLL_Original, which is never read. The zero is not stored either, so max_cll ends up
-    // missing although the stream states 1000 (suspicious; the L6 default fills it later).
-    assert_eq!(
-        read_static_metadata(clip.to_str().unwrap()),
-        meta(&[("max_dml", 1000.0), ("min_dml", 0.005), ("max_fall", 400.0)])
-    );
+    Some(clip)
 }
 
 #[test]
-fn static_metadata_skips_a_zero_container_max_fall_and_hides_the_stream_value() {
-    if let Some(reason) =
-        missing_clip_tools(&[("mediainfo", "--version"), ("mkvmerge", "--version")])
-    {
-        eprintln!("Skipping static_metadata_skips_a_zero_container_max_fall_and_hides_the_stream_value: {reason}");
-        return;
-    }
+fn static_metadata_reads_the_stream_max_cll_behind_a_zero_container_value() {
     let dir = tempfile::tempdir().unwrap();
-    let raw = encode_clip(dir.path(), "clip.hevc", PQ_X265).unwrap();
-    let clip = dir.path().join("clip.mkv");
-    run_tool(
-        Command::new("mkvmerge")
-            .arg("-q")
-            .arg("-o")
-            .arg(&clip)
-            .args(["--max-frame-light", "0:0"])
-            .arg(&raw),
+    let Some(clip) = clip_with_container_light_level(
+        "static_metadata_reads_the_stream_max_cll_behind_a_zero_container_value",
+        dir.path(),
+        ["--max-content-light", "0:0"],
+    ) else {
+        return;
+    };
+    // MediaInfo reports the container's MaxCLL as "0" and the stream's 812 as MaxCLL_Original.
+    let mut static_meta = read_static_metadata(clip.to_str().unwrap());
+    assert_eq!(
+        static_meta,
+        meta(&[
+            ("max_dml", 1000.0),
+            ("min_dml", 0.005),
+            ("max_cll", 812.0),
+            ("max_fall", 213.0),
+        ])
     );
-    // The MaxFALL twin of the MaxCLL case above: the stream's 400 moves to MaxFALL_Original
-    // and the container's "0" is not stored (suspicious, as above).
+
+    // The stream's values reach L6 of the generated extra.json, not the 1000/400 defaults.
+    assert!(resolve_light_levels(&mut static_meta, None, false).is_empty());
+    let output = dir.path().join("extra.json");
+    generate_extra_json(&output, "8.1", &static_meta, &[], None, None, None).unwrap();
+    let json: Value = serde_json::from_reader(File::open(&output).unwrap()).unwrap();
+    assert_eq!(json["level6"]["max_content_light_level"], 812);
+    assert_eq!(json["level6"]["max_frame_average_light_level"], 213);
+}
+
+#[test]
+fn static_metadata_reads_the_stream_max_fall_behind_a_zero_container_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some(clip) = clip_with_container_light_level(
+        "static_metadata_reads_the_stream_max_fall_behind_a_zero_container_value",
+        dir.path(),
+        ["--max-frame-light", "0:0"],
+    ) else {
+        return;
+    };
+    // The MaxFALL twin: the stream's 213 is MaxFALL_Original behind the container's "0".
     assert_eq!(
         read_static_metadata(clip.to_str().unwrap()),
-        meta(&[("max_dml", 1000.0), ("min_dml", 0.005), ("max_cll", 1000.0)])
+        meta(&[
+            ("max_dml", 1000.0),
+            ("min_dml", 0.005),
+            ("max_cll", 812.0),
+            ("max_fall", 213.0),
+        ])
     );
 }
 
