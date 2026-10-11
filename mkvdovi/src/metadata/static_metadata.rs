@@ -32,6 +32,28 @@ pub(super) fn track_light_level(track: &Value, field: &str) -> Option<f64> {
         .find(|&v| v > 0.0)
 }
 
+/// A Details.txt number with either decimal mark and optional thousands separators. With both `,`
+/// and `.`, the last one is the decimal mark (`1,234.5`, `1.234,5`). A lone `,` is a thousands
+/// separator when it groups three digits (`1,000`, `1,000,000`), else a decimal comma (`1234,5`):
+/// reading `1,000` as 1.0 would be an implausible MaxCLL/MaxFALL. Trailing marks are ignored.
+pub(super) fn parse_details_number(s: &str) -> Option<f64> {
+    let s = s.trim_end_matches([',', '.']);
+    let normalized = match (s.rfind(','), s.rfind('.')) {
+        (Some(comma), Some(dot)) if comma > dot => s.replace('.', "").replace(',', "."),
+        (Some(_), Some(_)) => s.replace(',', ""),
+        (Some(_), None) => {
+            let grouped = Regex::new(r"^[0-9]{1,3}(,[0-9]{3})+$").unwrap();
+            if grouped.is_match(s) {
+                s.replace(',', "")
+            } else {
+                s.replace(',', ".")
+            }
+        }
+        _ => s.to_string(),
+    };
+    normalized.parse().ok()
+}
+
 /// Static HDR metadata the source states (MediaInfo, then a Details.txt override for
 /// MaxCLL/MaxFALL), without defaults for what is missing.
 pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
@@ -100,16 +122,12 @@ pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
             let re_cll = Regex::new(r"(?i)MaxCLL\s*:\s*([0-9.,]+)").unwrap();
             let re_fall = Regex::new(r"(?i)MaxFALL\s*:\s*([0-9.,]+)").unwrap();
 
-            if let Some(caps) = re_cll.captures(&content) {
-                let s = caps[1].replace(',', ".");
-                if let Ok(v) = s.parse::<f64>() {
-                    insert_light_level(&mut meta, "max_cll", v);
-                }
-            }
-            if let Some(caps) = re_fall.captures(&content) {
-                let s = caps[1].replace(',', ".");
-                if let Ok(v) = s.parse::<f64>() {
-                    insert_light_level(&mut meta, "max_fall", v);
+            for (re, key) in [(re_cll, "max_cll"), (re_fall, "max_fall")] {
+                if let Some(v) = re
+                    .captures(&content)
+                    .and_then(|caps| parse_details_number(&caps[1]))
+                {
+                    insert_light_level(&mut meta, key, v);
                 }
             }
         }

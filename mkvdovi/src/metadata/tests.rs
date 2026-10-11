@@ -10,7 +10,7 @@ use super::format::{classify_hdr_hints, hints_indicate_hlg, hlg_colour_contract,
 use super::probe::{parse_mediainfo_duration_seconds, video_track_frame_count};
 use super::rpu_config::nits_to_pq_code;
 use super::static_metadata::{
-    detect_source_primaries_from_mediainfo, insert_light_level,
+    detect_source_primaries_from_mediainfo, insert_light_level, parse_details_number,
     parse_mastering_display_color_primaries, track_light_level,
 };
 use crate::rpu_check::{self, Level5Offsets};
@@ -1493,6 +1493,26 @@ fn track_light_level_reads_the_stream_value_behind_a_zero_container_value() {
 }
 
 #[test]
+fn details_file_numbers_take_either_decimal_mark_and_thousands_separators() {
+    for (text, value) in [
+        ("1000", Some(1000.0)),
+        ("812.5", Some(812.5)),
+        ("1234,5", Some(1234.5)),
+        ("12,5", Some(12.5)),
+        ("1,000", Some(1000.0)),
+        ("1,000,000", Some(1_000_000.0)),
+        ("1,234.5", Some(1234.5)),
+        ("1.234,5", Some(1234.5)),
+        ("812,", Some(812.0)),
+        ("1000.", Some(1000.0)),
+        (",", None),
+        ("1,2,3", None),
+    ] {
+        assert_eq!(parse_details_number(text), value, "{text}");
+    }
+}
+
+#[test]
 fn details_file_light_levels_are_read_without_mediainfo_data() {
     // The input is not a video, so MediaInfo (if installed) reports no video track and only
     // the Details.txt override contributes.
@@ -1510,14 +1530,13 @@ fn details_file_light_levels_are_read_without_mediainfo_data() {
     .unwrap();
     assert_eq!(read(), meta(&[("max_cll", 1234.5)]));
 
-    // Suspicious: a thousands separator is read as a decimal comma (1,000 -> 1.0), and a
-    // value with both separators does not parse at all. Only the first match counts.
+    // Thousands separators, with and without a decimal mark. Only the first match counts.
     fs::write(
         dir.path().join("clip_mkv_Details.txt"),
         "MaxCLL: 1,000\nMaxFALL: 1,234.5\nMaxFALL: 300\n",
     )
     .unwrap();
-    assert_eq!(read(), meta(&[("max_cll", 1.0)]));
+    assert_eq!(read(), meta(&[("max_cll", 1000.0), ("max_fall", 1234.5)]));
 }
 
 /// Serializes `check_hdr_format` in tests: its Dolby Vision probes use one directory per
