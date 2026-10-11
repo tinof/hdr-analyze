@@ -32,27 +32,27 @@ pub(super) fn track_light_level(track: &Value, field: &str) -> Option<f64> {
 }
 
 /// A Details.txt number with either decimal mark and optional thousands separators. With both `,`
-/// and `.`, the last one is the decimal mark (`1,234.5`, `1.234,5`). A lone `,` or `.` is a
-/// thousands separator when it groups three digits (`1,000`, `1.000`, `1,000,000`), else a decimal
-/// mark (`1234,5`, `812.5`): reading `1,000` as 1.0 would be an implausible MaxCLL/MaxFALL. So a
-/// value with exactly three fraction digits (`812.500`) is read as grouped; CTA-861.3 light levels
-/// are whole nits. Trailing marks are ignored.
+/// and `.`, the last one is the decimal mark (`1,234.5`, `1.234,5`). A lone `,` or `.` that
+/// groups three digits is a thousands separator (`1,000`, `1.000`): reading `1,000` as 1.0 would
+/// be an implausible MaxCLL/MaxFALL. When the grouped value would exceed the PQ peak of 10,000
+/// nits, the mark is a decimal mark instead (`812.000` -> 812, `12,500` -> 12.5); any other lone
+/// mark is a decimal mark too (`1234,5`, `812.5`). Trailing marks are ignored.
 pub(super) fn parse_details_number(s: &str) -> Option<f64> {
+    const PQ_PEAK_NITS: f64 = 10_000.0;
     let s = s.trim_end_matches([',', '.']);
-    let normalized = match (s.rfind(','), s.rfind('.')) {
-        (Some(comma), Some(dot)) if comma > dot => s.replace('.', "").replace(',', "."),
-        (Some(_), Some(_)) => s.replace(',', ""),
+    let decimal = |s: &str| s.replace(',', ".").parse::<f64>().ok();
+    match (s.rfind(','), s.rfind('.')) {
+        (Some(comma), Some(dot)) if comma > dot => decimal(&s.replace('.', "")),
+        (Some(_), Some(_)) => s.replace(',', "").parse().ok(),
         (Some(_), None) | (None, Some(_)) => {
             let grouped = Regex::new(r"^[0-9]{1,3}([,.][0-9]{3})+$").unwrap();
-            if grouped.is_match(s) {
-                s.replace([',', '.'], "")
-            } else {
-                s.replace(',', ".")
+            match s.replace([',', '.'], "").parse::<f64>() {
+                Ok(v) if grouped.is_match(s) && v <= PQ_PEAK_NITS => Some(v),
+                _ => decimal(s),
             }
         }
-        (None, None) => s.to_string(),
-    };
-    normalized.parse().ok()
+        (None, None) => s.parse().ok(),
+    }
 }
 
 /// Static HDR metadata the source states (MediaInfo, then a Details.txt override for
