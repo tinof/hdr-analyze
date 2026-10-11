@@ -14,6 +14,24 @@ pub(super) fn insert_light_level(meta: &mut HashMap<String, f64>, key: &str, val
     }
 }
 
+/// A MaxCLL / MaxFALL of a MediaInfo video track (`field` is `MaxCLL` or `MaxFALL`), as a number
+/// or the first number of a string such as "1000 cd/m2". When the container states 0 (e.g.
+/// `mkvmerge --max-content-light 0`), MediaInfo reports that 0 and moves the stream's own value to
+/// `<field>_Original`, which is read then. A non-zero container value wins, as for the colour
+/// fields (`ColourField::mediainfo_keys`).
+pub(super) fn track_light_level(track: &Value, field: &str) -> Option<f64> {
+    let parse = |val: &Value| {
+        val.as_f64().or_else(|| {
+            let re = Regex::new(r"([0-9.]+)").unwrap();
+            re.captures(val.as_str()?)?[1].parse::<f64>().ok()
+        })
+    };
+    [field.to_string(), format!("{field}_Original")]
+        .iter()
+        .filter_map(|key| track.get(key).and_then(parse))
+        .find(|&v| v > 0.0)
+}
+
 /// Static HDR metadata the source states (MediaInfo, then a Details.txt override for
 /// MaxCLL/MaxFALL), without defaults for what is missing.
 pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
@@ -66,31 +84,9 @@ pub fn read_static_metadata(input_file: &str) -> HashMap<String, f64> {
                             meta.insert("md_wpy".to_string(), wpy as f64);
                         }
                     }
-                    // MaxCLL
-                    if let Some(val) = track.get("MaxCLL") {
-                        if let Some(f) = val.as_f64() {
-                            insert_light_level(&mut meta, "max_cll", f);
-                        } else if let Some(s) = val.as_str() {
-                            let re = Regex::new(r"([0-9.]+)").unwrap();
-                            if let Some(caps) = re.captures(s) {
-                                if let Ok(v) = caps[1].parse::<f64>() {
-                                    insert_light_level(&mut meta, "max_cll", v);
-                                }
-                            }
-                        }
-                    }
-
-                    // MaxFALL
-                    if let Some(val) = track.get("MaxFALL") {
-                        if let Some(f) = val.as_f64() {
-                            insert_light_level(&mut meta, "max_fall", f);
-                        } else if let Some(s) = val.as_str() {
-                            let re = Regex::new(r"([0-9.]+)").unwrap();
-                            if let Some(caps) = re.captures(s) {
-                                if let Ok(v) = caps[1].parse::<f64>() {
-                                    insert_light_level(&mut meta, "max_fall", v);
-                                }
-                            }
+                    for (field, key) in [("MaxCLL", "max_cll"), ("MaxFALL", "max_fall")] {
+                        if let Some(v) = track_light_level(track, field) {
+                            insert_light_level(&mut meta, key, v);
                         }
                     }
                 }
