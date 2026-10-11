@@ -19,7 +19,8 @@ This document provides a historical record of completed milestones, feature impl
 
 - **`Details.txt` light levels with thousands separators** (mkvdovi). `1,000` and `1.000` were read
   as 1.0 (or not at all, as in `1,234.5`); they now read as 1000. With both marks, the last one is
-  the decimal mark; a lone mark that groups three digits is a thousands separator.
+  the decimal mark; a lone mark that groups three digits is a thousands separator while the value
+  stays within 10,000 nits (`10.000` → 10000), else a decimal mark (`812.000` → 812, as before).
 
 ## [0.6.0] - 2026-10-09
 

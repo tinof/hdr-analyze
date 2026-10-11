@@ -22,13 +22,16 @@ The three L6 defects the E13 step 2 tests found on 2026-10-07 are fixed on branc
   last one is the decimal mark; a lone `,` or `.` that groups three digits is a thousands separator
   (`1,000`, `1.000` → 1000), else a decimal mark. A value with three fraction digits (`812.500`) is
   read as grouped, because light levels are whole nits; this rule came from the pre-PR review (one
-  P3, found by all four reviewers).
+  P3, found by all four reviewers). The Codex review then found that it read `812.000` (812 on
+  main) as 812000 (P2); 251b294 bounds it by the PQ peak: grouping applies only while the value
+  stays within 10,000 nits (`10.000` → 10000), above it the mark is a decimal mark (`812.000` →
+  812, `812.500` → 812.5, `12,500` → 12.5), and `1,000,000` / `1.000.000` do not parse.
 - E7: `assert_rpu_invariants` (`mkvdovi/src/verify.rs`) takes `passthrough` (`delivery.is_none()`;
   only the MEL path calls `verify_post_mux` without a delivery). There, L6 MaxCLL/MaxFALL 0 is a
   warning; generated RPUs, missing or malformed fields and MaxDML 0 still fail. Tests:
   `rpu_invariants_warn_on_zero_light_levels_only_in_a_passed_through_rpu` and
   `rpu_invariants_reject_zero_mastering_peak_and_missing_light_level_in_a_passed_through_rpu`.
-- Gates on 5a0961d: fmt, clippy, workspace tests (303 passed, only allowed skips). No analyzer or
+- Gates on 251b294: fmt, clippy, workspace tests (303 passed, only allowed skips). No analyzer or
   decode path touched, so no CUDA parity or L1 gate.
 - End to end: `scripts/rpu-baseline.sh capture` with `--verify` of the r4 Skyfall MEL cut
   (`~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/inputs/r4-skyfall-macau-casino-entrance.mkv`)
