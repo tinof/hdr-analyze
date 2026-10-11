@@ -20,11 +20,10 @@ pub(super) fn insert_light_level(meta: &mut HashMap<String, f64>, key: &str, val
 /// `<field>_Original`, which is read then. A non-zero container value wins, as for the colour
 /// fields (`ColourField::mediainfo_keys`).
 pub(super) fn track_light_level(track: &Value, field: &str) -> Option<f64> {
+    let re = Regex::new(r"([0-9.]+)").unwrap();
     let parse = |val: &Value| {
-        val.as_f64().or_else(|| {
-            let re = Regex::new(r"([0-9.]+)").unwrap();
-            re.captures(val.as_str()?)?[1].parse::<f64>().ok()
-        })
+        val.as_f64()
+            .or_else(|| re.captures(val.as_str()?)?[1].parse::<f64>().ok())
     };
     [field.to_string(), format!("{field}_Original")]
         .iter()
