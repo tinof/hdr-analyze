@@ -62,19 +62,20 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-08 at main@43401ed)
+### Next up (checked 2026-10-11 at main@8db4ad6)
 
-1. **P6 container-0 MaxCLL/MaxFALL, then E7 passthrough L6 0** (priority 4), one branch
-   `fix-l6-zero-light-levels`, two commits: no L1 change, unit-test gate (flip the pinned tests, an
-   E7 test for both cases). Before E13 step 4, because the E7 defect blocks the r4 MEL default
-   baseline that step 4's rpu-baseline gate needs.
-2. **P9: which scene list carries the pixel average** (priority 2), offline on the development
-   corpus, no code on `main`, so it can run beside a code branch. Step 0 (2026-10-08) found offset 0
-   but HDR10+ scenes holding several shots in 24% of the frames. Gate: L1 average per frame against
-   the Alita retail RPU for HDR10+ scenes, analyzer cuts and their union; result in the log.
-3. **E13 step 4: split `convert_file` by phase** (`feat/e13-convert-file-phases`), before the P9
-   hybrid flag. Gate: the E13 per-move gate plus an r4 default baseline captured after E7. A
-   function extraction, not a line-exact move, so the pure-move panel mode does not apply.
+1. **P9: which scene list carries the pixel average** (priority 2), offline on `feat/dev-corpus`
+   with the step-0 v5 sidecars of the two Alita cuts; the result lands as a docs PR. Gate: L1
+   average per frame against the Alita retail RPU for HDR10+ scenes, analyzer cuts and their
+   union, measured and generator-clamped scores apart; retail min is 0 on every frame, so the
+   minimum rule stays open. Before E13 step 4 (`P9` item). Release: none
+2. **E13 step 4: split `convert_file` by phase** (`feat/e13-convert-file-phases`), can start
+   beside 1 (no shared files); before the P9 hybrid flag. Gate: the E13 per-move gate with the
+   r4 baseline in `l6-fix-e052c3d`, plus resume tests the baselines cannot give. Full panel,
+   not pure-move. Release: none
+3. **P1 step 1: measure CPU `accurate` against `balanced`** (priority 4), offline: CPU cost and
+   `FAST_BILINEAR`'s effect on L1 max, then flip CPU `auto` or keep it with a visible note.
+   The flip waits for E13 step 4 (`pipeline/`). Release: none (measurement); minor if it flips
 
 ### Waiting for the owner
 
@@ -273,6 +274,9 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Open:** for PQ, normalize full-range input or refuse it. (The HLG half shipped with P8:
   `mkvdovi` refuses full-range or non-BT.2020 HLG, `metadata::check_hlg_colour_contract`; the
   analyzer itself still only warns.)
+- **Checked 2026-10-11 @8db4ad6:** full-range PQ still only warns
+  (`hdr_analyzer_mvp/src/pipeline.rs:412`) and mkvdovi has no PQ range refusal; a refusal touches
+  `metadata/format.rs` and `pipeline/mod.rs`, so it waits for E13 step 4.
 
 ### P8: HLG → Profile 8.4 composer
 
@@ -323,11 +327,12 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Open (next design step):** decide which scene list carries the pixel average and minimum
   (HDR10+, the analyzer's cuts, or their union with the HDR10+ peak per piece), scored on the Alita
   cuts against the retail RPU; then E13 step 4, then the hybrid flag.
-- **Checked 2026-10-08 @43401ed:** still valid: `pipeline/dovi_steps.rs:319` passes `--hdr10plus-json`
-  (shots ignored, no HDR10+ `--verify` sidecar, `pipeline/mod.rs:897`), DV is detected first
-  (`metadata/format.rs:52`, Alita and Shining take the MEL path), mkvdovi reads only per-frame minima
-  (`metadata/sidecar.rs:179`). New: `AverageRGB` is one value per HDR10+ scene on all 8 cuts, so only
-  boundaries can be aligned; h1/h5 `shotlist.txt` equals the HDR10+ scene starts (not independent); all 8 `run/` sidecars are v4.
+- **Checked 2026-10-11 @8db4ad6:** still valid (`pipeline/dovi_steps.rs:319`, `pipeline/mod.rs:897`,
+  `metadata/format.rs:52`, `metadata/sidecar.rs:179`); `AverageRGB` is one value per HDR10+ scene,
+  `run/` sidecars are v4 (use the step-0 v5 runs). New: `l1_diff` scores per-frame averages
+  (`tools/l1_diff/src/main.rs:787`), so a candidate scene list needs its own per-scene aggregation
+  expanded back to frames; Alita retail min is 0 on every frame and avg sits at the 819 floor on
+  most night frames; Alita takes the MEL path, so the hybrid flag needs an HDR10+-only cut.
 
 ### P10: measured against delivered
 
@@ -652,12 +657,12 @@ The detailed gap table and validation method live in
   spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
   from `finish_success`.
 - **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
-- **Checked 2026-10-08 @43401ed:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3.
-  r4 MEL default baseline captured after the E7 fix (2026-10-11, step 4 prerequisite met):
-  `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/default/r4-skyfall-macau-casino-entrance`.
-  Step 4 (`convert_file`, `pipeline/mod.rs:43`): baselines do not cover resume or cleanup; keep the
-  `extra.json` compare before sentinel invalidation (`:676`) and both success paths (`finish_success`
-  `:994`). Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
+- **Checked 2026-10-11 @8db4ad6:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3;
+  r4 MEL default in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/` (step 4 prerequisite met).
+  Step 4 (`convert_file`, `pipeline/mod.rs:43`): baselines do not cover resume, cleanup or source
+  deletion (`scripts/rpu-baseline.sh:90` always passes `--keep-source --verify`), so unit-test
+  those and the `Ok(false)` returns (`:47,96,247,286`); keep the `extra.json` compare before
+  sentinel invalidation (`:676`) and both success paths (`finish_success` `:994`). Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
   optimizer-enabled default `.bin` (both gates pass `--disable-optimizer`).
 
 ## Checked and kept (2026-10-03)
