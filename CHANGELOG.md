@@ -6,6 +6,21 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Fixed
+
+- **MaxCLL/MaxFALL stated as 0 in the container no longer hide the stream's value** (mkvdovi). When
+  the MKV Colour element says 0 (e.g. `mkvmerge --max-content-light 0`), MediaInfo moves the
+  stream's value to `MaxCLL_Original`/`MaxFALL_Original`; mkvdovi now reads it there instead of
+  writing the 1000/400 L6 default. A non-zero container value still wins.
+
+- **`--verify` accepts L6 MaxCLL/MaxFALL 0 in a passed-through Profile 7 MEL RPU** (mkvdovi). Retail
+  discs state 0 ("unknown"); it is now a warning instead of a hard failure. A generated RPU, a
+  missing or malformed field and a MaxDML of 0 still fail.
+
+- **`Details.txt` light levels with thousands separators** (mkvdovi). `1,000` and `1.000` were read
+  as 1.0 (or not at all, as in `1,234.5`); they now read as 1000. With both marks, the last one is
+  the decimal mark; a lone mark that groups three digits is a thousands separator.
+
 ## [0.6.0] - 2026-10-09
 
 ### Upgrade notes
