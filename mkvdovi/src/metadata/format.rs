@@ -69,25 +69,43 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
         return format;
     }
 
-    // 2. Fallback to FFprobe
-    // (Simplification: Assuming mediainfo is usually correct or sufficient for now)
-    // If MediaInfo failed to detect, check ffprobe color_transfer
-    if let Ok(json) = get_ffprobe_json(input_file) {
-        // basic checking logic...
-        // For brevity in this implementation plan step, relying on MediaInfo is usually 99% there.
-        // But let's check streams[0].color_transfer
-        if let Some(streams) = json.get("streams").and_then(|v| v.as_array()) {
-            for stream in streams {
-                if let Some(transfer) = stream.get("color_transfer").and_then(|s| s.as_str()) {
-                    if let Some(format) = classify_hdr_hints(transfer, measurements) {
-                        return format;
-                    }
-                }
-            }
-        }
-    }
+    // 2. Fallback to ffprobe when MediaInfo is missing or names no HDR format.
+    ffprobe_hdr_format(input_file, measurements).unwrap_or(HdrFormat::Unsupported)
+}
 
-    HdrFormat::Unsupported
+/// HDR format of the first video stream from ffprobe's transfer tags: HLG when
+/// [`ffprobe_indicates_hlg`], else what [`classify_hdr_hints`] makes of its stream-level
+/// `color_transfer`. Only that stream counts: the conversion extracts `0:v:0`.
+pub(super) fn ffprobe_hdr_format(input_file: &str, measurements: bool) -> Option<HdrFormat> {
+    let json = get_ffprobe_json(input_file).ok();
+    if ffprobe_indicates_hlg(input_file, json.as_ref()) {
+        return Some(HdrFormat::Hlg);
+    }
+    classify_hdr_hints(first_video_transfer(json.as_ref()?)?, measurements)
+}
+
+/// True when ffprobe reports HLG for the first video stream: its stream-level `color_transfer`
+/// in `json`, or else its first decoded frame's ([`first_frame_color_transfer`]). The stream
+/// level usually carries the HEVC VUI value (e.g. `bt2020-10` or `bt709` in broadcast HLG), so it
+/// misses HLG signalled only through the alternative transfer characteristics SEI, which FFmpeg
+/// applies to decoded frames. Whether ffprobe also shows the SEI value at stream level depends on
+/// the file and container.
+pub(super) fn ffprobe_indicates_hlg(input_file: &str, json: Option<&Value>) -> bool {
+    json.and_then(first_video_transfer)
+        .is_some_and(hints_indicate_hlg)
+        || first_frame_color_transfer(input_file)
+            .is_some_and(|transfer| hints_indicate_hlg(&transfer))
+}
+
+/// Stream-level `color_transfer` of the first video stream (ffmpeg's `v:0`) in ffprobe
+/// `-show_streams` JSON.
+pub(super) fn first_video_transfer(json: &Value) -> Option<&str> {
+    json.get("streams")?
+        .as_array()?
+        .iter()
+        .find(|stream| stream.get("codec_type").and_then(Value::as_str) == Some("video"))?
+        .get("color_transfer")?
+        .as_str()
 }
 
 fn append_mediainfo_video_hints(json: &Value, hints: &mut String) {
@@ -176,18 +194,8 @@ pub fn has_hlg_transfer(input_file: &str) -> bool {
     if hints_indicate_hlg(&hints) {
         return true;
     }
-    get_ffprobe_json(input_file).is_ok_and(|json| {
-        json.get("streams")
-            .and_then(Value::as_array)
-            .is_some_and(|streams| {
-                streams.iter().any(|stream| {
-                    stream
-                        .get("color_transfer")
-                        .and_then(Value::as_str)
-                        .is_some_and(hints_indicate_hlg)
-                })
-            })
-    })
+    let json = get_ffprobe_json(input_file).ok();
+    ffprobe_indicates_hlg(input_file, json.as_ref())
 }
 
 /// A colour field a Dolby Vision Profile 8.4 RPU fixes for its HLG base layer: the RPU's

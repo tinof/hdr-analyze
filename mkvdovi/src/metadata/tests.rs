@@ -6,7 +6,10 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::format::{classify_hdr_hints, hints_indicate_hlg, hlg_colour_contract, ColourField};
+use super::format::{
+    classify_hdr_hints, ffprobe_hdr_format, ffprobe_indicates_hlg, first_video_transfer,
+    hints_indicate_hlg, hlg_colour_contract, ColourField,
+};
 use super::probe::{parse_mediainfo_duration_seconds, video_track_frame_count};
 use super::rpu_config::nits_to_pq_code;
 use super::static_metadata::{
@@ -1586,6 +1589,9 @@ const PQ_X265: &str = "hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=b
         master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):\
         max-cll=1000,400";
 const HLG_X265: &str = "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc";
+/// HLG signalled only through the alternative transfer characteristics SEI, as in broadcast HLG:
+/// the VUI says BT.2020 10-bit.
+const SEI_HLG_X265: &str = "colorprim=bt2020:transfer=bt2020-10:colormatrix=bt2020nc:atc-sei=18";
 const SDR_X265: &str = "colorprim=bt709:transfer=bt709:colormatrix=bt709";
 
 /// Three 64x64 10-bit frames encoded with libx265 into `dir/name`; the extension picks the
@@ -1836,6 +1842,95 @@ fn hlg_clip_is_hlg() {
     // A measurements file does not change an HLG classification.
     fs::write(dir.path().join("clip_measurements.bin"), b"").unwrap();
     assert_eq!(hdr_format_of(&clip), HdrFormat::Hlg);
+}
+
+/// The ffprobe fallback (MediaInfo missing or silent) finds HLG that only the SEI signals.
+#[test]
+fn sei_only_hlg_clip_is_hlg_through_ffprobe() {
+    if let Some(reason) = missing_clip_tools(&[("ffprobe", "-version")]) {
+        eprintln!("Skipping sei_only_hlg_clip_is_hlg_through_ffprobe: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let clip = encode_clip(dir.path(), "clip.mkv", SEI_HLG_X265).unwrap();
+    let input = clip.to_str().unwrap();
+    // The stream level carries only the VUI value (ffprobe 6.1 and 9.0 alike for this clip),
+    // so the fallback has to read the decoded frame.
+    let json = get_ffprobe_json(input).unwrap();
+    assert_eq!(first_video_transfer(&json), Some("bt2020-10"));
+    assert_eq!(
+        first_frame_color_transfer(input).as_deref(),
+        Some("arib-std-b67")
+    );
+    assert!(ffprobe_indicates_hlg(input, Some(&json)));
+    assert!(ffprobe_indicates_hlg(input, None));
+    assert_eq!(ffprobe_hdr_format(input, false), Some(HdrFormat::Hlg));
+}
+
+/// The ffprobe fallback still classifies a stream-level PQ tag as HDR10.
+#[test]
+fn pq_clip_is_hdr10_through_ffprobe() {
+    if let Some(reason) = missing_clip_tools(&[("ffprobe", "-version")]) {
+        eprintln!("Skipping pq_clip_is_hdr10_through_ffprobe: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let clip = encode_clip(dir.path(), "clip.mkv", PQ_X265).unwrap();
+    let input = clip.to_str().unwrap();
+    assert_eq!(
+        ffprobe_hdr_format(input, false),
+        Some(HdrFormat::Hdr10Unsupported)
+    );
+    assert_eq!(
+        ffprobe_hdr_format(input, true),
+        Some(HdrFormat::Hdr10WithMeasurements)
+    );
+}
+
+/// Only the first video stream counts, as in the extraction (`0:v:0`): a PQ track followed by
+/// an HLG track is HDR10, not HLG.
+#[test]
+fn pq_track_before_hlg_track_is_hdr10_through_ffprobe() {
+    if let Some(reason) = missing_clip_tools(&[("ffprobe", "-version")]) {
+        eprintln!("Skipping pq_track_before_hlg_track_is_hdr10_through_ffprobe: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let pq = encode_clip(dir.path(), "pq.mkv", PQ_X265).unwrap();
+    let hlg = encode_clip(dir.path(), "hlg.mkv", HLG_X265).unwrap();
+    let mixed = dir.path().join("mixed.mkv");
+    run_tool(
+        Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-i"])
+            .arg(&pq)
+            .arg("-i")
+            .arg(&hlg)
+            .args(["-map", "0:v", "-map", "1:v", "-c", "copy", "-y"])
+            .arg(&mixed),
+    );
+    let input = mixed.to_str().unwrap();
+    let json = get_ffprobe_json(input).unwrap();
+    assert!(!ffprobe_indicates_hlg(input, Some(&json)));
+    assert_eq!(
+        ffprobe_hdr_format(input, false),
+        Some(HdrFormat::Hdr10Unsupported)
+    );
+}
+
+#[test]
+fn first_video_transfer_reads_the_first_video_stream() {
+    let json = json!({"streams": [
+        {"codec_type": "audio"},
+        {"codec_type": "video", "color_transfer": "smpte2084"},
+        {"codec_type": "video", "color_transfer": "arib-std-b67"}
+    ]});
+    assert_eq!(first_video_transfer(&json), Some("smpte2084"));
+    let untagged = json!({"streams": [
+        {"codec_type": "video"},
+        {"codec_type": "video", "color_transfer": "arib-std-b67"}
+    ]});
+    assert_eq!(first_video_transfer(&untagged), None);
+    assert_eq!(first_video_transfer(&json!({})), None);
 }
 
 #[test]
