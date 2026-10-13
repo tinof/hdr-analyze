@@ -2,10 +2,11 @@ use super::analyzer::{
     analysis_quality_notice, analysis_sampling, coarser_sampling, gpu_analysis_missing,
     rejects_coarser_sidecar,
 };
+use super::config::withdraw_stale_rpu;
 use super::dovi_steps::{feed_mkv_to_dovi_tool, resolve_dovi_input};
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
 use super::measure::{
-    abort_unsupported, acquire_measurements, find_reusable_measurements, total_steps_for,
+    abort_unsupported, acquire_measurements, find_reusable_measurements, total_steps_for, Measured,
 };
 use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 use super::*;
@@ -764,4 +765,62 @@ fn find_reusable_measurements_without_candidates_loads_nothing() {
     ));
     assert!(measurements_file.is_none());
     assert!(l1_sidecar.is_none());
+}
+
+/// A temp dir from an interrupted run: `extra.json` holding `config`, sealed `RPU.bin` and
+/// `BL_RPU.hevc`, and the mux marker.
+fn interrupted_run(config: &[u8]) -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("extra.json"), config).unwrap();
+    for artifact in ["RPU.bin", "BL_RPU.hevc"] {
+        fs::write(temp.path().join(artifact), b"payload").unwrap();
+        resume::mark_done(&temp.path().join(artifact)).unwrap();
+    }
+    fs::write(temp.path().join("mux.done"), b"").unwrap();
+    temp
+}
+
+fn sealed(temp: &Path) -> [bool; 3] {
+    [
+        resume::is_complete(&temp.join("RPU.bin")),
+        resume::is_complete(&temp.join("BL_RPU.hevc")),
+        temp.join("mux.done").exists(),
+    ]
+}
+
+#[test]
+fn withdraw_stale_rpu_withdraws_rpu_and_mux_when_the_config_changed() {
+    let temp = interrupted_run(b"{\"new\": 1}");
+    let extra = temp.path().join("extra.json");
+    assert!(withdraw_stale_rpu(temp.path(), &extra, Some(b"{\"old\": 1}")).unwrap());
+    assert_eq!(sealed(temp.path()), [false, false, false]);
+    assert!(
+        temp.path().join("RPU.bin").exists(),
+        "only sentinels are withdrawn"
+    );
+}
+
+#[test]
+fn withdraw_stale_rpu_keeps_everything_when_the_config_is_unchanged() {
+    let temp = interrupted_run(b"{\"same\": 1}");
+    let extra = temp.path().join("extra.json");
+    assert!(!withdraw_stale_rpu(temp.path(), &extra, Some(b"{\"same\": 1}")).unwrap());
+    assert_eq!(sealed(temp.path()), [true, true, true]);
+}
+
+#[test]
+fn withdraw_stale_rpu_treats_a_missing_previous_config_as_changed() {
+    let temp = interrupted_run(b"{}");
+    let extra = temp.path().join("extra.json");
+    assert!(withdraw_stale_rpu(temp.path(), &extra, None).unwrap());
+    assert_eq!(sealed(temp.path()), [false, false, false]);
+}
+
+#[test]
+fn withdraw_stale_rpu_without_artifacts_is_not_an_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let extra = temp.path().join("extra.json");
+    fs::write(&extra, b"{}").unwrap();
+    assert!(withdraw_stale_rpu(temp.path(), &extra, None).unwrap());
+    assert_eq!(sealed(temp.path()), [false, false, false]);
 }

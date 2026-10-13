@@ -14,19 +14,17 @@ use crate::progress;
 use crate::resume;
 
 mod analyzer;
+mod config;
 mod dovi_steps;
 mod hdr10plus;
 mod measure;
 mod temp_dir;
 
 pub use self::analyzer::{analyzer_executable, resolve_auto_settings};
-use self::analyzer::{print_sidecar_advisories, warn_if_gpu_analysis_missing};
+use self::config::{prepare_configuration, Configured};
 pub use self::dovi_steps::DOVI_TOOL_MKV_INPUT_MIN;
 use self::dovi_steps::{convert_mel_fast_path, generate_rpu};
-use self::hdr10plus::inspect_hdr10plus_scene_peaks;
-use self::measure::{
-    abort_unsupported, acquire_measurements, report_detection, total_steps_for, Measured,
-};
+use self::measure::{abort_unsupported, acquire_measurements, report_detection, total_steps_for};
 use self::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 
 /// Error for Profile 7 FEL inputs. The BL+EL compositor and its re-encode were removed; FEL is
@@ -122,7 +120,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     // --- Step 1: Detect HDR format ---
     let original_hdr_type = detected_hdr_type;
-    let mut level5_offsets = report_detection(
+    let level5_offsets = report_detection(
         input_file,
         &temp_dir,
         detected_hdr_type,
@@ -151,13 +149,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     let mut current_step: u8 = 1; // Step 1 (detect) already done
 
-    let Some(Measured {
-        hdr_type,
-        measurements_file,
-        hdr10plus_json,
-        bl_source_file,
-        mut l1_sidecar,
-    }) = acquire_measurements(
+    let Some(mut measured) = acquire_measurements(
         input_file,
         &temp_dir,
         args,
@@ -179,199 +171,29 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         "Preparing Dolby Vision configuration...",
     );
 
-    // Static Metadata
-    // MaxCLL / MaxFALL are resolved after the L1 sidecar is loaded: measured values fill what the
-    // source does not state.
-    let hlg_source = hdr_type == HdrFormat::Hlg;
-    let mut static_meta = metadata::read_static_metadata(input_file);
-    metadata::apply_static_defaults(&mut static_meta, &["max_dml", "min_dml"], hlg_source);
-
-    // Build CM v4.0 config if enabled
-    let cm_v40_config = if args.cm_version == CmVersion::V40 {
-        // Detect or use provided source primaries
-        let source_primaries = args
-            .source_primaries
-            .unwrap_or_else(|| metadata::detect_source_primaries(input_file));
-
-        Some(metadata::CmV40Config {
-            source_primary_index: source_primaries,
-            content_type: args.content_type.as_u8(),
-            reference_mode: args.reference_mode,
-        })
-    } else {
-        None
-    };
-
-    if args.cm_version == CmVersion::V40 {
-        if let Some(ref cfg) = cm_v40_config {
-            progress::print_info(&format!(
-                "CM v4.0 — L9: primaries={}, L11: content_type={}, reference_mode={}",
-                cfg.source_primary_index, cfg.content_type, cfg.reference_mode
-            ));
-        }
-    }
-
-    // Warn when generated HDR10+ scene L1 peaks look suspicious. This is advisory:
-    // valid sources can contain outliers, so never clamp them silently.
-    if let (Some(metadata_path), Some(&max_dml)) =
-        (hdr10plus_json.as_deref(), static_meta.get("max_dml"))
-    {
-        match inspect_hdr10plus_scene_peaks(metadata_path, args.peak_source, max_dml * 3.0) {
-            Ok(Some(stats)) => progress::print_warn(&format!(
-                "{} HDR10+ scene(s) produce L1 peaks above 3× the mastering display peak \
-                 ({:.0} nits); highest selected peak is {:.0} nits. Review the source metadata \
-                 and compare --peak-source modes before deciding whether to use an opt-in clamp.",
-                stats.outlier_scene_count, max_dml, stats.max_peak_nits
-            )),
-            Ok(None) => {}
-            Err(e) => progress::print_warn(&format!(
-                "Could not inspect extracted HDR10+ scene peaks: {e}"
-            )),
-        }
-    }
-
-    // Generate extra.json
-    let extra_json_path = temp_dir.join("extra.json");
-    let final_trims: Vec<u32> = args
-        .trim_targets
-        .split(',')
-        .filter_map(|s| s.trim().parse().ok())
-        .collect();
-
-    // Source-honest per-scene L1 from the analyzer sidecar is mandatory for measurement-based
-    // generation. dovi_tool's madVR path fills L1 avg with a fixed placeholder and (with custom
-    // targets) replaces L1 max with optimizer targets, so it is reachable only by explicit opt-in.
-    if let Some(measurements) = measurements_file.as_deref() {
-        if args.legacy_madvr_l1 {
-            l1_sidecar = None;
-            progress::print_warn(
-                "--legacy-madvr-l1: L1 max comes from optimizer targets and L1 avg is a placeholder, not measured values.",
-            );
-        } else if l1_sidecar.is_none() {
-            // Freshly produced by the analyzer in this run: validate structure and, for HLG, the
-            // luminance mapping (an older analyzer binary would measure without it). The frame
-            // count is the analyzer's own: a v5 sidecar accounts for every picture of the stream
-            // it demuxed, while MediaInfo can report a count estimated from the duration or
-            // copied from stale statistics tags. The inject step still refuses an RPU whose
-            // length differs from the video.
-            let expect = metadata::SidecarExpectation::default().with_hlg_composer(hlg_composer);
-            match metadata::load_l1_sidecar(measurements, &expect) {
-                Ok((sidecar, advisories)) => {
-                    print_sidecar_advisories(&advisories);
-                    warn_if_gpu_analysis_missing(&sidecar, args);
-                    l1_sidecar = Some(sidecar);
-                }
-                Err(error) if hdr_type == HdrFormat::Hlg => {
-                    let required = hlg_composer.map_or(
-                        "`--transfer` and `--hlg-composer`".to_string(),
-                        |composer| {
-                            format!(
-                                "`--transfer`, `--hlg-composer` and the mapping {}",
-                                composer.luminance_mapping()
-                            )
-                        },
-                    );
-                    progress::print_error(&format!(
-                        "The analyzer's L1 sidecar cannot be used for Profile 8.4 ({error}). The analyzer did not measure through the selected Dolby Vision 8.4 HLG composer and decode, so it is probably an older build: `hdr_analyzer_mvp --help` must list {required}."
-                    ));
-                    return Ok(false);
-                }
-                Err(error) => {
-                    progress::print_error(&format!(
-                        "The analyzer's L1 sidecar is unusable ({error}). Refusing to fall back to optimizer-derived L1; pass --legacy-madvr-l1 to force it."
-                    ));
-                    return Ok(false);
-                }
-            }
-        }
-    }
-    if let Some(sidecar) = &l1_sidecar {
-        progress::print_info(&format!(
-            "Using measured L1 sidecar ({}): source-honest per-scene min/avg/max in the RPU.",
-            sidecar.provenance_summary()
-        ));
-        // Offsets sampled from a source RPU keep precedence; otherwise describe the same active
-        // area the measurements were taken over.
-        if level5_offsets.is_none() {
-            if let Some(offsets) = metadata::level5_from_sidecar(sidecar) {
-                progress::print_info(&format!(
-                    "L5 active area from the committed crop: left {}, right {}, top {}, bottom {}.",
-                    offsets.left, offsets.right, offsets.top, offsets.bottom
-                ));
-                level5_offsets = Some(offsets);
-            }
-        }
-    }
-
-    let dv_profile =
-        match metadata::dv_profile_for(hdr_type, l1_sidecar.as_ref(), args.hlg_composer) {
-            Ok(profile) => profile,
-            Err(error) => {
-                progress::print_error(&format!(
-                    "Cannot choose the Dolby Vision profile: {error:#}"
-                ));
-                return Ok(false);
-            }
-        };
-    if dv_profile != "8.1" {
-        progress::print_info(&format!(
-            "Generating Dolby Vision Profile {dv_profile} (base layer kept bit-exact)."
-        ));
-    }
-
-    for message in metadata::resolve_light_levels(&mut static_meta, l1_sidecar.as_ref(), hlg_source)
-    {
-        progress::print_info(&message);
-    }
-
-    // Profile 8.1 states the mastering range explicitly; dovi_tool's own L6 lookup gets every
-    // master other than 1000/2000/4000/10000 nits (and min 0.0001/0.005 nits) wrong.
-    let source_range = metadata::expected_source_range(dv_profile, &static_meta);
-    if source_range.is_none() {
-        progress::print_warn(&format!(
-            "Mastering display luminance (min {} nits, max {} nits) is not plausible; dovi_tool derives the source range from L6.",
-            static_meta.get("min_dml").copied().unwrap_or(f64::NAN),
-            static_meta.get("max_dml").copied().unwrap_or(f64::NAN)
-        ));
-    }
-
-    let previous_config = fs::read(&extra_json_path).ok();
-    metadata::generate_extra_json(
-        &extra_json_path,
-        dv_profile,
-        &static_meta,
-        &final_trims,
-        cm_v40_config.as_ref(),
+    let Some(Configured { source_range }) = prepare_configuration(
+        input_file,
+        &temp_dir,
+        args,
+        resume_enabled,
+        hlg_composer,
+        &mut measured,
         level5_offsets,
-        l1_sidecar.as_ref(),
-    )?;
-    progress::print_info("Configuration written.");
-    // The resume fingerprint does not cover the measurements. An RPU built from an earlier
-    // configuration (for example before a re-analysis changed L1) must not be reused.
-    if resume_enabled && previous_config != fs::read(&extra_json_path).ok() {
-        let stale = [temp_dir.join("RPU.bin"), temp_dir.join("BL_RPU.hevc")];
-        if stale.iter().any(|artifact| resume::is_complete(artifact)) {
-            progress::print_warn(
-                "The generation settings differ from the interrupted run; regenerating the RPU instead of reusing it.",
-            );
-        }
-        for artifact in &stale {
-            resume::invalidate(artifact)?;
-        }
-        // A muxed output from that run carries the old RPU too.
-        let _ = fs::remove_file(temp_dir.join("mux.done"));
-    }
+    )?
+    else {
+        return Ok(false);
+    };
 
     // --- Generate RPU ---
     current_step += 1;
     progress::print_step(current_step, total_steps, "Generating Dolby Vision RPU...");
     let rpu_path = generate_rpu(
-        hdr_type,
+        measured.hdr_type,
         &temp_dir,
         args.peak_source,
-        hdr10plus_json.as_deref(),
-        measurements_file.as_deref(),
-        l1_sidecar.is_some(),
+        measured.hdr10plus_json.as_deref(),
+        measured.measurements_file.as_deref(),
+        measured.l1_sidecar.is_some(),
         custom_composer,
         resume_enabled,
     )?;
@@ -387,9 +209,13 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     // When the BL source is already a raw Annex B HEVC stream in the temp dir (mdfix paths),
     // re-extracting it with ffmpeg would just duplicate ~the full video size on disk.
-    let bl_hevc = if bl_source_file.extension().is_some_and(|ext| ext == "hevc") {
+    let bl_hevc = if measured
+        .bl_source_file
+        .extension()
+        .is_some_and(|ext| ext == "hevc")
+    {
         progress::print_info("Base layer is already a raw HEVC stream; skipping re-extraction.");
-        bl_source_file.clone()
+        measured.bl_source_file.clone()
     } else {
         let bl_hevc = temp_dir.join("BL.hevc");
 
@@ -403,13 +229,15 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
                 "error",
                 "-stats",
                 "-i",
-                bl_source_file.to_str().unwrap(),
+                measured.bl_source_file.to_str().unwrap(),
                 "-map",
                 "0:v:0",
                 "-c:v",
                 "copy",
             ]);
-            if hdr_type == HdrFormat::Hlg && metadata::hlg_bitstream_lacks_transfer(input_file) {
+            if measured.hdr_type == HdrFormat::Hlg
+                && metadata::hlg_bitstream_lacks_transfer(input_file)
+            {
                 // Lossless SPS/VUI edit (slices untouched): without an HLG tag in the bitstream
                 // mkvmerge would give the Profile 8.4 track compatibility ID 2 (SDR) instead of 4.
                 progress::print_info(
@@ -422,7 +250,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             }
             ffmpeg_cmd.args(["-f", "hevc", "-y", bl_hevc.to_str().unwrap()]);
 
-            let bl_total = fs::metadata(&bl_source_file).ok().map(|m| m.len());
+            let bl_total = fs::metadata(&measured.bl_source_file).ok().map(|m| m.len());
             if !run_command_with_progress(
                 &mut ffmpeg_cmd,
                 &temp_dir.join("ffmpeg_extract_bl.log"),
@@ -481,7 +309,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             .lines()
             .find(|line| line.contains("mismatched lengths"))
         {
-            if measurements_file.is_some() {
+            if measured.measurements_file.is_some() {
                 progress::print_error(&format!(
                     "dovi_tool inject-rpu: {}. The measured RPU does not match the video picture for picture; refusing to mux it.",
                     line.trim().trim_start_matches("Warning: ")
@@ -540,7 +368,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // --- Optional verification ---
     if args.verify {
         progress::print_info("Running post-mux verification (--verify)...");
-        let measurements_file_path = measurements_file.clone();
+        let measurements_file_path = measured.measurements_file.clone();
         let expected_cm = match args.cm_version {
             CmVersion::V40 => Some("V40"),
             CmVersion::V29 => None,
@@ -554,9 +382,10 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             hlg_composer,
             Some(crate::verify::DeliveryExpectation {
                 // dovi_tool takes L1 from the HDR10+ metadata when it is given, never the shots.
-                l1_sidecar: l1_sidecar
+                l1_sidecar: measured
+                    .l1_sidecar
                     .as_ref()
-                    .filter(|_| hdr_type != HdrFormat::Hdr10Plus),
+                    .filter(|_| measured.hdr_type != HdrFormat::Hdr10Plus),
                 source_range,
             }),
         );
