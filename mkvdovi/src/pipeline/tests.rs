@@ -3,6 +3,7 @@ use super::analyzer::{
     rejects_coarser_sidecar,
 };
 use super::config::withdraw_stale_rpu;
+use super::deliver::{extract_base_layer, inject_rpu, mux_output};
 use super::dovi_steps::{feed_mkv_to_dovi_tool, resolve_dovi_input};
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
 use super::measure::{
@@ -823,4 +824,82 @@ fn withdraw_stale_rpu_without_artifacts_is_not_an_error() {
     fs::write(&extra, b"{}").unwrap();
     assert!(withdraw_stale_rpu(temp.path(), &extra, None).unwrap());
     assert_eq!(sealed(temp.path()), [false, false, false]);
+}
+
+/// A temp dir and default `Args` for the delivery phases; the input is `<dir>/in.mkv`.
+fn delivery_dirs() -> (tempfile::TempDir, PathBuf, PathBuf, Args) {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.mkv");
+    fs::write(&input, b"src").unwrap();
+    let temp = dir.path().join("mkvdovi_temp_in");
+    fs::create_dir(&temp).unwrap();
+    (dir, input, temp, Args::try_parse_from(["mkvdovi"]).unwrap())
+}
+
+#[test]
+fn extract_base_layer_passes_a_raw_hevc_source_through() {
+    let (_dir, input, temp, args) = delivery_dirs();
+    let clean_bl = temp.join("BL_clean.hevc");
+    fs::write(&clean_bl, b"hevc").unwrap();
+    let bl = extract_base_layer(
+        input.to_str().unwrap(),
+        &clean_bl,
+        &temp,
+        HdrFormat::Hdr10WithMeasurements,
+        true,
+        &args,
+    )
+    .unwrap();
+    assert_eq!(bl, Some(clean_bl));
+    assert!(!temp.join("BL.hevc").exists());
+}
+
+#[test]
+fn extract_base_layer_reuses_a_sealed_extraction_when_resuming() {
+    let (_dir, input, temp, args) = delivery_dirs();
+    let bl_hevc = temp.join("BL.hevc");
+    fs::write(&bl_hevc, b"hevc").unwrap();
+    resume::mark_done(&bl_hevc).unwrap();
+    let bl = extract_base_layer(
+        input.to_str().unwrap(),
+        &input,
+        &temp,
+        HdrFormat::Hdr10Unsupported,
+        true,
+        &args,
+    )
+    .unwrap();
+    assert_eq!(bl, Some(bl_hevc));
+}
+
+#[test]
+fn inject_rpu_reuses_a_sealed_injection_and_keeps_its_input() {
+    let (_dir, _input, temp, args) = delivery_dirs();
+    let bl_hevc = temp.join("BL.hevc");
+    fs::write(&bl_hevc, b"hevc").unwrap();
+    let bl_rpu_hevc = temp.join("BL_RPU.hevc");
+    fs::write(&bl_rpu_hevc, b"hevc+rpu").unwrap();
+    resume::mark_done(&bl_rpu_hevc).unwrap();
+    let injected = inject_rpu(&bl_hevc, &temp.join("RPU.bin"), &temp, true, true, &args).unwrap();
+    assert_eq!(injected, Some(bl_rpu_hevc));
+    assert!(bl_hevc.exists(), "only a fresh injection drops its input");
+}
+
+#[test]
+fn mux_output_reuses_a_finished_mux_when_resuming() {
+    let (dir, input, temp, args) = delivery_dirs();
+    let output = dir.path().join("in.DV.mkv");
+    fs::write(&output, b"out").unwrap();
+    fs::write(temp.join("mux.done"), b"").unwrap();
+    let muxed = mux_output(
+        input.to_str().unwrap(),
+        &temp.join("BL_RPU.hevc"),
+        &output,
+        &temp,
+        true,
+        &args,
+    )
+    .unwrap();
+    assert!(muxed);
+    assert_eq!(fs::read(&output).unwrap(), b"out");
 }
