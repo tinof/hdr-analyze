@@ -103,10 +103,14 @@ fi
 if want stale; then
     mkdir -p "$work/stale/out"
     echo junk > "$work/stale/out/prepr-gemini.a3.stream.ndjson"
+    echo junk > "$work/stale/out/prepr-gemini.prompt.md"
     echo keep > "$work/stale/out/prepr-scope.md"
+    echo keep > "$work/stale/out/prepr-gemini.log"
     run_case stale ok
     check_sh "stale attempt files removed" '[ ! -e "$out/prepr-gemini.a3.stream.ndjson" ]'
+    check_sh "stale prompt replaced" '! grep -qx junk "$out/prepr-gemini.prompt.md"'
     check_sh "other files kept" '[ -e "$out/prepr-scope.md" ]'
+    check_sh "a caller's prepr-gemini.log is kept" '[ "$(cat "$out/prepr-gemini.log")" = keep ]'
 fi
 
 if want hang; then
