@@ -283,37 +283,14 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         progress::print_info("Verification passed.");
     }
 
-    // --- Cleanup ---
-    let _ = fs::remove_dir_all(&temp_dir);
-
-    // Dolby Vision and metadata-repair inputs are preservation-first: keep the source unless the
-    // user is converting a non-DV input without --keep-source.
-    if should_keep_source(args, original_hdr_type) {
-        if !args.keep_source {
-            progress::print_info("Keeping source file (Dolby Vision/--mdfix safety default).");
-        }
-    } else {
-        progress::print_info(&format!("Deleting source file: {}", display_name));
-        if let Err(e) = fs::remove_file(input_file) {
-            progress::print_warn(&format!("Failed to delete source file: {}", e));
-        }
-    }
-
-    // --- Success ---
-    let elapsed = file_start.elapsed();
-    let elapsed_str = progress::format_duration_pub(elapsed);
-    if !progress::is_quiet() {
-        eprintln!(
-            "\n{}",
-            format!(
-                "✓ Done: {} ({})",
-                output_file.file_name().unwrap().to_string_lossy(),
-                elapsed_str
-            )
-            .green()
-            .bold()
-        );
-    }
+    finish_success(
+        input_file,
+        &output_file,
+        &temp_dir,
+        args,
+        original_hdr_type,
+        file_start,
+    );
     Ok(true)
 }
 
@@ -385,12 +362,22 @@ fn finish_success(
     started_at: Instant,
 ) {
     let _ = fs::remove_dir_all(temp_dir);
+
+    // Dolby Vision and metadata-repair inputs are preservation-first: keep the source unless the
+    // user is converting a non-DV input without --keep-source.
     if should_keep_source(args, original_hdr_type) {
         if !args.keep_source {
             progress::print_info("Keeping source file (Dolby Vision/--mdfix safety default).");
         }
-    } else if let Err(error) = fs::remove_file(input_file) {
-        progress::print_warn(&format!("Failed to delete source file: {error}"));
+    } else {
+        let display_name = Path::new(input_file)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        progress::print_info(&format!("Deleting source file: {}", display_name));
+        if let Err(error) = fs::remove_file(input_file) {
+            progress::print_warn(&format!("Failed to delete source file: {error}"));
+        }
     }
 
     if !progress::is_quiet() {
