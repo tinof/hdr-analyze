@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use colored::Colorize;
 use dovi84_composer::Composer;
 
@@ -12,21 +12,21 @@ use crate::external::{self, run_command_with_progress};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
-use crate::rpu_check::{self, Level5Offsets};
 
 mod analyzer;
 mod dovi_steps;
 mod hdr10plus;
+mod measure;
 mod temp_dir;
 
 pub use self::analyzer::{analyzer_executable, resolve_auto_settings};
-use self::analyzer::{
-    print_sidecar_advisories, rejects_coarser_sidecar, report_reused_sidecar, run_hdr_analyzer,
-    warn_if_gpu_analysis_missing,
-};
+use self::analyzer::{print_sidecar_advisories, warn_if_gpu_analysis_missing};
 pub use self::dovi_steps::DOVI_TOOL_MKV_INPUT_MIN;
-use self::dovi_steps::{convert_mel_to_profile81, extract_clean_base_layer, generate_rpu};
-use self::hdr10plus::{extract_hdr10plus_metadata, inspect_hdr10plus_scene_peaks};
+use self::dovi_steps::{convert_mel_fast_path, generate_rpu};
+use self::hdr10plus::inspect_hdr10plus_scene_peaks;
+use self::measure::{
+    abort_unsupported, acquire_measurements, report_detection, total_steps_for, Measured,
+};
 use self::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 
 /// Error for Profile 7 FEL inputs. The BL+EL compositor and its re-encode were removed; FEL is
@@ -121,326 +121,55 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     prepare_temp_dir(&temp_dir, resuming, fingerprint.as_ref())?;
 
     // --- Step 1: Detect HDR format ---
-    progress::print_step(1, 0, "Detecting HDR format...");
-    let mut hdr_type = detected_hdr_type;
-    let original_hdr_type = hdr_type;
-    let mut measurements_file: Option<PathBuf> = None;
-    let mut hdr10plus_json: Option<PathBuf> = None;
-    let mut bl_source_file = PathBuf::from(input_file);
-    let mut level5_offsets: Option<Level5Offsets> = None;
+    let original_hdr_type = detected_hdr_type;
+    let mut level5_offsets = report_detection(
+        input_file,
+        &temp_dir,
+        detected_hdr_type,
+        &colour_warnings,
+        custom_composer,
+    );
 
-    if is_dolby_vision(hdr_type) {
-        match rpu_check::sample_rpu_windows(input_file, &temp_dir) {
-            Ok(sample) => {
-                level5_offsets = sample.level5;
-                if let Ok(report) =
-                    rpu_check::analyze_rpus(sample.l1_frames, sample.mastering_peak_pq)
-                {
-                    if let Some(detail) = rpu_check::warning_summary(&report) {
-                        progress::print_warn(&format!(
-                            "DV metadata looks unreliable ({}); consider --mdfix. \
-                             (sampled {} windows; run `inspect` for a full check)",
-                            detail, sample.windows_sampled
-                        ));
-                    }
-                }
-            }
-            Err(error) => progress::print_warn(&format!(
-                "Could not inspect source Dolby Vision RPU: {error}"
-            )),
-        }
-    }
-
-    let format_label = match hdr_type {
-        HdrFormat::Hdr10Plus => "HDR10+",
-        HdrFormat::Hlg => "HLG",
-        HdrFormat::Hdr10WithMeasurements => "HDR10 (measurements found)",
-        HdrFormat::Hdr10Unsupported => "HDR10",
-        HdrFormat::DolbyVisionMel => "Dolby Vision Profile 7 MEL",
-        HdrFormat::DolbyVisionFel => "Dolby Vision Profile 7 FEL",
-        HdrFormat::DolbyVisionP8 => "Dolby Vision Profile 8",
-        HdrFormat::Unsupported => "Unsupported",
-    };
-    progress::print_info(&format!("Detected: {}", format_label));
-    for warning in &colour_warnings {
-        progress::print_warn(warning);
-    }
-    if let Some(composer) = custom_composer {
-        progress::print_info(&format!(
-            "HLG composer: {} ({}); playback tested on an LG OLED C9 only. If a display renders \
-             the output wrongly, convert with --hlg-composer preset.",
-            composer.cli_name(),
-            composer.luminance_mapping()
-        ));
-    }
-
-    if hdr_type == HdrFormat::Unsupported {
-        progress::print_error("Unsupported HDR format. Cannot process this file.");
-        let _ = fs::remove_dir_all(&temp_dir);
+    if abort_unsupported(detected_hdr_type, &temp_dir) {
         return Ok(false);
     }
 
+    if detected_hdr_type == HdrFormat::DolbyVisionMel && !args.mdfix {
+        return convert_mel_fast_path(
+            input_file,
+            &temp_dir,
+            &output_file,
+            args,
+            resume_enabled,
+            original_hdr_type,
+            file_start,
+        );
+    }
+
     // Compute total steps based on the detected format
-    let mut total_steps: u8 = match hdr_type {
-        HdrFormat::Hdr10Plus => 7, // detect, extract HEVC, extract meta, config, RPU, inject, mux
-        HdrFormat::Hlg => 7,       // detect, analyze, config, RPU, extract BL, inject, mux
-        HdrFormat::Hdr10WithMeasurements => 6, // detect, config, RPU, extract BL, inject, mux
-        HdrFormat::Hdr10Unsupported => 7, // detect, analyze, config, RPU, extract BL, inject, mux
-        HdrFormat::DolbyVisionMel => 7,
-        HdrFormat::DolbyVisionFel => 0, // unreachable — refused before the temp dir
-        HdrFormat::DolbyVisionP8 => 7,
-        HdrFormat::Unsupported => 0, // unreachable — handled above
-    };
+    let mut total_steps = total_steps_for(detected_hdr_type);
 
     let mut current_step: u8 = 1; // Step 1 (detect) already done
 
-    // Measured L1 sidecar, loaded when existing measurements are reused (validated against the
-    // input) or right after a fresh analyzer run.
-    let mut l1_sidecar: Option<metadata::L1Sidecar> = None;
-
-    // --- Format-specific metadata extraction ---
-    // Pre-handle HDR10+ to allow fallback to HDR10Unsupported if metadata is missing
-    if hdr_type == HdrFormat::Hdr10Plus {
-        current_step += 1;
-        progress::print_step(
-            current_step,
-            total_steps,
-            "Extracting HEVC stream for HDR10+ analysis...",
-        );
-        match extract_hdr10plus_metadata(input_file, &temp_dir, resume_enabled, args.stall_timeout)
-        {
-            Ok(Some(json_path)) => hdr10plus_json = Some(json_path),
-            Ok(None) => {
-                progress::print_warn(
-                    "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis.",
-                );
-                hdr_type = HdrFormat::Hdr10Unsupported;
-            }
-            Err(_) => return Ok(false),
-        }
-    }
-
-    // Logic branching
-    match hdr_type {
-        HdrFormat::Hdr10Plus => {
-            // Metadata already extracted above
-        }
-        HdrFormat::DolbyVisionMel => {
-            if !args.mdfix {
-                progress::print_info(
-                    "Converting Profile 7 MEL to Profile 8.1 without rebuilding metadata.",
-                );
-                let success = convert_mel_to_profile81(
-                    input_file,
-                    &temp_dir,
-                    &output_file,
-                    args,
-                    resume_enabled,
-                )?;
-                if success && args.verify {
-                    progress::print_info("Running post-mux verification (--verify)...");
-                    if !crate::verify::verify_post_mux(input_file, &output_file, None, &temp_dir) {
-                        progress::print_error("Inconsistencies detected during verification.");
-                        return Ok(false);
-                    }
-                }
-                if success {
-                    finish_success(
-                        input_file,
-                        &output_file,
-                        &temp_dir,
-                        args,
-                        original_hdr_type,
-                        file_start,
-                    );
-                }
-                return Ok(success);
-            }
-
-            progress::print_info(
-                "Rebuilding Profile 7 MEL metadata from fresh base-layer measurements (--mdfix).",
-            );
-            let clean_bl = extract_clean_base_layer(
-                input_file,
-                &temp_dir,
-                "Extracting Dolby Vision HEVC stream",
-                args,
-                resume_enabled,
-            )?;
-            bl_source_file = clean_bl.clone();
-
-            let mut extra_args = Vec::new();
-            add_optimizer_args(&mut extra_args, args);
-            // Analyze the original container, not the raw Annex B stream: without a container
-            // duration the seek-based crop probes are unavailable and the in-stream fallback
-            // can commit a degenerate active area on dark openings. MEL base-layer pixels are
-            // identical in the source.
-            measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
-            if measurements_file.is_none() {
-                return Ok(false);
-            }
-            hdr_type = HdrFormat::Hdr10WithMeasurements;
-        }
-        // Refused by reject_unsupported_input before the temp directory was touched.
-        HdrFormat::DolbyVisionFel => bail!(FEL_UNSUPPORTED_MESSAGE),
-        HdrFormat::DolbyVisionP8 => {
-            if !args.mdfix {
-                progress::print_warn(
-                    "Profile 8 input is already converted; use `inspect` or --mdfix to rebuild metadata.",
-                );
-                return Ok(false);
-            }
-
-            // A Profile 8.4 base layer is HLG; rebuilding it would put a PQ (8.1) RPU on it.
-            if metadata::has_hlg_transfer(input_file) {
-                progress::print_error("Profile 8.4 (HLG base layer) --mdfix is not supported yet.");
-                return Ok(false);
-            }
-
-            progress::print_info(
-                "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
-            );
-            let clean_bl = extract_clean_base_layer(
-                input_file,
-                &temp_dir,
-                "Extracting Profile 8 HEVC stream",
-                args,
-                resume_enabled,
-            )?;
-            bl_source_file = clean_bl.clone();
-
-            let mut extra_args = Vec::new();
-            add_optimizer_args(&mut extra_args, args);
-            // Same rationale as the MEL path: analyze the container so crop probing can seek.
-            measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
-            if measurements_file.is_none() {
-                return Ok(false);
-            }
-            hdr_type = HdrFormat::Hdr10WithMeasurements;
-        }
-        HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
-            // HLG goes to Profile 8.4: the base layer is the untouched source, and L1 must be
-            // measured through the Dolby Vision 8.4 reconstruction of the selected composer
-            // (sidecar v3+, `Composer::luminance_mapping`).
-            let hlg = hdr_type == HdrFormat::Hlg;
-            if hlg && args.legacy_madvr_l1 {
-                progress::print_error(
-                    "--legacy-madvr-l1 is not supported for HLG input: Profile 8.4 needs L1 measured through the Dolby Vision 8.4 mapping.",
-                );
-                return Ok(false);
-            }
-            // Reuse existing measurements only when their L1 sidecar is valid for this input
-            // (or the user explicitly asked for the legacy optimizer-target path). Every
-            // candidate is tried in turn, so a stale shared file cannot shadow a valid one.
-            let candidates = metadata::measurements_candidates(input_path);
-            let reuse = if args.legacy_madvr_l1 {
-                measurements_file = candidates.into_iter().next();
-                measurements_file.is_some()
-            } else if candidates.is_empty() {
-                false
-            } else {
-                let expect = metadata::SidecarExpectation::for_input(
-                    input_path,
-                    metadata::get_frame_count(input_file),
-                )
-                .with_hlg_composer(hlg_composer);
-                let mut reused = false;
-                for existing in candidates {
-                    match metadata::load_l1_sidecar(&existing, &expect) {
-                        Ok((sidecar, _)) if rejects_coarser_sidecar(&sidecar, &existing, args) => {}
-                        Ok((sidecar, advisories)) => {
-                            report_reused_sidecar(&sidecar, &existing, args);
-                            print_sidecar_advisories(&advisories);
-                            l1_sidecar = Some(sidecar);
-                            measurements_file = Some(existing);
-                            reused = true;
-                            break;
-                        }
-                        Err(error) => progress::print_warn(&format!(
-                            "Existing measurements '{}' cannot be reused ({error}).",
-                            existing.display()
-                        )),
-                    }
-                }
-                if !reused {
-                    progress::print_info("No reusable measurements found; re-running analysis.");
-                }
-                reused
-            };
-
-            if reuse {
-                if hlg {
-                    // HLG's step count assumes a fresh analysis.
-                    total_steps -= 1;
-                }
-                progress::print_info("Using existing measurements file.");
-                if args.boost_experimental {
-                    progress::print_warn(
-                        "Experimental boost requested, but using existing measurements.",
-                    );
-                }
-            } else {
-                // Generate them
-                if hdr_type == HdrFormat::Hdr10WithMeasurements {
-                    total_steps += 1;
-                }
-                current_step += 1;
-                progress::print_step(
-                    current_step,
-                    total_steps,
-                    if hlg {
-                        "Generating measurements (HLG via the Dolby Vision 8.4 mapping)..."
-                    } else {
-                        "Generating measurements..."
-                    },
-                );
-
-                let mut extra_args = Vec::new();
-                if args.boost_experimental {
-                    progress::print_info("Experimental boost: using 'aggressive' optimizer.");
-                    extra_args
-                        .extend(["--optimizer-profile".to_string(), "aggressive".to_string()]);
-                } else {
-                    add_optimizer_args(&mut extra_args, args);
-                }
-                if hlg {
-                    // MediaInfo classified the input as HLG; the analyzer's linked FFmpeg may not
-                    // see the tag (e.g. HLG only in the MKV colour element), so state it.
-                    extra_args.extend(["--transfer".to_string(), "hlg".to_string()]);
-                }
-                if let Some(composer) = hlg_composer {
-                    // Always name the composer: the analyzer's own default may differ from the
-                    // one this run writes. The analyzer's --help names the luminance mappings
-                    // it writes (a cross-binary contract, like the +cuda version probe); one
-                    // that does not list this composer's predates the spec 4:2:0 HLG decode,
-                    // and its measurement would be refused after a full analysis.
-                    if !external::analyzer_lists_option(
-                        &analyzer_executable(),
-                        composer.luminance_mapping(),
-                    ) {
-                        progress::print_error(&format!(
-                            "--hlg-composer {} needs an hdr_analyzer_mvp that measures HLG \
-                             through the spec 4:2:0 decode (sidecar mapping {}), and this \
-                             analyzer's --help does not name it; rebuild or update \
-                             hdr_analyzer_mvp.",
-                            composer.cli_name(),
-                            composer.luminance_mapping()
-                        ));
-                        return Ok(false);
-                    }
-                    extra_args.extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
-                }
-                measurements_file = run_hdr_analyzer(input_file, &temp_dir, &extra_args, args)?;
-                if measurements_file.is_none() {
-                    return Ok(false);
-                }
-            }
-        }
-        HdrFormat::Unsupported => {
-            // Already handled above
-            unreachable!();
-        }
-    }
+    let Some(Measured {
+        hdr_type,
+        measurements_file,
+        hdr10plus_json,
+        bl_source_file,
+        mut l1_sidecar,
+    }) = acquire_measurements(
+        input_file,
+        &temp_dir,
+        args,
+        resume_enabled,
+        hlg_composer,
+        detected_hdr_type,
+        &mut total_steps,
+        &mut current_step,
+    )?
+    else {
+        return Ok(false);
+    };
 
     // --- Configuration step ---
     current_step += 1;

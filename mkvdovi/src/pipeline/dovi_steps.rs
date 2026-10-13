@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use dovi84_composer::Composer;
@@ -10,6 +11,8 @@ use crate::external::{self, run_command_with_progress, run_command_with_spinner,
 use crate::metadata::HdrFormat;
 use crate::progress;
 use crate::resume;
+
+use super::finish_success;
 
 pub const DOVI_TOOL_MKV_INPUT_MIN: ToolVersion = (2, 3, 4);
 
@@ -353,4 +356,38 @@ pub(super) fn generate_rpu(
     }
     resume::mark_done(&rpu_out)?;
     Ok(Some(rpu_out))
+}
+
+/// Profile 7 MEL without `--mdfix`: converts the RPU to Profile 8.1, discards the EL, muxes and
+/// finishes, without rebuilding metadata.
+pub(super) fn convert_mel_fast_path(
+    input_file: &str,
+    temp_dir: &Path,
+    output_file: &Path,
+    args: &Args,
+    resume_enabled: bool,
+    original_hdr_type: HdrFormat,
+    file_start: Instant,
+) -> Result<bool> {
+    progress::print_info("Converting Profile 7 MEL to Profile 8.1 without rebuilding metadata.");
+    let success =
+        convert_mel_to_profile81(input_file, temp_dir, output_file, args, resume_enabled)?;
+    if success && args.verify {
+        progress::print_info("Running post-mux verification (--verify)...");
+        if !crate::verify::verify_post_mux(input_file, output_file, None, temp_dir) {
+            progress::print_error("Inconsistencies detected during verification.");
+            return Ok(false);
+        }
+    }
+    if success {
+        finish_success(
+            input_file,
+            output_file,
+            temp_dir,
+            args,
+            original_hdr_type,
+            file_start,
+        );
+    }
+    Ok(success)
 }
