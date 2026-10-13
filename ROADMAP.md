@@ -106,7 +106,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
-| 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](docs/ROADMAP_LOG.md) |
+| 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within about 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | v0.6.0 released (#46): #41 and #43 on top of rc.1; CUDA parity and all ten RPU baselines identical before the tag. | P6, E7, P8 | [v0.6.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.6.0) |
 | 2026-10-13 | P8 playback test: on an LG OLED C9 (Plex on the TV and on a Shield) a green canary composer renders green and the preset's grey tint is visible, bt2100 neutral; bt2100 stays the default. | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-11 | L6 fixes: MaxCLL/MaxFALL read from the stream behind a container 0, `Details.txt` thousands separators, `--verify` warns on L6 0 in a passed-through MEL RPU; r4 MEL default baseline captured. | P6, E7, E13 | `fix-l6-zero-light-levels` |
@@ -328,10 +328,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
   some HDR10+ starts split a shot (Alien).
 - **Done 2026-10-13: which scene list carries the pixel average.** The union of HDR10+ starts and
   the analyzer's cuts, by the pre-registered rule; the HDR10+ scenes, the analyzer's cuts and the
-  union score within 1.5 codes of each other (pooled clamped MAE above the floor 38.3 / 36.8 /
+  union score within about 1.5 codes of each other (pooled clamped MAE above the floor 38.3 / 36.8 /
   37.6), and the analyzer's cuts are the numerical best. The gain is the measured average itself:
   pooled clamped MAE over all frames 18.9 codes against 338.4 for today's HDR10+ path, which writes
-  1229 where retail sits at the 819 floor. Two cuts from one title; peak and minimum not
+  1229 where retail sits at the 819 floor. The 18.9 holds after the generator's 819 floor; raw, the
+  measured average is 147.6 codes off over all frames (about 259 below on floor frames). Two cuts from one title; peak and minimum not
   evaluated ([log](docs/ROADMAP_LOG.md) 2026-10-13).
 - **Open:** E13 step 4, then the hybrid flag: the union carries average and minimum; peak per piece
   from HDR10+ with the pixel fallback; its integration gate needs an HDR10+-only cut (Alita takes the

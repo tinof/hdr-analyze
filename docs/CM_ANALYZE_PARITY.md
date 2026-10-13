@@ -176,8 +176,9 @@ a 0.7-nit scene by 71 codes. A linear-light mean lies above a mean of PQ values 
 how much of the gap that explains and how much is the HDR10+ producer's own measurement was not
 separated. Against retail Dolby Vision L1 from the same master (two Alita: Battle Angel cuts,
 2026-10-13), the RPU that mkvdovi's HDR10+ path delivers reads on average 268 codes high where the
-retail average is above the 819 floor, and writes 1229 where it sits at the floor. A per-scene
-pixel average lands 19 codes from retail over all frames (P9; [log](ROADMAP_LOG.md)).
+retail average is above the 819 floor, and writes 1229 where it sits at the floor. On the same
+above-floor frames a per-scene pixel average lands 37 to 38 codes from retail (MAE); over all frames,
+after the generator's 819 floor, 19 codes (P9; [log](ROADMAP_LOG.md)).
 
 ### Active area and temporal stability
 

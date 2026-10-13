@@ -43,10 +43,13 @@ plus #41 (main 8db4ad6), and `--verify` passed on every mkvdovi output.
 ### 2026-10-13: P9, scene list for the pixel average
 
 The P9 design step is done. A hybrid HDR10+ → Profile 8.1 mode that takes the average from pixels
-lands about 19 codes from the retail L1 average per frame on the two Alita cuts (pooled MAE,
-generator floor applied). Today's HDR10+-derived average lands 338 codes away. Which scene list
-carries that average matters little on these cuts: the HDR10+ scenes (H), the analyzer's cuts (A)
-and their union (U) are within 1.5 codes of each other. By the pre-registered rule the hybrid mode
+lands about 19 codes from the retail L1 average per frame on the two Alita cuts (pooled MAE over
+all frames, after the generator's 819 average floor). Today's HDR10+-derived average lands
+338 codes away. The 19 codes depend on that floor: the raw measured average is 147 to 148 codes from
+retail over all frames, because on the floor frames it reads about 259 codes below 819. Above the
+floor, raw and clamped scores are the same for H, A, U and R. Which scene list carries the average
+matters little on these cuts: the HDR10+ scenes (H), the analyzer's cuts (A) and their union (U)
+are within about 1.5 codes of each other (1.51). By the pre-registered rule the hybrid mode
 uses U. A is the numerical best, and no HDR10+ boundary added a picture cut that the analyzer
 missed.
 
@@ -83,6 +86,9 @@ partitions the cut into pieces. A piece's average is the mean of the frame codes
 | Bias, above floor | −19.3 | −19.3 | −19.3 | −19.2 | −12.4 | +267.7 |
 | p95 / max \|error\|, above floor | 70 / 137 | 86 / 152 | 86 / 152 | 59 / 86 | 231 / 331 | 347 / 405 |
 | Floor frames lifted above 819 | 0 | 0 | 0 | 0 | 35 | 1,451 |
+| *Raw (no floor):* MAE, all frames | 148.0 | 147.2 | 147.6 | 144.8 | 165.2 | 338.4 |
+| *Raw:* bias, floor frames (1,451) | −259.1 | −259.0 | −259.0 | −259.0 | −259.1 | +410.0 |
+| *Raw:* MAE, above floor | 38.3 | 36.8 | 37.6 | 32.0 | 70.7 | 267.7 |
 
 Per cut (clamped MAE above floor; H / A / U):
 
@@ -98,14 +104,16 @@ S stays 336 to 460 codes away on both Shining cuts.
 
 Findings:
 
-- **The measured average is the gain; the scene list is not.** H, A and U differ by 1.5 codes on
+- **The measured average is the gain; the scene list is not.** H, A and U differ by about 1.5 codes on
   the primary score, against a 5-code margin. A is lowest on primary and all-frame MAE; H has the
   lowest p95 and maximum error. U wins only by the pre-registered preference: it keeps the HDR10+
   boundaries a hybrid peak needs. Read it as "U does no measurable harm", not "HDR10+ boundaries
   help".
 - **What decided it is a handful of boundaries in one cut.** On airlock, A equals R exactly
-  (18 pieces), and all four H scenes that hold several shots have retail 819, so the clamp hides
-  them. On Iron City, U is A plus one H start, frame 1044. That start lies inside retail shot
+  (18 pieces). Five H scenes hold several shots. Four of them have retail 819, so the clamp hides
+  them. The fifth, 1271–1461, holds all 191 above-floor frames of the cut (retail 940 and 953 in
+  its two shots); there H's single value, 912, lands closer than A's split at 1456 (910 / 969),
+  which is why H scores 28.4 against 29.6 on airlock. On Iron City, U is A plus one H start, frame 1044. That start lies inside retail shot
   999–1081, and splitting there costs U 1,125 code-frames. Iron City contributes 1,278 of the
   1,469 primary frames.
 - **Today's HDR10+ average reads high everywhere.** S is +268 codes above floor and +410 on every
