@@ -41,8 +41,9 @@ This document provides a historical record of completed milestones, feature impl
   `mkvdovi` 0.5.x rejects every sidecar this analyzer writes ("unsupported L1 sidecar version 5";
   0.5.x reads versions 1 to 3), HDR10 and HLG alike, and fails the file after the analysis.
 - **HLG output now uses the `bt2100` composer by default.** It keeps neutrals neutral and maps
-  nominal white to 1000 nits, but **no playback device has been tested with it yet**. If a player
-  shows HLG conversions wrongly, convert with `--hlg-composer preset`, which writes the RPU exactly
+  nominal white to 1000 nits. A playback test after `v0.6.0-rc.1` showed that an LG OLED C9 applies
+  it (through the TV's Plex app and through an Nvidia Shield TV Pro); no other device has been
+  tested. If a player shows HLG conversions wrongly, convert with `--hlg-composer preset`, which writes the RPU exactly
   as `dovi_tool generate` does (the 0.5.1 behaviour). HLG measurements and temp directories from
   0.5.x are re-analyzed and regenerated automatically.
 - **Some HLG files are refused** that 0.5.x converted: full range, a matrix other than BT.2020
@@ -100,8 +101,9 @@ This document provides a historical record of completed milestones, feature impl
   colour test patches is ΔE_ITP 11.8 from the reference on average, against 26.1 for the preset.
   The analyzer measures through the selected composer (CPU and CUDA, bit-identical), the sidecar
   names it (`dovi84-bt2100-v1`), and `mkvdovi` installs the same composer into the RPU that
-  `dovi_tool generate` wrote. Whether playback devices apply a composer other than the preset is
-  not yet confirmed by a playback test. HLG measurements and temp dirs from earlier versions carry
+  `dovi_tool generate` wrote. A playback test on an LG OLED C9 confirmed that the display applies
+  the composer in the RPU: a deliberately green test composer rendered green, and the preset's tint
+  on greys was visible where bt2100 was neutral. HLG measurements and temp dirs from earlier versions carry
   the preset, so under the new default they are re-analyzed and regenerated. Design and measurements:
   [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md).
   - New workspace library `dovi84_composer` (composer definitions, guarded RPU rewrite) and the

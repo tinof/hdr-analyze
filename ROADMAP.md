@@ -81,8 +81,6 @@ doing.
 Steps that need a decision or a hardware test from the owner. Other steps of the same item stay
 startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 
-- **P8: playback test.** Do Shield/TV devices apply the bt2100 composer, and how visible is the
-  preset's tint (WS6 procedure)? The chroma-siting comparison does not wait for this.
 - **P9: default change.** Whether hybrid mode becomes the default, after its development-tier score.
 - **P10 step 3: write L1 in-process.** Needs WS7 or playback evidence first.
 - **P11: targeted repair or full regeneration.** The notice that lists the dropped authored levels
@@ -95,13 +93,12 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| **v0.6.0** (now) | Everything under `[Unreleased]`: P8 spec 4:2:0 decode and the bt2100 default, E7 open-GOP alignment, P10 source range and `--verify` against the RPU, FEL removal, CUDA as main pipeline, WS2 unfiltered averages, measured L6 light levels | MINOR (Breaking entries, sidecar v5). Owner decision 2026-10-08: ship before the P8 playback test, notes say bt2100 playback is unverified and `--hlg-composer preset` is the fallback. `v0.6.0-rc.1` first, to test the new release workflow |
+| **v0.6.0** (now) | Everything under `[Unreleased]`: P8 spec 4:2:0 decode and the bt2100 default, E7 open-GOP alignment, P10 source range and `--verify` against the RPU, FEL removal, CUDA as main pipeline, WS2 unfiltered averages, measured L6 light levels | MINOR (Breaking entries, sidecar v5). Owner decision 2026-10-08: ship before the P8 playback test; it passed on 2026-10-13 after rc.1 (LG OLED C9), and the notes say so. `v0.6.0-rc.1` first, to test the new release workflow |
 | v0.6.1 | P6 container-0 MaxCLL/MaxFALL and `Details.txt` thousands separator, E7 passthrough L6 0 (Next up 1; fixed 2026-10-11 on `fix-l6-zero-light-levels`) | PATCH: corrects delivered L6, no contract change. If it merges before the v0.6.0 release PR, it ships in v0.6.0 instead |
 | none | P9 scene-list measurement (offline; step 0 done 2026-10-08), E13 steps 4 and 5 (refactors) | No user-visible change |
 | **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
-| next minor | P8 playback result, if devices ignore bt2100 (the default goes back to `preset`) | MINOR, released quickly |
 | a minor | E8 and E9 (they move the default `.bin`) | MINOR |
-| 1.0.0 | P8 playback verified (WS6), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
+| 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
 
 ## Progress log
 
@@ -111,6 +108,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-13 | P8 playback test: on an LG OLED C9 (Plex on the TV and on a Shield) a green canary composer renders green and the preset's grey tint is visible, bt2100 neutral; bt2100 stays the default. | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-11 | L6 fixes: MaxCLL/MaxFALL read from the stream behind a container 0, `Details.txt` thousands separators, `--verify` warns on L6 0 in a passed-through MEL RPU; r4 MEL default baseline captured. | P6, E7, E13 | `fix-l6-zero-light-levels` |
 | 2026-10-08 | P9 step 0: HDR10+ scene starts line up with the picture (offset 0 on six cuts, v5 runs, mkvdovi extraction path); 24% of frames in HDR10+ scenes holding several shots. | P9 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-07 | E13 step 3: pure-move split of mkvdovi `metadata.rs` and `pipeline.rs` into submodules, tests in `tests.rs`; all 8 RPU baselines identical. | E13 | `feat/e13-mkvdovi-split` |
@@ -166,7 +164,8 @@ evidence for each priority is in its items and in
 
 1. **HLG → Profile 8.4 composer** (P8, P7). `--hlg-composer bt2100` and the input refusal landed
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
-   devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback.
+   devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
+   one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); other devices untested.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list and peak from HDR10+; average, minimum and
    crop from pixels. Gate: opt-in, scored on the development tier before any default change.
    HDR10+ material is in (WS8 item 5, 2026-10-05), including a same-master Dolby Vision pair.
@@ -279,15 +278,18 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P8: HLG → Profile 8.4 composer
 
-- **Status:** Landed; default bt2100; playback test open.
+- **Status:** Landed; default bt2100; playback confirmed on an LG OLED C9 (2026-10-13).
 - `--hlg-composer bt2100` (2026-10-03) is fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ
   conversion and keeps neutrals neutral; the HLG colour input contract is enforced. Design and
   measurements: [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md). The preset it replaces tints
   neutrals (75% grey ΔE_ITP 6.8, up to 10.3 near black) and decodes nominal white to about
   1150 nits.
-- **Open:** the WS6 playback test must show that devices apply a composer that is not the preset,
-  and how visible the tint is on a TV. Real HLG material for both: five cuts since 2026-10-05
-  (live sport at 50p, a concert, a nature series, a broadcast capture, a drama; WS8 item 5).
+- **Done 2026-10-13: playback test.** An LG OLED C9 (Plex on the TV, and Plex on an Nvidia Shield TV Pro) shows a
+  canary composer (bt2100 with both chroma MMR constants shifted, `fit_hlg_composer canary-rpu`)
+  fully green, with the Dolby Vision badge, on a byte-identical HLG base layer: the display applies
+  the composer in the RPU. The preset's tint is visible on greys (the owner saw yellow), bt2100 is
+  neutral. bt2100 stays the default. Not covered: devices other than the C9, and the WS6
+  `code / 1023` question. Evidence: [log](docs/ROADMAP_LOG.md) 2026-10-13.
 - **Done 2026-10-06: spec 4:2:0 decode in the analyzer** (both composers;
   [#29](https://github.com/tinof/hdr-analyze/pull/29)). Max-RGB runs the chroma MMR at chroma resolution on down-sampled
   luma in `code / 1023` f32 (`spec-float`; `code / 1024` leaves `bt2100` 5.9 codes off neutral) and
@@ -431,7 +433,12 @@ The detailed gap table and validation method live in
 - **Open question (2026-10-06):** do devices evaluate the 8.4 composer at `code / 1023` (as
   libplacebo and the `bt2100` fit) or at the spec's `code / 1024`? Under the latter `bt2100` is
   5.9 codes off neutral, probably too little to see on a neutral ramp, so the test needs a pattern
-  that separates the two. A `code / 1024` answer means a refit (new composer and RPU).
+  that separates the two. A `code / 1024` answer means a refit (new composer and RPU). The P8
+  canary test (2026-10-13) does not answer it.
+- **P8 result (2026-10-13):** an LG OLED C9 applies the 8.4 composer in the RPU (canary method in
+  [log](docs/ROADMAP_LOG.md)). Not recorded for that test: firmware, picture mode, HDMI path. The
+  preset's grey tint looked yellow on the C9, where the libplacebo SDR render predicted lavender
+  (mid greys) and olive (dark greys).
 
 ### WS7: evaluation in displayed-picture units
 

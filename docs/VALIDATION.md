@@ -6,7 +6,7 @@ The project keeps three questions apart. This report answers the first.
 
 - Measurement accuracy: does the analyzer read the pixels correctly? Synthetic truth (§1), aligned comparisons against Dolby-authored embedded L1 and `cm_analyze` on identical pixels (§2 to §5, §7), and the HLG decode against libplacebo (§8) cover it. §6 lists the limits these comparisons found.
 - Output metadata correctness: is the final RPU well formed and consistent with the file it was muxed into? `mkvdovi --verify` checks the RPU extracted from the output (frame count, L1 ordering, L6, L9, L11, L254). In this report, the HDR10+ to L1 row of §7 Finding 2 scores generated L1 against a reference. A final-RPU regression corpus is tracked as WS6 in the [roadmap](../ROADMAP.md).
-- Playback quality: does the result look right on an identified playback chain? No controlled playback comparisons have been made. The playback test procedure is tracked as WS6 in the [roadmap](../ROADMAP.md).
+- Playback quality: does the result look right on an identified playback chain? One playback comparison has been made: the HLG composer test on an LG OLED C9 (2026-10-13, [roadmap log](ROADMAP_LOG.md)), which shows that the display applies the Profile 8.4 composer in the RPU. The playback test procedure is tracked as WS6 in the [roadmap](../ROADMAP.md).
 
 Generating output in the CM v4.0 metadata format does not mean the analysis reproduces Dolby's algorithm.
 

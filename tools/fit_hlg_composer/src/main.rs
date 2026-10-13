@@ -6,11 +6,14 @@
 //! fit_hlg_composer report [--spec-fixed [--vectors]]
 //! fit_hlg_composer rewrite-rpu <preset|bt2100> <RPU.bin>
 //! fit_hlg_composer mapping <preset|bt2100>
+//! fit_hlg_composer canary-rpu <bt2100 RPU.bin> <out RPU.bin> [--offset <v>]
+//! fit_hlg_composer canary-check <RPU.bin> [--offset <v>]
 //! fit_hlg_composer chroma-siting <preset|bt2100> <width> <height> [--every N]
 //!     [--render <rgba64le>] [--mask <u8 per pixel>] [--anchor-out <csv>] [--dump-pixels <dir>]
 //!     [--spec-only] < yuv420p10le
 //! ```
 
+mod canary;
 mod fit;
 mod model;
 mod report;
@@ -377,7 +380,9 @@ fn main() -> Result<()> {
             println!("{}", composer.luminance_mapping());
             Ok(())
         }
+        Some("canary-rpu") => canary::run_rewrite(&args[1..]),
+        Some("canary-check") => canary::run_check(&args[1..]),
         Some("chroma-siting") => siting::run(&args[1..]),
-        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report [--spec-fixed [--vectors]] | rewrite-rpu <preset|bt2100> <RPU.bin> | mapping <preset|bt2100> | chroma-siting <preset|bt2100> <width> <height> [options]"),
+        _ => bail!("usage: fit_hlg_composer fit [--write <file>] [--ridge <r>] | report [--spec-fixed [--vectors]] | rewrite-rpu <preset|bt2100> <RPU.bin> | mapping <preset|bt2100> | canary-rpu <in> <out> [--offset <v>] | canary-check <RPU.bin> [--offset <v>] | chroma-siting <preset|bt2100> <width> <height> [options]"),
     }
 }

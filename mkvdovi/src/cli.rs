@@ -102,9 +102,9 @@ pub struct Args {
     /// Dolby Vision Profile 8.4 composer (reshaping curves) written into the RPU of HLG inputs.
     /// bt2100 (default) = fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion with
     /// neutrals kept neutral; preset = the dolby_vision crate's Profile84 preset that dovi_tool
-    /// generates (decodes neutral greys slightly blue). Device support for a composer other
-    /// than the preset is not yet confirmed by a playback test; if a display renders bt2100
-    /// output wrongly, convert with preset.
+    /// generates (decodes neutral greys slightly blue). A playback test on an LG OLED C9
+    /// confirmed that the display applies the composer; if a display renders bt2100 output
+    /// wrongly, convert with preset.
     #[arg(
         long,
         value_parser = PossibleValuesParser::new(Composer::ALL.map(Composer::cli_name))

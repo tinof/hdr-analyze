@@ -9,8 +9,8 @@
   section 10. An implementation review (three independent reviewers) found only minor issues, all
   handled; the deviations from the first version of this note are marked "as built".
 - First built opt-in. 2026-10-03, by owner decision: `bt2100` is the default for both binaries,
-  ahead of the WS6 playback test, which the owner runs with it. Whether playback devices apply a
-  composer that is not the preset is still unverified; `--hlg-composer preset` is the fallback.
+  ahead of the WS6 playback test, which the owner ran with it; `--hlg-composer preset` is the
+  fallback.
 - 2026-10-06 (P8): the analyzer measures both composers through the spec's 4:2:0 structure in
   `code / 1023` f32 (`spec-float`, section 9), with new sidecar names `dovi84-v3` (preset) and
   `dovi84-bt2100-v1-spec420` (bt2100). Section 9's table and the analyzer row above it describe the
@@ -251,10 +251,16 @@ because CI has no GPU.
   script also prints a BT.2100 reference column and ΔE_ITP of the libplacebo render against it, and
   exits non-zero when the libplacebo-vs-analyzer difference exceeds its tolerance, as today.
   Reported numbers name the ffmpeg/libplacebo build: its tone mapping changed on 2026-09-30.
+- 2026-10-13 (WS6): playback test on an LG OLED C9 (Plex on the TV, and Plex on an Nvidia Shield TV Pro). A canary
+  composer (bt2100 with both chroma MMR constants shifted by −0.0625, `fit_hlg_composer
+  canary-rpu`) on a byte-identical HLG base layer rendered fully green with the Dolby Vision badge,
+  so the display applies the composer in the RPU. The preset's tint on greys was visible (the owner
+  saw yellow; the libplacebo SDR render shows lavender mid greys and olive dark greys), bt2100 was
+  neutral. bt2100 stays the default. Details: [`ROADMAP_LOG.md`](ROADMAP_LOG.md) 2026-10-13.
 - **End to end:** `mkvdovi/tests/hlg_profile84.rs` gets a `--hlg-composer bt2100` case: sidecar name,
   the fitted mapping on every frame of the muxed RPU, and `--verify` passing.
-- **Not covered:** a Dolby display's behaviour. Device acceptance and visibility of the change stay
-  open for the WS6 playback test.
+- **Not covered:** a Dolby display's internal decode. Device acceptance and the visibility of the
+  change were tested on 2026-10-13 on an LG OLED C9 (see the status list at the top).
 
 **4:2:0 chroma: the analyzer is not the spec decode (both composers; measured 2026-10-05).** Three
 decodes of the same 4:2:0 frame differ:
@@ -390,9 +396,10 @@ average max-RGB +5 to +30 (median +20), minimum −31 to +13 (median −17). All
 3079. The rewrite's byte-identical round-trip guard was exercised with `dovi_tool` 2.3.4 only; a
 `dovi_tool` that serializes differently is refused by design.
 
-**Not measured:** any Dolby display, device acceptance of a non-preset composer, and visibility on
-a TV. They stay open for the WS6 playback test, which should include sub-black fades, coloured
-superwhite and dark saturated colours, where the two composers differ most.
+**Not measured:** any Dolby display's decode numerically. An LG OLED C9 applies a non-preset
+composer and shows the preset's tint (playback test 2026-10-13, status list at the top); the owner
+reported the grey tint, not each pattern page, so sub-black fades, coloured superwhite and dark
+saturated colours, where the two composers differ most, are not reported separately on a TV.
 
 ## 11. Input contract: refuse what the 8.4 RPU cannot describe
 

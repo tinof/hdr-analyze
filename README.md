@@ -55,7 +55,7 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 |---|---|---|---|
 | HDR10 | Profile 8.1, CM v4.0 metadata | No | Measurement comparisons published; playback unvalidated |
 | HDR10+ | Profile 8.1, L1 taken from HDR10+ | No | Measurement comparisons published; playback unvalidated |
-| HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves); composer fitted to BT.2100 by default (`--hlg-composer preset` for the `dovi_tool` preset) | No | Decode validated against libplacebo; playback unvalidated |
+| HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves); composer fitted to BT.2100 by default (`--hlg-composer preset` for the `dovi_tool` preset) | No | Decode validated against libplacebo; composer applied on an LG OLED C9 |
 | Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
 | Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](docs/FEL_PLAN.md)) |
 | Profile 8.1 or MEL with `--mdfix` (Profile 8.4 is refused) | Profile 8.1 with rebuilt metadata | No | Works; not a guaranteed improvement |
@@ -70,7 +70,7 @@ On synthetic patterns, measured peaks land within 0.25 of one 12-bit PQ code. On
 
 The weak spot is grain. With the default `max` estimator, two grainy real-content assets read +74 and +93 codes hot against the reference. An opt-in grain-rejecting estimator (`--peak-estimator`, see the CLI reference) narrows this but does not close it.
 
-CPU and GPU agreement shows the two paths are consistent. It says nothing about accuracy. The accuracy evidence is in [docs/VALIDATION.md](docs/VALIDATION.md), and the remaining gaps are in [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md). No playback comparisons have been published yet.
+CPU and GPU agreement shows the two paths are consistent. It says nothing about accuracy. The accuracy evidence is in [docs/VALIDATION.md](docs/VALIDATION.md), and the remaining gaps are in [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md). The only playback comparison so far is the HLG composer test on an LG OLED C9 ([docs/ROADMAP_LOG.md](docs/ROADMAP_LOG.md), 2026-10-13).
 
 ## Why another HDR analyzer?
 
@@ -89,8 +89,8 @@ Dolby provides its own professional tools for this job. If you already use them 
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
 - There is no Profile 5 output and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
-- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the default 8.4 preset curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)); `--hlg-composer preset` writes the `dolby_vision` crate's preset instead, which tints neutral greys slightly blue. No playback device has been tested with the fitted composer yet.
-- Playback on real displays has not been compared and published.
+- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the default 8.4 preset curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)); `--hlg-composer preset` writes the `dolby_vision` crate's preset instead, which tints neutral greys slightly blue. A playback test showed that an LG OLED C9 applies the fitted composer; other devices are untested.
+- Playback has been compared on one display only: the HLG composer test on an LG OLED C9 (2026-10-13). HDR10, HDR10+ and other devices are untested.
 
 ## Documentation
 
