@@ -6,6 +6,31 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-13: E13 step 4, `convert_file` split by phase
+
+Behavior-preserving function extraction in `mkvdovi/src/pipeline/`; no user-visible change.
+`pipeline/mod.rs` went from 1037 to 409 lines; `convert_file` is about 270 lines of orchestration.
+
+- New modules: `temp_dir.rs` (`locate_temp_dir`, `settle_leftover_temp_dir`, `prepare_temp_dir`),
+  `measure.rs` (detection report, unsupported exit, `acquire_measurements`,
+  `find_reusable_measurements`, `run_fresh_analysis` with the analyzer `--help` composer probe, the
+  seam for the P9 hybrid flag), `config.rs` (`prepare_configuration`, `withdraw_stale_rpu`) and
+  `deliver.rs` (`extract_base_layer`, `inject_rpu`, `mux_output`). The MEL fast path moved to
+  `dovi_steps::convert_mel_fast_path`. `convert_file` ends through `finish_success`, which folds the
+  duplicated cleanup (an E13 simplification candidate).
+- Tests: 27 new unit tests (4 tool-free `convert_file` characterization, 8 temp-dir, 7 measure,
+  4 `withdraw_stale_rpu`, 4 delivery); 181 mkvdovi unit tests in total.
+- Gates on d7c080d: fmt, clippy and `cargo test --workspace` pass (log
+  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/workspace-test.log`); `hlg_profile84` and
+  `open_gop_start` ran without skips; the corpus classification test passed (174 s).
+- RPU baselines: 9 stems (default d1, g3, h1, r1, r2, r4; mdfix r4, r5; preset g3) captured in
+  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/` and compared with
+  `~/mkvdovi-work/rpu-baseline/0.6.0/`: `compare --require-identical-l1` exit 0 and `RPU.bin`
+  byte-identical for all 9; mkvdovi's own log lines identical after normalizing timings and paths.
+  Covers Profile 7 MEL, Profile 8 `--mdfix`, HDR10, HDR10+ and HLG bt2100 and preset. The only full-log
+  difference is one analyzer stderr line interleaved differently on g3.
+- No CUDA parity or L1 regression gate: no analyzer path changed.
+
 ### 2026-10-13: P8 playback test, the LG OLED C9 applies the RPU composer
 
 The owner viewed the P8 test set on an LG OLED C9 with Plex on the TV and with Plex on an Nvidia

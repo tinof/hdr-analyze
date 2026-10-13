@@ -92,7 +92,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | E13 steps 4 and 5 (refactors), P1 step 1 measurement | No user-visible change |
+| none | E13 step 5 (refactor), P1 step 1 measurement | No user-visible change |
 | next patch | P11 `--mdfix` dropped-levels notice | PATCH: a new notice, no changed default, flag or contract; batched with other fixes |
 | **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
 | a minor | E8 and E9 (they move the default `.bin`) | MINOR |
@@ -106,6 +106,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-13 | E13 step 4: `convert_file` split by phase into `pipeline/{temp_dir,measure,config,deliver}.rs`, `mod.rs` 1037 to 409 lines, 27 new unit tests; all 9 RPU baselines byte-identical to 0.6.0. | E13 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within about 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | v0.6.0 released (#46): #41 and #43 on top of rc.1; CUDA parity and all ten RPU baselines identical before the tag. | P6, E7, P8 | [v0.6.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.6.0) |
 | 2026-10-13 | P8 playback test: on an LG OLED C9 (Plex on the TV and on a Shield) a green canary composer renders green and the preset's grey tint is visible, bt2100 neutral; bt2100 stays the default. | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
@@ -170,7 +171,7 @@ evidence for each priority is in its items and in
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels. Gate: opt-in, scored on the development tier before any default change.
    HDR10+ material is in (WS8 item 5, 2026-10-05), including a same-master Dolby Vision pair.
    **Prerequisite:** E13 step 3 (split `mkvdovi/src/{metadata,pipeline}.rs`; met, #33) before P9 step 0, and
-   E13 step 4 (`convert_file` by phase) before the hybrid flag; P9 works in those files.
+   E13 step 4 (`convert_file` by phase; met 2026-10-13) before the hybrid flag; P9 works in those files.
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
    a playback test.
@@ -278,7 +279,7 @@ and broader hardware acceleration (E5). Neutral trims stay.
   analyzer itself still only warns.)
 - **Checked 2026-10-11 @8db4ad6:** full-range PQ still only warns
   (`hdr_analyzer_mvp/src/pipeline.rs:412`) and mkvdovi has no PQ range refusal; a refusal touches
-  `metadata/format.rs` and `pipeline/mod.rs`, so it waits for E13 step 4.
+  `metadata/format.rs` and `pipeline/`; E13 step 4, which it waited for, is done (2026-10-13).
 
 ### P8: HLG → Profile 8.4 composer
 
@@ -335,11 +336,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
   1229 where retail sits at the 819 floor. The 18.9 holds after the generator's 819 floor; raw, the
   measured average is 147.6 codes off over all frames (about 259 below on floor frames). Two cuts from one title; peak and minimum not
   evaluated ([log](docs/ROADMAP_LOG.md) 2026-10-13).
-- **Open:** E13 step 4, then the hybrid flag: the union carries average and minimum; peak per piece
+- **Open:** the hybrid flag (E13 step 4 done 2026-10-13; the analyzer seam is `pipeline/measure.rs`): the union carries average and minimum; peak per piece
   from HDR10+ with the pixel fallback; its integration gate needs an HDR10+-only cut (Alita takes the
   MEL path). Before a default change (owner list): score holdout HDR10+ cuts, where the union could
   show whether HDR10+ starts rescue cuts the analyzer misses; none did on the development cuts.
-- **Checked 2026-10-11 @8db4ad6:** still valid (`pipeline/dovi_steps.rs:319`, `pipeline/mod.rs:897`,
+- **Checked 2026-10-11 @8db4ad6:** still valid (`pipeline/dovi_steps.rs:322`, `pipeline/mod.rs:275` since E13 step 4,
   `metadata/format.rs:52`, `metadata/sidecar.rs:179`); `AverageRGB` is one value per HDR10+ scene,
   `run/` sidecars are v4 (use the step-0 v5 runs). New: `l1_diff` scores per-frame averages
   (`tools/l1_diff/src/main.rs:787`), so a candidate scene list needs its own per-scene aggregation
@@ -636,9 +637,9 @@ The detailed gap table and validation method live in
 ### E13: module size refactor
 
 - **Status:** Open; step 2 (safety net) done 2026-10-07; step 3 (mkvdovi split) done 2026-10-07,
-  evidence in the PR body and `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/`; steps 4-5
-  open. Still over the 800-line limit in CLAUDE.md ("Module size"), test modules not counted:
-  `mkvdovi/src/pipeline/mod.rs` (1037 lines, `convert_file` about 900; step 4),
+  evidence in the PR body and `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/`; step 4
+  (`convert_file` by phase) done 2026-10-13, evidence in
+  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 open. Still over the 800-line limit in CLAUDE.md ("Module size"), test modules not counted:
   `hdr_analyzer_mvp/src/pipeline.rs` (1348), `analysis/frame.rs` (1026) and `analysis/gpu.rs` (951).
   The mkvdovi `metadata/` submodules are all under it.
 - **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
@@ -666,15 +667,10 @@ The detailed gap table and validation method live in
   it is not planned.
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
-  spellings anyway; two `impl L1Sidecar` blocks; the temp-dir cleanup `convert_file` duplicates
-  from `finish_success`.
+  spellings anyway; two `impl L1Sidecar` blocks.
 - **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
 - **Checked 2026-10-11 @8db4ad6:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3;
-  r4 MEL default in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/` (step 4 prerequisite met).
-  Step 4 (`convert_file`, `pipeline/mod.rs:43`): baselines do not cover resume, cleanup or source
-  deletion (`scripts/rpu-baseline.sh:90` always passes `--keep-source --verify`), so unit-test
-  those and the `Ok(false)` returns (`:47,96,247,286`); keep the `extra.json` compare before
-  sentinel invalidation (`:676`) and both success paths (`finish_success` `:994`). Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
+  r4 MEL default in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`. Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
   optimizer-enabled default `.bin` (both gates pass `--disable-optimizer`).
 
 ## Checked and kept (2026-10-03)
