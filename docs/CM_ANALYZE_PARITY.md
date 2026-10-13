@@ -174,7 +174,10 @@ picture) the generator's average, PQ of the linear-light mean rounded to whole n
 codes (median 264) above the analyzer's mean of PQ max-RGB in every scene; the rounding alone moves
 a 0.7-nit scene by 71 codes. A linear-light mean lies above a mean of PQ values by construction, but
 how much of the gap that explains and how much is the HDR10+ producer's own measurement was not
-separated.
+separated. Against retail Dolby Vision L1 from the same master (two Alita: Battle Angel cuts,
+2026-10-13), the RPU that mkvdovi's HDR10+ path delivers reads on average 268 codes high where the
+retail average is above the 819 floor, and writes 1229 where it sits at the floor. A per-scene
+pixel average lands 19 codes from retail over all frames (P9; [log](ROADMAP_LOG.md)).
 
 ### Active area and temporal stability
 

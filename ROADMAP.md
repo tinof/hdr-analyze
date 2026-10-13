@@ -62,17 +62,17 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-11 at main@8db4ad6)
+### Next up (checked 2026-10-13 at main@0eb414d)
 
-1. **P9: which scene list carries the pixel average** (priority 2), offline on `feat/dev-corpus`
-   with the step-0 v5 sidecars of the two Alita cuts; the result lands as a docs PR. Gate: L1
-   average per frame against the Alita retail RPU for HDR10+ scenes, analyzer cuts and their
-   union, measured and generator-clamped scores apart; retail min is 0 on every frame, so the
-   minimum rule stays open. Before E13 step 4 (`P9` item). Release: none
-2. **E13 step 4: split `convert_file` by phase** (`feat/e13-convert-file-phases`), can start
-   beside 1 (no shared files); before the P9 hybrid flag. Gate: the E13 per-move gate with the
-   r4 baseline in `l6-fix-e052c3d`, plus resume tests the baselines cannot give. Full panel,
-   not pure-move. Release: none
+1. **E13 step 4: split `convert_file` by phase** (`feat/e13-convert-file-phases`), the last
+   prerequisite of the P9 hybrid flag now that the scene list is chosen. Gate: the E13 per-move
+   gate with the 0.6.0 RPU baselines (`~/mkvdovi-work/rpu-baseline/0.6.0/`, identical to the E13
+   and r4 baselines), plus unit tests for resume, cleanup and source deletion, which the baselines
+   cannot give. Full panel, not pure-move. Release: none
+2. **P11: the `--mdfix` dropped-levels notice** (priority 5; full regeneration kept by owner
+   decision 2026-10-13). Gate: a unit test per dropped level, and the notice labelled as sampled
+   (240-frame classifier sample). Touches `rpu_check.rs` and the repair branch of
+   `pipeline/mod.rs`, so after step 4 or rebased on it. Release: patch
 3. **P1 step 1: measure CPU `accurate` against `balanced`** (priority 4), offline: CPU cost and
    `FAST_BILINEAR`'s effect on L1 max, then flip CPU `auto` or keep it with a visible note.
    The flip waits for E13 step 4 (`pipeline/`). Release: none (measurement); minor if it flips
@@ -84,8 +84,6 @@ startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 
 - **P9: default change.** Whether hybrid mode becomes the default, after its development-tier score.
 - **P10 step 3: write L1 in-process.** Needs WS7 or playback evidence first.
-- **P11: targeted repair or full regeneration.** The notice that lists the dropped authored levels
-  does not wait for this.
 
 ### Release plan (2026-10-13)
 
@@ -94,7 +92,8 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | P9 scene-list measurement (offline; step 0 done 2026-10-08), E13 steps 4 and 5 (refactors) | No user-visible change |
+| none | E13 steps 4 and 5 (refactors), P1 step 1 measurement | No user-visible change |
+| next patch | P11 `--mdfix` dropped-levels notice | PATCH: a new notice, no changed default, flag or contract; batched with other fixes |
 | **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
 | a minor | E8 and E9 (they move the default `.bin`) | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
@@ -107,6 +106,8 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](docs/ROADMAP_LOG.md) |
+| 2026-10-13 | v0.6.0 released (#46): #41 and #43 on top of rc.1; CUDA parity and all ten RPU baselines identical before the tag. | P6, E7, P8 | [v0.6.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.6.0) |
 | 2026-10-13 | P8 playback test: on an LG OLED C9 (Plex on the TV and on a Shield) a green canary composer renders green and the preset's grey tint is visible, bt2100 neutral; bt2100 stays the default. | P8, WS6 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-11 | L6 fixes: MaxCLL/MaxFALL read from the stream behind a container 0, `Details.txt` thousands separators, `--verify` warns on L6 0 in a passed-through MEL RPU; r4 MEL default baseline captured. | P6, E7, E13 | `fix-l6-zero-light-levels` |
 | 2026-10-08 | P9 step 0: HDR10+ scene starts line up with the picture (offset 0 on six cuts, v5 runs, mkvdovi extraction path); 24% of frames in HDR10+ scenes holding several shots. | P9 | [log](docs/ROADMAP_LOG.md) |
@@ -178,7 +179,8 @@ evidence for each priority is in its items and in
    fixed 2026-10-11). Gate: unit tests for the reader and the option; measure the CPU default
    first. **Prerequisite:** E13 step 5 (analyzer
    split) before E8 + E9, because E8 moves the default `.bin`.
-5. **`--mdfix` replaces the whole RPU** (P11): targeted repair or full regeneration. Open decision.
+5. **`--mdfix` replaces the whole RPU** (P11): full regeneration stays (owner decision 2026-10-13);
+   open: a notice that names the authored levels it drops.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts. Gate: the simulator reproduces the recomputed numbers in WS7.
 7. **Test material** (WS8): grain on synthetic highlights, unaligned positions, a same-master grainy
@@ -303,7 +305,7 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Open; step 0 (frame alignment) done 2026-10-08.
+- **Status:** Open; step 0 (frame alignment) done 2026-10-08; scene list chosen 2026-10-13.
 - `dovi_tool generate --hdr10plus-json` takes L1 from the first frame of each HDR10+ scene
   (minimum 0, average rounded to whole nits, no measured crop). On the HDR10+ test cut the average
   reads 156 to 505 codes above the analyzer's mean; the cause is not separated.
@@ -324,9 +326,17 @@ and broader hardware acceleration (E5). Neutral trims stay.
   ([log](docs/ROADMAP_LOG.md) 2026-10-08). The scene list is not a shot
   list: 24% of the frames sit in HDR10+ scenes holding more than one shot (Alita, The Shining), and
   some HDR10+ starts split a shot (Alien).
-- **Open (next design step):** decide which scene list carries the pixel average and minimum
-  (HDR10+, the analyzer's cuts, or their union with the HDR10+ peak per piece), scored on the Alita
-  cuts against the retail RPU; then E13 step 4, then the hybrid flag.
+- **Done 2026-10-13: which scene list carries the pixel average.** The union of HDR10+ starts and
+  the analyzer's cuts, by the pre-registered rule; the HDR10+ scenes, the analyzer's cuts and the
+  union score within 1.5 codes of each other (pooled clamped MAE above the floor 38.3 / 36.8 /
+  37.6), and the analyzer's cuts are the numerical best. The gain is the measured average itself:
+  pooled clamped MAE over all frames 18.9 codes against 338.4 for today's HDR10+ path, which writes
+  1229 where retail sits at the 819 floor. Two cuts from one title; peak and minimum not
+  evaluated ([log](docs/ROADMAP_LOG.md) 2026-10-13).
+- **Open:** E13 step 4, then the hybrid flag: the union carries average and minimum; peak per piece
+  from HDR10+ with the pixel fallback; its integration gate needs an HDR10+-only cut (Alita takes the
+  MEL path). Before a default change (owner list): score holdout HDR10+ cuts, where the union could
+  show whether HDR10+ starts rescue cuts the analyzer misses; none did on the development cuts.
 - **Checked 2026-10-11 @8db4ad6:** still valid (`pipeline/dovi_steps.rs:319`, `pipeline/mod.rs:897`,
   `metadata/format.rs:52`, `metadata/sidecar.rs:179`); `AverageRGB` is one value per HDR10+ scene,
   `run/` sidecars are v4 (use the step-0 v5 runs). New: `l1_diff` scores per-frame averages
@@ -353,12 +363,12 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P11: `--mdfix` and authored metadata
 
-- **Status:** Open; decision.
+- **Status:** Open; decided 2026-10-13 (owner): full regeneration stays, with a notice.
 - `--mdfix` regenerates the whole RPU: authored L2 and L4 become neutral L2 and no L4, authored L5
   is reduced to one sampled value, L6 comes from the container. Retail trims are far from neutral.
-- **Decision:** a targeted repair that keeps unaffected levels, against the finding that trims were
-  authored for the authored L1 and shot list. Until decided, `--mdfix` should state in its output
-  which authored levels it drops.
+- **Decision (owner, 2026-10-13):** keep full regeneration, since trims were authored for the
+  authored L1 and shot list; no targeted repair. **Open:** `--mdfix` states in its output which
+  authored levels it drops.
 - **Checked 2026-10-05 @9edee09:** the source RPU is classified from a 240-frame sample
   (`rpu_check::extract_rpu_sample`), so the dropped-levels notice can only name levels seen in
   that sample unless the step reads the whole RPU.
