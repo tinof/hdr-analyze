@@ -391,3 +391,65 @@ fn finish_success_with_a_missing_source_only_warns_and_still_cleans_up() {
     assert!(!temp);
     assert!(output);
 }
+
+/// Runs `convert_file` on `<dir>/in.mkv` after `setup` has populated the directory; returns
+/// the result and the directory. Only paths that return before format detection (MediaInfo)
+/// are reachable without external tools.
+fn run_convert_file(
+    flags: &[&str],
+    setup: impl FnOnce(&Path),
+) -> (Result<bool>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    let mut argv = vec!["mkvdovi"];
+    argv.extend_from_slice(flags);
+    let args = Args::try_parse_from(argv).unwrap();
+    let input = dir.path().join("in.mkv");
+    let result = convert_file(input.to_str().unwrap(), &args);
+    (result, dir)
+}
+
+fn write_source_and_output(dir: &Path) {
+    fs::write(dir.join("in.mkv"), b"src").unwrap();
+    fs::write(dir.join("in.DV.mkv"), b"out").unwrap();
+}
+
+#[test]
+fn convert_file_with_a_missing_input_fails_without_temp_work() {
+    let (result, dir) = run_convert_file(&[], |_| {});
+    assert!(!result.unwrap());
+    assert!(!dir.path().join("mkvdovi_temp_in").exists());
+}
+
+#[test]
+fn convert_file_skips_an_existing_output_without_a_temp_dir() {
+    let (result, dir) = run_convert_file(&[], write_source_and_output);
+    assert!(result.unwrap());
+    assert!(dir.path().join("in.mkv").exists(), "source must be kept");
+    assert!(dir.path().join("in.DV.mkv").exists());
+    assert!(!dir.path().join("mkvdovi_temp_in").exists());
+}
+
+#[test]
+fn convert_file_no_resume_skips_an_existing_output_and_leaves_the_temp_dir() {
+    let (result, dir) = run_convert_file(&["--no-resume"], |dir| {
+        write_source_and_output(dir);
+        fs::create_dir(dir.join("mkvdovi_temp_in")).unwrap();
+        fs::write(dir.join("mkvdovi_temp_in").join("marker"), b"x").unwrap();
+    });
+    assert!(result.unwrap());
+    assert!(dir.path().join("in.mkv").exists());
+    assert!(dir.path().join("mkvdovi_temp_in").join("marker").exists());
+}
+
+#[test]
+fn convert_file_no_resume_neither_adopts_nor_deletes_a_legacy_temp_dir() {
+    let (result, dir) = run_convert_file(&["--no-resume"], |dir| {
+        write_source_and_output(dir);
+        fs::create_dir(dir.join("mkvdolby_temp_in")).unwrap();
+        fs::write(dir.join("mkvdolby_temp_in").join("marker"), b"x").unwrap();
+    });
+    assert!(result.unwrap());
+    assert!(dir.path().join("mkvdolby_temp_in").join("marker").exists());
+    assert!(!dir.path().join("mkvdovi_temp_in").exists());
+}
