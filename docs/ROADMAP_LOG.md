@@ -121,8 +121,9 @@ Findings:
   This repeats the 2026-10-03 finding on four more cuts from two titles.
 - **Rounding does not matter.** V1 and V2 pick U too; V2 differs from the main variant in one A
   piece by one code.
-- **A constant crop or calibration shift does not reorder the candidates.** Shifts of 0 to
-  40 codes keep the spread under 2 codes.
+- **A constant crop or calibration shift does not change the winner under the rule.** Shifts of
+  0 to 40 codes keep the spread under 2 codes. The numerical order can change: A is best up to
+  +35 codes, U at +40.
 - **Minimum.** Retail min is 0 on every frame, so this data cannot choose a rule for the minimum.
   The generator writes it as at most 12 codes anyway.
 

@@ -166,8 +166,8 @@ evidence for each priority is in its items and in
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); other devices untested.
-2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list and peak from HDR10+; average, minimum and
-   crop from pixels. Gate: opt-in, scored on the development tier before any default change.
+2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
+   cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels. Gate: opt-in, scored on the development tier before any default change.
    HDR10+ material is in (WS8 item 5, 2026-10-05), including a same-master Dolby Vision pair.
    **Prerequisite:** E13 step 3 (split `mkvdovi/src/{metadata,pipeline}.rs`; met, #33) before P9 step 0, and
    E13 step 4 (`convert_file` by phase) before the hybrid flag; P9 works in those files.
@@ -316,7 +316,8 @@ and broader hardware acceleration (E5). Neutral trims stay.
   frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on Alita) and
   the average are present. A peak taken from MaxSCL is unusable on such sources, so the pixel
   fallback is required, not optional; whether the percentiles can stand in is open.
-- **Plan:** opt-in hybrid mode (HDR10+ scene list and peak; average, minimum and L5 from pixels),
+- **Plan:** opt-in hybrid mode (scene list = union of HDR10+ starts and the analyzer's cuts, peak
+  per piece from HDR10+; average, minimum and L5 from pixels),
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
