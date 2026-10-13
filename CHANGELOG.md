@@ -6,33 +6,7 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
-### Fixed
-
-- **HLG signalled only in the SEI is detected without MediaInfo** (mkvdovi). When MediaInfo is
-  missing or names no HDR format, mkvdovi falls back to ffprobe. That fallback read only the
-  stream-level transfer, which usually carries the HEVC VUI value (`bt2020-10` or `bt709` in the
-  broadcast HLG cuts tested), so HLG signalled only through the alternative transfer
-  characteristics SEI was refused as unsupported. `--mdfix` on such a Profile 8.4 input was not
-  refused upfront either: it re-analyzed the file and then stopped at the L1 sidecar check with a
-  misleading "input is not HLG" error. The fallback now also reads the first decoded frame's
-  transfer, which carries the SEI value. Whether ffprobe shows the SEI value at stream level
-  depends on the file and container, with FFmpeg 6.1 and 9.0 alike.
-
-- **MaxCLL/MaxFALL stated as 0 in the container no longer hide the stream's value** (mkvdovi). When
-  the MKV Colour element says 0 (e.g. `mkvmerge --max-content-light 0`), MediaInfo moves the
-  stream's value to `MaxCLL_Original`/`MaxFALL_Original`; mkvdovi now reads it there instead of
-  writing the 1000/400 L6 default. A non-zero container value still wins.
-
-- **`--verify` accepts L6 MaxCLL/MaxFALL 0 in a passed-through Profile 7 MEL RPU** (mkvdovi). Retail
-  discs state 0 ("unknown"); it is now a warning instead of a hard failure. A generated RPU, a
-  missing or malformed field and a MaxDML of 0 still fail.
-
-- **`Details.txt` light levels with thousands separators** (mkvdovi). `1,000` and `1.000` were read
-  as 1.0 (or not at all, as in `1,234.5`); they now read as 1000. With both marks, the last one is
-  the decimal mark; a lone mark that groups three digits is a thousands separator while the value
-  stays within 10,000 nits (`10.000` → 10000), else a decimal mark (`812.000` → 812, as before).
-
-## [0.6.0] - 2026-10-09
+## [0.6.0] - 2026-10-13
 
 ### Upgrade notes
 
@@ -297,6 +271,30 @@ This document provides a historical record of completed milestones, feature impl
     bit-exact and re-encodes nothing.
 
 ### Fixed
+
+- **HLG signalled only in the SEI is detected without MediaInfo** (mkvdovi). When MediaInfo is
+  missing or names no HDR format, mkvdovi falls back to ffprobe. That fallback read only the
+  stream-level transfer, which usually carries the HEVC VUI value (`bt2020-10` or `bt709` in the
+  broadcast HLG cuts tested), so HLG signalled only through the alternative transfer
+  characteristics SEI was refused as unsupported. `--mdfix` on such a Profile 8.4 input was not
+  refused upfront either: it re-analyzed the file and then stopped at the L1 sidecar check with a
+  misleading "input is not HLG" error. The fallback now also reads the first decoded frame's
+  transfer, which carries the SEI value. Whether ffprobe shows the SEI value at stream level
+  depends on the file and container, with FFmpeg 6.1 and 9.0 alike.
+
+- **MaxCLL/MaxFALL stated as 0 in the container no longer hide the stream's value** (mkvdovi). When
+  the MKV Colour element says 0 (e.g. `mkvmerge --max-content-light 0`), MediaInfo moves the
+  stream's value to `MaxCLL_Original`/`MaxFALL_Original`; mkvdovi now reads it there instead of
+  writing the 1000/400 L6 default. A non-zero container value still wins.
+
+- **`--verify` accepts L6 MaxCLL/MaxFALL 0 in a passed-through Profile 7 MEL RPU** (mkvdovi). Retail
+  discs state 0 ("unknown"); it is now a warning instead of a hard failure. A generated RPU, a
+  missing or malformed field and a MaxDML of 0 still fail.
+
+- **`Details.txt` light levels with thousands separators** (mkvdovi). `1,000` and `1.000` were read
+  as 1.0 (or not at all, as in `1,234.5`); they now read as 1000. With both marks, the last one is
+  the decimal mark; a lone mark that groups three digits is a thousands separator while the value
+  stays within 10,000 nits (`10.000` → 10000), else a decimal mark (`812.000` → 812, as before).
 
 - **`scripts/rpu-baseline.sh capture` with `--mdfix`** (tooling). It looked for `<stem>.DV.mkv`;
   `--mdfix` writes `<stem>.mdfix.DV.mkv`, so the capture failed.

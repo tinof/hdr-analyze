@@ -86,15 +86,13 @@ startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 - **P11: targeted repair or full regeneration.** The notice that lists the dropped authored levels
   does not wait for this.
 
-### Release plan (2026-10-08)
+### Release plan (2026-10-13)
 
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
-`/roadmap-next` keeps this table current. Latest release: v0.5.1 (2026-10-01).
+`/roadmap-next` keeps this table current. Latest release: v0.6.0 (2026-10-13; with the L6 fixes of #41 and the ffprobe HLG fix of #43, both merged after rc.1).
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| **v0.6.0** (now) | Everything under `[Unreleased]`: P8 spec 4:2:0 decode and the bt2100 default, E7 open-GOP alignment, P10 source range and `--verify` against the RPU, FEL removal, CUDA as main pipeline, WS2 unfiltered averages, measured L6 light levels | MINOR (Breaking entries, sidecar v5). Owner decision 2026-10-08: ship before the P8 playback test; it passed on 2026-10-13 after rc.1 (LG OLED C9), and the notes say so. `v0.6.0-rc.1` first, to test the new release workflow |
-| v0.6.1 | P6 container-0 MaxCLL/MaxFALL and `Details.txt` thousands separator, E7 passthrough L6 0 (Next up 1; fixed 2026-10-11 on `fix-l6-zero-light-levels`) | PATCH: corrects delivered L6, no contract change. If it merges before the v0.6.0 release PR, it ships in v0.6.0 instead |
 | none | P9 scene-list measurement (offline; step 0 done 2026-10-08), E13 steps 4 and 5 (refactors) | No user-visible change |
 | **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
 | a minor | E8 and E9 (they move the default `.bin`) | MINOR |
