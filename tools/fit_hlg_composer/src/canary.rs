@@ -41,6 +41,10 @@ fn encode_rpu_file(rpus: &[DoviRpu]) -> Result<Vec<u8>> {
 /// The `bt2100` mapping with `offset` added to both chroma MMR constants (fixed point,
 /// `int + frac / 2^23`).
 pub fn canary_mapping(offset: f64) -> Result<RpuDataMapping> {
+    ensure!(
+        offset.is_finite() && offset.abs() <= 1.0,
+        "offset {offset} must be finite and within [-1, 1]"
+    );
     let one = 1_i64 << COEFFICIENT_LOG2_DENOM;
     let shift = (offset * one as f64).round() as i64;
     ensure!(shift != 0, "offset {offset} rounds to zero");
@@ -139,4 +143,53 @@ pub fn run_check(args: &[String]) -> Result<()> {
         rpus.len()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn constants(mapping: &RpuDataMapping) -> Vec<i64> {
+        let one = 1_i64 << COEFFICIENT_LOG2_DENOM;
+        mapping.curves[1..]
+            .iter()
+            .map(|curve| {
+                let mmr = curve.mmr.as_ref().unwrap();
+                assert!(mmr.mmr_constant[0] < one as u64);
+                mmr.mmr_constant_int[0] * one + mmr.mmr_constant[0] as i64
+            })
+            .collect()
+    }
+
+    #[test]
+    fn default_offset_shifts_both_chroma_constants_only() {
+        let bt2100 = Composer::Bt2100V1.rpu_data_mapping();
+        let canary = canary_mapping(DEFAULT_OFFSET).unwrap();
+        let shift = (DEFAULT_OFFSET * f64::from(1_u32 << COEFFICIENT_LOG2_DENOM)).round() as i64;
+        let expected: Vec<i64> = constants(&bt2100).iter().map(|c| c + shift).collect();
+        assert_eq!(constants(&canary), expected);
+
+        let mut restored = canary.clone();
+        for (curve, original) in restored.curves[1..].iter_mut().zip(&bt2100.curves[1..]) {
+            let (mmr, base) = (curve.mmr.as_mut().unwrap(), original.mmr.as_ref().unwrap());
+            mmr.mmr_constant_int[0] = base.mmr_constant_int[0];
+            mmr.mmr_constant[0] = base.mmr_constant[0];
+        }
+        assert!(mappings_equal(&restored, &bt2100));
+    }
+
+    #[test]
+    fn rejects_offsets_that_round_to_zero_or_are_out_of_range() {
+        for offset in [
+            1e-9,
+            -1e13,
+            1e13,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NAN,
+            -1.5,
+        ] {
+            assert!(canary_mapping(offset).is_err(), "offset {offset} accepted");
+        }
+    }
 }
