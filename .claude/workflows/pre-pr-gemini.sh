@@ -57,7 +57,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(git rev-parse --show-toplevel) || exit 0
 mkdir -p "$out"
 result="$out/prepr-gemini.result.json"
-rm -f -- "$out"/prepr-gemini.*
+# Only this script's own files: a caller may keep its log here as prepr-gemini.log.
+rm -f -- "$result" "$out"/prepr-gemini.{diff-body,prompt.md} "$out"/prepr-gemini.a[0-9]*.*
 
 started=$(date +%s)
 deadline=$((started + limit))
