@@ -40,6 +40,110 @@ plus #41 (main 8db4ad6), and `--verify` passed on every mkvdovi output.
 - Work files, viewing guide and reference renders: `~/mkvdovi-work/p8-playback-2026-10-11/`
   (local).
 
+### 2026-10-13: P9, scene list for the pixel average
+
+The P9 design step is done. A hybrid HDR10+ → Profile 8.1 mode that takes the average from pixels
+lands about 19 codes from the retail L1 average per frame on the two Alita cuts (pooled MAE over
+all frames, after the generator's 819 average floor). Today's HDR10+-derived average lands
+338 codes away. The 19 codes depend on that floor: the raw measured average is 147 to 148 codes from
+retail over all frames, because on the floor frames it reads about 259 codes below 819. Above the
+floor, raw and clamped scores are the same for H, A, U and R. Which scene list carries the average
+matters little on these cuts: the HDR10+ scenes (H), the analyzer's cuts (A) and their union (U)
+are within about 1.5 codes of each other (1.51). By the pre-registered rule the hybrid mode
+uses U. A is the numerical best, and no HDR10+ boundary added a picture cut that the analyzer
+missed.
+
+**Method.** The rule was registered in `method.md` before any scoring. Each candidate list
+partitions the cut into pieces. A piece's average is the mean of the frame codes
+`avg_max_rgb_pq_12bit`, rounded half away from zero; every frame of the piece gets that value.
+
+- **Cuts.** The two Alita: Battle Angel cuts (airlock night, Iron City day) carry Dolby Vision MEL
+  and HDR10+ from the same master. Their retail L1 is the reference per frame (scoring only). The
+  two The Shining cuts support the result but take no part in the decision.
+- **Analyzer.** v5 runs with mkvdovi's `accurate` flags, crop on. Every per-frame array and scene
+  list is identical to the step-0 runs.
+- **Today's path (S).** A DV-free remux of each cut (`dovi_tool remove`; the HDR10+ SEI equals the
+  corpus JSON) went through the installed `mkvdovi` ("Detected: HDR10+"); the L1 was exported from
+  its RPU.
+- **Frame alignment.** Frame counts agree across decoder, sidecar, HDR10+, retail CSV and S RPU,
+  with `leading_skipped_frames` 0.
+- **References outside the decision.** R is the retail scene refreshes, an oracle. F is the
+  per-frame values with no piece average.
+- **Scores.** Errors against the retail average, raw and clamped (average ≥ 819, as the generator
+  writes). The primary score is clamped MAE on frames where the retail average is above 819.
+- **Rule.** Near-best = within 5 codes of the best primary score; U is preferred inside that set.
+  The winner must also pass an all-frame regression gate, be near-best on each Alita cut, and win
+  under both rounding variants. V1 is the unrounded mean; V2 uses the sidecar's own scene averages
+  for A.
+- **Scoring.** Two scorers implemented it independently and agree to 0.01 code on every number.
+  A methods review, a provenance review (22 piece values recomputed by hand) and Codex
+  (gpt-6.1-sol, high) found no error that changes the verdict.
+
+| Alita pooled, clamped | H | A | U | R (oracle) | F (per frame) | S (today) |
+|---|---|---|---|---|---|---|
+| MAE, retail above floor (1,469 frames) | 38.3 | **36.8** | 37.6 | 32.0 | 63.8 | 267.7 |
+| MAE, all frames (2,920) | 19.3 | **18.5** | 18.9 | 16.1 | 32.5 | 338.4 |
+| Bias, above floor | −19.3 | −19.3 | −19.3 | −19.2 | −12.4 | +267.7 |
+| p95 / max \|error\|, above floor | 70 / 137 | 86 / 152 | 86 / 152 | 59 / 86 | 231 / 331 | 347 / 405 |
+| Floor frames lifted above 819 | 0 | 0 | 0 | 0 | 35 | 1,451 |
+| *Raw (no floor):* MAE, all frames | 148.0 | 147.2 | 147.6 | 144.8 | 165.2 | 338.4 |
+| *Raw:* bias, floor frames (1,451) | −259.1 | −259.0 | −259.0 | −259.0 | −259.1 | +410.0 |
+| *Raw:* MAE, above floor | 38.3 | 36.8 | 37.6 | 32.0 | 70.7 | 267.7 |
+
+Per cut (clamped MAE above floor; H / A / U):
+
+- airlock: 28.4 / 29.6 / 29.6 (191 frames);
+- Iron City: 39.8 / 37.9 / 38.8 (1,278 frames).
+
+On the Shining cuts (all frames above floor), the scores are:
+
+- hedge maze: 83.0 / 79.9 / 79.9;
+- mountain road: 21.5 for all three.
+
+S stays 336 to 460 codes away on both Shining cuts.
+
+Findings:
+
+- **The measured average is the gain; the scene list is not.** H, A and U differ by about 1.5 codes on
+  the primary score, against a 5-code margin. A is lowest on primary and all-frame MAE; H has the
+  lowest p95 and maximum error. U wins only by the pre-registered preference: it keeps the HDR10+
+  boundaries a hybrid peak needs. Read it as "U does no measurable harm", not "HDR10+ boundaries
+  help".
+- **What decided it is a handful of boundaries in one cut.** On airlock, A equals R exactly
+  (18 pieces). Five H scenes hold several shots. Four of them have retail 819, so the clamp hides
+  them. The fifth, 1271–1461, holds all 191 above-floor frames of the cut (retail 940 and 953 in
+  its two shots); there H's single value, 912, lands closer than A's split at 1456 (910 / 969),
+  which is why H scores 28.4 against 29.6 on airlock. On Iron City, U is A plus one H start, frame 1044. That start lies inside retail shot
+  999–1081, and splitting there costs U 1,125 code-frames. Iron City contributes 1,278 of the
+  1,469 primary frames.
+- **Today's HDR10+ average reads high everywhere.** S is +268 codes above floor and +410 on every
+  floor frame, where it writes 1229 against retail 819; none of its floor frames stay at 819.
+  This repeats the 2026-10-03 finding on four more cuts from two titles.
+- **Rounding does not matter.** V1 and V2 pick U too; V2 differs from the main variant in one A
+  piece by one code.
+- **A constant crop or calibration shift does not change the winner under the rule.** Shifts of
+  0 to 40 codes keep the spread under 2 codes. The numerical order can change: A is best up to
+  +35 codes, U at +40.
+- **Minimum.** Retail min is 0 on every frame, so this data cannot choose a rule for the minimum.
+  The generator writes it as at most 12 codes anyway.
+
+Limits:
+
+- Two cuts from one title decide the result, and the analyzer was developed on this corpus, so
+  A's near-oracle partition may be in-sample. A case where the union rescues a cut the analyzer
+  misses was never observed. Holdout HDR10+ cuts would test it.
+- The crop convention of the retail L1 is unknown. The scores hold for the committed crop;
+  another crop changes the mean's denominator and needs rescoring.
+- Peak was not evaluated. mkvdovi's default HDR10+ peak source is the histogram
+  (`DistributionValues`), not MaxSCL (`pipeline/hdr10plus.rs:84`).
+- The scores measure agreement with retail metadata in PQ codes: neither displayed-picture units
+  (WS7) nor playback.
+- The model omits the generator's upper average clamp (`max_pq − 1`); every frame average here is
+  far below it.
+
+Where: `method.md`, the runs, both scorers' scripts and results, and the review checks are in
+`~/mkvdovi-work/p9-scene-list-2026-10-13/`, outside the repository.
+
 ### 2026-10-11: P6 and E7, L6 light-level fixes
 
 The three L6 defects the E13 step 2 tests found on 2026-10-07 are fixed on branch
