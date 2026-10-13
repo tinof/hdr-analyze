@@ -17,6 +17,7 @@ use crate::rpu_check::{self, Level5Offsets};
 mod analyzer;
 mod dovi_steps;
 mod hdr10plus;
+mod temp_dir;
 
 pub use self::analyzer::{analyzer_executable, resolve_auto_settings};
 use self::analyzer::{
@@ -26,6 +27,7 @@ use self::analyzer::{
 pub use self::dovi_steps::DOVI_TOOL_MKV_INPUT_MIN;
 use self::dovi_steps::{convert_mel_to_profile81, extract_clean_base_layer, generate_rpu};
 use self::hdr10plus::{extract_hdr10plus_metadata, inspect_hdr10plus_scene_peaks};
+use self::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 
 /// Error for Profile 7 FEL inputs. The BL+EL compositor and its re-encode were removed; FEL is
 /// refused until a design that keeps the base layer bit-exact exists (docs/FEL_PLAN.md).
@@ -55,27 +57,12 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     let resume_enabled = !args.no_resume;
     let temp_dir_name = format!("mkvdovi_temp_{}", stem);
-    let mut temp_dir = dir.join(&temp_dir_name);
-    // Pre-rename compat (mkvdolby -> mkvdovi in v0.3.0): resume from a leftover
-    // `mkvdolby_temp_*` directory when no new-style one exists. Such directories predate resume
-    // fingerprints, so they resume through the missing-fingerprint path below.
-    if resume_enabled && !temp_dir.exists() {
-        let legacy_temp_dir = dir.join(format!("mkvdolby_temp_{}", stem));
-        if legacy_temp_dir.exists() {
-            temp_dir = legacy_temp_dir;
-        }
-    }
+    let temp_dir = locate_temp_dir(dir, &temp_dir_name, &stem, resume_enabled);
 
     // With no leftover temp dir, an existing output means the file is already converted. This is
     // checked before format detection so that a finished batch is skipped without probing.
-    let warn_output_exists = || {
-        progress::print_warn(&format!(
-            "Output file '{}' already exists. Skipping.",
-            output_file.display()
-        ));
-    };
     if output_file.exists() && !(resume_enabled && temp_dir.exists()) {
-        warn_output_exists();
+        warn_output_exists(&output_file);
         return Ok(true);
     }
 
@@ -101,62 +88,19 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     };
     let custom_composer = hlg_composer.filter(|&composer| composer != Composer::Preset);
 
-    // A leftover temp dir means a previous run for this file was interrupted. With resume
-    // enabled we reuse its completed steps when it was created for this exact input and these
-    // settings. A directory with no fingerprint was left by an older mkvdovi, so it resumes with
-    // a warning, unless a non-preset HLG composer is selected (its RPU.bin would carry the
-    // preset). A directory with a different fingerprint is discarded.
     let fingerprint =
         resume::Fingerprint::for_input(input_path, resume_settings(args, hlg_composer)).ok();
-    let mut resuming = resume_enabled && temp_dir.exists();
-    if resuming && resume::is_legacy_hlg_dir(&temp_dir) {
-        // Only the removed HLG-to-PQ (Profile 8.1) path wrote HLG_to_PQ.mkv. Its PQ base layer and
-        // 8.1 RPU do not fit the Profile 8.4 conversion that replaced it, whatever the fingerprint
-        // says (v0.4.0 already wrote fingerprints for those directories).
-        progress::print_info(&format!(
-            "Leftover temp dir '{}' comes from the removed HLG-to-PQ (Profile 8.1) conversion; starting clean.",
-            temp_dir.display()
-        ));
-        let _ = fs::remove_dir_all(&temp_dir);
-        temp_dir = dir.join(&temp_dir_name);
-        resuming = false;
-    }
-    if resuming {
-        let status = fingerprint
-            .as_ref()
-            .map_or(resume::FingerprintStatus::Differs, |current| {
-                current.check(&temp_dir)
-            });
-        match status {
-            resume::FingerprintStatus::Matches => {}
-            resume::FingerprintStatus::Missing if custom_composer.is_some() => {
-                progress::print_warn(&format!(
-                    "Leftover temp dir '{}' has no resume fingerprint (created by an older mkvdovi), so its RPU may carry another HLG composer than --hlg-composer {}; starting clean.",
-                    temp_dir.display(),
-                    args.hlg_composer.cli_name()
-                ));
-                let _ = fs::remove_dir_all(&temp_dir);
-                temp_dir = dir.join(&temp_dir_name);
-                resuming = false;
-            }
-            resume::FingerprintStatus::Missing => progress::print_warn(&format!(
-                "Leftover temp dir '{}' has no resume fingerprint (created by an older mkvdovi); resuming its completed steps, which may carry metadata from that version. Pass --no-resume to start clean.",
-                temp_dir.display()
-            )),
-            resume::FingerprintStatus::Differs => {
-                progress::print_warn(&format!(
-                    "Leftover temp dir '{}' was created for a different input, settings, or mkvdovi version; starting clean.",
-                    temp_dir.display()
-                ));
-                let _ = fs::remove_dir_all(&temp_dir);
-                temp_dir = dir.join(&temp_dir_name);
-                resuming = false;
-            }
-        }
-    }
+    let (temp_dir, resuming) = settle_leftover_temp_dir(
+        temp_dir,
+        dir.join(&temp_dir_name),
+        resume_enabled,
+        fingerprint.as_ref(),
+        custom_composer,
+        args.hlg_composer,
+    );
 
     if output_file.exists() && !resuming {
-        warn_output_exists();
+        warn_output_exists(&output_file);
         return Ok(true);
     }
 
@@ -174,18 +118,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let file_start = Instant::now();
 
     // Create (or reset) the temp directory.
-    if temp_dir.exists() && !resuming {
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-    fs::create_dir_all(&temp_dir).context("Failed to create temp directory")?;
-    if let Some(fingerprint) = &fingerprint {
-        fingerprint
-            .write(&temp_dir)
-            .context("Failed to write resume fingerprint")?;
-    }
-    if resuming {
-        progress::print_info("Resuming from a previous run — completed steps will be reused.");
-    }
+    prepare_temp_dir(&temp_dir, resuming, fingerprint.as_ref())?;
 
     // --- Step 1: Detect HDR format ---
     progress::print_step(1, 0, "Detecting HDR format...");
@@ -973,6 +906,13 @@ fn resume_settings(args: &Args, hlg_composer: Option<Composer>) -> String {
         settings.push_str(&format!(" hlg_composer={}", composer.luminance_mapping()));
     }
     settings
+}
+
+fn warn_output_exists(output_file: &Path) {
+    progress::print_warn(&format!(
+        "Output file '{}' already exists. Skipping.",
+        output_file.display()
+    ));
 }
 
 fn output_path_for(input_path: &Path, mdfix: bool) -> PathBuf {

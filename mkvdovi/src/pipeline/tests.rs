@@ -3,6 +3,7 @@ use super::analyzer::{
 };
 use super::dovi_steps::{feed_mkv_to_dovi_tool, resolve_dovi_input};
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
+use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 use super::*;
 use crate::cli::{AnalysisQuality, DoviInput, HwAccel, PeakSource};
 use clap::Parser;
@@ -452,4 +453,189 @@ fn convert_file_no_resume_neither_adopts_nor_deletes_a_legacy_temp_dir() {
     assert!(result.unwrap());
     assert!(dir.path().join("mkvdolby_temp_in").join("marker").exists());
     assert!(!dir.path().join("mkvdovi_temp_in").exists());
+}
+
+#[test]
+fn locate_temp_dir_adopts_a_legacy_dir_only_when_resuming_without_a_new_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let fresh = dir.path().join("mkvdovi_temp_in");
+    let legacy = dir.path().join("mkvdolby_temp_in");
+    let locate = |resume| locate_temp_dir(dir.path(), "mkvdovi_temp_in", "in", resume);
+
+    assert_eq!(locate(true), fresh, "nothing left over");
+    fs::create_dir(&legacy).unwrap();
+    assert_eq!(locate(true), legacy);
+    assert_eq!(locate(false), fresh, "--no-resume never adopts");
+    fs::create_dir(&fresh).unwrap();
+    assert_eq!(locate(true), fresh, "a new-style dir wins");
+}
+
+/// A source, its leftover temp dir (`name`, holding `RPU.bin`) and the fingerprint of `settings`.
+struct Leftover {
+    root: tempfile::TempDir,
+    temp: PathBuf,
+    fresh: PathBuf,
+    fingerprint: resume::Fingerprint,
+}
+
+fn leftover(name: &str) -> Leftover {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("in.mkv");
+    fs::write(&source, b"src").unwrap();
+    let temp = root.path().join(name);
+    fs::create_dir(&temp).unwrap();
+    fs::write(temp.join("RPU.bin"), b"rpu").unwrap();
+    let fingerprint = resume::Fingerprint::for_input(&source, "settings".into()).unwrap();
+    let fresh = root.path().join("mkvdovi_temp_in");
+    Leftover {
+        root,
+        temp,
+        fresh,
+        fingerprint,
+    }
+}
+
+#[test]
+fn settle_resumes_a_dir_with_a_matching_fingerprint() {
+    let left = leftover("mkvdovi_temp_in");
+    left.fingerprint.write(&left.temp).unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Bt2100V1,
+    );
+    assert_eq!(settled, (left.temp.clone(), true));
+    assert!(left.temp.join("RPU.bin").exists());
+}
+
+#[test]
+fn settle_discards_a_differing_dir_and_resets_to_the_new_name() {
+    let left = leftover("mkvdolby_temp_in");
+    let other = resume::Fingerprint {
+        settings: "other".into(),
+        ..left.fingerprint.clone()
+    };
+    other.write(&left.temp).unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Bt2100V1,
+    );
+    assert_eq!(settled, (left.fresh.clone(), false));
+    assert!(!left.temp.exists(), "the discarded dir is removed");
+    assert!(left.root.path().join("in.mkv").exists());
+}
+
+#[test]
+fn settle_treats_an_unknown_current_fingerprint_as_differing() {
+    let left = leftover("mkvdovi_temp_in");
+    left.fingerprint.write(&left.temp).unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        None,
+        None,
+        Composer::Bt2100V1,
+    );
+    assert_eq!(settled, (left.fresh.clone(), false));
+    assert!(!left.temp.exists());
+}
+
+#[test]
+fn settle_resumes_a_dir_without_fingerprint_unless_a_custom_composer_is_selected() {
+    for custom in [None, Some(Composer::Bt2100V1)] {
+        let left = leftover("mkvdolby_temp_in");
+        let settled = settle_leftover_temp_dir(
+            left.temp.clone(),
+            left.fresh.clone(),
+            true,
+            Some(&left.fingerprint),
+            custom,
+            Composer::Bt2100V1,
+        );
+        if custom.is_some() {
+            assert_eq!(settled, (left.fresh.clone(), false));
+            assert!(!left.temp.exists());
+        } else {
+            assert_eq!(settled, (left.temp.clone(), true), "legacy dir resumes");
+            assert!(left.temp.join("RPU.bin").exists());
+        }
+    }
+}
+
+#[test]
+fn settle_discards_a_legacy_hlg_dir_whatever_its_fingerprint() {
+    let left = leftover("mkvdovi_temp_in");
+    left.fingerprint.write(&left.temp).unwrap();
+    fs::write(left.temp.join("HLG_to_PQ.mkv"), b"pq").unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Preset,
+    );
+    assert_eq!(settled, (left.fresh.clone(), false));
+    assert!(!left.temp.exists());
+}
+
+#[test]
+fn settle_leaves_everything_alone_without_resume_or_leftover() {
+    let left = leftover("mkvdovi_temp_in");
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        false,
+        Some(&left.fingerprint),
+        None,
+        Composer::Preset,
+    );
+    assert_eq!(settled, (left.temp.clone(), false));
+    assert!(
+        left.temp.join("RPU.bin").exists(),
+        "only prepare_temp_dir resets it"
+    );
+
+    let missing = left.root.path().join("mkvdovi_temp_other");
+    let settled = settle_leftover_temp_dir(
+        missing.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Preset,
+    );
+    assert_eq!(settled, (missing, false));
+}
+
+#[test]
+fn prepare_temp_dir_resets_a_dir_it_does_not_resume_and_writes_the_fingerprint() {
+    let left = leftover("mkvdovi_temp_in");
+    prepare_temp_dir(&left.temp, false, Some(&left.fingerprint)).unwrap();
+    assert!(!left.temp.join("RPU.bin").exists());
+    assert_eq!(
+        left.fingerprint.check(&left.temp),
+        resume::FingerprintStatus::Matches
+    );
+
+    let resumed = leftover("mkvdovi_temp_in");
+    prepare_temp_dir(&resumed.temp, true, Some(&resumed.fingerprint)).unwrap();
+    assert!(resumed.temp.join("RPU.bin").exists());
+    assert_eq!(
+        resumed.fingerprint.check(&resumed.temp),
+        resume::FingerprintStatus::Matches
+    );
+
+    let created = resumed.root.path().join("mkvdovi_temp_new");
+    prepare_temp_dir(&created, false, None).unwrap();
+    assert!(created.is_dir());
+    assert!(!created.join(resume::FINGERPRINT_FILE).exists());
 }
