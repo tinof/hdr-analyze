@@ -10,7 +10,7 @@ analyzer accuracy and remaining technical gaps, see [CM_ANALYZE_PARITY.md](CM_AN
 |-------|--------|--------------------|----------|
 | HDR10 | Profile 8.1, CM v4.0, L1 from analyzer measurements | No | Measurement comparisons published; playback unvalidated |
 | HDR10+ | Profile 8.1, L1 from source HDR10+ metadata | No | Measurement comparisons published; playback unvalidated |
-| HLG | Profile 8.4, HLG base layer kept, L1 through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; playback unvalidated |
+| HLG | Profile 8.4, HLG base layer kept, L1 through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; composer applied on an LG OLED C9 |
 | Dolby Vision Profile 7 MEL | Profile 8.1, metadata-only enhancement layer discard | No | Works |
 | Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](FEL_PLAN.md)) |
 | Dolby Vision Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata, source kept | No | Works, not a guaranteed improvement over authored metadata |
@@ -31,8 +31,8 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   is kept exactly as `dovi_tool` writes it. `bt2100`, the default since 2026-10-03, is a composer
   fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ conversion that keeps neutrals neutral
   ([HLG_COMPOSER.md](HLG_COMPOSER.md)). `mkvdovi` writes it into every RPU frame after
-  `dovi_tool generate`. Whether playback devices apply a composer other than the preset is
-  unverified; that needs a playback test. `hdr_analyzer_mvp` measures the HLG stream through the
+  `dovi_tool generate`. A playback test (2026-10-13) showed that an LG OLED C9 applies a composer
+  other than the preset; other devices are untested. `hdr_analyzer_mvp` measures the HLG stream through the
   selected composer's decode: the luma curve for luma statistics, and for max-RGB peaks and means
   the full reconstruction (luma curve, the two chroma MMR curves and the RPU's YCbCr-to-RGB matrix).
   Both are clamped to the RPU's declared source range (PQ codes 62–3079, about 0–1000 nits), so L1

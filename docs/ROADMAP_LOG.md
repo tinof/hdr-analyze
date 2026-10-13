@@ -6,6 +6,40 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-13: P8 playback test, the LG OLED C9 applies the RPU composer
+
+The owner viewed the P8 test set on an LG OLED C9 with Plex on the TV and with Plex on an Nvidia
+Shield TV Pro; the result was the same on both. The set was built on 2026-10-11 with 0.6.0-rc.1
+plus #41 (main 8db4ad6), and `--verify` passed on every mkvdovi output.
+
+- Files: a broadcast HLG clip (Blue Lights, 3026 frames) and a synthetic test pattern (800 frames,
+  four still pages: superwhite greys, 100% and 75% colours, dark greys with 25% colours, sub-black),
+  each as the HLG source, `--hlg-composer preset` (A), `--hlg-composer bt2100` (B) and a canary (C).
+  Within a group the HLG base layer is byte-identical; only the RPU differs. The canary is B's RPU
+  with both chroma MMR constants shifted by −0.0625 (`fit_hlg_composer canary-rpu`), muxed like
+  mkvdovi does. A decoder that applies the RPU composer shows the picture strongly green (libplacebo:
+  mid grey 1808/1808/1808 becomes 1377/2023/1258 in 12-bit PQ R/G/B); one that ignores the composer
+  shows normal colours. `canary-check` confirmed the shifted mapping on every frame of the RPU
+  extracted from both muxed canary files.
+- The owner's report, per file:
+  - Canary, clip: "full green", Dolby Vision badge.
+  - Canary, pattern: "first green bars, then different colors, then green boxes, with two red and one
+    dark blue, then green columns", Dolby Vision badge.
+  - A (preset), clip and pattern: yellow tint on greys, Dolby Vision badge.
+  - B (bt2100), clip and pattern: no tint, "looks good", Dolby Vision badge.
+  - Pattern HLG source: played as SDR (HLG is signalled in the VUI; a player detection matter, not
+    followed up).
+- Result: the C9 applies the composer in the RPU. The canary turns an unchanged base layer green,
+  and A and B differ the way their composers do (A tinted, B neutral). `--hlg-composer bt2100` stays
+  the default; the release that would have switched the default back to `preset` is not needed.
+- Hue: the libplacebo SDR render predicted lavender mid greys and olive dark greys for the preset;
+  the owner saw yellow on the C9. Recorded, not explained.
+- Not covered: whether devices evaluate the composer at `code / 1023` or `code / 1024` (WS6; 5.9
+  codes, below what this test can show); TV firmware, picture mode and HDMI path (not recorded);
+  devices other than the C9.
+- Work files, viewing guide and reference renders: `~/mkvdovi-work/p8-playback-2026-10-11/`
+  (local).
+
 ### 2026-10-11: P6 and E7, L6 light-level fixes
 
 The three L6 defects the E13 step 2 tests found on 2026-10-07 are fixed on branch

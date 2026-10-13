@@ -234,7 +234,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
     if let Some(composer) = custom_composer {
         progress::print_info(&format!(
-            "HLG composer: {} ({}); not yet confirmed on playback devices. If a display renders \
+            "HLG composer: {} ({}); playback tested on an LG OLED C9 only. If a display renders \
              the output wrongly, convert with --hlg-composer preset.",
             composer.cli_name(),
             composer.luminance_mapping()
