@@ -351,7 +351,8 @@ and broader hardware acceleration (E5). Neutral trims stay.
   and `max-scl-luminance`: the hybrid max equals `dovi_tool`'s on every non-fallback frame of six
   cuts; fallbacks (all Profile A pieces under `max-scl*`) carry the analyzer scene's max; `--boost`
   equals `histogram99`. Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/`
-  ([log](docs/ROADMAP_LOG.md) 2026-10-14).
+  ([log](docs/ROADMAP_LOG.md) 2026-10-14). The unit test `hdr10plus_peak_sources_follow_dovi_tool`
+  pins the mirror, not parity: re-run that evidence's `run.sh` after a `dovi_tool` bump.
 - **Open:** (1) score holdout HDR10+ cuts before any default change (owner list), where the union
   could show whether HDR10+ starts rescue cuts the analyzer misses; (2) sidecar v6 with a per-frame
   max for an exact fallback peak, also recording the analyzer's resolved `--peak-source` so
@@ -360,8 +361,9 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Checked 2026-10-14 @f5d4ccc:** mirror `hdr10plus_peak_nits` (`pipeline/hdr10plus.rs:81`);
   `--boost` remaps to `histogram99` (`main.rs:167`); the report prints only `MAX_FALLBACK_LINES`
   ranges (`pipeline/hybrid.rs:93`); `check_measurements` admits a hand-made percentile sidecar
-  (`hybrid.rs:115`), so parity runs use fresh analyses. MaxSCL is nonzero only on the h1 Deadloch
-  and h4 The Shining cuts, 0 on Alita and Alien (every `max-scl*` piece falls back there).
+  (`hybrid.rs:115`), so parity runs use fresh analyses. Of the HDR10+ development cuts, MaxSCL is
+  nonzero on h1 Deadloch, h4 The Shining and d2 Patriot (not run), 0 on every frame of the Alita
+  and Alien cuts (every `max-scl*` piece falls back there).
 
 ### P10: measured against delivered
 
@@ -391,8 +393,10 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Checked 2026-10-14 @f5d4ccc:** samplers `rpu_check::extract_rpu_sample` (`rpu_check.rs:132`,
   from `metadata/format.rs:468`) and `sample_rpu_windows` (`rpu_check.rs:182`, from
   `pipeline/measure.rs:50`); `SampledRpu` (`rpu_check.rs:173`) has no L2/L4. Name each level by what
-  happens: L4 removed; L2, L6, L9, L11 regenerated (`metadata/rpu_config.rs:103`); L5 reduced to one
-  sampled value. A sampled absence means "not seen"; a failed read still gives a general notice.
+  happens: L1, L2, L6, L9, L11 regenerated (`generate_extra_json`, `metadata/rpu_config.rs:103`,
+  writes no other level; `dovi_tool` adds L254 under CM v4.0); L3, L4, L8, L10 removed; L5 reduced
+  to one sampled value. To name them, the sampler must also detect L2/L3/L4/L8. A sampled absence
+  means "not seen"; a failed read still gives a general notice.
 
 ## `cm_analyze` parity
 

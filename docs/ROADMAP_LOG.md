@@ -31,6 +31,11 @@ Measurement only, no code change. Run on main f5d4ccc's code (mkvdovi and hdr_an
 - Not triggered by any cut: the `missing`, `malformed` and below-average fallbacks (unit tests in
   `hybrid.rs` cover them). Peak against retail is still not scored.
 - Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/` (README, `run.sh`, `score.py`, `score.md`).
+- Guard: the unit test `hdr10plus_peak_sources_follow_dovi_tool` (`mkvdovi/src/pipeline/tests.rs`)
+  pins the mirror for `histogram99` (last distribution value, not the largest), `histogram` and
+  `max-scl`. It does not prove parity with `dovi_tool`; re-run `run.sh` and `score.py` after a
+  `dovi_tool` bump. Of the HDR10+ development cuts, d2 Patriot also has nonzero MaxSCL; it was not
+  run.
 
 ### 2026-10-14: P9, the hybrid flag
 

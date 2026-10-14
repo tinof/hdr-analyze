@@ -199,6 +199,27 @@ fn hdr10plus_max_scl_luminance_matches_upstream_weighting() {
 }
 
 #[test]
+fn hdr10plus_peak_sources_follow_dovi_tool() {
+    // histogram99 is the last distribution value (the 99.98th percentile), not the largest.
+    let scene = json!({
+        "LuminanceParameters": {
+            "LuminanceDistributions": { "DistributionValues": [100, 35000, 20000] },
+            "MaxScl": [1000, 2000, 3000]
+        }
+    });
+
+    assert_eq!(
+        hdr10plus_peak_nits(&scene, PeakSource::Histogram99),
+        Some(2000.0)
+    );
+    assert_eq!(
+        hdr10plus_peak_nits(&scene, PeakSource::Histogram),
+        Some(3500.0)
+    );
+    assert_eq!(hdr10plus_peak_nits(&scene, PeakSource::MaxScl), Some(300.0));
+}
+
+#[test]
 fn resume_settings_carry_only_a_non_preset_hlg_composer() {
     let preset = Args::try_parse_from(["mkvdovi", "--hlg-composer", "preset"]).unwrap();
     let bt2100 = Args::try_parse_from(["mkvdovi"]).unwrap();
