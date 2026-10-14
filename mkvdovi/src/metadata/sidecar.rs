@@ -76,6 +76,12 @@ pub struct L1Sidecar {
     pub crop: Option<L1SidecarCrop>,
     #[serde(default)]
     pub frames: Option<L1SidecarFrames>,
+    /// `"max-rgb"` or `"luma"`; what the scene maximum and minimum measure.
+    #[serde(default)]
+    pub peak_domain: Option<String>,
+    /// How the frame peak was taken: `"max"`, `"histogram-percentile"`, `"robust"`, ...
+    #[serde(default)]
+    pub peak_estimator: Option<String>,
     /// Content MaxCLL / MaxFALL measured by the analyzer (max-RGB runs of newer version 4
     /// analyzers only).
     #[serde(default)]
@@ -178,6 +184,10 @@ pub struct L1SidecarCrop {
 #[derive(Debug, Default, Deserialize)]
 pub struct L1SidecarFrames {
     pub min_pq_12bit: Vec<u16>,
+    /// Unfiltered frame means of max-RGB PQ. Only the HDR10+ hybrid mode reads them, and it
+    /// checks their length itself (`pipeline::hybrid::check_measurements`).
+    #[serde(default)]
+    pub avg_max_rgb_pq_12bit: Vec<u16>,
 }
 
 impl L1Sidecar {

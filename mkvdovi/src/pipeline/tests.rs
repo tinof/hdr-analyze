@@ -205,19 +205,55 @@ fn resume_settings_carry_only_a_non_preset_hlg_composer() {
 
     // Preset fingerprints stay what 0.5.1 wrote (its RPUs carry the preset), so those temp
     // dirs still resume under --hlg-composer preset and are discarded under bt2100.
-    let default = resume_settings(&preset, None);
+    let default = resume_settings(&preset, None, false);
     assert_eq!(
             default,
             "hwaccel=Auto analysis_quality=Auto optimizer=Conservative boost=false boost_experimental=false cm=V40 content_type=Movies reference_mode=false source_primaries=None trim_targets=100,600,1000 peak_source=Histogram mdfix=false legacy_madvr_l1=false"
         );
-    assert_eq!(resume_settings(&preset, Some(Composer::Preset)), default);
+    assert_eq!(
+        resume_settings(&preset, Some(Composer::Preset), false),
+        default
+    );
     // The composer only matters for HLG inputs.
-    assert_eq!(resume_settings(&bt2100, None), default);
+    assert_eq!(resume_settings(&bt2100, None, false), default);
     // bt2100 differs from the preset both ways, so neither reuses the other's RPU.bin.
     assert_eq!(
-        resume_settings(&bt2100, Some(Composer::Bt2100V1)),
+        resume_settings(&bt2100, Some(Composer::Bt2100V1), false),
         format!("{default} hlg_composer=dovi84-bt2100-v1-spec420")
     );
+}
+
+#[test]
+fn resume_settings_carry_the_hdr10plus_hybrid_only_for_an_hdr10plus_input() {
+    let default = resume_settings(&Args::try_parse_from(["mkvdovi"]).unwrap(), None, false);
+    let hybrid = Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hybrid"]).unwrap();
+    // `convert_file` passes true only for an HDR10+ input under the flag.
+    assert_eq!(resume_settings(&hybrid, None, false), default);
+    assert_eq!(
+        resume_settings(&hybrid, None, true),
+        format!("{default} hdr10plus_l1=hybrid")
+    );
+}
+
+#[test]
+fn hdr10plus_hybrid_refuses_a_sampling_that_skips_frames() {
+    let with_quality = |quality: &str| {
+        Args::try_parse_from([
+            "mkvdovi",
+            "--hdr10plus-l1",
+            "hybrid",
+            "--analysis-quality",
+            quality,
+        ])
+        .unwrap()
+    };
+    let refusal = hybrid_sampling_refusal(&with_quality("fast")).unwrap();
+    assert!(
+        refusal.contains("fast analyzes one frame in 3"),
+        "{refusal}"
+    );
+    assert!(hybrid_sampling_refusal(&with_quality("balanced")).is_none());
+    assert!(hybrid_sampling_refusal(&with_quality("accurate")).is_none());
 }
 
 #[test]
@@ -781,11 +817,54 @@ fn find_reusable_measurements_without_candidates_loads_nothing() {
         input.to_str().unwrap(),
         &args,
         None,
+        false,
         &mut measurements_file,
         &mut l1_sidecar,
     ));
     assert!(measurements_file.is_none());
     assert!(l1_sidecar.is_none());
+}
+
+#[test]
+fn hdr10plus_hybrid_reanalyzes_measurements_that_skipped_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.mkv");
+    fs::write(&input, b"src").unwrap();
+    let measurements = dir.path().join("in_measurements.bin");
+    fs::write(&measurements, b"bin").unwrap();
+    let sidecar = json!({
+        "version": 5,
+        "source": {"file_name": "in.mkv", "size_bytes": 3, "width": 1920, "height": 1080,
+                   "transfer_function": "PQ (SMPTE 2084)", "stream_frames": 4,
+                   "leading_skipped_frames": 0},
+        "analysis": {"downscale": 2, "sample_rate": 3, "gpu": false, "no_crop": false,
+                     "luminance_mapping": "pq"},
+        "scenes": [{"start": 0, "end": 3, "min_pq_12bit": 1, "avg_luma_pq_12bit": 500,
+                    "avg_max_rgb_pq_12bit": 520, "max_pq_12bit": 2400}],
+        "frames": {"min_pq_12bit": [1, 1, 1, 1], "avg_max_rgb_pq_12bit": [520, 520, 520, 520]}
+    });
+    fs::write(
+        metadata::l1_sidecar_path(&measurements),
+        serde_json::to_vec(&sidecar).unwrap(),
+    )
+    .unwrap();
+    let args = Args::try_parse_from(["mkvdovi", "--analysis-quality", "balanced"]).unwrap();
+    let reuse = |hybrid| {
+        let (mut measurements_file, mut l1_sidecar) = (None, None);
+        let reused = find_reusable_measurements(
+            &input,
+            input.to_str().unwrap(),
+            &args,
+            None,
+            hybrid,
+            &mut measurements_file,
+            &mut l1_sidecar,
+        );
+        (reused, measurements_file.is_some(), l1_sidecar.is_some())
+    };
+    // Plain HDR10 reuses it under balanced (with a warning); the hybrid needs every frame.
+    assert_eq!(reuse(false), (true, true, true));
+    assert_eq!(reuse(true), (false, false, false));
 }
 
 /// A temp dir from an interrupted run: `extra.json` holding `config`, sealed `RPU.bin` and
