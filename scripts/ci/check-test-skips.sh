@@ -8,7 +8,9 @@
 set -euo pipefail
 
 log=${1:?usage: $0 <test log> [extra allowed regex]}
-allowed='HDR_ANALYZE_REAL_SAMPLE|MKVDOVI_FEL_SAMPLE|MKVDOVI_CORPUS_DIR|sample not found at'
+# `already exists. Skipping.` is mkvdovi's own output-exists warning, which the convert_file
+# characterization tests print; it is not a test skip.
+allowed='HDR_ANALYZE_REAL_SAMPLE|MKVDOVI_FEL_SAMPLE|MKVDOVI_CORPUS_DIR|sample not found at|already exists\. Skipping\.'
 if [[ -n ${2:-} ]]; then
     allowed="$allowed|$2"
 fi
