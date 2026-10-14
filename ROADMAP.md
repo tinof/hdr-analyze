@@ -89,7 +89,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | E13 step 5 (refactor), P1 step 1 measurement, P9 peak-parity measurement | No user-visible change (a parity mismatch becomes a fix in v0.7.0) |
+| none | E13 step 5 (refactor), P1 step 1 measurement, P9 peak-parity measurement (done 2026-10-14, PASS, no fix) | No user-visible change |
 | **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` notice only if merged by about 2026-10-19 | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
 | v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract), both after E13 step 5 | MINOR |
