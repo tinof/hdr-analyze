@@ -1,8 +1,15 @@
 use super::analyzer::{
     analysis_quality_notice, analysis_sampling, coarser_sampling, gpu_analysis_missing,
+    rejects_coarser_sidecar,
 };
+use super::config::withdraw_stale_rpu;
+use super::deliver::{extract_base_layer, inject_rpu, mux_output};
 use super::dovi_steps::{feed_mkv_to_dovi_tool, resolve_dovi_input};
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
+use super::measure::{
+    abort_unsupported, acquire_measurements, find_reusable_measurements, total_steps_for, Measured,
+};
+use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 use super::*;
 use crate::cli::{AnalysisQuality, DoviInput, HwAccel, PeakSource};
 use clap::Parser;
@@ -390,4 +397,509 @@ fn finish_success_with_a_missing_source_only_warns_and_still_cleans_up() {
     assert!(!source);
     assert!(!temp);
     assert!(output);
+}
+
+/// Runs `convert_file` on `<dir>/in.mkv` after `setup` has populated the directory; returns
+/// the result and the directory. Only paths that return before format detection (MediaInfo)
+/// are reachable without external tools.
+fn run_convert_file(
+    flags: &[&str],
+    setup: impl FnOnce(&Path),
+) -> (Result<bool>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    let mut argv = vec!["mkvdovi"];
+    argv.extend_from_slice(flags);
+    let args = Args::try_parse_from(argv).unwrap();
+    let input = dir.path().join("in.mkv");
+    let result = convert_file(input.to_str().unwrap(), &args);
+    (result, dir)
+}
+
+fn write_source_and_output(dir: &Path) {
+    fs::write(dir.join("in.mkv"), b"src").unwrap();
+    fs::write(dir.join("in.DV.mkv"), b"out").unwrap();
+}
+
+#[test]
+fn convert_file_with_a_missing_input_fails_without_temp_work() {
+    let (result, dir) = run_convert_file(&[], |_| {});
+    assert!(!result.unwrap());
+    assert!(!dir.path().join("mkvdovi_temp_in").exists());
+}
+
+#[test]
+fn convert_file_skips_an_existing_output_without_a_temp_dir() {
+    let (result, dir) = run_convert_file(&[], write_source_and_output);
+    assert!(result.unwrap());
+    assert!(dir.path().join("in.mkv").exists(), "source must be kept");
+    assert!(dir.path().join("in.DV.mkv").exists());
+    assert!(!dir.path().join("mkvdovi_temp_in").exists());
+}
+
+#[test]
+fn convert_file_no_resume_skips_an_existing_output_and_leaves_the_temp_dir() {
+    let (result, dir) = run_convert_file(&["--no-resume"], |dir| {
+        write_source_and_output(dir);
+        fs::create_dir(dir.join("mkvdovi_temp_in")).unwrap();
+        fs::write(dir.join("mkvdovi_temp_in").join("marker"), b"x").unwrap();
+    });
+    assert!(result.unwrap());
+    assert!(dir.path().join("in.mkv").exists());
+    assert!(dir.path().join("mkvdovi_temp_in").join("marker").exists());
+}
+
+#[test]
+fn convert_file_no_resume_neither_adopts_nor_deletes_a_legacy_temp_dir() {
+    let (result, dir) = run_convert_file(&["--no-resume"], |dir| {
+        write_source_and_output(dir);
+        fs::create_dir(dir.join("mkvdolby_temp_in")).unwrap();
+        fs::write(dir.join("mkvdolby_temp_in").join("marker"), b"x").unwrap();
+    });
+    assert!(result.unwrap());
+    assert!(dir.path().join("mkvdolby_temp_in").join("marker").exists());
+    assert!(!dir.path().join("mkvdovi_temp_in").exists());
+}
+
+#[test]
+fn locate_temp_dir_adopts_a_legacy_dir_only_when_resuming_without_a_new_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let fresh = dir.path().join("mkvdovi_temp_in");
+    let legacy = dir.path().join("mkvdolby_temp_in");
+    let locate = |resume| locate_temp_dir(dir.path(), "mkvdovi_temp_in", "in", resume);
+
+    assert_eq!(locate(true), fresh, "nothing left over");
+    fs::create_dir(&legacy).unwrap();
+    assert_eq!(locate(true), legacy);
+    assert_eq!(locate(false), fresh, "--no-resume never adopts");
+    fs::create_dir(&fresh).unwrap();
+    assert_eq!(locate(true), fresh, "a new-style dir wins");
+}
+
+/// A source, its leftover temp dir (`name`, holding `RPU.bin`) and the fingerprint of `settings`.
+struct Leftover {
+    root: tempfile::TempDir,
+    temp: PathBuf,
+    fresh: PathBuf,
+    fingerprint: resume::Fingerprint,
+}
+
+fn leftover(name: &str) -> Leftover {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("in.mkv");
+    fs::write(&source, b"src").unwrap();
+    let temp = root.path().join(name);
+    fs::create_dir(&temp).unwrap();
+    fs::write(temp.join("RPU.bin"), b"rpu").unwrap();
+    let fingerprint = resume::Fingerprint::for_input(&source, "settings".into()).unwrap();
+    let fresh = root.path().join("mkvdovi_temp_in");
+    Leftover {
+        root,
+        temp,
+        fresh,
+        fingerprint,
+    }
+}
+
+#[test]
+fn settle_resumes_a_dir_with_a_matching_fingerprint() {
+    let left = leftover("mkvdovi_temp_in");
+    left.fingerprint.write(&left.temp).unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Bt2100V1,
+    );
+    assert_eq!(settled, (left.temp.clone(), true));
+    assert!(left.temp.join("RPU.bin").exists());
+}
+
+#[test]
+fn settle_discards_a_differing_dir_and_resets_to_the_new_name() {
+    let left = leftover("mkvdolby_temp_in");
+    let other = resume::Fingerprint {
+        settings: "other".into(),
+        ..left.fingerprint.clone()
+    };
+    other.write(&left.temp).unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Bt2100V1,
+    );
+    assert_eq!(settled, (left.fresh.clone(), false));
+    assert!(!left.temp.exists(), "the discarded dir is removed");
+    assert!(left.root.path().join("in.mkv").exists());
+}
+
+#[test]
+fn settle_treats_an_unknown_current_fingerprint_as_differing() {
+    let left = leftover("mkvdovi_temp_in");
+    left.fingerprint.write(&left.temp).unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        None,
+        None,
+        Composer::Bt2100V1,
+    );
+    assert_eq!(settled, (left.fresh.clone(), false));
+    assert!(!left.temp.exists());
+}
+
+#[test]
+fn settle_resumes_a_dir_without_fingerprint_unless_a_custom_composer_is_selected() {
+    for custom in [None, Some(Composer::Bt2100V1)] {
+        let left = leftover("mkvdolby_temp_in");
+        let settled = settle_leftover_temp_dir(
+            left.temp.clone(),
+            left.fresh.clone(),
+            true,
+            Some(&left.fingerprint),
+            custom,
+            Composer::Bt2100V1,
+        );
+        if custom.is_some() {
+            assert_eq!(settled, (left.fresh.clone(), false));
+            assert!(!left.temp.exists());
+        } else {
+            assert_eq!(settled, (left.temp.clone(), true), "legacy dir resumes");
+            assert!(left.temp.join("RPU.bin").exists());
+        }
+    }
+}
+
+#[test]
+fn settle_discards_a_legacy_hlg_dir_whatever_its_fingerprint() {
+    let left = leftover("mkvdovi_temp_in");
+    left.fingerprint.write(&left.temp).unwrap();
+    fs::write(left.temp.join("HLG_to_PQ.mkv"), b"pq").unwrap();
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Preset,
+    );
+    assert_eq!(settled, (left.fresh.clone(), false));
+    assert!(!left.temp.exists());
+}
+
+#[test]
+fn settle_leaves_everything_alone_without_resume_or_leftover() {
+    let left = leftover("mkvdovi_temp_in");
+    let settled = settle_leftover_temp_dir(
+        left.temp.clone(),
+        left.fresh.clone(),
+        false,
+        Some(&left.fingerprint),
+        None,
+        Composer::Preset,
+    );
+    assert_eq!(settled, (left.temp.clone(), false));
+    assert!(
+        left.temp.join("RPU.bin").exists(),
+        "only prepare_temp_dir resets it"
+    );
+
+    let missing = left.root.path().join("mkvdovi_temp_other");
+    let settled = settle_leftover_temp_dir(
+        missing.clone(),
+        left.fresh.clone(),
+        true,
+        Some(&left.fingerprint),
+        None,
+        Composer::Preset,
+    );
+    assert_eq!(settled, (missing, false));
+}
+
+#[test]
+fn prepare_temp_dir_resets_a_dir_it_does_not_resume_and_writes_the_fingerprint() {
+    let left = leftover("mkvdovi_temp_in");
+    prepare_temp_dir(&left.temp, false, Some(&left.fingerprint)).unwrap();
+    assert!(!left.temp.join("RPU.bin").exists());
+    assert_eq!(
+        left.fingerprint.check(&left.temp),
+        resume::FingerprintStatus::Matches
+    );
+
+    let resumed = leftover("mkvdovi_temp_in");
+    prepare_temp_dir(&resumed.temp, true, Some(&resumed.fingerprint)).unwrap();
+    assert!(resumed.temp.join("RPU.bin").exists());
+    assert_eq!(
+        resumed.fingerprint.check(&resumed.temp),
+        resume::FingerprintStatus::Matches
+    );
+
+    let created = resumed.root.path().join("mkvdovi_temp_new");
+    prepare_temp_dir(&created, false, None).unwrap();
+    assert!(created.is_dir());
+    assert!(!created.join(resume::FINGERPRINT_FILE).exists());
+}
+
+#[test]
+fn total_steps_for_counts_the_steps_of_each_detected_format() {
+    let expected = [
+        (HdrFormat::Hdr10Plus, 7),
+        (HdrFormat::Hlg, 7),
+        (HdrFormat::Hdr10WithMeasurements, 6),
+        (HdrFormat::Hdr10Unsupported, 7),
+        (HdrFormat::DolbyVisionMel, 7),
+        (HdrFormat::DolbyVisionFel, 0),
+        (HdrFormat::DolbyVisionP8, 7),
+        (HdrFormat::Unsupported, 0),
+    ];
+    assert_eq!(expected.len(), ALL_HDR_FORMATS.len());
+    for (format, steps) in expected {
+        assert_eq!(total_steps_for(format), steps, "{format:?}");
+    }
+}
+
+#[test]
+fn abort_unsupported_removes_the_temp_dir_only_for_an_unsupported_format() {
+    for format in ALL_HDR_FORMATS {
+        let dir = tempfile::tempdir().unwrap();
+        let temp = dir.path().join("mkvdovi_temp_in");
+        fs::create_dir(&temp).unwrap();
+        let unsupported = format == HdrFormat::Unsupported;
+        assert_eq!(abort_unsupported(format, &temp), unsupported, "{format:?}");
+        assert_eq!(temp.exists(), !unsupported, "{format:?}");
+    }
+}
+
+/// Runs `acquire_measurements` for `<dir>/in.mkv` with fresh step counters starting at
+/// `total_steps_for(format)` and 1; returns the result and the counters.
+fn run_acquire_measurements(
+    flags: &[&str],
+    format: HdrFormat,
+    setup: impl FnOnce(&Path),
+) -> (Result<Option<Measured>>, u8, u8) {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.mkv");
+    fs::write(&input, b"src").unwrap();
+    setup(dir.path());
+    let temp = dir.path().join("mkvdovi_temp_in");
+    fs::create_dir(&temp).unwrap();
+    let mut argv = vec!["mkvdovi"];
+    argv.extend_from_slice(flags);
+    let args = Args::try_parse_from(argv).unwrap();
+    let hlg_composer = (format == HdrFormat::Hlg).then_some(args.hlg_composer);
+    let (mut total, mut current) = (total_steps_for(format), 1);
+    let result = acquire_measurements(
+        input.to_str().unwrap(),
+        &temp,
+        &args,
+        true,
+        hlg_composer,
+        format,
+        &mut total,
+        &mut current,
+    );
+    (result, total, current)
+}
+
+#[test]
+fn acquire_measurements_refuses_legacy_madvr_l1_for_hlg_before_any_step() {
+    let (result, total, current) =
+        run_acquire_measurements(&["--legacy-madvr-l1"], HdrFormat::Hlg, |_| {});
+    assert!(result.unwrap().is_none());
+    assert_eq!((total, current), (7, 1));
+}
+
+#[test]
+fn acquire_measurements_stops_on_profile8_without_mdfix() {
+    let (result, total, current) = run_acquire_measurements(&[], HdrFormat::DolbyVisionP8, |_| {});
+    assert!(result.unwrap().is_none());
+    assert_eq!((total, current), (7, 1));
+}
+
+#[test]
+fn acquire_measurements_refuses_fel() {
+    let (result, _, _) = run_acquire_measurements(&[], HdrFormat::DolbyVisionFel, |_| {});
+    let error = result.err().expect("FEL is refused");
+    assert_eq!(error.to_string(), FEL_UNSUPPORTED_MESSAGE);
+}
+
+#[test]
+fn acquire_measurements_legacy_madvr_l1_reuses_the_first_candidate_without_sidecar() {
+    let (result, total, current) = run_acquire_measurements(
+        &["--legacy-madvr-l1"],
+        HdrFormat::Hdr10WithMeasurements,
+        |dir| {
+            fs::write(dir.join("measurements.bin"), b"shared").unwrap();
+            fs::write(dir.join("in_measurements.bin"), b"own").unwrap();
+        },
+    );
+    let measured = result.unwrap().expect("legacy path reuses measurements");
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    let file = measured.measurements_file.unwrap();
+    assert_eq!(file.file_name().unwrap(), "in_measurements.bin");
+    assert!(measured.l1_sidecar.is_none());
+    assert!(measured.hdr10plus_json.is_none());
+    assert!(measured.bl_source_file.ends_with("in.mkv"));
+    assert_eq!((total, current), (6, 1), "reuse adds no analysis step");
+}
+
+#[test]
+fn find_reusable_measurements_without_candidates_loads_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.mkv");
+    fs::write(&input, b"src").unwrap();
+    let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+    let (mut measurements_file, mut l1_sidecar) = (None, None);
+    assert!(!find_reusable_measurements(
+        &input,
+        input.to_str().unwrap(),
+        &args,
+        None,
+        &mut measurements_file,
+        &mut l1_sidecar,
+    ));
+    assert!(measurements_file.is_none());
+    assert!(l1_sidecar.is_none());
+}
+
+/// A temp dir from an interrupted run: `extra.json` holding `config`, sealed `RPU.bin` and
+/// `BL_RPU.hevc`, and the mux marker.
+fn interrupted_run(config: &[u8]) -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("extra.json"), config).unwrap();
+    for artifact in ["RPU.bin", "BL_RPU.hevc"] {
+        fs::write(temp.path().join(artifact), b"payload").unwrap();
+        resume::mark_done(&temp.path().join(artifact)).unwrap();
+    }
+    fs::write(temp.path().join("mux.done"), b"").unwrap();
+    temp
+}
+
+fn sealed(temp: &Path) -> [bool; 3] {
+    [
+        resume::is_complete(&temp.join("RPU.bin")),
+        resume::is_complete(&temp.join("BL_RPU.hevc")),
+        temp.join("mux.done").exists(),
+    ]
+}
+
+#[test]
+fn withdraw_stale_rpu_withdraws_rpu_and_mux_when_the_config_changed() {
+    let temp = interrupted_run(b"{\"new\": 1}");
+    let extra = temp.path().join("extra.json");
+    assert!(withdraw_stale_rpu(temp.path(), &extra, Some(b"{\"old\": 1}")).unwrap());
+    assert_eq!(sealed(temp.path()), [false, false, false]);
+    assert!(
+        temp.path().join("RPU.bin").exists(),
+        "only sentinels are withdrawn"
+    );
+}
+
+#[test]
+fn withdraw_stale_rpu_keeps_everything_when_the_config_is_unchanged() {
+    let temp = interrupted_run(b"{\"same\": 1}");
+    let extra = temp.path().join("extra.json");
+    assert!(!withdraw_stale_rpu(temp.path(), &extra, Some(b"{\"same\": 1}")).unwrap());
+    assert_eq!(sealed(temp.path()), [true, true, true]);
+}
+
+#[test]
+fn withdraw_stale_rpu_treats_a_missing_previous_config_as_changed() {
+    let temp = interrupted_run(b"{}");
+    let extra = temp.path().join("extra.json");
+    assert!(withdraw_stale_rpu(temp.path(), &extra, None).unwrap());
+    assert_eq!(sealed(temp.path()), [false, false, false]);
+}
+
+#[test]
+fn withdraw_stale_rpu_without_artifacts_is_not_an_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let extra = temp.path().join("extra.json");
+    fs::write(&extra, b"{}").unwrap();
+    assert!(withdraw_stale_rpu(temp.path(), &extra, None).unwrap());
+    assert_eq!(sealed(temp.path()), [false, false, false]);
+}
+
+/// A temp dir and default `Args` for the delivery phases; the input is `<dir>/in.mkv`.
+fn delivery_dirs() -> (tempfile::TempDir, PathBuf, PathBuf, Args) {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.mkv");
+    fs::write(&input, b"src").unwrap();
+    let temp = dir.path().join("mkvdovi_temp_in");
+    fs::create_dir(&temp).unwrap();
+    (dir, input, temp, Args::try_parse_from(["mkvdovi"]).unwrap())
+}
+
+#[test]
+fn extract_base_layer_passes_a_raw_hevc_source_through() {
+    let (_dir, input, temp, args) = delivery_dirs();
+    let clean_bl = temp.join("BL_clean.hevc");
+    fs::write(&clean_bl, b"hevc").unwrap();
+    let bl = extract_base_layer(
+        input.to_str().unwrap(),
+        &clean_bl,
+        &temp,
+        HdrFormat::Hdr10WithMeasurements,
+        true,
+        &args,
+    )
+    .unwrap();
+    assert_eq!(bl, Some(clean_bl));
+    assert!(!temp.join("BL.hevc").exists());
+}
+
+#[test]
+fn extract_base_layer_reuses_a_sealed_extraction_when_resuming() {
+    let (_dir, input, temp, args) = delivery_dirs();
+    let bl_hevc = temp.join("BL.hevc");
+    fs::write(&bl_hevc, b"hevc").unwrap();
+    resume::mark_done(&bl_hevc).unwrap();
+    let bl = extract_base_layer(
+        input.to_str().unwrap(),
+        &input,
+        &temp,
+        HdrFormat::Hdr10Unsupported,
+        true,
+        &args,
+    )
+    .unwrap();
+    assert_eq!(bl, Some(bl_hevc));
+}
+
+#[test]
+fn inject_rpu_reuses_a_sealed_injection_and_keeps_its_input() {
+    let (_dir, _input, temp, args) = delivery_dirs();
+    let bl_hevc = temp.join("BL.hevc");
+    fs::write(&bl_hevc, b"hevc").unwrap();
+    let bl_rpu_hevc = temp.join("BL_RPU.hevc");
+    fs::write(&bl_rpu_hevc, b"hevc+rpu").unwrap();
+    resume::mark_done(&bl_rpu_hevc).unwrap();
+    let injected = inject_rpu(&bl_hevc, &temp.join("RPU.bin"), &temp, true, true, &args).unwrap();
+    assert_eq!(injected, Some(bl_rpu_hevc));
+    assert!(bl_hevc.exists(), "only a fresh injection drops its input");
+}
+
+#[test]
+fn mux_output_reuses_a_finished_mux_when_resuming() {
+    let (dir, input, temp, args) = delivery_dirs();
+    let output = dir.path().join("in.DV.mkv");
+    fs::write(&output, b"out").unwrap();
+    fs::write(temp.join("mux.done"), b"").unwrap();
+    let muxed = mux_output(
+        input.to_str().unwrap(),
+        &temp.join("BL_RPU.hevc"),
+        &output,
+        &temp,
+        true,
+        &args,
+    )
+    .unwrap();
+    assert!(muxed);
+    assert_eq!(fs::read(&output).unwrap(), b"out");
 }

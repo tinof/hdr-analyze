@@ -466,8 +466,7 @@ fn accurate_reanalyzes_coarser_measurements() {
 }
 
 /// The default for a non-DV input: a successful conversion deletes the source and its temp dir
-/// (the cleanup at the end of `convert_file`, not `finish_success`, which only the MEL fast path
-/// calls).
+/// (`finish_success` at the end of `convert_file`).
 #[test]
 fn successful_hlg_conversion_deletes_the_source_and_the_temp_dir() {
     if let Some(reason) = missing_prerequisite() {
