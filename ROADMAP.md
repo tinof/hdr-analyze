@@ -62,16 +62,15 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-14 at main@ae211e6)
+### Next up (checked 2026-10-14 at main@4114c51)
 
-1. **P7: refuse tagged full-range PQ in mkvdovi** (priority 1; `fix-p7-full-range-pq`). The
-   analyzer only warns and measures as limited range (`hdr_analyzer_mvp/src/pipeline.rs:412`); a
-   sibling of `metadata::check_hlg_colour_contract` (`metadata/format.rs:357`, called only for HLG at
-   `pipeline/mod.rs:77`). Gate: refused before temp work, source kept; unit tests for full-range
-   refusal, limited and untagged acceptance, conflicting container/stream tags. Release: patch
-2. **P9: the hybrid HDR10+ flag** (priority 2; `feat/p9-hdr10plus-hybrid`). Gate: opt-in, an
-   integration test on an HDR10+-only cut (`h1-deadloch-*`, `h5-alien-*`), scored on the development
-   tier. Plan mode first settles the data contract (see the P9 Checked bullet). Release: minor
+1. **P9: the hybrid HDR10+ flag** (priority 2; `feat/p9-hdr10plus-hybrid`). Gate: opt-in, an
+   integration test on an HDR10+-only cut (`h1-deadloch-*`, `h5-alien-*`; pipeline proof only, no
+   retail L1), scored on the development tier. Plan mode first settles the data contract and the
+   fallback rule (see the P9 Checked bullet). Merging it puts a MINOR on `main`. Release: minor
+2. **P11: `--mdfix` dropped-levels notice** (priority 5; `feat/p11-mdfix-notice`). Gate: `--mdfix`
+   names the authored levels it drops, with a unit test. The remaining content of the next patch,
+   with P7 (merged, unreleased, due about 2026-10-21); cut that patch before P9 lands. Release: patch
 3. **E13 step 5: analyzer split** (prerequisite of priority 4). Gate: the E13 per-move gate incl.
    `scripts/cuda-parity.sh` and an optimizer-enabled `.bin` diff. No other branch open during the
    move; comes before P9 only if P9 needs a sidecar v6. Release: none
@@ -342,12 +341,12 @@ and broader hardware acceleration (E5). Neutral trims stay.
   from HDR10+ with the pixel fallback; its integration gate needs an HDR10+-only cut (Alita takes the
   MEL path). Before a default change (owner list): score holdout HDR10+ cuts, where the union could
   show whether HDR10+ starts rescue cuts the analyzer misses; none did on the development cuts.
-- **Checked 2026-10-14 @ae211e6:** seam `pipeline/measure.rs:140` (HDR10+ runs no analyzer),
-  `dovi_steps.rs:322` passes `--hdr10plus-json`, `pipeline/mod.rs:275` drops the sidecar from
-  verify. mkvdovi's `L1SidecarFrames` reads only `min_pq_12bit` (`metadata/sidecar.rs:179`), and the
-  sidecar has no per-frame max (`l1_sidecar.rs:146`), so the flag extends the reader and takes the
-  fallback peak from the `.bin` or a sidecar v6. `rpu_config.rs:200` already shifts by leading
-  pictures: shift the union once. v5 runs: `~/mkvdovi-work/p9-step0-2026-10-08`.
+- **Checked 2026-10-14 @4114c51:** seam `pipeline/measure.rs:140`; `dovi_steps.rs:322`
+  `--hdr10plus-json` overrides shots, so the flag passes explicit hybrid shots and `--verify`
+  (`pipeline/mod.rs:298` drops the sidecar for HDR10+) checks against them; add the flag to
+  `resume_settings` (`mod.rs:336`). No per-frame max (`l1_sidecar.rs:146`, `sidecar.rs:179`): a `.bin`
+  reader adds `madvr_parse` to mkvdovi, so `Cargo.lock` brings the CUDA and L1 gates. The h1/h5
+  manifests have `truth.l1: null`. Leading-picture shift: `rpu_config.rs:200`.
 
 ### P10: measured against delivered
 
@@ -374,11 +373,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Decision (owner, 2026-10-13):** keep full regeneration, since trims were authored for the
   authored L1 and shot list; no targeted repair. **Open:** `--mdfix` states in its output which
   authored levels it drops.
-- **Checked 2026-10-14 @ae211e6:** two samplers: `rpu_check::extract_rpu_sample` (240 RPUs,
-  `rpu_check.rs:132`, from `metadata/format.rs:392` for classification) and `sample_rpu_windows`
-  (three short windows, `rpu_check.rs:182`, from `pipeline/measure.rs:45`). The notice states which
-  sample feeds it, unless the step reads the whole RPU. mkvdovi-only, no L1 change: can share the
-  P7 branch.
+- **Checked 2026-10-14 @4114c51:** two samplers: `rpu_check::extract_rpu_sample` (240 RPUs,
+  `rpu_check.rs:132`, from `metadata/format.rs:468`) and `sample_rpu_windows` (`rpu_check.rs:182`,
+  from `pipeline/measure.rs:45`). `SampledRpu` (`rpu_check.rs:173`) holds L1, peak and one L5, no
+  L2/L4: extend it or read the whole RPU. A sampled absence means "not seen in the sample"; a failed
+  read still gives a general notice. mkvdovi-only, no L1 change; P7's branch is merged.
 
 ## `cm_analyze` parity
 
