@@ -62,20 +62,19 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-13 at main@0eb414d)
+### Next up (checked 2026-10-14 at main@ae211e6)
 
-1. **E13 step 4: split `convert_file` by phase** (`feat/e13-convert-file-phases`), the last
-   prerequisite of the P9 hybrid flag now that the scene list is chosen. Gate: the E13 per-move
-   gate with the 0.6.0 RPU baselines (`~/mkvdovi-work/rpu-baseline/0.6.0/`, identical to the E13
-   and r4 baselines), plus unit tests for resume, cleanup and source deletion, which the baselines
-   cannot give. Full panel, not pure-move. Release: none
-2. **P11: the `--mdfix` dropped-levels notice** (priority 5; full regeneration kept by owner
-   decision 2026-10-13). Gate: a unit test per dropped level, and the notice labelled as sampled
-   (240-frame classifier sample). Touches `rpu_check.rs` and the repair branch of
-   `pipeline/mod.rs`, so after step 4 or rebased on it. Release: patch
-3. **P1 step 1: measure CPU `accurate` against `balanced`** (priority 4), offline: CPU cost and
-   `FAST_BILINEAR`'s effect on L1 max, then flip CPU `auto` or keep it with a visible note.
-   The flip waits for E13 step 4 (`pipeline/`). Release: none (measurement); minor if it flips
+1. **P7: refuse tagged full-range PQ in mkvdovi** (priority 1; `fix-p7-full-range-pq`). The
+   analyzer only warns and measures as limited range (`hdr_analyzer_mvp/src/pipeline.rs:412`); a
+   sibling of `metadata::check_hlg_colour_contract` (`metadata/format.rs:357`, called only for HLG at
+   `pipeline/mod.rs:77`). Gate: refused before temp work, source kept; unit tests for full-range
+   refusal, limited and untagged acceptance, conflicting container/stream tags. Release: patch
+2. **P9: the hybrid HDR10+ flag** (priority 2; `feat/p9-hdr10plus-hybrid`). Gate: opt-in, an
+   integration test on an HDR10+-only cut (`h1-deadloch-*`, `h5-alien-*`), scored on the development
+   tier. Plan mode first settles the data contract (see the P9 Checked bullet). Release: minor
+3. **E13 step 5: analyzer split** (prerequisite of priority 4). Gate: the E13 per-move gate incl.
+   `scripts/cuda-parity.sh` and an optimizer-enabled `.bin` diff. No other branch open during the
+   move; comes before P9 only if P9 needs a sidecar v6. Release: none
 
 ### Waiting for the owner
 
@@ -85,7 +84,7 @@ startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 - **P9: default change.** Whether hybrid mode becomes the default, after its development-tier score.
 - **P10 step 3: write L1 in-process.** Needs WS7 or playback evidence first.
 
-### Release plan (2026-10-13)
+### Release plan (2026-10-14)
 
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
 `/roadmap-next` keeps this table current. Latest release: v0.6.0 (2026-10-13; with the L6 fixes of #41 and the ffprobe HLG fix of #43, both merged after rc.1).
@@ -93,7 +92,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13 step 5 (refactor), P1 step 1 measurement | No user-visible change |
-| next patch | P11 `--mdfix` dropped-levels notice | PATCH: a new notice, no changed default, flag or contract; batched with other fixes |
+| next patch | P7 full-range PQ refusal; P11 `--mdfix` dropped-levels notice | PATCH: a correctness fix and a new notice, no changed default, flag or contract. P7 is priority 1, so release within about a week of its merge (`docs/RELEASING.md`) |
 | **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
 | a minor | E8 and E9 (they move the default `.bin`) | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
@@ -106,6 +105,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-14 | P7: mkvdovi refuses PQ input tagged full range before any temp work (HDR10, HDR10+, `--mdfix`), including a full-range stream the container overrides as limited; 9/9 RPU baselines byte-identical to 0.6.0. | P7 | `fix-p7-full-range-pq` |
 | 2026-10-13 | E13 step 4: `convert_file` split by phase into `pipeline/{temp_dir,measure,config,deliver}.rs`, `mod.rs` 1037 to 409 lines, 27 new unit tests; all 9 RPU baselines byte-identical to 0.6.0. | E13 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within about 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | v0.6.0 released (#46): #41 and #43 on top of rc.1; CUDA parity and all ten RPU baselines identical before the tag. | P6, E7, P8 | [v0.6.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.6.0) |
@@ -271,15 +271,17 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P7: analyzer input contract
 
-- **Status:** Core complete. Only PQ and HLG transfers are analyzed; tagged SDR transfers, including
+- **Status:** Complete. Only PQ and HLG transfers are analyzed; tagged SDR transfers, including
   the BT.2020 10/12-bit tags that share the BT.709 curve, are refused. Full-range and non-BT.2020
-  matrix tags warn.
-- **Open:** for PQ, normalize full-range input or refuse it. (The HLG half shipped with P8:
-  `mkvdovi` refuses full-range or non-BT.2020 HLG, `metadata::check_hlg_colour_contract`; the
-  analyzer itself still only warns.)
-- **Checked 2026-10-11 @8db4ad6:** full-range PQ still only warns
-  (`hdr_analyzer_mvp/src/pipeline.rs:412`) and mkvdovi has no PQ range refusal; a refusal touches
-  `metadata/format.rs` and `pipeline/`; E13 step 4, which it waited for, is done (2026-10-13).
+  matrix tags warn in the analyzer; `mkvdovi` refuses full-range or non-BT.2020 HLG (P8,
+  `metadata::check_hlg_colour_contract`) and full-range PQ (below).
+- **Done 2026-10-14: full-range PQ refused in mkvdovi** (`fix-p7-full-range-pq`). Every input whose
+  Profile 8.1 RPU mkvdovi generates (HDR10, HDR10+, MEL / Profile 8 under `--mdfix`) is refused
+  before any temp work when MediaInfo, the ffprobe stream or the first decoded video frame names
+  full range (`metadata::check_pq_range_contract`); the source is kept. Range only, by owner
+  decision; untagged range and the MEL fast path pass. The analyzer still only warns. Evidence:
+  unit and e2e tests (`mkvdovi/tests/pq_input_contract.rs`), 9/9 RPU baselines byte-identical to
+  0.6.0; [log](docs/ROADMAP_LOG.md) 2026-10-14.
 
 ### P8: HLG → Profile 8.4 composer
 
@@ -340,12 +342,12 @@ and broader hardware acceleration (E5). Neutral trims stay.
   from HDR10+ with the pixel fallback; its integration gate needs an HDR10+-only cut (Alita takes the
   MEL path). Before a default change (owner list): score holdout HDR10+ cuts, where the union could
   show whether HDR10+ starts rescue cuts the analyzer misses; none did on the development cuts.
-- **Checked 2026-10-11 @8db4ad6:** still valid (`pipeline/dovi_steps.rs:322`, `pipeline/mod.rs:275` since E13 step 4,
-  `metadata/format.rs:52`, `metadata/sidecar.rs:179`); `AverageRGB` is one value per HDR10+ scene,
-  `run/` sidecars are v4 (use the step-0 v5 runs). New: `l1_diff` scores per-frame averages
-  (`tools/l1_diff/src/main.rs:787`), so a candidate scene list needs its own per-scene aggregation
-  expanded back to frames; Alita retail min is 0 on every frame and avg sits at the 819 floor on
-  most night frames; Alita takes the MEL path, so the hybrid flag needs an HDR10+-only cut.
+- **Checked 2026-10-14 @ae211e6:** seam `pipeline/measure.rs:140` (HDR10+ runs no analyzer),
+  `dovi_steps.rs:322` passes `--hdr10plus-json`, `pipeline/mod.rs:275` drops the sidecar from
+  verify. mkvdovi's `L1SidecarFrames` reads only `min_pq_12bit` (`metadata/sidecar.rs:179`), and the
+  sidecar has no per-frame max (`l1_sidecar.rs:146`), so the flag extends the reader and takes the
+  fallback peak from the `.bin` or a sidecar v6. `rpu_config.rs:200` already shifts by leading
+  pictures: shift the union once. v5 runs: `~/mkvdovi-work/p9-step0-2026-10-08`.
 
 ### P10: measured against delivered
 
@@ -372,9 +374,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Decision (owner, 2026-10-13):** keep full regeneration, since trims were authored for the
   authored L1 and shot list; no targeted repair. **Open:** `--mdfix` states in its output which
   authored levels it drops.
-- **Checked 2026-10-05 @9edee09:** the source RPU is classified from a 240-frame sample
-  (`rpu_check::extract_rpu_sample`), so the dropped-levels notice can only name levels seen in
-  that sample unless the step reads the whole RPU.
+- **Checked 2026-10-14 @ae211e6:** two samplers: `rpu_check::extract_rpu_sample` (240 RPUs,
+  `rpu_check.rs:132`, from `metadata/format.rs:392` for classification) and `sample_rpu_windows`
+  (three short windows, `rpu_check.rs:182`, from `pipeline/measure.rs:45`). The notice states which
+  sample feeds it, unless the step reads the whole RPU. mkvdovi-only, no L1 change: can share the
+  P7 branch.
 
 ## `cm_analyze` parity
 

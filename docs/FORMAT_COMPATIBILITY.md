@@ -70,6 +70,13 @@ untagged transfer is analyzed as PQ with a notice. Samples are interpreted as li
 BT.2020 non-constant-luminance coefficients; streams tagged full range or with another matrix
 (BT.2020 constant luminance included) produce a warning. `mkvdovi` refuses such HLG input instead.
 
+`mkvdovi` also refuses PQ input tagged full range before any work, for every input whose Profile 8.1
+RPU it generates: HDR10, HDR10+, and Profile 7 MEL / Profile 8 under `--mdfix`. It reads MediaInfo
+(effective and original range), the ffprobe stream and the first decoded video frame, because an
+MKV container can tag a full-range stream as limited; any source naming full range refuses.
+Untagged range is accepted as limited. The matrix and primaries of PQ input are not checked, and
+the Profile 7 MEL fast path (no `--mdfix`) keeps the authored RPU without a check.
+
 ### Analysis quality and optimizer behavior
 
 For HDR10/HLG analysis, `--analysis-quality` selects:

@@ -6,6 +6,41 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-14: P7, full-range PQ refused in mkvdovi
+
+Closes P7's open step ("for PQ, normalize full-range input or refuse it") as a refusal in
+`mkvdovi`; the analyzer's own full-range warning (`hdr_analyzer_mvp/src/pipeline.rs:412`) is
+unchanged.
+
+- Scope (owner decisions 2026-10-14): every input whose Profile 8.1 RPU mkvdovi generates, i.e.
+  HDR10 (with or without measurements), HDR10+, and Profile 7 MEL / Profile 8 only under `--mdfix`.
+  Range only: the matrix and primaries of PQ input are not checked. Untagged range is accepted
+  silently. The MEL fast path (authored RPU passed through) is not checked. A Profile 8 input with an
+  HLG base layer under `--mdfix` keeps the existing 8.4 `--mdfix` refusal.
+- Refusal point: in `convert_file` next to the HLG contract (`needs_pq_range_check`), before the
+  resume fingerprint, so no `mkvdovi_temp_*` directory is created, resumed or discarded, nothing is
+  extracted, measured or written, and the source is kept. `resume_settings` is unchanged.
+- Sources: MediaInfo effective and `_Original` range, the ffprobe stream, and the first decoded
+  video frame from a video-only ffprobe call (`metadata::get_ffprobe_video_json`), because an MKV
+  can override a full-range stream as limited in the container (ffprobe stream `tv`, frame `pc`)
+  and MediaInfo is optional. Any source naming full range refuses; the error lists every tag read.
+  Code: `metadata::pq_range_contract` / `check_pq_range_contract` and the shared
+  `resolve_colour_field` in `mkvdovi/src/metadata/format.rs`; the HLG contract uses the same
+  resolver and is unchanged.
+- Tests: six unit tests in `mkvdovi/src/metadata/tests.rs` (every spelling and source refused,
+  conflicting tags refused, limited and untagged accepted, one tool missing, matrix and primaries
+  ignored), `pq_range_check_covers_exactly_the_generated_8_1_rpus` in
+  `mkvdovi/src/pipeline/tests.rs`, and e2e `mkvdovi/tests/pq_input_contract.rs`
+  (`full_range_pq_is_refused_before_any_work`;
+  `container_override_of_full_range_pq_is_refused_without_mediainfo`, audio track first, MediaInfo
+  hidden).
+- Gates on a733804: fmt, clippy and `cargo test --workspace` pass (344 tests, only allowed skips).
+  Pre-PR panel (three Opus lenses, Fable 5.1) and Gemini 3.8 Flash: no findings.
+- RPU baselines: `~/mkvdovi-work/rpu-baseline/p7-full-range-pq-a733804/` against 0.6.0, 9/9
+  byte-identical, gate exit 0. Hand check with the installed binary: full range refused with the
+  source kept, limited range converts.
+- No CUDA parity or L1 regression gate: no analyzer path changed.
+
 ### 2026-10-13: E13 step 4, `convert_file` split by phase
 
 Behavior-preserving function extraction in `mkvdovi/src/pipeline/`; no user-visible change.
