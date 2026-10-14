@@ -393,10 +393,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Checked 2026-10-14 @f5d4ccc:** samplers `rpu_check::extract_rpu_sample` (`rpu_check.rs:132`,
   from `metadata/format.rs:468`) and `sample_rpu_windows` (`rpu_check.rs:182`, from
   `pipeline/measure.rs:50`); `SampledRpu` (`rpu_check.rs:173`) has no L2/L4. Name each level by what
-  happens: L1, L2, L6, L9, L11 regenerated (`generate_extra_json`, `metadata/rpu_config.rs:103`,
-  writes no other level; `dovi_tool` adds L254 under CM v4.0); L3, L4, L8, L10 removed; L5 reduced
-  to one sampled value. To name them, the sampler must also detect L2/L3/L4/L8. A sampled absence
-  means "not seen"; a failed read still gives a general notice.
+  happens: L1, L2, L6, L9, L11 regenerated (`generate_extra_json`, `metadata/rpu_config.rs:103`);
+  L3 replaced by neutral offsets (2048) and L254 added (`dovi_tool` CM v4.0 defaults, seen in the
+  0.6.0 `--mdfix` baselines); L4, L8, L10 removed; L5 reduced to one sampled value. To name them,
+  the sampler must also detect L2/L3/L4/L8. A sampled absence means "not seen"; a failed read
+  still gives a general notice.
 
 ## `cm_analyze` parity
 
