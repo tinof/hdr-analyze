@@ -43,12 +43,8 @@ pub struct Args {
     /// HDR10+ peak is missing, 0 or not above the measured average (each one is reported);
     /// average, minimum and L5 from the measured pixels. Needs every frame analyzed (not
     /// --analysis-quality fast). Other inputs ignore it.
-    #[arg(
-        long,
-        value_enum,
-        default_value_t = Hdr10PlusL1::Hdr10plus,
-        conflicts_with = "legacy_madvr_l1"
-    )]
+    /// hybrid cannot be combined with --legacy-madvr-l1.
+    #[arg(long, value_enum, default_value_t = Hdr10PlusL1::Hdr10plus)]
     pub hdr10plus_l1: Hdr10PlusL1,
 
     /// Comma-separated list of nits values for the Dolby Vision trim pass (e.g., '100,600,1000').
@@ -201,12 +197,18 @@ mod tests {
         assert_eq!(args.hdr10plus_l1, Hdr10PlusL1::Hdr10plus);
         let args = Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hybrid"]).unwrap();
         assert_eq!(args.hdr10plus_l1, Hdr10PlusL1::Hybrid);
-        // The default value does not count as a conflict.
-        assert!(Args::try_parse_from(["mkvdovi", "--legacy-madvr-l1"]).is_ok());
-        assert!(
+        // Only hybrid conflicts with --legacy-madvr-l1, also when the default is given explicitly.
+        for flags in [
+            &["--legacy-madvr-l1"][..],
+            &["--hdr10plus-l1", "hdr10plus", "--legacy-madvr-l1"],
+        ] {
+            let args = Args::try_parse_from(["mkvdovi"].iter().chain(flags)).unwrap();
+            assert_eq!(args.flag_conflict(), None, "{flags:?}");
+        }
+        let args =
             Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hybrid", "--legacy-madvr-l1"])
-                .is_err()
-        );
+                .unwrap();
+        assert!(args.flag_conflict().unwrap().contains("--legacy-madvr-l1"));
         assert!(Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "pixels"]).is_err());
     }
 
@@ -321,6 +323,16 @@ pub enum PeakSource {
     MaxScl,
     /// Use luminance calculated from max-scl metadata (most conservative; can look dim).
     MaxSclLuminance,
+}
+
+impl Args {
+    /// A flag combination refused before any file is processed. Checked after parsing, so that an
+    /// explicit `--hdr10plus-l1 hdr10plus` (the default) still combines with --legacy-madvr-l1.
+    pub fn flag_conflict(&self) -> Option<&'static str> {
+        (self.hdr10plus_l1 == Hdr10PlusL1::Hybrid && self.legacy_madvr_l1).then_some(
+            "--hdr10plus-l1 hybrid builds L1 from the measured L1 sidecar, which --legacy-madvr-l1 replaces; use one or the other.",
+        )
+    }
 }
 
 /// Where the L1 of an HDR10+ input comes from (`--hdr10plus-l1`).

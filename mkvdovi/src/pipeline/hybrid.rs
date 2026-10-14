@@ -113,8 +113,11 @@ impl HybridReport {
 }
 
 /// Whether a sidecar can carry the hybrid's average and minimum: every frame measured (sample
-/// rate 1), per-frame arrays for all of them, max-RGB peaks taken as the plain maximum (the
-/// fallback peak), a PQ mapping, and the stream frame count (version 5) for the HDR10+ match.
+/// rate 1), per-frame arrays for all of them, a max-RGB peak domain and the `max` estimator, a PQ
+/// mapping, and the stream frame count (version 5) for the HDR10+ match. The fallback peak is the
+/// analyzer scene's `max_pq_12bit`. The sidecar does not record the analyzer's own
+/// `--peak-source`, so measurements made by hand with `histogram99` pass this check and their
+/// scene peak is a luma percentile; mkvdovi's own analyzer runs use `max`.
 pub(super) fn check_measurements(sidecar: &L1Sidecar) -> Result<(), String> {
     if sidecar.version < L1_SIDECAR_STREAM_FRAMES_VERSION
         || sidecar
@@ -264,7 +267,7 @@ fn hdr10plus_scenes(
                 .iter()
                 .zip(ends)
                 .zip(&lengths)
-                .all(|((start, end), length)| start + length == end);
+                .all(|((start, end), length)| end - start == *length);
         if !consistent {
             return Err("HDR10+ SceneFrameNumbers do not match the scene starts".into());
         }
@@ -680,6 +683,10 @@ mod tests {
         let mut lengths = metadata(&[0, 4], 10, 10_000);
         lengths["SceneInfoSummary"]["SceneFrameNumbers"] = json!([5, 5]);
         refused(lengths, "SceneFrameNumbers");
+        // A length that would overflow `start + length` is refused, not a panic.
+        let mut huge = metadata(&[0, 4], 10, 10_000);
+        huge["SceneInfoSummary"]["SceneFrameNumbers"] = json!([4, u64::MAX]);
+        refused(huge, "SceneFrameNumbers");
         let mut not_integer = metadata(&[0, 4], 10, 10_000);
         not_integer["SceneInfoSummary"]["SceneFirstFrameIndex"] = json!([0, "4"]);
         refused(not_integer, "not an integer");
