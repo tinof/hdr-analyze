@@ -8,7 +8,7 @@ use std::process::Command;
 
 use super::format::{
     classify_hdr_hints, ffprobe_hdr_format, ffprobe_indicates_hlg, first_video_transfer,
-    hints_indicate_hlg, hlg_colour_contract, ColourField,
+    hints_indicate_hlg, hlg_colour_contract, pq_range_contract, ColourField,
 };
 use super::probe::{parse_mediainfo_duration_seconds, video_track_frame_count};
 use super::rpu_config::nits_to_pq_code;
@@ -1313,6 +1313,129 @@ fn untagged_hlg_fields_are_assumed_with_a_warning() {
         warnings[0]
     );
     assert!(warnings[0].contains("limited range"), "{}", warnings[0]);
+}
+
+fn ffprobe_with_frame(stream: Value, frame: Value) -> Value {
+    let mut json = ffprobe_video(stream);
+    let mut entry = json!({"media_type": "video"});
+    entry
+        .as_object_mut()
+        .unwrap()
+        .extend(frame.as_object().unwrap().clone());
+    json.as_object_mut().unwrap().insert(
+        "frames".into(),
+        json!([{"media_type": "audio", "color_range": "tv"}, entry]),
+    );
+    json
+}
+
+#[test]
+fn full_range_pq_is_refused_in_every_spelling_and_source() {
+    for (mediainfo, ffprobe, expected) in [
+        (
+            mediainfo_video(json!({"colour_range": "Full"})),
+            ffprobe_video(json!({})),
+            "range: MediaInfo colour_range = Full",
+        ),
+        (
+            mediainfo_video(json!({})),
+            ffprobe_video(json!({"color_range": "pc"})),
+            "range: ffprobe color_range = pc",
+        ),
+        (
+            mediainfo_video(json!({"colour_range_Original": "Full"})),
+            ffprobe_video(json!({})),
+            "range: MediaInfo colour_range_Original = Full",
+        ),
+        (
+            mediainfo_video(json!({})),
+            ffprobe_with_frame(json!({}), json!({"color_range": "pc"})),
+            "range: ffprobe frame color_range = pc",
+        ),
+    ] {
+        let error = pq_range_contract(Some(&mediainfo), Some(&ffprobe)).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+        assert!(error.contains("Profile 8.1"), "{error}");
+        assert!(error.contains("copied unchanged"), "{error}");
+    }
+}
+
+#[test]
+fn conflicting_pq_range_tags_are_refused_with_every_source() {
+    // An MKV that overrides a full-range stream as limited in the container: MediaInfo shows the
+    // override and the stream's own value, ffprobe's stream entry only the override, and the
+    // decoded frame the stream's value.
+    let mediainfo = mediainfo_video(json!({
+        "colour_range": "Limited",
+        "colour_range_Original": "Full",
+    }));
+    let ffprobe = ffprobe_with_frame(json!({"color_range": "tv"}), json!({"color_range": "pc"}));
+    let error = pq_range_contract(Some(&mediainfo), Some(&ffprobe)).unwrap_err();
+    assert!(
+        error.contains(
+            "range: MediaInfo colour_range = Limited, MediaInfo colour_range_Original = Full, ffprobe color_range = tv, ffprobe frame color_range = pc"
+        ),
+        "{error}"
+    );
+    // Without MediaInfo, the frame still catches the override.
+    assert!(pq_range_contract(None, Some(&ffprobe)).is_err());
+}
+
+#[test]
+fn limited_range_pq_is_accepted() {
+    for (mediainfo, ffprobe) in [
+        ("Limited", "tv"),
+        ("Limited", "mpeg"),
+        ("Limited", "unknown"),
+    ] {
+        let mediainfo = mediainfo_video(json!({"colour_range": mediainfo}));
+        let ffprobe = ffprobe_with_frame(
+            json!({"color_range": ffprobe}),
+            json!({"color_range": ffprobe}),
+        );
+        assert_eq!(pq_range_contract(Some(&mediainfo), Some(&ffprobe)), Ok(()));
+    }
+}
+
+#[test]
+fn untagged_pq_range_is_accepted() {
+    let mediainfo = mediainfo_video(json!({}));
+    for value in ["unknown", "unspecified", ""] {
+        let ffprobe =
+            ffprobe_with_frame(json!({"color_range": value}), json!({"color_range": value}));
+        assert_eq!(pq_range_contract(Some(&mediainfo), Some(&ffprobe)), Ok(()));
+    }
+    assert_eq!(
+        pq_range_contract(Some(&mediainfo), Some(&ffprobe_video(json!({})))),
+        Ok(())
+    );
+    assert_eq!(pq_range_contract(None, None), Ok(()));
+}
+
+#[test]
+fn pq_range_uses_the_remaining_tool_when_one_is_missing() {
+    let ffprobe = ffprobe_video(json!({"color_range": "pc"}));
+    assert!(pq_range_contract(None, Some(&ffprobe)).is_err());
+    let mediainfo = mediainfo_video(json!({"colour_range": "Full"}));
+    assert!(pq_range_contract(Some(&mediainfo), None).is_err());
+    let mediainfo = mediainfo_video(json!({"colour_range": "Limited"}));
+    assert_eq!(pq_range_contract(Some(&mediainfo), None), Ok(()));
+}
+
+#[test]
+fn pq_range_ignores_matrix_and_primaries() {
+    // Range only: the matrix and primaries a PQ input carries are not part of this contract.
+    let mediainfo = mediainfo_video(json!({
+        "colour_range": "Limited",
+        "matrix_coefficients": "BT.709",
+        "colour_primaries": "BT.709",
+    }));
+    let ffprobe = ffprobe_video(json!({
+        "color_range": "tv",
+        "color_space": "bt2020c",
+        "color_primaries": "bt709",
+    }));
+    assert_eq!(pq_range_contract(Some(&mediainfo), Some(&ffprobe)), Ok(()));
 }
 
 #[test]

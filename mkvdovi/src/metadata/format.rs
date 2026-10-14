@@ -3,7 +3,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use super::{find_measurements_file, get_ffprobe_json, get_mediainfo_json, HdrFormat};
+use super::{
+    find_measurements_file, get_ffprobe_json, get_ffprobe_video_json, get_mediainfo_json, HdrFormat,
+};
 use crate::rpu_check::{self, RpuFormatKind};
 
 pub fn check_hdr_format(input_file: &str) -> HdrFormat {
@@ -200,7 +202,9 @@ pub fn has_hlg_transfer(input_file: &str) -> bool {
 
 /// A colour field a Dolby Vision Profile 8.4 RPU fixes for its HLG base layer: the RPU's
 /// `ycc_to_rgb` is limited-range BT.2020 non-constant-luminance, and the base layer is copied
-/// bit-exact, so an input tagged otherwise decodes wrong on every Dolby Vision display.
+/// bit-exact, so an input tagged otherwise decodes wrong on every Dolby Vision display. The
+/// Profile 8.1 RPU of a PQ input has the same limited-range `ycc_to_rgb`, so `Range` also serves
+/// the PQ check ([`pq_range_contract`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ColourField {
     Range,
@@ -284,6 +288,58 @@ fn first_video_entry<'a>(
         .find(|entry| entry.get(type_key).and_then(Value::as_str) == Some(video))
 }
 
+/// What every source says about one colour field.
+#[derive(Debug, PartialEq, Eq)]
+enum FieldVerdict {
+    /// At least one source names a conforming value and none names another.
+    Conforming,
+    /// No source names a value.
+    Untagged,
+    /// Some source names a non-conforming value: `"<label>: <source> = <value>, …"`, listing
+    /// every source of the field, so conflicting tags are reported, not resolved.
+    Refused(String),
+}
+
+/// Resolve `field` from the MediaInfo video track (effective and `_Original` values), the ffprobe
+/// video stream and, when given, the first decoded ffprobe video frame. The frame carries the
+/// stream's own tag where the stream entry shows a container override.
+fn resolve_colour_field(
+    field: ColourField,
+    mediainfo_video: Option<&Value>,
+    ffprobe_video: Option<&Value>,
+    ffprobe_frame: Option<&Value>,
+) -> FieldVerdict {
+    let mut observed: Vec<(String, String)> = Vec::new();
+    for key in field.mediainfo_keys() {
+        if let Some(value) = mediainfo_video.and_then(|track| track.get(key)?.as_str()) {
+            observed.push((format!("MediaInfo {key}"), value.to_owned()));
+        }
+    }
+    let key = field.ffprobe_key();
+    if let Some(value) = ffprobe_video.and_then(|stream| stream.get(key)?.as_str()) {
+        observed.push((format!("ffprobe {key}"), value.to_owned()));
+    }
+    if let Some(value) = ffprobe_frame.and_then(|frame| frame.get(key)?.as_str()) {
+        observed.push((format!("ffprobe frame {key}"), value.to_owned()));
+    }
+
+    let verdicts: Vec<Option<bool>> = observed
+        .iter()
+        .map(|(_, value)| field.conforms(value))
+        .collect();
+    if verdicts.contains(&Some(false)) {
+        let listing: Vec<String> = observed
+            .iter()
+            .map(|(source, value)| format!("{source} = {value}"))
+            .collect();
+        FieldVerdict::Refused(format!("{}: {}", field.label(), listing.join(", ")))
+    } else if verdicts.contains(&Some(true)) {
+        FieldVerdict::Conforming
+    } else {
+        FieldVerdict::Untagged
+    }
+}
+
 /// The HLG input contract of Profile 8.4 (docs/HLG_COMPOSER.md section 11), from MediaInfo JSON
 /// (`--Output=JSON`) and ffprobe JSON (`-show_streams`). Each field is resolved on its own from
 /// every source, so a partial MediaInfo result does not keep ffprobe from filling the rest. Any
@@ -302,29 +358,10 @@ pub(super) fn hlg_colour_contract(
     let mut refusals = Vec::new();
     let mut untagged = Vec::new();
     for field in ColourField::ALL {
-        let mut observed: Vec<(String, String)> = Vec::new();
-        for key in field.mediainfo_keys() {
-            if let Some(value) = mediainfo_video.and_then(|track| track.get(key)?.as_str()) {
-                observed.push((format!("MediaInfo {key}"), value.to_owned()));
-            }
-        }
-        let key = field.ffprobe_key();
-        if let Some(value) = ffprobe_video.and_then(|stream| stream.get(key)?.as_str()) {
-            observed.push((format!("ffprobe {key}"), value.to_owned()));
-        }
-
-        let verdicts: Vec<Option<bool>> = observed
-            .iter()
-            .map(|(_, value)| field.conforms(value))
-            .collect();
-        if verdicts.contains(&Some(false)) {
-            let listing: Vec<String> = observed
-                .iter()
-                .map(|(source, value)| format!("{source} = {value}"))
-                .collect();
-            refusals.push(format!("{}: {}", field.label(), listing.join(", ")));
-        } else if !verdicts.contains(&Some(true)) {
-            untagged.push(field);
+        match resolve_colour_field(field, mediainfo_video, ffprobe_video, None) {
+            FieldVerdict::Conforming => {}
+            FieldVerdict::Untagged => untagged.push(field),
+            FieldVerdict::Refused(listing) => refusals.push(listing),
         }
     }
 
@@ -358,6 +395,45 @@ pub fn check_hlg_colour_contract(input_file: &str) -> Result<Vec<String>, String
     let mediainfo = get_mediainfo_json(input_file).ok();
     let ffprobe = get_ffprobe_json(input_file).ok();
     hlg_colour_contract(mediainfo.as_ref(), ffprobe.as_ref())
+}
+
+/// The range contract of a PQ input whose Profile 8.1 RPU mkvdovi generates, from MediaInfo JSON
+/// and ffprobe JSON with streams and frames (as [`get_ffprobe_video_json`] reads it). The analyzer
+/// interprets samples as limited range, and the RPU's `ycc_to_rgb` is limited range while the base
+/// layer is copied unchanged, so any source naming full range refuses. The first decoded frame
+/// counts as a source: an MKV can override a full-range stream as limited in the container, and
+/// ffprobe's stream entry then shows only the override. An untagged range is accepted silently:
+/// HDR10 is limited range, and that is what the analyzer assumes.
+pub(super) fn pq_range_contract(
+    mediainfo: Option<&Value>,
+    ffprobe: Option<&Value>,
+) -> Result<(), String> {
+    let mediainfo_video =
+        mediainfo.and_then(|json| first_video_entry(json, &["media", "track"], "@type", "Video"));
+    let ffprobe_video =
+        ffprobe.and_then(|json| first_video_entry(json, &["streams"], "codec_type", "video"));
+    let ffprobe_frame =
+        ffprobe.and_then(|json| first_video_entry(json, &["frames"], "media_type", "video"));
+    match resolve_colour_field(
+        ColourField::Range,
+        mediainfo_video,
+        ffprobe_video,
+        ffprobe_frame,
+    ) {
+        FieldVerdict::Refused(listing) => Err(format!(
+            "PQ input is tagged full range, but the analyzer and the Dolby Vision Profile 8.1 RPU assume limited range (the base layer is copied unchanged). {listing}."
+        )),
+        FieldVerdict::Conforming | FieldVerdict::Untagged => Ok(()),
+    }
+}
+
+/// Check a PQ input against the Profile 8.1 range contract before any extraction (see
+/// [`pq_range_contract`]). One MediaInfo and one video-only ffprobe call, so the decoded frame is
+/// a video frame whatever track comes first; a tool that fails contributes nothing.
+pub fn check_pq_range_contract(input_file: &str) -> Result<(), String> {
+    let mediainfo = get_mediainfo_json(input_file).ok();
+    let ffprobe = get_ffprobe_video_json(input_file).ok();
+    pq_range_contract(mediainfo.as_ref(), ffprobe.as_ref())
 }
 
 pub(super) fn classify_hdr_hints(hints: &str, measurements: bool) -> Option<HdrFormat> {

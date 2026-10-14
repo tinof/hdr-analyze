@@ -273,6 +273,26 @@ fn dv_format(format: HdrFormat) -> bool {
 }
 
 #[test]
+fn pq_range_check_covers_exactly_the_generated_8_1_rpus() {
+    for format in ALL_HDR_FORMATS {
+        for mdfix in [false, true] {
+            let expected = match format {
+                HdrFormat::Hdr10Plus
+                | HdrFormat::Hdr10WithMeasurements
+                | HdrFormat::Hdr10Unsupported => true,
+                HdrFormat::DolbyVisionMel | HdrFormat::DolbyVisionP8 => mdfix,
+                HdrFormat::Hlg | HdrFormat::DolbyVisionFel | HdrFormat::Unsupported => false,
+            };
+            assert_eq!(
+                needs_pq_range_check(format, mdfix),
+                expected,
+                "{format:?} mdfix={mdfix}"
+            );
+        }
+    }
+}
+
+#[test]
 fn is_dolby_vision_is_true_only_for_mel_fel_and_p8() {
     for format in ALL_HDR_FORMATS {
         assert_eq!(is_dolby_vision(format), dv_format(format), "{format:?}");

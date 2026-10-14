@@ -30,6 +30,28 @@ pub fn get_ffprobe_json(input_file: &str) -> Result<Value> {
     serde_json::from_str(&out).context("Failed to parse ffprobe JSON")
 }
 
+/// ffprobe JSON for the first video stream only: its stream entry and its first decoded frame.
+/// Unlike [`get_ffprobe_json`], whose one-packet read can end on an audio packet, the frame is
+/// always a video frame when the stream decodes.
+pub fn get_ffprobe_video_json(input_file: &str) -> Result<Value> {
+    let mut cmd = Command::new("ffprobe");
+    cmd.args([
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-select_streams",
+        "v:0",
+        "-show_streams",
+        "-show_frames",
+        "-read_intervals",
+        "%+#1",
+        input_file,
+    ]);
+    let out = external::get_command_output(&mut cmd)?;
+    serde_json::from_str(&out).context("Failed to parse ffprobe JSON")
+}
+
 /// Video-track frame count reported by MediaInfo (`FrameCount` on the first Video track).
 pub fn get_frame_count(input_file: &str) -> Option<u64> {
     let json = get_mediainfo_json(input_file).ok()?;

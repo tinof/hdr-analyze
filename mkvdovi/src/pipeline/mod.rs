@@ -40,6 +40,19 @@ fn reject_unsupported_input(hdr_type: HdrFormat) -> Result<()> {
     Ok(())
 }
 
+/// Inputs whose Profile 8.1 RPU mkvdovi generates from its own measurements or HDR10+ metadata:
+/// HDR10, HDR10+, and Dolby Vision repaired with --mdfix. The MEL fast path keeps the authored
+/// RPU, and HLG has its own contract.
+fn needs_pq_range_check(hdr_type: HdrFormat, mdfix: bool) -> bool {
+    match hdr_type {
+        HdrFormat::Hdr10Unsupported | HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Plus => {
+            true
+        }
+        HdrFormat::DolbyVisionMel | HdrFormat::DolbyVisionP8 => mdfix,
+        HdrFormat::Hlg | HdrFormat::DolbyVisionFel | HdrFormat::Unsupported => false,
+    }
+}
+
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let input_path = Path::new(input_file);
     if !input_path.exists() {
@@ -84,6 +97,19 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     } else {
         Vec::new()
     };
+    // A PQ input whose Profile 8.1 RPU is generated here is refused when tagged full range, at
+    // the same point: the analyzer interprets samples as limited range, the RPU's `ycc_to_rgb`
+    // is limited range, and the base layer is copied unchanged. A Profile 8 input with an HLG
+    // base layer is left to the 8.4 --mdfix refusal in `acquire_measurements`.
+    if needs_pq_range_check(detected_hdr_type, args.mdfix)
+        && !(detected_hdr_type == HdrFormat::DolbyVisionP8
+            && metadata::has_hlg_transfer(input_file))
+    {
+        if let Err(refusal) = metadata::check_pq_range_contract(input_file) {
+            progress::print_error(&refusal);
+            return Ok(false);
+        }
+    }
     let custom_composer = hlg_composer.filter(|&composer| composer != Composer::Preset);
 
     let fingerprint =
