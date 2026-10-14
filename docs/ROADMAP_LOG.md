@@ -6,6 +6,32 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-14: P9, peak parity for the other `--peak-source` values
+
+Closes P9's open item "peak parity with `dovi_tool` is measured for the `histogram` source only".
+Measurement only, no code change. Run on main f5d4ccc's code (mkvdovi and hdr_analyzer_mvp 0.6.0
++cuda, dovi_tool 2.3.4, hdr10plus_tool 1.7.2).
+
+- Method: per source X and cut, the default HDR10+ path with `--peak-source X` (dovi_tool computes
+  the peak) against `--hdr10plus-l1 hybrid --peak-source X --analysis-quality accurate` with a fresh
+  analysis. The scorer ports `hdr10plus_peak_nits`, `hdr10plus_peak_code` and `build_pieces` and
+  rebuilds every piece and fallback (range and reason) from `truth/hdr10plus.json` and the sidecar,
+  independently of the log, which prints only the first 10 fallback ranges. Self-tested on the
+  `histogram` captures of the hybrid-flag run (0 mismatches).
+- Cuts: h1 Deadloch beach-day and shoreline-night, the DV-free remuxes of the two The Shining cuts
+  (MaxSCL nonzero), and h4 Alita airlock-night and h5 Alien derelict-chamber (MaxSCL 0 on every
+  frame).
+- Result, PASS on all 18 runs: the derived fallbacks equal mkvdovi's report (counts per reason and
+  the printed prefix); the hybrid max equals `dovi_tool`'s on every non-fallback frame (8,938 frames
+  under `histogram99`, 6,034 under each `max-scl*`); fallback frames carry the enclosing analyzer
+  scene's max after the 2081 floor (76 pieces); min and avg follow the rule after the generator's
+  clamps. The source changes the peak on 37, 41 and 40 of the 42 parity-cut pieces, so the runs
+  discriminate. Under `max-scl*`, every Alita and Alien piece falls back with "HDR10+ peak is 0"
+  (18/18, 20/20). `--boost` writes the same RPU as `--peak-source histogram99`.
+- Not triggered by any cut: the `missing`, `malformed` and below-average fallbacks (unit tests in
+  `hybrid.rs` cover them). Peak against retail is still not scored.
+- Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/` (README, `run.sh`, `score.py`, `score.md`).
+
 ### 2026-10-14: P9, the hybrid flag
 
 Closes P9's open step "the hybrid flag" as the opt-in `mkvdovi --hdr10plus-l1 hdr10plus|hybrid`

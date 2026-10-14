@@ -64,10 +64,8 @@ doing.
 
 ### Next up (checked 2026-10-14 at main@f5d4ccc)
 
-1. **P9 open (3): peak parity for `histogram99`, `max-scl`, `max-scl-luminance`** (priority 2;
-   `docs/p9-peak-parity`, `fix-p9-peak-source` on a mismatch). Measurement before v0.7.0 ships the flag. Gate: per source, hybrid
-   max = `dovi_tool --hdr10plus-peak-source` on every HDR10+-peak frame, fallback pieces (ranges + reasons derived by the scorer) = their analyzer scene's peak,
-   and a nonzero number of pieces where the source changes the peak (see P9 Checked). Release: none
+1. **P9 peak parity for the other `--peak-source` values:** done 2026-10-14, PASS, no fix needed
+   (see P9). Release: none
 2. **P11: `--mdfix` dropped-levels notice** (priority 5; `feat/p11-mdfix-notice`, own branch). Gate:
    `--mdfix` names the authored levels it drops, with a unit test. In v0.7.0 only if merged by about
    2026-10-19. Release: patch
@@ -105,6 +103,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-14 | P9 peak parity: under `histogram99`, `max-scl` and `max-scl-luminance` the hybrid max equals `dovi_tool`'s on every non-fallback frame of six cuts (0 mismatches), fallbacks carry the analyzer scene's max, `--boost` equals `histogram99`. | P9 | `docs/p9-peak-parity` |
 | 2026-10-14 | P9 hybrid flag: opt-in `--hdr10plus-l1 hybrid` (union pieces, HDR10+ peak, measured average and minimum); default RPUs byte-identical to 0.6.0, Alita pooled clamped MAE 37.58 / 18.91 as pre-registered. | P9 | `feat/p9-hdr10plus-hybrid` |
 | 2026-10-14 | P7: mkvdovi refuses PQ input tagged full range before any temp work (HDR10, HDR10+, `--mdfix`), including a full-range stream the container overrides as limited; 9/9 RPU baselines byte-identical to 0.6.0. | P7 | `fix-p7-full-range-pq` |
 | 2026-10-13 | E13 step 4: `convert_file` split by phase into `pipeline/{temp_dir,measure,config,deliver}.rs`, `mod.rs` 1037 to 409 lines, 27 new unit tests; all 9 RPU baselines byte-identical to 0.6.0. | E13 | [log](docs/ROADMAP_LOG.md) |
@@ -348,11 +347,16 @@ and broader hardware acceleration (E5). Neutral trims stay.
   pre-registered rule, max equal to `dovi_tool`'s HDR10+ path on every frame, Alita pooled clamped
   MAE of the average 37.58 above floor / 18.91 all frames (pre-registered 37.6 / 18.9). Evidence:
   `~/mkvdovi-work/p9-hybrid-2026-10-14/` ([log](docs/ROADMAP_LOG.md) 2026-10-14).
+- **Done 2026-10-14: peak parity for the other `--peak-source` values.** `histogram99`, `max-scl`
+  and `max-scl-luminance`: the hybrid max equals `dovi_tool`'s on every non-fallback frame of six
+  cuts; fallbacks (all Profile A pieces under `max-scl*`) carry the analyzer scene's max; `--boost`
+  equals `histogram99`. Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/`
+  ([log](docs/ROADMAP_LOG.md) 2026-10-14).
 - **Open:** (1) score holdout HDR10+ cuts before any default change (owner list), where the union
   could show whether HDR10+ starts rescue cuts the analyzer misses; (2) sidecar v6 with a per-frame
   max for an exact fallback peak, also recording the analyzer's resolved `--peak-source` so
-  `check_measurements` can refuse a percentile peak (after E13 step 5); (3) peak parity with
-  `dovi_tool` is measured for the `histogram` source only; peak against retail is not scored.
+  `check_measurements` can refuse a percentile peak (after E13 step 5). Peak against retail is not
+  scored.
 - **Checked 2026-10-14 @f5d4ccc:** mirror `hdr10plus_peak_nits` (`pipeline/hdr10plus.rs:81`);
   `--boost` remaps to `histogram99` (`main.rs:167`); the report prints only `MAX_FALLBACK_LINES`
   ranges (`pipeline/hybrid.rs:93`); `check_measurements` admits a hand-made percentile sidecar
