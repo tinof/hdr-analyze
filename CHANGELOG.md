@@ -6,6 +6,21 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Some HDR10, HDR10+ and `--mdfix` files are refused** that 0.6.0 converted: PQ input tagged full
+  range in MediaInfo, the ffprobe stream or the first decoded frame. The analyzer and the Profile 8.1
+  RPU assume limited range, and the base layer is copied unchanged. The error lists every tag it read.
+
+### Changed
+
+- `mkvdovi` refuses PQ input tagged full range before any work (no `mkvdovi_temp_*` directory,
+  extraction or analysis; the source is kept), for every input whose Profile 8.1 RPU it generates:
+  HDR10, HDR10+, and Profile 7 MEL / Profile 8 under `--mdfix`. A full-range stream that the MKV
+  container overrides as limited is caught from the first decoded frame, also without MediaInfo.
+  Not checked: the MEL fast path without `--mdfix` (the authored RPU is kept), and untagged range,
+  which is accepted. Only the range is checked for PQ, not the matrix or primaries.
+
 ## [0.6.0] - 2026-10-13
 
 ### Upgrade notes

@@ -105,6 +105,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-14 | P7: mkvdovi refuses PQ input tagged full range before any temp work (HDR10, HDR10+, `--mdfix`), including a full-range stream the container overrides as limited; 9/9 RPU baselines byte-identical to 0.6.0. | P7 | `fix-p7-full-range-pq` |
 | 2026-10-13 | E13 step 4: `convert_file` split by phase into `pipeline/{temp_dir,measure,config,deliver}.rs`, `mod.rs` 1037 to 409 lines, 27 new unit tests; all 9 RPU baselines byte-identical to 0.6.0. | E13 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within about 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | v0.6.0 released (#46): #41 and #43 on top of rc.1; CUDA parity and all ten RPU baselines identical before the tag. | P6, E7, P8 | [v0.6.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.6.0) |
@@ -270,15 +271,17 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P7: analyzer input contract
 
-- **Status:** Core complete. Only PQ and HLG transfers are analyzed; tagged SDR transfers, including
+- **Status:** Complete. Only PQ and HLG transfers are analyzed; tagged SDR transfers, including
   the BT.2020 10/12-bit tags that share the BT.709 curve, are refused. Full-range and non-BT.2020
-  matrix tags warn.
-- **Open:** for PQ, normalize full-range input or refuse it. (The HLG half shipped with P8:
-  `mkvdovi` refuses full-range or non-BT.2020 HLG, `metadata::check_hlg_colour_contract`; the
-  analyzer itself still only warns.)
-- **Checked 2026-10-11 @8db4ad6:** full-range PQ still only warns
-  (`hdr_analyzer_mvp/src/pipeline.rs:412`) and mkvdovi has no PQ range refusal; a refusal touches
-  `metadata/format.rs` and `pipeline/`; E13 step 4, which it waited for, is done (2026-10-13).
+  matrix tags warn in the analyzer; `mkvdovi` refuses full-range or non-BT.2020 HLG (P8,
+  `metadata::check_hlg_colour_contract`) and full-range PQ (below).
+- **Done 2026-10-14: full-range PQ refused in mkvdovi** (`fix-p7-full-range-pq`). Every input whose
+  Profile 8.1 RPU mkvdovi generates (HDR10, HDR10+, MEL / Profile 8 under `--mdfix`) is refused
+  before any temp work when MediaInfo, the ffprobe stream or the first decoded video frame names
+  full range (`metadata::check_pq_range_contract`); the source is kept. Range only, by owner
+  decision; untagged range and the MEL fast path pass. The analyzer still only warns. Evidence:
+  unit and e2e tests (`mkvdovi/tests/pq_input_contract.rs`), 9/9 RPU baselines byte-identical to
+  0.6.0; [log](docs/ROADMAP_LOG.md) 2026-10-14.
 
 ### P8: HLG → Profile 8.4 composer
 
