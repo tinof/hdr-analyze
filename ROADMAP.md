@@ -62,14 +62,16 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-14 at main@4114c51)
+### Next up (checked 2026-10-14 at main@f5d4ccc)
 
-1. **P11: `--mdfix` dropped-levels notice** (priority 5; `feat/p11-mdfix-notice`). Gate: `--mdfix`
-   names the authored levels it drops, with a unit test. The remaining content of the next patch,
-   with P7 (merged, unreleased, due about 2026-10-21); cut that patch before P9 lands. Release: patch
-2. **E13 step 5: analyzer split** (prerequisite of priority 4). Gate: the E13 per-move gate incl.
-   `scripts/cuda-parity.sh` and an optimizer-enabled `.bin` diff. No other branch open during the
-   move; comes before P9 only if P9 needs a sidecar v6. Release: none
+1. **P9 peak parity for the other `--peak-source` values:** done 2026-10-14, PASS, no fix needed
+   (see P9). Release: none
+2. **P11: `--mdfix` dropped-levels notice** (priority 5; `feat/p11-mdfix-notice`, own branch). Gate:
+   `--mdfix` names the authored levels it drops, with a unit test. In v0.7.0 only if merged by about
+   2026-10-19. Release: patch
+3. **P1 open (1): measure CPU `accurate` against `balanced`** (priority 4; no branch). Cost and L1 max
+   / MaxCLL effect of `FAST_BILINEAR`; v0.7.0 binaries are CPU-only. E13 step 5 takes the first
+   branch-free slot after P11 and the release PR. Release: none
 
 ### Waiting for the owner
 
@@ -87,10 +89,10 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | E13 step 5 (refactor), P1 step 1 measurement | No user-visible change |
-| next patch | P7 full-range PQ refusal; P11 `--mdfix` dropped-levels notice | PATCH: a correctness fix and a new notice, no changed default, flag or contract. P7 is priority 1, so release within about a week of its merge (`docs/RELEASING.md`) |
-| **v0.7.0** | E12 CUDA release binaries (Linux x64, Windows x64); P9 hybrid mode as an opt-in flag if it has landed | MINOR: delivered L1 changes for NVIDIA users. `v0.7.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-08: E12 not in 0.6.0 |
-| a minor | E8 and E9 (they move the default `.bin`) | MINOR |
+| none | E13 step 5 (refactor), P1 step 1 measurement, P9 peak-parity measurement (done 2026-10-14, PASS, no fix) | No user-visible change |
+| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` notice only if merged by about 2026-10-19 | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
+| v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-14: E12 moved out of v0.7.0 |
+| a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract), both after E13 step 5 | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
 
 ## Progress log
@@ -101,6 +103,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-14 | P9 peak parity: under `histogram99`, `max-scl` and `max-scl-luminance` the hybrid max equals `dovi_tool`'s on every non-fallback frame of six cuts (0 mismatches), fallbacks carry the analyzer scene's max, `--boost` equals `histogram99`. | P9 | `docs/p9-peak-parity` |
 | 2026-10-14 | P9 hybrid flag: opt-in `--hdr10plus-l1 hybrid` (union pieces, HDR10+ peak, measured average and minimum); default RPUs byte-identical to 0.6.0, Alita pooled clamped MAE 37.58 / 18.91 as pre-registered. | P9 | `feat/p9-hdr10plus-hybrid` |
 | 2026-10-14 | P7: mkvdovi refuses PQ input tagged full range before any temp work (HDR10, HDR10+, `--mdfix`), including a full-range stream the container overrides as limited; 9/9 RPU baselines byte-identical to 0.6.0. | P7 | `fix-p7-full-range-pq` |
 | 2026-10-13 | E13 step 4: `convert_file` split by phase into `pipeline/{temp_dir,measure,config,deliver}.rs`, `mod.rs` 1037 to 409 lines, 27 new unit tests; all 9 RPU baselines byte-identical to 0.6.0. | E13 | [log](docs/ROADMAP_LOG.md) |
@@ -344,11 +347,23 @@ and broader hardware acceleration (E5). Neutral trims stay.
   pre-registered rule, max equal to `dovi_tool`'s HDR10+ path on every frame, Alita pooled clamped
   MAE of the average 37.58 above floor / 18.91 all frames (pre-registered 37.6 / 18.9). Evidence:
   `~/mkvdovi-work/p9-hybrid-2026-10-14/` ([log](docs/ROADMAP_LOG.md) 2026-10-14).
+- **Done 2026-10-14: peak parity for the other `--peak-source` values.** `histogram99`, `max-scl`
+  and `max-scl-luminance`: the hybrid max equals `dovi_tool`'s on every non-fallback frame of six
+  cuts; fallbacks (all Profile A pieces under `max-scl*`) carry the analyzer scene's max; `--boost`
+  equals `histogram99`. Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/`
+  ([log](docs/ROADMAP_LOG.md) 2026-10-14). The unit test `hdr10plus_peak_sources_follow_dovi_tool`
+  pins the mirror, not parity: re-run that evidence's `run.sh` after a `dovi_tool` bump.
 - **Open:** (1) score holdout HDR10+ cuts before any default change (owner list), where the union
   could show whether HDR10+ starts rescue cuts the analyzer misses; (2) sidecar v6 with a per-frame
   max for an exact fallback peak, also recording the analyzer's resolved `--peak-source` so
-  `check_measurements` can refuse a percentile peak (after E13 step 5); (3) peak parity with
-  `dovi_tool` is measured for the `histogram` source only; peak against retail is not scored.
+  `check_measurements` can refuse a percentile peak (after E13 step 5). Peak against retail is not
+  scored.
+- **Checked 2026-10-14 @f5d4ccc:** mirror `hdr10plus_peak_nits` (`pipeline/hdr10plus.rs:81`);
+  `--boost` remaps to `histogram99` (`main.rs:167`); the report prints only `MAX_FALLBACK_LINES`
+  ranges (`pipeline/hybrid.rs:93`); `check_measurements` admits a hand-made percentile sidecar
+  (`hybrid.rs:115`), so parity runs use fresh analyses. Of the HDR10+ development cuts, MaxSCL is
+  nonzero on h1 Deadloch, h4 The Shining and d2 Patriot (not run), 0 on every frame of the Alita
+  and Alien cuts (every `max-scl*` piece falls back there).
 
 ### P10: measured against delivered
 
@@ -375,11 +390,14 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Decision (owner, 2026-10-13):** keep full regeneration, since trims were authored for the
   authored L1 and shot list; no targeted repair. **Open:** `--mdfix` states in its output which
   authored levels it drops.
-- **Checked 2026-10-14 @4114c51:** two samplers: `rpu_check::extract_rpu_sample` (240 RPUs,
-  `rpu_check.rs:132`, from `metadata/format.rs:468`) and `sample_rpu_windows` (`rpu_check.rs:182`,
-  from `pipeline/measure.rs:45`). `SampledRpu` (`rpu_check.rs:173`) holds L1, peak and one L5, no
-  L2/L4: extend it or read the whole RPU. A sampled absence means "not seen in the sample"; a failed
-  read still gives a general notice. mkvdovi-only, no L1 change; P7's branch is merged.
+- **Checked 2026-10-14 @f5d4ccc:** samplers `rpu_check::extract_rpu_sample` (`rpu_check.rs:132`,
+  from `metadata/format.rs:468`) and `sample_rpu_windows` (`rpu_check.rs:182`, from
+  `pipeline/measure.rs:50`); `SampledRpu` (`rpu_check.rs:173`) has no L2/L4. Name each level by what
+  happens: L1, L2, L6, L9, L11 regenerated (`generate_extra_json`, `metadata/rpu_config.rs:103`);
+  L3 replaced by neutral offsets (2048) and L254 added (`dovi_tool` CM v4.0 defaults, seen in the
+  0.6.0 `--mdfix` baselines); L4, L8, L10 removed; L5 reduced to one sampled value. To name them,
+  the sampler must also detect L2/L3/L4/L8. A sampled absence means "not seen"; a failed read
+  still gives a general notice.
 
 ## `cm_analyze` parity
 
