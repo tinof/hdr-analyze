@@ -46,6 +46,10 @@ env:
   # dovi_tool for the mkvdovi integration tests; bump both together.
   DOVI_TOOL_VERSION: 2.3.4
   DOVI_TOOL_SHA256: 1844258e13c26607b32224bf1fa82b595d3b35949f5467405fda560daad32b3f
+  # hdr10plus_tool for the HDR10+ integration test (mkvdovi/tests/hdr10plus_hybrid.rs); bump
+  # both together.
+  HDR10PLUS_TOOL_VERSION: 1.7.2
+  HDR10PLUS_TOOL_SHA256: 06385f37a639d61ba21d4be3150c863846933bc3b58110e094d8fc8f1c2249f2
 
 jobs:
   check:
@@ -115,6 +119,11 @@ jobs:
             "https://github.com/quietvoid/dovi_tool/releases/download/${DOVI_TOOL_VERSION}/dovi_tool-${DOVI_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz"
           echo "${DOVI_TOOL_SHA256}  $archive" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/tools"
+          tar xzf "$archive" -C "$RUNNER_TEMP/tools"
+          archive="$RUNNER_TEMP/hdr10plus_tool.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/quietvoid/hdr10plus_tool/releases/download/${HDR10PLUS_TOOL_VERSION}/hdr10plus_tool-${HDR10PLUS_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          echo "${HDR10PLUS_TOOL_SHA256}  $archive" | sha256sum -c -
           tar xzf "$archive" -C "$RUNNER_TEMP/tools"
           echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
       # The HLG tests use the hdr_analyzer_mvp built next to mkvdovi. There is no GPU, so the
