@@ -62,17 +62,12 @@ Quality has so far been scored only in PQ codes. The same review recomputed, wit
 what an L1 error costs on a display (WS7); that scale now decides which measurement work is worth
 doing.
 
-### Next up (checked 2026-10-14 at main@ae211e6)
+### Next up (checked 2026-10-14 at main@4114c51)
 
-1. **P7: refuse tagged full-range PQ in mkvdovi** (priority 1; `fix-p7-full-range-pq`). The
-   analyzer only warns and measures as limited range (`hdr_analyzer_mvp/src/pipeline.rs:412`); a
-   sibling of `metadata::check_hlg_colour_contract` (`metadata/format.rs:357`, called only for HLG at
-   `pipeline/mod.rs:77`). Gate: refused before temp work, source kept; unit tests for full-range
-   refusal, limited and untagged acceptance, conflicting container/stream tags. Release: patch
-2. **P9: the hybrid HDR10+ flag** (priority 2; `feat/p9-hdr10plus-hybrid`). Gate: opt-in, an
-   integration test on an HDR10+-only cut (`h1-deadloch-*`, `h5-alien-*`), scored on the development
-   tier. Plan mode first settles the data contract (see the P9 Checked bullet). Release: minor
-3. **E13 step 5: analyzer split** (prerequisite of priority 4). Gate: the E13 per-move gate incl.
+1. **P11: `--mdfix` dropped-levels notice** (priority 5; `feat/p11-mdfix-notice`). Gate: `--mdfix`
+   names the authored levels it drops, with a unit test. The remaining content of the next patch,
+   with P7 (merged, unreleased, due about 2026-10-21); cut that patch before P9 lands. Release: patch
+2. **E13 step 5: analyzer split** (prerequisite of priority 4). Gate: the E13 per-move gate incl.
    `scripts/cuda-parity.sh` and an optimizer-enabled `.bin` diff. No other branch open during the
    move; comes before P9 only if P9 needs a sidecar v6. Release: none
 
@@ -81,7 +76,8 @@ doing.
 Steps that need a decision or a hardware test from the owner. Other steps of the same item stay
 startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 
-- **P9: default change.** Whether hybrid mode becomes the default, after its development-tier score.
+- **P9: default change.** Whether hybrid mode becomes the default, after holdout HDR10+ scoring (development tier
+  scored 2026-10-14).
 - **P10 step 3: write L1 in-process.** Needs WS7 or playback evidence first.
 
 ### Release plan (2026-10-14)
@@ -105,6 +101,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-14 | P9 hybrid flag: opt-in `--hdr10plus-l1 hybrid` (union pieces, HDR10+ peak, measured average and minimum); default RPUs byte-identical to 0.6.0, Alita pooled clamped MAE 37.58 / 18.91 as pre-registered. | P9 | `feat/p9-hdr10plus-hybrid` |
 | 2026-10-14 | P7: mkvdovi refuses PQ input tagged full range before any temp work (HDR10, HDR10+, `--mdfix`), including a full-range stream the container overrides as limited; 9/9 RPU baselines byte-identical to 0.6.0. | P7 | `fix-p7-full-range-pq` |
 | 2026-10-13 | E13 step 4: `convert_file` split by phase into `pipeline/{temp_dir,measure,config,deliver}.rs`, `mod.rs` 1037 to 409 lines, 27 new unit tests; all 9 RPU baselines byte-identical to 0.6.0. | E13 | [log](docs/ROADMAP_LOG.md) |
 | 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within about 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](docs/ROADMAP_LOG.md) |
@@ -308,7 +305,8 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Open; step 0 (frame alignment) done 2026-10-08; scene list chosen 2026-10-13.
+- **Status:** Open; step 0 (frame alignment) done 2026-10-08; scene list chosen 2026-10-13; the
+  hybrid flag done 2026-10-14 (opt-in).
 - `dovi_tool generate --hdr10plus-json` takes L1 from the first frame of each HDR10+ scene
   (minimum 0, average rounded to whole nits, no measured crop). On the HDR10+ test cut the average
   reads 156 to 505 codes above the analyzer's mean; the cause is not separated.
@@ -338,16 +336,19 @@ and broader hardware acceleration (E5). Neutral trims stay.
   1229 where retail sits at the 819 floor. The 18.9 holds after the generator's 819 floor; raw, the
   measured average is 147.6 codes off over all frames (about 259 below on floor frames). Two cuts from one title; peak and minimum not
   evaluated ([log](docs/ROADMAP_LOG.md) 2026-10-13).
-- **Open:** the hybrid flag (E13 step 4 done 2026-10-13; the analyzer seam is `pipeline/measure.rs`): the union carries average and minimum; peak per piece
-  from HDR10+ with the pixel fallback; its integration gate needs an HDR10+-only cut (Alita takes the
-  MEL path). Before a default change (owner list): score holdout HDR10+ cuts, where the union could
-  show whether HDR10+ starts rescue cuts the analyzer misses; none did on the development cuts.
-- **Checked 2026-10-14 @ae211e6:** seam `pipeline/measure.rs:140` (HDR10+ runs no analyzer),
-  `dovi_steps.rs:322` passes `--hdr10plus-json`, `pipeline/mod.rs:275` drops the sidecar from
-  verify. mkvdovi's `L1SidecarFrames` reads only `min_pq_12bit` (`metadata/sidecar.rs:179`), and the
-  sidecar has no per-frame max (`l1_sidecar.rs:146`), so the flag extends the reader and takes the
-  fallback peak from the `.bin` or a sidecar v6. `rpu_config.rs:200` already shifts by leading
-  pictures: shift the union once. v5 runs: `~/mkvdovi-work/p9-step0-2026-10-08`.
+- **Done 2026-10-14: the hybrid flag.** `--hdr10plus-l1 hybrid` (opt-in, default unchanged):
+  union pieces, HDR10+ peak (`--peak-source`, whole nits like `dovi_tool`) with a reported fallback
+  to the analyzer scene peak, measured average and minimum. Default path 9/9 RPUs byte-identical to
+  0.6.0; the four HDR10+-only cuts (h1, h5) convert with `--verify` passing and 0 fallbacks. On
+  DV-free remuxes of the Alita and The Shining cuts (`accurate`): 0 L1 mismatches against the
+  pre-registered rule, max equal to `dovi_tool`'s HDR10+ path on every frame, Alita pooled clamped
+  MAE of the average 37.58 above floor / 18.91 all frames (pre-registered 37.6 / 18.9). Evidence:
+  `~/mkvdovi-work/p9-hybrid-2026-10-14/` ([log](docs/ROADMAP_LOG.md) 2026-10-14).
+- **Open:** (1) score holdout HDR10+ cuts before any default change (owner list), where the union
+  could show whether HDR10+ starts rescue cuts the analyzer misses; (2) sidecar v6 with a per-frame
+  max for an exact fallback peak, also recording the analyzer's resolved `--peak-source` so
+  `check_measurements` can refuse a percentile peak (after E13 step 5); (3) peak parity with
+  `dovi_tool` is measured for the `histogram` source only; peak against retail is not scored.
 
 ### P10: measured against delivered
 
@@ -374,11 +375,11 @@ and broader hardware acceleration (E5). Neutral trims stay.
 - **Decision (owner, 2026-10-13):** keep full regeneration, since trims were authored for the
   authored L1 and shot list; no targeted repair. **Open:** `--mdfix` states in its output which
   authored levels it drops.
-- **Checked 2026-10-14 @ae211e6:** two samplers: `rpu_check::extract_rpu_sample` (240 RPUs,
-  `rpu_check.rs:132`, from `metadata/format.rs:392` for classification) and `sample_rpu_windows`
-  (three short windows, `rpu_check.rs:182`, from `pipeline/measure.rs:45`). The notice states which
-  sample feeds it, unless the step reads the whole RPU. mkvdovi-only, no L1 change: can share the
-  P7 branch.
+- **Checked 2026-10-14 @4114c51:** two samplers: `rpu_check::extract_rpu_sample` (240 RPUs,
+  `rpu_check.rs:132`, from `metadata/format.rs:468`) and `sample_rpu_windows` (`rpu_check.rs:182`,
+  from `pipeline/measure.rs:45`). `SampledRpu` (`rpu_check.rs:173`) holds L1, peak and one L5, no
+  L2/L4: extend it or read the whole RPU. A sampled absence means "not seen in the sample"; a failed
+  read still gives a general notice. mkvdovi-only, no L1 change; P7's branch is merged.
 
 ## `cm_analyze` parity
 

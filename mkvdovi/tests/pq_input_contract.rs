@@ -189,8 +189,13 @@ fn container_override_of_full_range_pq_is_refused_without_mediainfo() {
 
     let (success, log) = convert(dir.path(), Some(bin.path()));
     assert_refused_before_any_work(dir.path(), &source, &log, success);
+    // The decoded frame names the stream's full range in every FFmpeg. The stream entry depends
+    // on the ffprobe build: FFmpeg 9 reports the container's `tv`, while Ubuntu 24.04's FFmpeg
+    // 6.1 (the release test job) still reports the bitstream's `pc`.
+    assert!(log.contains("ffprobe frame color_range = pc"), "{log}");
     assert!(
-        log.contains("ffprobe color_range = tv, ffprobe frame color_range = pc"),
+        log.contains("ffprobe color_range = tv, ffprobe frame")
+            || log.contains("ffprobe color_range = pc, ffprobe frame"),
         "{log}"
     );
     assert!(

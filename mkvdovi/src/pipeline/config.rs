@@ -10,6 +10,7 @@ use dovi84_composer::Composer;
 
 use super::analyzer::{print_sidecar_advisories, warn_if_gpu_analysis_missing};
 use super::hdr10plus::inspect_hdr10plus_scene_peaks;
+use super::hybrid;
 use super::measure::Measured;
 use crate::cli::{Args, CmVersion};
 use crate::metadata::{self, HdrFormat};
@@ -138,6 +139,31 @@ pub(super) fn prepare_configuration(
                     ));
                     return Ok(None);
                 }
+            }
+        }
+    }
+    // --hdr10plus-l1 hybrid: the RPU's scenes become the union of the HDR10+ scenes and the
+    // analyzer's cuts, with the HDR10+ peak and the measured average and minimum.
+    if measured.hdr10plus_hybrid {
+        let combined = match (
+            measured.l1_sidecar.take(),
+            measured.hdr10plus_json.as_deref(),
+        ) {
+            (Some(sidecar), Some(hdr10plus_json)) => {
+                hybrid::apply_file(sidecar, hdr10plus_json, args.peak_source)
+            }
+            _ => Err("the measurements or the HDR10+ metadata are missing".to_string()),
+        };
+        match combined {
+            Ok((sidecar, report)) => {
+                report.print(args.peak_source);
+                measured.l1_sidecar = Some(sidecar);
+            }
+            Err(error) => {
+                progress::print_error(&format!(
+                    "--hdr10plus-l1 hybrid cannot combine the HDR10+ metadata with the measurements: {error}. Convert without --hdr10plus-l1 hybrid to use the HDR10+ metadata alone."
+                ));
+                return Ok(None);
             }
         }
     }

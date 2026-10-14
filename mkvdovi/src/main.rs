@@ -205,6 +205,9 @@ fn main() -> anyhow::Result<()> {
     if trim_targets.is_empty() {
         anyhow::bail!("--trim-targets cannot be empty");
     }
+    if let Some(conflict) = final_args.flag_conflict() {
+        anyhow::bail!(conflict);
+    }
 
     if !progress::is_quiet() {
         eprintln!("{} mkvdovi", "Starting".green().bold());

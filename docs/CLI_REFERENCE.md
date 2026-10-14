@@ -248,7 +248,8 @@ mkvdovi "input.mkv"     # process a specific file
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--peak-source <histogram\|histogram99\|max-scl\|max-scl-luminance>` | `histogram` | Maps to `dovi_tool generate --hdr10plus-peak-source` |
+| `--peak-source <histogram\|histogram99\|max-scl\|max-scl-luminance>` | `histogram` | Maps to `dovi_tool generate --hdr10plus-peak-source`; also the HDR10+ peak under `--hdr10plus-l1 hybrid` |
+| `--hdr10plus-l1 <hdr10plus\|hybrid>` | `hdr10plus` | L1 for HDR10+ input. `hybrid` (opt-in) also runs the analyzer: scenes = union of HDR10+ starts and analyzer cuts, HDR10+ peak (reported fallback to the analyzer scene peak), measured average, minimum and L5. Refused with `--analysis-quality fast` (per file) and with `--legacy-madvr-l1` (at startup) |
 | `-b, --boost` | off | Brighter preset; switches another selected `--peak-source` to `histogram99` |
 | `--boost-experimental` | off | Asks `hdr_analyzer_mvp` to use a more aggressive optimizer profile |
 

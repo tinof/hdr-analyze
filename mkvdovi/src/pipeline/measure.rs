@@ -12,8 +12,9 @@ use super::analyzer::{
 };
 use super::dovi_steps::extract_clean_base_layer;
 use super::hdr10plus::extract_hdr10plus_metadata;
+use super::hybrid;
 use super::{add_optimizer_args, analyzer_executable, is_dolby_vision, FEL_UNSUPPORTED_MESSAGE};
-use crate::cli::Args;
+use crate::cli::{Args, Hdr10PlusL1};
 use crate::external;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
@@ -27,6 +28,10 @@ pub(super) struct Measured {
     pub(super) hdr10plus_json: Option<PathBuf>,
     pub(super) bl_source_file: PathBuf,
     pub(super) l1_sidecar: Option<metadata::L1Sidecar>,
+    /// An HDR10+ input under `--hdr10plus-l1 hybrid`, measured as HDR10 (`hdr_type` is
+    /// `Hdr10WithMeasurements`); the configuration replaces the sidecar's scenes with the
+    /// hybrid pieces.
+    pub(super) hdr10plus_hybrid: bool,
 }
 
 /// Step 1: samples a Dolby Vision source RPU and reports the detected format. Returns the L5
@@ -130,6 +135,7 @@ pub(super) fn acquire_measurements(
     let mut measurements_file: Option<PathBuf> = None;
     let mut hdr10plus_json: Option<PathBuf> = None;
     let mut bl_source_file = PathBuf::from(input_file);
+    let mut hdr10plus_hybrid = false;
 
     // Measured L1 sidecar, loaded when existing measurements are reused (validated against the
     // input) or right after a fresh analyzer run.
@@ -150,6 +156,11 @@ pub(super) fn acquire_measurements(
                 progress::print_warn(
                     "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis.",
                 );
+                if args.hdr10plus_l1 == Hdr10PlusL1::Hybrid {
+                    progress::print_info(
+                        "--hdr10plus-l1 hybrid: without HDR10+ metadata the measured L1 alone is used.",
+                    );
+                }
                 hdr_type = HdrFormat::Hdr10Unsupported;
             }
             Err(_) => return Ok(None),
@@ -158,6 +169,42 @@ pub(super) fn acquire_measurements(
 
     // Logic branching
     match hdr_type {
+        HdrFormat::Hdr10Plus if args.hdr10plus_l1 == Hdr10PlusL1::Hybrid => {
+            // The HDR10+ metadata stays for the peaks; average, minimum and crop are measured.
+            // `convert_file` refused a sampling that skips frames before any temp work.
+            progress::print_info(
+                "--hdr10plus-l1 hybrid: measuring the HDR10+ input for its average, minimum and active area.",
+            );
+            let reuse = find_reusable_measurements(
+                input_path,
+                input_file,
+                args,
+                None,
+                true,
+                &mut measurements_file,
+                &mut l1_sidecar,
+            );
+            if reuse {
+                progress::print_info("Using existing measurements file.");
+            } else {
+                // Counted as an HDR10 analysis: `total_steps_for(Hdr10Plus)` has no analysis step.
+                match run_fresh_analysis(
+                    input_file,
+                    temp_dir,
+                    args,
+                    HdrFormat::Hdr10WithMeasurements,
+                    false,
+                    None,
+                    total_steps,
+                    current_step,
+                )? {
+                    Some(measurements) => measurements_file = Some(measurements),
+                    None => return Ok(None),
+                }
+            }
+            hdr_type = HdrFormat::Hdr10WithMeasurements;
+            hdr10plus_hybrid = true;
+        }
         HdrFormat::Hdr10Plus => {
             // Metadata already extracted above
         }
@@ -244,6 +291,7 @@ pub(super) fn acquire_measurements(
                 input_file,
                 args,
                 hlg_composer,
+                false,
                 &mut measurements_file,
                 &mut l1_sidecar,
             );
@@ -287,16 +335,19 @@ pub(super) fn acquire_measurements(
         hdr10plus_json,
         bl_source_file,
         l1_sidecar,
+        hdr10plus_hybrid,
     }))
 }
 
 /// Tries every existing measurements candidate in turn and keeps the first whose L1 sidecar is
-/// valid for this input. Returns true when one is reused.
+/// valid for this input (and, with `hybrid`, for `--hdr10plus-l1 hybrid`). Returns true when one
+/// is reused.
 pub(super) fn find_reusable_measurements(
     input_path: &Path,
     input_file: &str,
     args: &Args,
     hlg_composer: Option<Composer>,
+    hybrid: bool,
     measurements_file: &mut Option<PathBuf>,
     l1_sidecar: &mut Option<metadata::L1Sidecar>,
 ) -> bool {
@@ -316,6 +367,7 @@ pub(super) fn find_reusable_measurements(
         for existing in candidates {
             match metadata::load_l1_sidecar(&existing, &expect) {
                 Ok((sidecar, _)) if rejects_coarser_sidecar(&sidecar, &existing, args) => {}
+                Ok((sidecar, _)) if rejects_for_hybrid(&sidecar, &existing, hybrid) => {}
                 Ok((sidecar, advisories)) => {
                     report_reused_sidecar(&sidecar, &existing, args);
                     print_sidecar_advisories(&advisories);
@@ -335,6 +387,23 @@ pub(super) fn find_reusable_measurements(
         }
         reused
     }
+}
+
+/// Under `--hdr10plus-l1 hybrid` (`hybrid`: an HDR10+ input), only measurements that can carry
+/// the hybrid's piece averages ([`hybrid::check_measurements`]) are reused; others are
+/// re-analyzed. Returns true when the candidate was rejected (and says so).
+fn rejects_for_hybrid(sidecar: &metadata::L1Sidecar, measurements: &Path, hybrid: bool) -> bool {
+    if !hybrid {
+        return false;
+    }
+    let Err(reason) = hybrid::check_measurements(sidecar) else {
+        return false;
+    };
+    progress::print_warn(&format!(
+        "Existing measurements '{}' cannot carry --hdr10plus-l1 hybrid ({reason}); re-analyzing.",
+        measurements.display()
+    ));
+    true
 }
 
 /// Runs the analyzer for a fresh measurement. `None`: the phase printed why; `convert_file`

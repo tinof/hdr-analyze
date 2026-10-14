@@ -31,9 +31,21 @@ pub struct Args {
     #[arg(required = false)]
     pub input: Vec<String>,
 
-    /// Controls the --hdr10plus-peak-source flag in dovi_tool generate.
+    /// Controls the --hdr10plus-peak-source flag in dovi_tool generate, and the HDR10+ peak of
+    /// --hdr10plus-l1 hybrid.
     #[arg(long, value_enum, default_value_t = PeakSource::Histogram)]
     pub peak_source: PeakSource,
+
+    /// L1 for HDR10+ inputs. hdr10plus (default) = dovi_tool takes L1 from the HDR10+ metadata
+    /// (first frame of each HDR10+ scene; minimum 0, average rounded to whole nits, no L5).
+    /// hybrid = the analyzer also runs: scenes = union of the HDR10+ scene starts and the
+    /// analyzer's cuts; peak from HDR10+ (--peak-source), or from the analyzer scene where the
+    /// HDR10+ peak is missing, 0 or not above the measured average (each one is reported);
+    /// average, minimum and L5 from the measured pixels. Needs every frame analyzed (not
+    /// --analysis-quality fast). Other inputs ignore it.
+    /// hybrid cannot be combined with --legacy-madvr-l1.
+    #[arg(long, value_enum, default_value_t = Hdr10PlusL1::Hdr10plus)]
+    pub hdr10plus_l1: Hdr10PlusL1,
 
     /// Comma-separated list of nits values for the Dolby Vision trim pass (e.g., '100,600,1000').
     #[arg(long, default_value = "100,600,1000")]
@@ -92,7 +104,7 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = OptimizerProfile::Conservative)]
     pub optimizer_profile: OptimizerProfile,
 
-    /// Analysis quality for HDR10/HLG sources.
+    /// Analysis quality for HDR10/HLG sources, and HDR10+ under --hdr10plus-l1 hybrid.
     /// fast = half-res, every 3rd frame (old default); balanced = half-res, every frame;
     /// accurate = full-res, every frame (most precise L1; the only preset where CPU and CUDA
     /// give identical output). With GPU analysis all three run at the same speed.
@@ -177,6 +189,27 @@ mod tests {
         let args = Args::try_parse_from(["mkvdovi", "--hlg-composer", "preset"]).unwrap();
         assert_eq!(args.hlg_composer, Composer::Preset);
         assert!(Args::try_parse_from(["mkvdovi", "--hlg-composer", "dovi84-bt2100-v1"]).is_err());
+    }
+
+    #[test]
+    fn hdr10plus_l1_defaults_to_hdr10plus_and_hybrid_excludes_legacy_madvr_l1() {
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        assert_eq!(args.hdr10plus_l1, Hdr10PlusL1::Hdr10plus);
+        let args = Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hybrid"]).unwrap();
+        assert_eq!(args.hdr10plus_l1, Hdr10PlusL1::Hybrid);
+        // Only hybrid conflicts with --legacy-madvr-l1, also when the default is given explicitly.
+        for flags in [
+            &["--legacy-madvr-l1"][..],
+            &["--hdr10plus-l1", "hdr10plus", "--legacy-madvr-l1"],
+        ] {
+            let args = Args::try_parse_from(["mkvdovi"].iter().chain(flags)).unwrap();
+            assert_eq!(args.flag_conflict(), None, "{flags:?}");
+        }
+        let args =
+            Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hybrid", "--legacy-madvr-l1"])
+                .unwrap();
+        assert!(args.flag_conflict().unwrap().contains("--legacy-madvr-l1"));
+        assert!(Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "pixels"]).is_err());
     }
 
     #[test]
@@ -290,6 +323,26 @@ pub enum PeakSource {
     MaxScl,
     /// Use luminance calculated from max-scl metadata (most conservative; can look dim).
     MaxSclLuminance,
+}
+
+impl Args {
+    /// A flag combination refused before any file is processed. Checked after parsing, so that an
+    /// explicit `--hdr10plus-l1 hdr10plus` (the default) still combines with --legacy-madvr-l1.
+    pub fn flag_conflict(&self) -> Option<&'static str> {
+        (self.hdr10plus_l1 == Hdr10PlusL1::Hybrid && self.legacy_madvr_l1).then_some(
+            "--hdr10plus-l1 hybrid builds L1 from the measured L1 sidecar, which --legacy-madvr-l1 replaces; use one or the other.",
+        )
+    }
+}
+
+/// Where the L1 of an HDR10+ input comes from (`--hdr10plus-l1`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum Hdr10PlusL1 {
+    /// dovi_tool generate --hdr10plus-json: L1 from the HDR10+ metadata alone.
+    #[default]
+    Hdr10plus,
+    /// Union of HDR10+ scenes and analyzer cuts; HDR10+ peak, measured average and minimum.
+    Hybrid,
 }
 
 impl std::fmt::Display for PeakSource {

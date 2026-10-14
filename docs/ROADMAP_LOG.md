@@ -6,6 +6,52 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-14: P9, the hybrid flag
+
+Closes P9's open step "the hybrid flag" as the opt-in `mkvdovi --hdr10plus-l1 hdr10plus|hybrid`
+(default `hdr10plus`, output unchanged). Branch `feat/p9-hdr10plus-hybrid`; code in
+`mkvdovi/src/pipeline/hybrid.rs`, e2e `mkvdovi/tests/hdr10plus_hybrid.rs`.
+
+- Design (owner decisions 2026-10-14): an HDR10+ input under the flag runs the analyzer. The
+  sidecar's scenes become the union pieces (HDR10+ starts ∪ analyzer cuts), so `generate_extra_json`,
+  `--verify`, the stale-RPU check, L5 and L6 take them unchanged. Average: mean of the per-frame
+  max-RGB codes, rounded half away from zero (the 2026-10-13 pre-registered rule). Minimum: min of the
+  per-frame codes. Peak: `nits_to_pq_12_bit(round(nits))` of the HDR10+ scene's first frame, as
+  `dovi_tool generate --hdr10plus-json` does. Fallback to the enclosing analyzer scene's max when
+  the peak is missing, 0, not finite, above 10000 nits, or not above the average after the 2081
+  floor; each fallback is reported.
+- Refusals per file, source kept: `--analysis-quality fast`; a malformed HDR10+ scene list or one
+  whose frame count differs from the stream's; measurements that cannot carry the hybrid (reused
+  candidates are re-analyzed). `hybrid` with `--legacy-madvr-l1` is refused at startup. Resume
+  appends ` hdr10plus_l1=hybrid` only for an HDR10+ input under the flag. `release.yml` pins
+  `hdr10plus_tool` 1.7.2 so the e2e test runs in the release test job.
+- Evidence: `~/mkvdovi-work/p9-hybrid-2026-10-14/` (README, `C/score.md`, `versions.txt`; mkvdovi
+  and hdr_analyzer_mvp 0.6.0 +cuda at e14e514, dovi_tool 2.3.4, hdr10plus_tool 1.7.2).
+  - Default path: `scripts/rpu-baseline.sh compare --require-identical-l1` against 0.6.0, 9/9 exit 0
+    (h1 HDR10+ without the flag included).
+  - HDR10+-only cuts (integration gate; `truth.l1` is null, so pipeline and plausibility only): h1
+    beach-day 14 pieces, h1 shoreline-night 23, h5 derelict-chamber 20, h5 nostromo-corridor-dark 1.
+    All convert, `--verify` passes, 0 fallbacks under the default histogram peak source.
+  - Development tier: DV-free remuxes (`dovi_tool remove`, mkvmerge; HDR10+ equal to
+    `truth/hdr10plus.json`) of the two Alita and two The Shining cuts at `--analysis-quality
+    accurate`. Per-frame arrays equal to the 2026-10-13 run; 0 mismatches between delivered min/avg
+    and the rule after the generator clamps; delivered max equal to the default HDR10+ path on every
+    frame; 0 fallbacks; `--verify` passes.
+
+| Delivered avg vs retail (clamped MAE, codes) | Above floor | All frames | 2026-10-13 U |
+|---|---|---|---|
+| Alita pooled (1,469 / 2,920 frames) | 37.58 | 18.91 | 37.6 / 18.9 |
+| airlock | 29.56 | 3.86 | 29.6 |
+| Iron City | 38.78 | 34.00 | 38.8 |
+| Shining hedge maze | 79.87 | 79.87 | 79.9 |
+| Shining mountain road | 21.49 | 21.49 | 21.5 |
+
+- Not scored: peak against retail (not pre-registered). Peak parity with `dovi_tool` holds for the
+  `histogram` source only. Open: holdout HDR10+ scoring before a default change; sidecar v6 with a
+  per-frame max and the analyzer's resolved `--peak-source`.
+- Gates on d93de4d: fmt, clippy and test pass. Pre-PR fixes: overflow check on the scene frame
+  numbers; only `hybrid` conflicts with `--legacy-madvr-l1`, checked after parsing.
+
 ### 2026-10-14: P7, full-range PQ refused in mkvdovi
 
 Closes P7's open step ("for PQ, normalize full-range input or refuse it") as a refusal in
