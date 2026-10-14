@@ -12,6 +12,25 @@ This document provides a historical record of completed milestones, feature impl
   range in MediaInfo, the ffprobe stream or the first decoded frame. The analyzer and the Profile 8.1
   RPU assume limited range, and the base layer is copied unchanged. The error lists every tag it read.
 
+### Added
+
+- `mkvdovi --hdr10plus-l1 hdr10plus|hybrid` (opt-in; the default `hdr10plus` leaves output
+  unchanged). Under `hybrid` an HDR10+ input also runs `hdr_analyzer_mvp`, which writes
+  `<stem>_measurements.bin` and its `.l1.json` next to the input as for HDR10. Scenes are the union
+  of the HDR10+ scene starts and the analyzer's cuts. The peak comes from HDR10+ (`--peak-source`,
+  rounded to whole nits like `dovi_tool`); average and minimum come from the measured frames. L5
+  from the crop and measured L6 light levels now reach HDR10+ output under the flag, and the L1
+  average floor is 819 (CM v2.9 anchor) instead of 1229.
+- Per piece, the analyzer scene's peak replaces an HDR10+ peak that is missing, 0 (MaxSCL on
+  Profile A sources), out of range, or not above the measured average after the 100-nit floor. Each
+  fallback is reported; outlier peaks are still only warned, never clamped.
+- Under `hybrid` a file is refused, with the source kept, for `--analysis-quality fast`, a malformed
+  HDR10+ scene list (including a first start other than 0, which the default path tolerates), an
+  HDR10+ frame count other than the stream's, or measurements that cannot carry the hybrid (a reused
+  candidate is re-analyzed instead). `--hdr10plus-l1 hybrid` with `--legacy-madvr-l1` is refused at
+  startup.
+- The release workflow's test job installs a checksum-pinned `hdr10plus_tool` 1.7.2.
+
 ### Changed
 
 - `mkvdovi` refuses PQ input tagged full range before any work (no `mkvdovi_temp_*` directory,

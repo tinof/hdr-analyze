@@ -9,7 +9,7 @@ analyzer accuracy and remaining technical gaps, see [CM_ANALYZE_PARITY.md](CM_AN
 | Input | Output | Picture re-encoded | Maturity |
 |-------|--------|--------------------|----------|
 | HDR10 | Profile 8.1, CM v4.0, L1 from analyzer measurements | No | Measurement comparisons published; playback unvalidated |
-| HDR10+ | Profile 8.1, L1 from source HDR10+ metadata | No | Measurement comparisons published; playback unvalidated |
+| HDR10+ | Profile 8.1, L1 from source HDR10+ metadata (opt-in `--hdr10plus-l1 hybrid`: HDR10+ peak, measured average and minimum) | No | Measurement comparisons published; playback unvalidated |
 | HLG | Profile 8.4, HLG base layer kept, L1 through the 8.4 decode (luma and chroma curves) | No | Decode validated against libplacebo; composer applied on an LG OLED C9 |
 | Dolby Vision Profile 7 MEL | Profile 8.1, metadata-only enhancement layer discard | No | Works |
 | Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](FEL_PLAN.md)) |
@@ -24,6 +24,12 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   analysis only when extraction runs but yields no metadata (the stream carries no dynamic metadata,
   or the extraction step exits with an error or writes an empty file). `hdr10plus_tool` is not
   checked at startup, and if it cannot be started the file fails instead of falling back.
+  With `--hdr10plus-l1 hybrid` (opt-in) the analyzer also runs and writes its measurements next to
+  the input. Scenes are the union of the HDR10+ starts and the analyzer's cuts; the peak per piece
+  comes from HDR10+, the average and minimum from the measured frames, and L5 and measured L6 light
+  levels apply as for HDR10. The file is refused (source kept) under `--analysis-quality fast`, for
+  a malformed HDR10+ scene list (including a first start other than 0), or an HDR10+ frame count
+  other than the stream's. `hybrid` cannot be combined with `--legacy-madvr-l1`.
 - HLG: the base layer is copied unchanged and the output is Dolby Vision Profile 8.4 (HLG
   backward-compatible). A Profile 8.4 RPU carries a reshaping curve set, the composer, that a Dolby
   Vision decoder uses to turn the HLG signal into PQ. `--hlg-composer` selects it. `preset` is
@@ -172,6 +178,11 @@ For HDR10+ input, `mkvdovi` forwards the selected peak source to
 - `max-scl`: largest RGB MaxSCL component. More sensitive to channel highlights and outliers.
 - `max-scl-luminance`: luminance calculated from MaxSCL components. Can look dimmer.
 
+Under `--hdr10plus-l1 hybrid` the same source gives the peak of each piece, from the first frame of
+the HDR10+ scene holding it, rounded to whole nits as `dovi_tool` does. Where that peak is missing,
+0 (MaxSCL on Profile A sources), out of range, or not above the measured average after the 100-nit
+floor, the analyzer scene's peak is used and the fallback is reported.
+
 Neutral L2 compatibility targets remain `100,600,1000`. They are not panel-calibration controls and
 should not be replaced with a television's measured peak brightness. A Dolby Vision-capable display
 applies its own display mapping.
@@ -196,7 +207,7 @@ fallback remains on the roadmap.
 ## CM v4.0 metadata
 
 `mkvdovi` generates Content Mapping v4.0 metadata by default. HDR10+ inputs derive L1 from source
-scenes; HDR10/HLG inputs derive it from analyzer measurements.
+scenes (with `--hdr10plus-l1 hybrid`, partly from analyzer measurements); HDR10/HLG inputs derive it from analyzer measurements.
 
 ```bash
 # Default: CM v4.0 with auto-detected settings
@@ -217,7 +228,7 @@ mkvdovi "input.mkv" --source-primaries 0
 
 | Level | Current output |
 |-------|----------------|
-| **L1** | HDR10/HLG: per-scene minimum, max-RGB mean, and maximum from the analyzer's L1 sidecar, after the `dovi_tool generate` clamps (minimum at most 12 codes, maximum at least 2081, average at least 819). HDR10+: derived from source scenes |
+| **L1** | HDR10/HLG: per-scene minimum, max-RGB mean, and maximum from the analyzer's L1 sidecar, after the `dovi_tool generate` clamps (minimum at most 12 codes, maximum at least 2081, average at least 819). HDR10+: derived from source scenes (average at least 1229); with `--hdr10plus-l1 hybrid`, union pieces with the HDR10+ peak and the measured minimum and average, same clamps as HDR10 |
 | **L2** | Neutral compatibility trims for 100/600/1000-nit targets |
 | **L5** | HDR10/HLG: offsets from the committed crop. Dolby Vision inputs: sampled source L5. Full-frame content: `dovi_tool` zero default |
 | **L6** | Static mastering-display metadata and MaxCLL/MaxFALL, read with MediaInfo. HDR10/HLG: a MaxCLL or MaxFALL the source does not state (or states as 0) is taken from the analyzer's measurement (see below). Otherwise warned defaults when MediaInfo is absent or a field is missing |
@@ -288,8 +299,9 @@ conversion warns about), for 8.4 62/3079. Every frame of every measured scene mu
 generator's limits (minimum at most 12 codes, maximum at least 2081, average at least 819 and below
 the maximum); any other difference fails. The output reports how many scenes those limits changed
 per field and by how much (one line per scene with `--verbose`). It also notes scenes whose L1 max
-lies above `source_max_pq`. HDR10+ output and `--legacy-madvr-l1` output are not compared with the
-measurements, because their L1 does not come from them. For HLG output it also
+lies above `source_max_pq`. Under `--hdr10plus-l1 hybrid`, HDR10+ output is compared with the
+hybrid pieces. HDR10+ output without that flag and `--legacy-madvr-l1` output are not compared with
+the measurements, because their L1 does not come from them. For HLG output it also
 fails when no measurements are available or the L1 sidecar does not load, and it checks that every
 RPU frame carries the composer the sidecar names (`dovi84-v3` = preset,
 `dovi84-bt2100-v1-spec420` = bt2100), so a measurement is never paired with an RPU of another composer. Missing source L6 fields or
