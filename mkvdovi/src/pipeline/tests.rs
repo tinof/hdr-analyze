@@ -4,7 +4,10 @@ use super::analyzer::{
 };
 use super::config::withdraw_stale_rpu;
 use super::deliver::{extract_base_layer, inject_rpu, mux_output};
-use super::dovi_steps::{feed_mkv_to_dovi_tool, resolve_dovi_input};
+use super::dovi_steps::{
+    convert_mel_fast_path, convert_mel_to_profile81, extract_clean_base_layer,
+    feed_mkv_to_dovi_tool, resolve_dovi_input,
+};
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
 use super::measure::{
     abort_unsupported, acquire_measurements, find_reusable_measurements, total_steps_for, Measured,
@@ -1041,4 +1044,758 @@ fn mux_output_reuses_a_finished_mux_when_resuming() {
     .unwrap();
     assert!(muxed);
     assert_eq!(fs::read(&output).unwrap(), b"out");
+}
+
+// Delivery steps against fake external tools. The functions under test spawn `ffmpeg`,
+// `ffprobe`, `mkvmerge` and `dovi_tool` from PATH, and PATH is shared by every test in this
+// binary, so the shims are installed once and pass every call through to the real tool unless
+// one of its arguments lies in a `FakeTools` sandbox that scripts that tool.
+
+#[cfg(unix)]
+const SHIMMED_TOOLS: [&str; 4] = ["ffmpeg", "ffprobe", "mkvmerge", "dovi_tool"];
+
+#[cfg(unix)]
+const SANDBOX_PREFIX: &str = "mkvdovi-fake-";
+
+/// Puts the pass-through shims first on PATH, once per process. False when a real tool is
+/// missing: a shim would then hide that from the tests that skip without it.
+#[cfg(unix)]
+fn shims_installed() -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::OnceLock;
+
+    static INSTALLED: OnceLock<bool> = OnceLock::new();
+    *INSTALLED.get_or_init(|| {
+        let mut real = Vec::new();
+        for tool in SHIMMED_TOOLS {
+            match crate::external::find_tool(tool) {
+                Some(path) => real.push((tool, path)),
+                None => return false,
+            }
+        }
+        let bin = tempfile::Builder::new()
+            .prefix("mkvdovi-shims-")
+            .tempdir()
+            .unwrap()
+            .keep();
+        for (tool, real_path) in real {
+            // A sandbox call appends its argv to `<root>/fake/<tool>.calls` and runs
+            // `<root>/fake/<tool>.sh` with IN (after -i), OUT (after -o, else the last
+            // argument) and LAST set. That script must exit itself.
+            let script = format!(
+                r#"#!/bin/sh
+root=
+for arg in "$@"; do
+  case "$arg" in
+    */{SANDBOX_PREFIX}*) root=$(printf '%s\n' "$arg" | sed 's|^\(.*/{SANDBOX_PREFIX}[^/]*\).*|\1|'); break ;;
+  esac
+done
+if [ -n "$root" ] && [ -f "$root/fake/{tool}.sh" ]; then
+  printf '%s\n' "$*" >> "$root/fake/{tool}.calls"
+  IN= OUT= LAST= prev=
+  for arg in "$@"; do
+    case "$prev" in -i) IN=$arg ;; -o) OUT=$arg ;; esac
+    prev=$arg
+    LAST=$arg
+  done
+  [ -n "$OUT" ] || OUT=$LAST
+  . "$root/fake/{tool}.sh"
+  exit 99
+fi
+exec '{}' "$@"
+"#,
+                real_path.display()
+            );
+            let shim = bin.join(tool);
+            fs::write(&shim, script).unwrap();
+            fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut dirs = vec![bin];
+        dirs.extend(std::env::split_paths(&path));
+        std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
+        true
+    })
+}
+
+/// A sandbox holding `in.mkv`, the temp dir `mkvdovi_temp_in` and the output path `in.DV.mkv`.
+#[cfg(unix)]
+struct FakeTools {
+    dir: tempfile::TempDir,
+    input: PathBuf,
+    temp: PathBuf,
+    output: PathBuf,
+}
+
+#[cfg(unix)]
+impl FakeTools {
+    /// `None` (after a skip message) when a real tool is missing.
+    fn new(test: &str) -> Option<Self> {
+        if !shims_installed() {
+            println!("Skipping {test}: ffmpeg, ffprobe, mkvmerge or dovi_tool not found in PATH");
+            return None;
+        }
+        let dir = tempfile::Builder::new()
+            .prefix(SANDBOX_PREFIX)
+            .tempdir()
+            .unwrap();
+        fs::create_dir(dir.path().join("fake")).unwrap();
+        let input = dir.path().join("in.mkv");
+        fs::write(&input, b"source mkv").unwrap();
+        let temp = dir.path().join("mkvdovi_temp_in");
+        fs::create_dir(&temp).unwrap();
+        let output = dir.path().join("in.DV.mkv");
+        Some(Self {
+            dir,
+            input,
+            temp,
+            output,
+        })
+    }
+
+    fn input(&self) -> &str {
+        self.input.to_str().unwrap()
+    }
+
+    fn script(&self, tool: &str, body: &str) {
+        fs::write(
+            self.dir.path().join("fake").join(format!("{tool}.sh")),
+            body,
+        )
+        .unwrap();
+    }
+
+    /// The argv of every call of `tool`, one string each.
+    fn calls(&self, tool: &str) -> Vec<String> {
+        fs::read_to_string(self.dir.path().join("fake").join(format!("{tool}.calls")))
+            .map(|log| log.lines().map(str::to_owned).collect())
+            .unwrap_or_default()
+    }
+
+    /// Writes `artifact` with `content`, with its completion sentinel when `sealed`.
+    fn leave(&self, artifact: &Path, content: &[u8], sealed: bool) {
+        fs::write(artifact, content).unwrap();
+        if sealed {
+            resume::mark_done(artifact).unwrap();
+        }
+    }
+}
+
+/// Behaves like a working tool: fails on a missing or empty `-i` input, else writes `content`.
+#[cfg(unix)]
+fn writes(content: &str) -> String {
+    format!("[ -z \"$IN\" ] || [ -s \"$IN\" ] || exit 1\nprintf '{content}' > \"$OUT\"\nexit 0\n")
+}
+
+#[cfg(unix)]
+const EXITS_WITH_EMPTY_OUTPUT: &str = ": > \"$OUT\"\nexit 0\n";
+
+#[cfg(unix)]
+const FAILS_AFTER_PARTIAL_OUTPUT: &str = "printf 'partial' > \"$OUT\"\nexit 1\n";
+
+#[cfg(unix)]
+const FAILS: &str = "exit 1\n";
+
+/// dovi_tool that reads the MKV with `mkv_body` and a raw HEVC stream with `raw_body`.
+#[cfg(unix)]
+fn dovi_tool_by_input(mkv_body: &str, raw_body: &str) -> String {
+    format!("case \"$IN\" in\n*.mkv)\n{mkv_body}\n;;\nesac\n{raw_body}")
+}
+
+#[cfg(unix)]
+fn args_with_dovi_input(mode: DoviInput) -> Args {
+    let mut args = Args::try_parse_from(["mkvdovi"]).unwrap();
+    args.dovi_input = mode;
+    args
+}
+
+#[cfg(unix)]
+fn run_clean_base_layer(fake: &FakeTools, mode: DoviInput, resume: bool) -> Result<PathBuf> {
+    extract_clean_base_layer(
+        fake.input(),
+        &fake.temp,
+        "Extracting HEVC",
+        &args_with_dovi_input(mode),
+        resume,
+    )
+}
+
+#[cfg(unix)]
+fn run_mel_to_profile81(fake: &FakeTools, mode: DoviInput, resume: bool) -> bool {
+    convert_mel_to_profile81(
+        fake.input(),
+        &fake.temp,
+        &fake.output,
+        &args_with_dovi_input(mode),
+        resume,
+    )
+    .unwrap()
+}
+
+#[cfg(unix)]
+fn called_with(calls: &[String], needle: &str) -> bool {
+    calls.iter().any(|call| call.contains(needle))
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_that_succeeds_needs_no_ffmpeg_extraction() {
+    let Some(fake) = FakeTools::new("direct_mkv_step_that_succeeds_needs_no_ffmpeg_extraction")
+    else {
+        return;
+    };
+    fake.script("dovi_tool", &writes("clean"));
+    fake.script("ffmpeg", &writes("raw"));
+    let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
+    assert_eq!(clean_bl, fake.temp.join("BL_clean.hevc"));
+    assert!(resume::is_complete(&clean_bl));
+    let dovi = fake.calls("dovi_tool");
+    assert_eq!(dovi.len(), 1, "{dovi:?}");
+    assert!(called_with(&dovi, &format!("-i {}", fake.input())));
+    assert!(fake.calls("ffmpeg").is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_reads_the_mkv_without_resume_although_a_raw_stream_is_sealed() {
+    let Some(fake) = FakeTools::new(
+        "direct_mkv_step_reads_the_mkv_without_resume_although_a_raw_stream_is_sealed",
+    ) else {
+        return;
+    };
+    fake.leave(&fake.temp.join("DV_raw.hevc"), b"old raw", true);
+    fake.script("dovi_tool", &writes("clean"));
+    fake.script("ffmpeg", &writes("raw"));
+    run_clean_base_layer(&fake, DoviInput::Mkv, false).unwrap();
+    let dovi = fake.calls("dovi_tool");
+    assert_eq!(dovi.len(), 1, "{dovi:?}");
+    assert!(called_with(&dovi, &format!("-i {}", fake.input())));
+    assert!(fake.calls("ffmpeg").is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_with_a_sealed_raw_stream_feeds_that_stream_instead_of_the_mkv() {
+    let Some(fake) =
+        FakeTools::new("resume_with_a_sealed_raw_stream_feeds_that_stream_instead_of_the_mkv")
+    else {
+        return;
+    };
+    let raw = fake.temp.join("DV_raw.hevc");
+    fake.leave(&raw, b"sealed raw", true);
+    fake.script("dovi_tool", &writes("clean"));
+    fake.script("ffmpeg", &writes("raw"));
+    run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
+    let dovi = fake.calls("dovi_tool");
+    assert_eq!(dovi.len(), 1, "{dovi:?}");
+    assert!(called_with(&dovi, &format!("-i {}", raw.display())));
+    assert!(
+        fake.calls("ffmpeg").is_empty(),
+        "the sealed stream is reused"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_with_empty_output_falls_back_to_ffmpeg_extraction() {
+    let Some(fake) =
+        FakeTools::new("direct_mkv_step_with_empty_output_falls_back_to_ffmpeg_extraction")
+    else {
+        return;
+    };
+    fake.script(
+        "dovi_tool",
+        &dovi_tool_by_input(EXITS_WITH_EMPTY_OUTPUT, &writes("clean from raw")),
+    );
+    fake.script("ffmpeg", &writes("raw"));
+    let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
+    assert_eq!(fake.calls("ffmpeg").len(), 1);
+    assert_eq!(fake.calls("dovi_tool").len(), 2);
+    assert_eq!(fs::read(&clean_bl).unwrap(), b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_that_fails_after_writing_output_falls_back_to_ffmpeg_extraction() {
+    let Some(fake) = FakeTools::new(
+        "direct_mkv_step_that_fails_after_writing_output_falls_back_to_ffmpeg_extraction",
+    ) else {
+        return;
+    };
+    fake.script(
+        "dovi_tool",
+        &dovi_tool_by_input(FAILS_AFTER_PARTIAL_OUTPUT, &writes("clean from raw")),
+    );
+    fake.script("ffmpeg", &writes("raw"));
+    let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
+    assert_eq!(fake.calls("ffmpeg").len(), 1);
+    assert_eq!(fs::read(&clean_bl).unwrap(), b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_step_that_succeeds_seals_the_clean_base_layer_and_drops_the_raw_stream() {
+    let Some(fake) = FakeTools::new(
+        "raw_step_that_succeeds_seals_the_clean_base_layer_and_drops_the_raw_stream",
+    ) else {
+        return;
+    };
+    fake.script("dovi_tool", &writes("clean"));
+    fake.script("ffmpeg", &writes("raw"));
+    let clean_bl = run_clean_base_layer(&fake, DoviInput::Raw, true).unwrap();
+    assert_eq!(clean_bl, fake.temp.join("BL_clean.hevc"));
+    assert!(resume::is_complete(&clean_bl));
+    let ffmpeg = fake.calls("ffmpeg");
+    assert_eq!(ffmpeg.len(), 1);
+    assert!(called_with(&ffmpeg, &format!("-i {}", fake.input())));
+    let raw = fake.temp.join("DV_raw.hevc");
+    assert!(called_with(
+        &fake.calls("dovi_tool"),
+        &format!("-i {}", raw.display())
+    ));
+    assert!(!raw.exists());
+    assert!(!resume::marker_path(&raw).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_step_with_empty_output_is_a_failure() {
+    let Some(fake) = FakeTools::new("raw_step_with_empty_output_is_a_failure") else {
+        return;
+    };
+    fake.script("dovi_tool", EXITS_WITH_EMPTY_OUTPUT);
+    fake.script("ffmpeg", &writes("raw"));
+    let error = run_clean_base_layer(&fake, DoviInput::Raw, true).unwrap_err();
+    assert!(error.to_string().contains("Failed to remove"), "{error:#}");
+    assert!(!resume::marker_path(&fake.temp.join("BL_clean.hevc")).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_step_that_fails_after_writing_output_is_a_failure() {
+    let Some(fake) = FakeTools::new("raw_step_that_fails_after_writing_output_is_a_failure") else {
+        return;
+    };
+    fake.script("dovi_tool", FAILS_AFTER_PARTIAL_OUTPUT);
+    fake.script("ffmpeg", &writes("raw"));
+    assert!(run_clean_base_layer(&fake, DoviInput::Raw, true).is_err());
+    assert!(!resume::marker_path(&fake.temp.join("BL_clean.hevc")).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn clean_base_layer_is_reused_only_when_sealed_and_resuming() {
+    // (resume, sealed) -> dovi_tool must run again.
+    for (resume_enabled, sealed, reruns) in [
+        (true, true, false),
+        (true, false, true),
+        (false, true, true),
+    ] {
+        let Some(fake) = FakeTools::new("clean_base_layer_is_reused_only_when_sealed_and_resuming")
+        else {
+            return;
+        };
+        let clean_bl = fake.temp.join("BL_clean.hevc");
+        fake.leave(&clean_bl, b"previous clean", sealed);
+        fake.script("dovi_tool", &writes("new clean"));
+        fake.script("ffmpeg", &writes("raw"));
+        let returned = run_clean_base_layer(&fake, DoviInput::Raw, resume_enabled).unwrap();
+        assert_eq!(returned, clean_bl);
+        let case = format!("resume {resume_enabled}, sealed {sealed}");
+        assert_eq!(!fake.calls("dovi_tool").is_empty(), reruns, "{case}");
+        let expected: &[u8] = if reruns {
+            b"new clean"
+        } else {
+            b"previous clean"
+        };
+        assert_eq!(fs::read(&clean_bl).unwrap(), expected, "{case}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_extraction_is_reused_only_when_sealed_and_resuming() {
+    // convert_mel_to_profile81 keeps DV_raw.hevc, so its sentinel can be checked afterwards.
+    for (resume_enabled, sealed, extracts) in [
+        (true, true, false),
+        (true, false, true),
+        (false, true, true),
+        (false, false, true),
+    ] {
+        let Some(fake) = FakeTools::new("raw_extraction_is_reused_only_when_sealed_and_resuming")
+        else {
+            return;
+        };
+        let raw = fake.temp.join("DV_raw.hevc");
+        fake.leave(&raw, b"previous raw", sealed);
+        fake.script("ffmpeg", &writes("new raw"));
+        fake.script("dovi_tool", &writes("p81"));
+        fake.script("mkvmerge", &writes("muxed"));
+        assert!(run_mel_to_profile81(&fake, DoviInput::Raw, resume_enabled));
+        let case = format!("resume {resume_enabled}, sealed {sealed}");
+        assert_eq!(!fake.calls("ffmpeg").is_empty(), extracts, "{case}");
+        let expected: &[u8] = if extracts {
+            b"new raw"
+        } else {
+            b"previous raw"
+        };
+        assert_eq!(fs::read(&raw).unwrap(), expected, "{case}");
+        assert!(resume::is_complete(&raw), "{case}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_extraction_failure_is_an_error_and_leaves_no_sentinel() {
+    for ffmpeg in [FAILS_AFTER_PARTIAL_OUTPUT, FAILS, "exit 0\n"] {
+        let Some(fake) =
+            FakeTools::new("raw_extraction_failure_is_an_error_and_leaves_no_sentinel")
+        else {
+            return;
+        };
+        fake.script("ffmpeg", ffmpeg);
+        fake.script("dovi_tool", &writes("clean"));
+        let error = run_clean_base_layer(&fake, DoviInput::Raw, true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Failed to extract HEVC bitstream"),
+            "{ffmpeg:?}: {error:#}"
+        );
+        assert!(
+            !resume::marker_path(&fake.temp.join("DV_raw.hevc")).exists(),
+            "{ffmpeg:?}"
+        );
+        assert!(fake.calls("dovi_tool").is_empty(), "{ffmpeg:?}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_conversion_that_succeeds_seals_the_stream_and_muxes_it() {
+    let Some(fake) = FakeTools::new("mel_conversion_that_succeeds_seals_the_stream_and_muxes_it")
+    else {
+        return;
+    };
+    fake.script("dovi_tool", &writes("p81"));
+    fake.script("mkvmerge", &writes("muxed"));
+    assert!(run_mel_to_profile81(&fake, DoviInput::Mkv, true));
+    let converted = fake.temp.join("P81_discard.hevc");
+    assert!(resume::is_complete(&converted));
+    let mkvmerge = fake.calls("mkvmerge");
+    assert_eq!(mkvmerge.len(), 1);
+    assert!(called_with(&mkvmerge, &converted.display().to_string()));
+    assert!(fake.temp.join("mux.done").exists());
+    assert_eq!(fs::read(&fake.output).unwrap(), b"muxed");
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_conversion_that_fails_is_reported_and_never_muxed() {
+    let Some(fake) = FakeTools::new("mel_conversion_that_fails_is_reported_and_never_muxed") else {
+        return;
+    };
+    fake.script("dovi_tool", FAILS);
+    fake.script("ffmpeg", &writes("raw"));
+    fake.script("mkvmerge", &writes("muxed"));
+    assert!(!run_mel_to_profile81(&fake, DoviInput::Mkv, true));
+    assert!(!resume::marker_path(&fake.temp.join("P81_discard.hevc")).exists());
+    assert!(fake.calls("mkvmerge").is_empty());
+    assert!(!fake.output.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_conversion_is_reused_only_when_sealed_and_resuming() {
+    for (resume_enabled, sealed, converts) in [
+        (true, true, false),
+        (true, false, true),
+        (false, true, true),
+    ] {
+        let Some(fake) = FakeTools::new("mel_conversion_is_reused_only_when_sealed_and_resuming")
+        else {
+            return;
+        };
+        let converted = fake.temp.join("P81_discard.hevc");
+        fake.leave(&converted, b"previous p81", sealed);
+        fake.script("dovi_tool", &writes("new p81"));
+        fake.script("mkvmerge", &writes("muxed"));
+        assert!(run_mel_to_profile81(&fake, DoviInput::Mkv, resume_enabled));
+        let case = format!("resume {resume_enabled}, sealed {sealed}");
+        assert_eq!(!fake.calls("dovi_tool").is_empty(), converts, "{case}");
+        let expected: &[u8] = if converts {
+            b"new p81"
+        } else {
+            b"previous p81"
+        };
+        assert_eq!(fs::read(&converted).unwrap(), expected, "{case}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_mux_is_reused_only_with_resume_output_and_marker() {
+    // (resume, output exists, mux.done exists) -> mkvmerge must run.
+    for (resume_enabled, output, marker, muxes) in [
+        (true, true, true, false),
+        (true, true, false, true),
+        (true, false, true, true),
+        (false, true, true, true),
+    ] {
+        let Some(fake) = FakeTools::new("mel_mux_is_reused_only_with_resume_output_and_marker")
+        else {
+            return;
+        };
+        fake.leave(&fake.temp.join("P81_discard.hevc"), b"p81", true);
+        if output {
+            fs::write(&fake.output, b"previous mux").unwrap();
+        }
+        if marker {
+            fs::write(fake.temp.join("mux.done"), b"").unwrap();
+        }
+        fake.script("dovi_tool", &writes("p81"));
+        fake.script("mkvmerge", &writes("new mux"));
+        assert!(run_mel_to_profile81(&fake, DoviInput::Mkv, resume_enabled));
+        let case = format!("resume {resume_enabled}, output {output}, marker {marker}");
+        assert_eq!(!fake.calls("mkvmerge").is_empty(), muxes, "{case}");
+        let expected: &[u8] = if muxes { b"new mux" } else { b"previous mux" };
+        assert_eq!(fs::read(&fake.output).unwrap(), expected, "{case}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_mux_failure_is_reported_without_a_mux_marker() {
+    let Some(fake) = FakeTools::new("mel_mux_failure_is_reported_without_a_mux_marker") else {
+        return;
+    };
+    fake.script("dovi_tool", &writes("p81"));
+    fake.script("mkvmerge", FAILS_AFTER_PARTIAL_OUTPUT);
+    assert!(!run_mel_to_profile81(&fake, DoviInput::Mkv, true));
+    assert_eq!(fake.calls("mkvmerge").len(), 1);
+    assert!(!fake.temp.join("mux.done").exists());
+}
+
+#[cfg(unix)]
+fn run_mel_fast_path(fake: &FakeTools, verify: bool) -> bool {
+    let mut args = args_with_dovi_input(DoviInput::Mkv);
+    args.verify = verify;
+    convert_mel_fast_path(
+        fake.input(),
+        &fake.temp,
+        &fake.output,
+        &args,
+        true,
+        HdrFormat::DolbyVisionMel,
+        Instant::now(),
+    )
+    .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_without_verify_finishes_and_never_runs_verification() {
+    let Some(fake) =
+        FakeTools::new("mel_fast_path_without_verify_finishes_and_never_runs_verification")
+    else {
+        return;
+    };
+    fake.script("dovi_tool", &writes("p81"));
+    fake.script("mkvmerge", &writes("muxed"));
+    // Verification starts by extracting the muxed video with ffmpeg; make that fail.
+    fake.script("ffmpeg", FAILS);
+    assert!(run_mel_fast_path(&fake, false));
+    assert!(fake.calls("ffmpeg").is_empty());
+    assert!(!fake.temp.exists(), "finish_success removes the temp dir");
+    assert!(fake.input.exists(), "a Dolby Vision source is kept");
+    assert_eq!(fs::read(&fake.output).unwrap(), b"muxed");
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_with_failed_verification_reports_failure_and_keeps_the_temp_dir() {
+    let Some(fake) = FakeTools::new(
+        "mel_fast_path_with_failed_verification_reports_failure_and_keeps_the_temp_dir",
+    ) else {
+        return;
+    };
+    fake.script("dovi_tool", &writes("p81"));
+    fake.script("mkvmerge", &writes("muxed"));
+    fake.script("ffmpeg", FAILS);
+    assert!(!run_mel_fast_path(&fake, true));
+    assert!(called_with(&fake.calls("ffmpeg"), "verify_video.hevc"));
+    assert!(fake.temp.exists());
+    assert!(fake.input.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_that_fails_to_convert_skips_verification() {
+    let Some(fake) = FakeTools::new("mel_fast_path_that_fails_to_convert_skips_verification")
+    else {
+        return;
+    };
+    fake.script("dovi_tool", FAILS);
+    fake.script("mkvmerge", &writes("muxed"));
+    // The failed direct MKV read falls back to an ffmpeg extraction, which works.
+    fake.script(
+        "ffmpeg",
+        &format!(
+            "case \"$OUT\" in *verify_video.hevc) exit 1 ;; esac\n{}",
+            writes("raw")
+        ),
+    );
+    assert!(!run_mel_fast_path(&fake, true));
+    assert!(!called_with(&fake.calls("ffmpeg"), "verify_video.hevc"));
+    assert!(fake.temp.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn base_layer_extraction_writes_the_hlg_transfer_only_for_hlg_lacking_it() {
+    // (format, first-frame transfer ffprobe reports) -> hevc_metadata VUI rewrite.
+    for (format, transfer, rewrites) in [
+        (HdrFormat::Hlg, "bt709", true),
+        (HdrFormat::Hlg, "bt2020-10", true),
+        (HdrFormat::Hlg, "arib-std-b67", false),
+        (HdrFormat::Hdr10Unsupported, "bt709", false),
+        (HdrFormat::Hdr10WithMeasurements, "smpte2084", false),
+    ] {
+        let Some(fake) =
+            FakeTools::new("base_layer_extraction_writes_the_hlg_transfer_only_for_hlg_lacking_it")
+        else {
+            return;
+        };
+        fake.script("ffprobe", &format!("echo {transfer}\nexit 0\n"));
+        fake.script("ffmpeg", &writes("bl"));
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        let bl =
+            extract_base_layer(fake.input(), &fake.input, &fake.temp, format, true, &args).unwrap();
+        let bl_hevc = fake.temp.join("BL.hevc");
+        assert_eq!(bl, Some(bl_hevc.clone()));
+        assert!(resume::is_complete(&bl_hevc));
+        let ffmpeg = fake.calls("ffmpeg");
+        assert_eq!(ffmpeg.len(), 1, "{format:?} {transfer}");
+        assert_eq!(
+            called_with(
+                &ffmpeg,
+                "hevc_metadata=colour_primaries=9:transfer_characteristics=18:matrix_coefficients=9"
+            ),
+            rewrites,
+            "{format:?} {transfer}: {ffmpeg:?}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn base_layer_extraction_is_reused_only_when_sealed_and_resuming() {
+    for (resume_enabled, sealed, extracts) in [
+        (true, true, false),
+        (true, false, true),
+        (false, true, true),
+    ] {
+        let Some(fake) =
+            FakeTools::new("base_layer_extraction_is_reused_only_when_sealed_and_resuming")
+        else {
+            return;
+        };
+        let bl_hevc = fake.temp.join("BL.hevc");
+        fake.leave(&bl_hevc, b"previous bl", sealed);
+        fake.script("ffmpeg", &writes("new bl"));
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        let bl = extract_base_layer(
+            fake.input(),
+            &fake.input,
+            &fake.temp,
+            HdrFormat::Hdr10Unsupported,
+            resume_enabled,
+            &args,
+        )
+        .unwrap();
+        assert_eq!(bl, Some(bl_hevc.clone()));
+        let case = format!("resume {resume_enabled}, sealed {sealed}");
+        assert_eq!(!fake.calls("ffmpeg").is_empty(), extracts, "{case}");
+        let expected: &[u8] = if extracts { b"new bl" } else { b"previous bl" };
+        assert_eq!(fs::read(&bl_hevc).unwrap(), expected, "{case}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn base_layer_extraction_failure_returns_none_without_a_sentinel() {
+    let Some(fake) =
+        FakeTools::new("base_layer_extraction_failure_returns_none_without_a_sentinel")
+    else {
+        return;
+    };
+    fake.script("ffmpeg", FAILS_AFTER_PARTIAL_OUTPUT);
+    let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+    let bl = extract_base_layer(
+        fake.input(),
+        &fake.input,
+        &fake.temp,
+        HdrFormat::Hdr10Unsupported,
+        true,
+        &args,
+    )
+    .unwrap();
+    assert_eq!(bl, None);
+    assert!(!resume::marker_path(&fake.temp.join("BL.hevc")).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn mux_output_is_reused_only_with_resume_output_and_marker() {
+    for (resume_enabled, output, marker, muxes) in [
+        (true, true, true, false),
+        (true, true, false, true),
+        (true, false, true, true),
+        (false, true, true, true),
+    ] {
+        let Some(fake) = FakeTools::new("mux_output_is_reused_only_with_resume_output_and_marker")
+        else {
+            return;
+        };
+        let bl_rpu = fake.temp.join("BL_RPU.hevc");
+        fs::write(&bl_rpu, b"bl+rpu").unwrap();
+        if output {
+            fs::write(&fake.output, b"previous mux").unwrap();
+        }
+        if marker {
+            fs::write(fake.temp.join("mux.done"), b"").unwrap();
+        }
+        fake.script("mkvmerge", &writes("new mux"));
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        let muxed = mux_output(
+            fake.input(),
+            &bl_rpu,
+            &fake.output,
+            &fake.temp,
+            resume_enabled,
+            &args,
+        )
+        .unwrap();
+        let case = format!("resume {resume_enabled}, output {output}, marker {marker}");
+        assert!(muxed, "{case}");
+        assert_eq!(!fake.calls("mkvmerge").is_empty(), muxes, "{case}");
+        let expected: &[u8] = if muxes { b"new mux" } else { b"previous mux" };
+        assert_eq!(fs::read(&fake.output).unwrap(), expected, "{case}");
+        assert!(fake.temp.join("mux.done").exists(), "{case}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn mux_output_failure_returns_false_without_a_mux_marker() {
+    let Some(fake) = FakeTools::new("mux_output_failure_returns_false_without_a_mux_marker") else {
+        return;
+    };
+    let bl_rpu = fake.temp.join("BL_RPU.hevc");
+    fs::write(&bl_rpu, b"bl+rpu").unwrap();
+    fake.script("mkvmerge", FAILS);
+    let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+    let muxed = mux_output(fake.input(), &bl_rpu, &fake.output, &fake.temp, true, &args).unwrap();
+    assert!(!muxed);
+    assert!(!fake.temp.join("mux.done").exists());
 }
