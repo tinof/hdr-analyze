@@ -211,24 +211,26 @@ fn pq_label(pq: u16) -> String {
         .unwrap_or_else(|| format!("{nits:.1}"))
 }
 
-/// An L8 trim target: a display the crate knows by its nits; a custom display by its L10 peak
-/// when the sample has that L10, otherwise by its index alone. `trim_target_nits` reads 100 for
-/// any index it does not know, and index 1 is the 100-nit display.
+/// An L8 trim target: a custom display by the peak of the sampled L10 that defines it (L10 may
+/// use any non-preset index, including 24 and 25, which `trim_target_nits` reads as 300 nits);
+/// otherwise a display the crate knows by its nits, else by its index alone. `trim_target_nits`
+/// reads 100 for any index it does not know, and index 1 is the 100-nit display.
 fn l8_target_label(index: u8, authored: &AuthoredLevels) -> String {
+    if let Some(&pq) = authored.l10_targets.get(&index) {
+        return format!(
+            "custom target display {index} ({} nits, from L10)",
+            pq_label(pq)
+        );
+    }
     let known_nits = ExtMetadataBlockLevel8 {
         target_display_index: index,
         ..Default::default()
     }
     .trim_target_nits();
     if index == 1 || known_nits != 100 {
-        return format!("{known_nits} nits");
-    }
-    match authored.l10_targets.get(&index) {
-        Some(&pq) => format!(
-            "custom target display {index} ({} nits, from L10)",
-            pq_label(pq)
-        ),
-        None => format!("target display index {index}"),
+        format!("{known_nits} nits")
+    } else {
+        format!("target display index {index}")
     }
 }
 
@@ -491,6 +493,20 @@ mod tests {
         assert_eq!(
             line(&lines, "L10").unwrap(),
             "L10 custom target displays 5: dropped"
+        );
+        // An L10 at index 24 overrides the crate's 300-nit lookup for that index.
+        authored.l8_trims = BTreeSet::from([24]);
+        authored.l10_targets = BTreeMap::from([(24, 3079)]);
+        let lines = notice(Some(&authored), &args(&[]));
+        assert_eq!(
+            line(&lines, "L8").unwrap(),
+            "L8 trims for custom target display 24 (1000 nits, from L10): dropped"
+        );
+        authored.l10_targets.clear();
+        let lines = notice(Some(&authored), &args(&[]));
+        assert_eq!(
+            line(&lines, "L8").unwrap(),
+            "L8 trims for 300 nits: dropped"
         );
     }
 
