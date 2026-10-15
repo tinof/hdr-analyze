@@ -221,6 +221,32 @@ fn expected_source_range_is_the_preset_for_profile_84() {
 }
 
 #[test]
+fn extra_json_names_the_requested_cm_version() {
+    // dovi_tool generate defaults to CM v4.0, so v29 must be named explicitly (ROADMAP P13).
+    let write = |cm_v40_config: Option<&CmV40Config>| -> Value {
+        let text = extra_json_text(
+            "8.1",
+            &mastering(0.005, 1000.0),
+            &[100],
+            cm_v40_config,
+            None,
+            None,
+        );
+        serde_json::from_str(&text).unwrap()
+    };
+
+    let v29 = write(None);
+    assert_eq!(v29["cm_version"], "V29");
+    assert!(v29.get("default_metadata_blocks").is_none());
+
+    let v40 = write(Some(&CmV40Config::default()));
+    assert_eq!(v40["cm_version"], "V40");
+    assert!(v40["default_metadata_blocks"]
+        .as_array()
+        .is_some_and(|blocks| !blocks.is_empty()));
+}
+
+#[test]
 fn extra_json_carries_the_source_range_for_profile_81_only() {
     let write = |profile: &str, meta: &HashMap<String, f64>| -> Value {
         let output = tempfile::NamedTempFile::new().unwrap();
@@ -286,6 +312,169 @@ fn json_generation_rejects_missing_static_metadata() {
         generate_extra_json(output.path(), "8.1", &metadata, &[], None, None, None).unwrap_err();
 
     assert!(error.to_string().contains("min_dml"));
+}
+
+/// Exercise the extra.json as written, including dovi_tool's defaults. Some(config) selects
+/// v40; the optional CM v4.0 configuration being absent is the interface's v29 case.
+fn cm_version_acceptance_rpu(
+    test: &str,
+    cm_v40_config: Option<&CmV40Config>,
+) -> Option<(tempfile::TempDir, PathBuf)> {
+    match Command::new("dovi_tool").arg("--version").output() {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("Skipping {test}: dovi_tool not found in PATH");
+            return None;
+        }
+        Err(error) => panic!("failed to start dovi_tool: {error}"),
+        Ok(output) => assert!(output.status.success(), "dovi_tool --version failed"),
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let extra = dir.path().join("extra.json");
+    let sidecar = L1Sidecar {
+        version: 1,
+        scenes: vec![
+            L1SidecarScene {
+                start: 0,
+                end: 1,
+                min_pq_12bit: 0,
+                avg_luma_pq_12bit: 1200,
+                avg_max_rgb_pq_12bit: 1200,
+                max_pq_12bit: 2800,
+            },
+            L1SidecarScene {
+                start: 2,
+                end: 4,
+                min_pq_12bit: 5,
+                avg_luma_pq_12bit: 1500,
+                avg_max_rgb_pq_12bit: 1500,
+                max_pq_12bit: 3000,
+            },
+        ],
+        ..Default::default()
+    };
+    generate_extra_json(
+        &extra,
+        "8.1",
+        &mastering(0.005, 1000.0),
+        &[100, 600, 1000],
+        cm_v40_config,
+        Some(Level5Offsets {
+            left: 0,
+            right: 0,
+            top: 140,
+            bottom: 140,
+        }),
+        Some(&sidecar),
+    )
+    .unwrap();
+    let rpu = dir.path().join("RPU.bin");
+    run_tool(
+        Command::new("dovi_tool")
+            .args(["generate", "-j"])
+            .arg(&extra)
+            .arg("-o")
+            .arg(&rpu),
+    );
+    Some((dir, rpu))
+}
+
+#[test]
+fn cm_version_acceptance_v40_generated_frames() {
+    use dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlock;
+    use dolby_vision::rpu::utils::parse_rpu_file;
+
+    let Some((_dir, rpu)) = cm_version_acceptance_rpu(
+        "cm_version_acceptance_v40_generated_frames",
+        Some(&CmV40Config::default()),
+    ) else {
+        return;
+    };
+    let frames = parse_rpu_file(&rpu).unwrap();
+    assert_eq!(frames.len(), 5, "must inspect every generated frame");
+    for (index, frame) in frames.iter().enumerate() {
+        let dm = frame.vdr_dm_data.as_ref().expect("frame must have DM data");
+        assert!(
+            dm.cmv40_metadata.is_some(),
+            "CM v4.0 frame {index} must have CM v4.0 DM data"
+        );
+        for level in [1, 2, 5, 6, 9, 11, 254] {
+            assert!(
+                dm.get_block(level).is_some(),
+                "CM v4.0 frame {index} must carry L{level}"
+            );
+        }
+        match dm.get_block(254).unwrap() {
+            ExtMetadataBlock::Level254(block) => assert_eq!(
+                block.dm_version_index, 2,
+                "CM v4.0 frame {index} L254 must have dm_version_index 2"
+            ),
+            other => panic!("expected L254, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn cm_version_acceptance_v29_generated_frames() {
+    use dolby_vision::rpu::utils::parse_rpu_file;
+
+    let Some((_dir, rpu)) =
+        cm_version_acceptance_rpu("cm_version_acceptance_v29_generated_frames", None)
+    else {
+        return;
+    };
+    let frames = parse_rpu_file(&rpu).unwrap();
+    assert_eq!(frames.len(), 5, "must inspect every generated frame");
+    let mut frames_with_v40 = Vec::new();
+    let mut forbidden_blocks = Vec::new();
+    for (index, frame) in frames.iter().enumerate() {
+        let dm = frame.vdr_dm_data.as_ref().expect("frame must have DM data");
+        for level in [1, 6] {
+            assert!(
+                dm.get_block(level).is_some(),
+                "CM v2.9 frame {index} must carry L{level}"
+            );
+        }
+        if dm.cmv40_metadata.is_some() {
+            frames_with_v40.push(index);
+        }
+        // L2 trims are deliberately unconstrained for v29.
+        for level in [3, 8, 9, 10, 11, 254] {
+            if dm.get_block(level).is_some() {
+                forbidden_blocks.push((index, level));
+            }
+        }
+    }
+    assert!(
+        frames_with_v40.is_empty() && forbidden_blocks.is_empty(),
+        "CM v2.9 must have no CM v4.0 DM data or blocks; CM v4.0 DM data in frames \
+         {frames_with_v40:?}, forbidden (frame, level) pairs: {forbidden_blocks:?}"
+    );
+}
+
+#[test]
+fn cm_version_acceptance_v29_summary_has_no_v40() {
+    let Some((_dir, rpu)) =
+        cm_version_acceptance_rpu("cm_version_acceptance_v29_summary_has_no_v40", None)
+    else {
+        return;
+    };
+    let output = Command::new("dovi_tool")
+        .args(["info", "-i"])
+        .arg(&rpu)
+        .arg("--summary")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "dovi_tool info --summary failed");
+    let summary = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !summary.contains("CM v4.0"),
+        "CM v2.9 summary must not report CM v4.0:\n{summary}"
+    );
 }
 
 #[test]

@@ -190,6 +190,10 @@ pub fn generate_extra_json(
         }));
 
         json_content["default_metadata_blocks"] = json!(default_blocks);
+    } else {
+        // `dovi_tool generate` defaults to CM v4.0 and would add its own L3, L9, L11 and L254
+        // (ROADMAP P13), so a CM v2.9 RPU must be asked for explicitly.
+        json_content["cm_version"] = json!("V29");
     }
 
     // Source-honest per-scene L1 from the analyzer sidecar. Explicit shots carry the

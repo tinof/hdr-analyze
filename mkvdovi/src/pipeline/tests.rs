@@ -16,6 +16,24 @@ use clap::Parser;
 use serde_json::json;
 
 #[test]
+fn cm_version_acceptance_cli_defaults_to_v40_and_accepts_both_versions() {
+    let default = Args::try_parse_from(["mkvdovi"]).unwrap();
+    assert_eq!(default.cm_version.to_string(), "V40");
+    for (option, expected) in [("v29", "V29"), ("v40", "V40")] {
+        let args = Args::try_parse_from(["mkvdovi", "--cm-version", option, "--verify"]).unwrap();
+        assert_eq!(args.cm_version.to_string(), expected);
+        assert!(args.verify);
+    }
+}
+
+#[test]
+fn verify_requires_the_requested_cm_version() {
+    // Before P13, --cm-version v29 passed no expected version, so --verify accepted CM v4.0.
+    assert_eq!(expected_cm_version(CmVersion::V29), "V29");
+    assert_eq!(expected_cm_version(CmVersion::V40), "V40");
+}
+
+#[test]
 fn analysis_quality_maps_to_analyzer_sampling_args() {
     assert_eq!(analysis_sampling(AnalysisQuality::Fast), (2, 3));
     assert_eq!(analysis_sampling(AnalysisQuality::Balanced), (2, 1));

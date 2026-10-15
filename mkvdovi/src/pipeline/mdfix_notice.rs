@@ -13,13 +13,9 @@ use crate::rpu_check::AuthoredLevels;
 /// L254 that `dovi_tool generate` writes for CM v4.0 (`ExtMetadataBlockLevel254::cmv402_default`).
 const GENERATED_L254: (u8, u8) = (0, 2);
 
-/// L9 and L11 of a `--cm-version v29` RPU. mkvdovi writes no `cm_version` then
-/// (`metadata/rpu_config.rs`, `generate_extra_json`), so `dovi_tool generate` falls back to CM v4.0
-/// with `CmV40DmData::default_safe`: L9 DCI-P3 (index 0) and L11 cinema. ROADMAP lists this as a
-/// defect; when v29 output becomes CM v2.9, these lines change with it.
-const V29_GENERATED_L9: u8 = 0;
-const V29_GENERATED_L11: (u8, u8, bool) = (1, 0, false);
-const V29_DEFAULT: &str = "generator default under --cm-version v29";
+/// Why a CM v4.0 level is not kept under `--cm-version v29`: the RPU then carries no CM v4.0
+/// metadata at all (`metadata/rpu_config.rs`, `generate_extra_json`).
+const V29_DROPPED: &str = "dropped (a CM v2.9 RPU has no CM v4.0 levels)";
 
 /// Prints the notice: the first line as a warning, the rest as info lines. Under CM v4.0 the L9 to
 /// be written is resolved here as `prepare_configuration` resolves it (MediaInfo unless
@@ -52,12 +48,17 @@ pub(super) fn mdfix_notice(
     let Some(authored) = authored else {
         return vec![format!(
             "--mdfix rebuilds the whole RPU (L1 is measured again). The source RPU could not be \
-             sampled, so in general: authored L2 trims are {}, L3 becomes neutral, L4, L8, L10 \
-             and L255 are dropped, L5 is reduced to one active area, L6 comes from the container \
-             and the measurements, and L9, L11 and L254 are rebuilt.",
+             sampled, so in general: {}, L5 is reduced to one active area, and L6 comes from the \
+             container and the measurements.",
             match args.cm_version {
-                CmVersion::V40 => "replaced by neutral trims",
-                CmVersion::V29 => "dropped",
+                CmVersion::V40 => {
+                    "authored L2 trims are replaced by neutral trims, L3 becomes neutral, L4, L8, \
+                     L10 and L255 are dropped, L9, L11 and L254 are rebuilt"
+                }
+                CmVersion::V29 => {
+                    "authored L2 trims are dropped, L3, L8, L9, L10, L11 and L254 are dropped \
+                     (a CM v2.9 RPU has no CM v4.0 levels), L4 and L255 are dropped"
+                }
             }
         )];
     };
@@ -84,7 +85,11 @@ pub(super) fn mdfix_notice(
         });
     }
     if authored.l3 {
-        lines.push("L3 offsets: replaced by neutral offsets".to_string());
+        lines.push(if v40 {
+            "L3 offsets: replaced by neutral offsets".to_string()
+        } else {
+            format!("L3 offsets: {V29_DROPPED}")
+        });
     }
     if authored.l4 {
         lines.push("L4: dropped".to_string());
@@ -110,10 +115,13 @@ pub(super) fn mdfix_notice(
             .collect();
         lines.push(format!("L8 trims for {}: dropped", targets.join(", ")));
     }
-    if !authored.l9.is_empty() {
-        let (written, origin) = if !v40 {
-            (Some(V29_GENERATED_L9), V29_DEFAULT)
-        } else if args.source_primaries.is_some() {
+    if !authored.l9.is_empty() && !v40 {
+        lines.push(format!(
+            "L9 primaries {}: {V29_DROPPED}",
+            join(authored.l9.iter().map(|&v| primaries_label(v)))
+        ));
+    } else if !authored.l9.is_empty() {
+        let (written, origin) = if args.source_primaries.is_some() {
             (resolved_primaries, "--source-primaries")
         } else {
             (resolved_primaries, "detected from the container")
@@ -144,34 +152,36 @@ pub(super) fn mdfix_notice(
         let indices = join(authored.l10_targets.keys().map(|index| index.to_string()));
         lines.push(format!("L10 custom target displays {indices}: dropped"));
     }
-    let (generated_l11, l11_origin) = if v40 {
-        (
-            (args.content_type.as_u8(), 0, args.reference_mode),
-            "--content-type, --reference-mode",
-        )
-    } else {
-        (V29_GENERATED_L11, V29_DEFAULT)
-    };
+    let generated_l11 = (args.content_type.as_u8(), 0, args.reference_mode);
     let changed_l11: Vec<(u8, u8, bool)> = authored
         .l11
         .iter()
         .copied()
-        .filter(|&value| value != generated_l11)
+        .filter(|&value| !v40 || value != generated_l11)
         .collect();
     if !changed_l11.is_empty() {
-        lines.push(format!(
-            "L11 {}: replaced by {} ({l11_origin})",
-            join(changed_l11.iter().map(|&value| l11_label(value))),
-            l11_label(generated_l11)
-        ));
+        let labels = join(changed_l11.iter().map(|&value| l11_label(value)));
+        lines.push(if v40 {
+            format!(
+                "L11 {labels}: replaced by {} (--content-type, --reference-mode)",
+                l11_label(generated_l11)
+            )
+        } else {
+            format!("L11 {labels}: {V29_DROPPED}")
+        });
     }
     let changed_l254: Vec<(u8, u8)> = authored
         .l254
         .iter()
         .copied()
-        .filter(|&value| value != GENERATED_L254)
+        .filter(|&value| !v40 || value != GENERATED_L254)
         .collect();
-    if !changed_l254.is_empty() {
+    if !changed_l254.is_empty() && !v40 {
+        lines.push(format!(
+            "L254 {}: {V29_DROPPED}",
+            join(changed_l254.iter().map(|&value| l254_label(value)))
+        ));
+    } else if !changed_l254.is_empty() {
         lines.push(format!(
             "L254 {}: replaced by {}",
             join(changed_l254.iter().map(|&value| l254_label(value))),
@@ -423,9 +433,10 @@ mod tests {
     }
 
     #[test]
-    fn cm_v29_output_drops_l2_and_names_the_generator_defaults() {
+    fn cm_v29_output_drops_l2_and_every_cm_v40_level() {
         let v29 = args(&["--cm-version", "v29"]);
         let mut authored = p81_v40();
+        authored.l3 = true;
         authored.l9 = BTreeSet::from([2]);
         authored.l11 = BTreeSet::from([(1, 0, true)]);
         authored.l254 = BTreeSet::from([(1, 1)]);
@@ -435,24 +446,37 @@ mod tests {
             "L2 trims for 100, 600, 1000 nits: dropped (no L2 is written under --cm-version v29)"
         );
         assert_eq!(
+            line(&lines, "L3").unwrap(),
+            "L3 offsets: dropped (a CM v2.9 RPU has no CM v4.0 levels)"
+        );
+        assert_eq!(
             line(&lines, "L9").unwrap(),
-            "L9 primaries 2 (BT.2020): replaced by 0 (P3-D65) (generator default under --cm-version v29)"
+            "L9 primaries 2 (BT.2020): dropped (a CM v2.9 RPU has no CM v4.0 levels)"
         );
         assert_eq!(
             line(&lines, "L11").unwrap(),
-            "L11 (content type 1, whitepoint 0, reference mode on): replaced by (content type 1, whitepoint 0, reference mode off) (generator default under --cm-version v29)"
+            "L11 (content type 1, whitepoint 0, reference mode on): dropped (a CM v2.9 RPU has no CM v4.0 levels)"
         );
         assert_eq!(
             line(&lines, "L254").unwrap(),
-            "L254 (DM mode 1, version index 1): replaced by (DM mode 0, version index 2)"
+            "L254 (DM mode 1, version index 1): dropped (a CM v2.9 RPU has no CM v4.0 levels)"
         );
 
-        // Source values equal to what the generator writes are kept: no line.
-        authored.l9 = BTreeSet::from([V29_GENERATED_L9]);
-        authored.l11 = BTreeSet::from([V29_GENERATED_L11]);
+        // Under v29 a source value equal to what a CM v4.0 rebuild would write is dropped too.
+        authored.l9 = BTreeSet::from([0]);
+        authored.l11 = BTreeSet::from([(1, 0, false)]);
         authored.l254 = BTreeSet::from([GENERATED_L254]);
         let lines = notice(Some(&authored), &v29);
-        for kept in ["L9", "L11", "L254"] {
+        for dropped in ["L9", "L11", "L254"] {
+            assert!(
+                line(&lines, dropped).is_some_and(|l| l.ends_with("CM v4.0 levels)")),
+                "{dropped}: {lines:?}"
+            );
+        }
+        // The same values are kept by a CM v4.0 rebuild: no line.
+        let v40 = args(&["--content-type", "movies"]);
+        let lines = notice(Some(&authored), &v40);
+        for kept in ["L11", "L254"] {
             assert!(line(&lines, kept).is_none(), "{kept}: {lines:?}");
         }
     }
@@ -530,7 +554,10 @@ mod tests {
         assert!(lines[0].contains("could not be sampled"));
         assert!(lines[0].contains("L2 trims are replaced by neutral trims"));
         assert!(lines[0].contains("L4, L8, L10 and L255 are dropped"));
+        assert!(lines[0].contains("L9, L11 and L254 are rebuilt"));
         let lines = notice(None, &args(&["--cm-version", "v29"]));
         assert!(lines[0].contains("L2 trims are dropped"));
+        assert!(lines[0].contains("L3, L8, L9, L10, L11 and L254 are dropped"));
+        assert!(!lines[0].contains("rebuilt"));
     }
 }

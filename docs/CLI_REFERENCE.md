@@ -259,7 +259,7 @@ See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#hdr10-peak-mapping) for gu
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--cm-version <v29\|v40>` | `v40` | Content Mapping version |
+| `--cm-version <v29\|v40>` | `v40` | Content Mapping version. `v29` writes a CM v2.9 RPU: L1, L5 and L6, no L2 and no CM v4.0 levels (L3, L9, L11, L254); `--verify` checks the version |
 | `--content-type <default\|movies\|game\|sport\|user-generated-content>` | `movies` | L11 content type (`cinema`/`film` alias `movies`, `gaming` aliases `game`) |
 | `--reference-mode <true\|false>` | `false` | L11 reference mode (critical/studio viewing) |
 | `--source-primaries <0\|1\|2>` | auto | L9 source primaries: `0=P3-D65, 1=BT.709, 2=BT.2020` (auto-detected from MediaInfo if unset) |
@@ -303,7 +303,7 @@ Profile 7 file is MEL or FEL. The plan for FEL input is in [FEL_PLAN.md](FEL_PLA
 mkvdovi "input.mkv" --keep-source             # keep source for A/B testing
 mkvdovi "input.mkv" --keep-source --verify    # recommended first run
 mkvdovi "input.mkv" --content-type sport      # high-motion content
-mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9
+mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9 (L1, L5, L6 only)
 mkvdovi "input.mkv" --source-primaries 0      # force P3-D65
 mkvdovi inspect "input.DV.mkv"                 # inspect source RPU metadata
 mkvdovi "input.DV.mkv" --mdfix                 # write input.mdfix.DV.mkv
