@@ -187,6 +187,43 @@ mod tests {
     }
 
     #[test]
+    fn check_refuses_a_frame_whose_header_cannot_carry_the_composer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = generated_rpu_file(dir.path(), 2);
+        let rpus = parse_rpu_file(&path).unwrap();
+        assert_eq!(check_rpus(&rpus, Composer::Preset).unwrap(), 2);
+
+        type Change = fn(&mut DoviRpu);
+        // The composers are quantized to fixed-point coefficients over 2^23, signalled on the
+        // frame itself; each case breaks exactly one of those conditions on frame 1.
+        let cases: &[(&str, Change)] = &[
+            ("coefficient_data_type", |rpu| {
+                rpu.header.coefficient_data_type = 1
+            }),
+            ("coefficient_log2_denom", |rpu| {
+                rpu.header.coefficient_log2_denom = 22
+            }),
+            ("coefficient_log2_denom", |rpu| {
+                rpu.header.coefficient_log2_denom_length = 22
+            }),
+            ("use_prev_vdr_rpu_flag", |rpu| {
+                rpu.header.use_prev_vdr_rpu_flag = true
+            }),
+            ("no rpu_data_mapping", |rpu| rpu.rpu_data_mapping = None),
+        ];
+        for (reason, change) in cases {
+            let mut changed = rpus.clone();
+            change(&mut changed[1]);
+            let error = check_rpus(&changed, Composer::Preset).unwrap_err();
+            let message = format!("{error:#}");
+            assert!(
+                message.contains("RPU frame 1") && message.contains(reason),
+                "{reason}: {message}"
+            );
+        }
+    }
+
+    #[test]
     fn rewrite_installs_the_composer_on_every_frame_and_keeps_the_rest() {
         let dir = tempfile::tempdir().unwrap();
         let path = generated_rpu_file(dir.path(), 5);

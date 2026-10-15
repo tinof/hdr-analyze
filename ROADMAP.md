@@ -104,6 +104,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-15 | E14 step 5, first PR: tests for the 19 high-risk survivor groups (composer, `--verify`, sidecar/RPU/HLG probes, pipeline delivery steps); 0 of the targeted mutants missed. Steps 1, 2 and 3–4 (partial) recorded. | E14 | `test/e14-high-risk` |
 | 2026-10-15 | P13: `--cm-version v29` writes a CM v2.9 RPU (L1, L5, L6) and `--verify` checks the requested CM version; CM v4.0 RPUs identical to 0.6.0. | P13 | `fix-p13-cm-v29` |
 | 2026-10-15 | P11 notice: `--mdfix` names the authored levels it replaces or drops, from the sampled source RPU windows; r4/r5 `--mdfix` RPUs identical to 0.6.0; two defects found (P12, P13). | P11, P12, P13 | `feat/p11-mdfix-notice` |
 | 2026-10-14 | P9 peak parity: under `histogram99`, `max-scl` and `max-scl-luminance` the hybrid max equals `dovi_tool`'s on every non-fallback frame of six cuts (0 mismatches), fallbacks carry the analyzer scene's max, `--boost` equals `histogram99`. | P9 | `docs/p9-peak-parity` |
@@ -725,8 +726,12 @@ The detailed gap table and validation method live in
 
 ### E14: test-suite audit
 
-- **Status:** Open; step 1 (PR CI runs the tool-dependent tests) in review 2026-10-15. Rules:
-  [`docs/TESTING.md`](docs/TESTING.md).
+- **Status:** Open. Rules: [`docs/TESTING.md`](docs/TESTING.md). Step 1 done (#54, CI run
+  38753171952, only allowed skips). Step 2 done: 3 of the pilot's tests red on main, nothing new
+  found, pipeline wiring missed; owner decision on a separate test author open. Steps 3 and 4 done
+  on main@c74effb for `verify.rs` and the riskiest modules only (owner choice): 336 survivors, 0
+  actual bugs, 19 high-risk groups. Step 5: high-risk groups covered on `test/e14-high-risk` (0
+  missed after); medium/low-risk groups and the unrun modules of step 3 open.
 - **Why:** a test that has never been red has not been shown to test anything. Until 2026-10-15
   the PR CI test job installed none of the integration-test tools, so the HLG 8.4, open-GOP, P7
   full-range refusal (`pq_input_contract`), HDR10+ hybrid, synthetic-accuracy and clip tests

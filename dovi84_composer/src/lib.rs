@@ -204,6 +204,95 @@ mod tests {
     }
 
     #[test]
+    fn mappings_equal_rejects_a_change_in_any_single_field() {
+        use dolby_vision::rpu::rpu_data_mapping::{DoviMappingMethod, DoviNlqMethod};
+        use dolby_vision::rpu::rpu_data_nlq::RpuDataNlq;
+
+        type Change = fn(&mut RpuDataMapping);
+        fn poly(m: &mut RpuDataMapping) -> &mut DoviPolynomialCurve {
+            m.curves[0].polynomial.as_mut().unwrap()
+        }
+        fn mmr(m: &mut RpuDataMapping) -> &mut DoviMMRCurve {
+            m.curves[1].mmr.as_mut().unwrap()
+        }
+        // bt2100 carries a polynomial luma curve and MMR chroma curves, so every field exists.
+        let cases: &[(&str, Change)] = &[
+            ("num_pivots_minus2", |m| m.curves[0].num_pivots_minus2 += 1),
+            ("pivots", |m| m.curves[0].pivots[1] += 1),
+            ("mapping_idc", |m| {
+                m.curves[1].mapping_idc = DoviMappingMethod::Polynomial
+            }),
+            ("polynomial removed", |m| m.curves[0].polynomial = None),
+            ("poly_order_minus1", |m| poly(m).poly_order_minus1[0] += 1),
+            ("poly_coef_int", |m| poly(m).poly_coef_int[0][0] += 1),
+            ("poly_coef", |m| poly(m).poly_coef[0][0] ^= 1),
+            ("mmr removed", |m| m.curves[1].mmr = None),
+            ("mmr_order_minus1", |m| mmr(m).mmr_order_minus1[0] -= 1),
+            ("mmr_constant_int", |m| mmr(m).mmr_constant_int[0] += 1),
+            ("mmr_constant", |m| mmr(m).mmr_constant[0] ^= 1),
+            ("mmr_coef_int", |m| mmr(m).mmr_coef_int[0][0][0] += 1),
+            ("mmr_coef", |m| mmr(m).mmr_coef[0][0][0] ^= 1),
+            ("last chroma curve", |m| m.curves[2].pivots[1] -= 1),
+            ("vdr_rpu_id", |m| m.vdr_rpu_id += 1),
+            ("mapping_color_space", |m| m.mapping_color_space += 1),
+            ("mapping_chroma_format_idc", |m| {
+                m.mapping_chroma_format_idc += 1
+            }),
+            ("num_x_partitions_minus1", |m| {
+                m.num_x_partitions_minus1 += 1
+            }),
+            ("num_y_partitions_minus1", |m| {
+                m.num_y_partitions_minus1 += 1
+            }),
+            ("nlq_method_idc", |m| {
+                m.nlq_method_idc = Some(DoviNlqMethod::LinearDeadzone)
+            }),
+            ("nlq", |m| m.nlq = Some(RpuDataNlq::default())),
+        ];
+        let base = Composer::Bt2100V1.rpu_data_mapping();
+        assert!(mappings_equal(&base, &base.clone()));
+        for (field, change) in cases {
+            let mut changed = base.clone();
+            change(&mut changed);
+            assert!(
+                !mappings_equal(&base, &changed),
+                "{field}: changed mapping compared equal"
+            );
+            assert!(
+                !mappings_equal(&changed, &base),
+                "{field}: changed mapping compared equal (swapped)"
+            );
+        }
+    }
+
+    #[test]
+    fn mappings_equal_accepts_only_all_false_linear_interp_flags() {
+        // The parser fills one `false` per luma piece where the constructor leaves the vector
+        // empty; both mean "no linear interpolation". A `true` flag is unsupported on either side.
+        let base = Composer::Preset.rpu_data_mapping();
+        let pieces = base.curves[0].pivots.len() - 1;
+        let with_flags = |flags: Vec<bool>| {
+            let mut mapping = base.clone();
+            mapping.curves[0]
+                .polynomial
+                .as_mut()
+                .unwrap()
+                .linear_interp_flag = flags;
+            mapping
+        };
+        let parsed_like = with_flags(vec![false; pieces]);
+        assert!(mappings_equal(&base, &parsed_like));
+        assert!(mappings_equal(&parsed_like, &base));
+
+        let mut flags = vec![false; pieces];
+        flags[0] = true;
+        let interpolated = with_flags(flags);
+        assert!(!mappings_equal(&base, &interpolated));
+        assert!(!mappings_equal(&interpolated, &base));
+        assert!(!mappings_equal(&interpolated, &interpolated.clone()));
+    }
+
+    #[test]
     fn luminance_mapping_names_round_trip() {
         for composer in Composer::ALL {
             assert_eq!(

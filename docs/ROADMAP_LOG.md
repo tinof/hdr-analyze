@@ -6,6 +6,38 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-15: E14 steps 1 to 5, high-risk survivors covered
+
+Test-only; no production code changes. E14 stays open.
+
+- Step 1 (#54, 0c68d2a): PR CI installs the tool-dependent test tools. CI run 38753171952
+  `Test (Ubuntu)`: synthetic_accuracy 10.51 s, hlg_profile84 5.99 s, open_gop_start 3.24 s,
+  hdr10plus_hybrid 7.36 s; only allowed skips.
+- Step 2 (P13 pilot): Codex wrote the P13 acceptance tests in 148 s; 3 were red on main. They found
+  nothing an in-session test missed, and missed the pipeline wiring. Owner decision open: does a
+  separate test author become mandatory?
+- Steps 3 and 4: `cargo-mutants` on main@c74effb for `verify.rs` and the riskiest modules (owner
+  choice), not the full step-3 list. 336 survivors: dovi84_composer 11, `verify.rs` 20, verifier
+  142, pipeline (`deliver.rs`, `measure.rs`, `dovi_steps.rs`) 42, metadata 30, `rpu_check.rs` 91.
+  Triage: 0 actual bugs, 120 print-only or equivalent, 215 missing tests, 19 high-risk groups.
+- Step 5, first PR (`test/e14-high-risk`): tests for the 19 high-risk groups. `mappings_equal` and
+  `check_header` in dovi84_composer; `--verify` frame-count, HLG sidecar and compatibility-ID checks
+  on real muxed outputs; sidecar identity and luminance mapping, RPU profile classification and HLG
+  transfer probes in metadata and `rpu_check.rs`; pipeline delivery steps (`extract_base_layer`
+  bsf decision, `mux_output` resume predicate, `run_dovi_video_step`) against PATH-shimmed fake
+  tools in `pipeline/tests.rs`. The shims live in one hash-keyed directory next to the test binary
+  (`target/<profile>/deps/mkvdovi-shims-<hash>`), written by staged write and rename. The
+  `verify.rs` sibling-analyzer helper skips a stale analyzer whose `--help` lacks a
+  `Composer::ALL` luminance mapping name.
+- After counts, 7 targeted runs at the branch's tests: composer 46 caught; pipeline dovi_steps 30;
+  pipeline deliver 12; verify 11; classify-format 6 caught, 1 unviable; classify-rpu 2 caught, 1
+  unviable; classify-sidecar 2 caught. All 0 missed, 0 timeout.
+- Gates on e8658ee: fmt, clippy, clippy-cuda, test (429 passed, no unexpected `Skipping` lines),
+  l1-regression (check mode), cuda-parity: all pass.
+- Evidence: `~/mkvdovi-work/test-audit-2026-10-15/` (`triage.md`, `triage.json`, `mutants/`,
+  `mutants-after/SUMMARY.txt`).
+- Open: the medium- and low-risk groups, and the step-3 modules not yet run.
+
 ### 2026-10-15: P13, `--cm-version v29` writes a CM v2.9 RPU
 
 Closes P13. Changes delivered output only under `--cm-version v29`.
