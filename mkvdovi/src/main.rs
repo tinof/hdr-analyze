@@ -192,14 +192,9 @@ fn main() -> anyhow::Result<()> {
     // (one-time detection; all downstream code sees only concrete settings).
     pipeline::resolve_auto_settings(&mut final_args);
 
-    let trim_targets: Vec<u32> = final_args
-        .trim_targets
-        .split(',')
-        .map(|s| s.trim().parse::<u32>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| {
-            anyhow::anyhow!("--trim-targets must be a comma-separated list of integers.")
-        })?;
+    let trim_targets = final_args.trim_targets_nits().map_err(|_| {
+        anyhow::anyhow!("--trim-targets must be a comma-separated list of integers.")
+    })?;
 
     // Validate trim target parsing early
     if trim_targets.is_empty() {

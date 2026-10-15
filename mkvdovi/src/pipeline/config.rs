@@ -89,11 +89,8 @@ pub(super) fn prepare_configuration(
 
     // Generate extra.json
     let extra_json_path = temp_dir.join("extra.json");
-    let final_trims: Vec<u32> = args
-        .trim_targets
-        .split(',')
-        .filter_map(|s| s.trim().parse().ok())
-        .collect();
+    // Validated in main before any file is processed.
+    let final_trims = args.trim_targets_nits().unwrap_or_default();
 
     // Source-honest per-scene L1 from the analyzer sidecar is mandatory for measurement-based
     // generation. dovi_tool's madVR path fills L1 avg with a fixed placeholder and (with custom

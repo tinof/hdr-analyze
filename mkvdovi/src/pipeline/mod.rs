@@ -17,6 +17,7 @@ mod deliver;
 mod dovi_steps;
 mod hdr10plus;
 mod hybrid;
+mod mdfix_notice;
 mod measure;
 mod temp_dir;
 
@@ -171,7 +172,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 
     // --- Step 1: Detect HDR format ---
     let original_hdr_type = detected_hdr_type;
-    let level5_offsets = report_detection(
+    let detection = report_detection(
         input_file,
         &temp_dir,
         detected_hdr_type,
@@ -210,6 +211,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         resume_enabled,
         hlg_composer,
         detected_hdr_type,
+        detection.authored.as_ref(),
         &mut total_steps,
         &mut current_step,
     )?
@@ -232,7 +234,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         resume_enabled,
         hlg_composer,
         &mut measured,
-        level5_offsets,
+        detection.level5,
     )?
     else {
         return Ok(false);

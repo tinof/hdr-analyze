@@ -181,6 +181,16 @@ mod tests {
     }
 
     #[test]
+    fn trim_targets_parse_as_nits_in_order() {
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        assert_eq!(args.trim_targets_nits().unwrap(), vec![100, 600, 1000]);
+        let args = Args::try_parse_from(["mkvdovi", "--trim-targets", "600, 100"]).unwrap();
+        assert_eq!(args.trim_targets_nits().unwrap(), vec![600, 100]);
+        let args = Args::try_parse_from(["mkvdovi", "--trim-targets", "100,x"]).unwrap();
+        assert!(args.trim_targets_nits().is_err());
+    }
+
+    #[test]
     fn hlg_composer_defaults_to_bt2100_and_parses_the_preset() {
         let args = Args::try_parse_from(["mkvdovi"]).unwrap();
         assert_eq!(args.hlg_composer, Composer::Bt2100V1);
@@ -326,6 +336,14 @@ pub enum PeakSource {
 }
 
 impl Args {
+    /// `--trim-targets` as nits values, in the order given.
+    pub fn trim_targets_nits(&self) -> Result<Vec<u32>, std::num::ParseIntError> {
+        self.trim_targets
+            .split(',')
+            .map(|s| s.trim().parse::<u32>())
+            .collect()
+    }
+
     /// A flag combination refused before any file is processed. Checked after parsing, so that an
     /// explicit `--hdr10plus-l1 hdr10plus` (the default) still combines with --legacy-madvr-l1.
     pub fn flag_conflict(&self) -> Option<&'static str> {
