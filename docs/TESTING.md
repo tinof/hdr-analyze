@@ -29,7 +29,9 @@ How tests are written, reviewed and gated in this repository. The rules are writ
 
 ```bash
 cargo install --locked cargo-mutants
-# Before any run: the suite passes with every skip accounted for on this host.
+# Before any run: the suite passes with every skip accounted for on this host. pipefail makes
+# a failing cargo test fail the line; without it the pipeline returns tee's status.
+set -o pipefail
 cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee baseline.log \
   && scripts/ci/check-test-skips.sh baseline.log 'built without HDR10_PLUS|does not accept dhdr10-info'
 # One module; mkvdovi and dovi84_composer need --test-workspace=true, so that the analyzer
@@ -37,12 +39,14 @@ cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee 
 mkdir -p <dir>/verify
 cargo mutants -f 'mkvdovi/src/verify.rs' --test-workspace=true -j 3 --timeout 600 \
   -o <dir>/verify -- -- --nocapture --skip cuda_output_matches_cpu
-# Changes on a branch only:
-cargo mutants --in-diff <(git diff main...HEAD) --test-workspace=true -j 3 --timeout 600
+# Changes on a branch only (--nocapture, so the mutant logs show skips):
+mkdir -p <dir>/in-diff
+cargo mutants --in-diff <(git diff origin/main...HEAD) --test-workspace=true -j 3 --timeout 600 \
+  -o <dir>/in-diff -- -- --nocapture --skip cuda_output_matches_cpu
 ```
 
 - Run modules one after another. One run at `-j 3` with `CARGO_BUILD_JOBS=4` fits a 16-core, 10 GB host.
-- The run's baseline ignores `--test-workspace`: it builds and tests only the mutated package, so for mkvdovi its log shows the "not built next to mkvdovi" skips. The mutants run the whole workspace. Check a few mutant logs (`<dir>/mutants.out/log/*.log`) with `check-test-skips.sh` instead. A skip there means the run is invalid, and every survivor it reports is suspect.
+- The run's baseline ignores `--test-workspace`: it builds and tests only the mutated package, so for mkvdovi its log shows the "not built next to mkvdovi" skips. The mutants run the whole workspace. Check a few mutant logs (`<output dir>/mutants.out/log/*.log`, e.g. `<dir>/verify/mutants.out/log/*.log`) with `check-test-skips.sh` instead. A skip there means the run is invalid, and every survivor it reports is suspect.
 - Pass `--timeout 600`. The automatic timeout comes from that short package-only baseline (20 s). A workspace run takes 20–30 s per mutant, so survivors show up as timeouts. On `verify.rs`, 20 of 26 "timeouts" were survivors.
 - Cost on the WSL CUDA host: about 10 s of wall time per mutant at `-j 3` (`verify.rs`: 119 mutants in 15 min).
 
@@ -72,7 +76,7 @@ A reviewer that did not write the tests looks for:
 
 ## 5. Definition of done
 
-- [ ] The tests pass, and the log passes `check-test-skips.sh`. State the command and its result.
+- [ ] The tests pass, and the log passes `check-test-skips.sh` (with `pipefail` when the log goes through `tee`). State the command and its result.
 - [ ] Every new or changed test has a named production change that makes it fail.
 - [ ] Every new decision is tested on both sides.
 - [ ] A bug fix has a test that fails on the parent commit.

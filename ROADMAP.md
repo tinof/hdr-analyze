@@ -724,9 +724,9 @@ The detailed gap table and validation method live in
 - **Status:** Open; step 1 (PR CI runs the tool-dependent tests) in review 2026-10-15. Rules:
   [`docs/TESTING.md`](docs/TESTING.md).
 - **Why:** a test that has never been red has not been shown to test anything. Until 2026-10-15
-  the PR CI test job installed none of the integration-test tools, so the HLG 8.4, open-GOP, P7,
-  HDR10+ hybrid, synthetic-accuracy and clip tests passed as skips (0.00 s on main run
-  38715765973); only `release.yml` ran them. Mutation testing ran once (E13 step 2: 69 of 75
+  the PR CI test job installed none of the integration-test tools, so the HLG 8.4, open-GOP, P7
+  full-range refusal (`pq_input_contract`), HDR10+ hybrid, synthetic-accuracy and clip tests
+  passed as skips (0.00 s on main run 38715765973); only `release.yml` ran them. Mutation testing ran once (E13 step 2: 69 of 75
   `metadata.rs` mutants caught) and was never repeated. A read-only sweep on 2026-10-15
   (`~/mkvdovi-work/test-audit-2026-10-15/smells-*.md`, unverified) lists one-sided decisions
   (`classify_rpu_format`, the `inject_rpu` length refusal, `hlg_bitstream_lacks_transfer`, the
