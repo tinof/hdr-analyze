@@ -757,6 +757,42 @@ fn sidecar_for_a_different_input_is_rejected() {
 }
 
 #[test]
+fn expectation_for_an_input_file_takes_its_name_size_and_frame_count() {
+    let dir = tempfile::tempdir().unwrap();
+    // The fixture's source record: input.mkv, 42 bytes, 20 frames.
+    let input = dir.path().join("input.mkv");
+    fs::write(&input, [0u8; 42]).unwrap();
+    let expect = SidecarExpectation::for_input(&input, Some(20));
+    assert_eq!(expect.file_name.as_deref(), Some("input.mkv"));
+    assert_eq!(expect.size_bytes, Some(42));
+    assert_eq!(expect.frames, Some(20));
+    assert_eq!(expect.hlg_composer, None);
+
+    let sidecar: L1Sidecar = serde_json::from_value(current_sidecar_json()).unwrap();
+    assert!(validate_l1_sidecar(&sidecar, &expect).unwrap().is_empty());
+
+    let other_name = dir.path().join("other.mkv");
+    fs::write(&other_name, [0u8; 42]).unwrap();
+    let other_size = dir.path().join("sub").join("input.mkv");
+    fs::create_dir(other_size.parent().unwrap()).unwrap();
+    fs::write(&other_size, [0u8; 43]).unwrap();
+    for other in [&other_name, &other_size] {
+        assert!(
+            matches!(
+                validate_l1_sidecar(&sidecar, &SidecarExpectation::for_input(other, Some(20))),
+                Err(SidecarError::Invalid(reason)) if reason.contains("not this input")
+            ),
+            "{}",
+            other.display()
+        );
+    }
+    assert!(matches!(
+        validate_l1_sidecar(&sidecar, &SidecarExpectation::for_input(&input, Some(40))),
+        Err(SidecarError::Invalid(reason)) if reason.contains("input video has 40")
+    ));
+}
+
+#[test]
 fn sidecar_frame_count_mismatch_is_rejected() {
     let sidecar: L1Sidecar = serde_json::from_value(v2_sidecar_json()).unwrap();
     let expect = SidecarExpectation {
@@ -1150,6 +1186,40 @@ fn v3_pq_sidecar_is_accepted_for_pq_and_rejected_for_hlg() {
         validate_l1_sidecar(&sidecar, &hlg_expectation()),
         Err(SidecarError::LuminanceMappingMismatch(_))
     ));
+}
+
+/// An HLG source with a current version but a PQ or missing mapping: only the mapping check can
+/// refuse it, because the source-transfer check that follows would let it through.
+#[test]
+fn hlg_source_sidecar_without_a_dovi84_mapping_is_rejected_for_hlg() {
+    let mut pq_mapping = v3_hlg_sidecar_json();
+    pq_mapping["analysis"]["luminance_mapping"] = json!("pq");
+    let mut no_mapping = v3_hlg_sidecar_json();
+    no_mapping["analysis"]
+        .as_object_mut()
+        .unwrap()
+        .remove("luminance_mapping");
+    for (fixture, mapping) in [(pq_mapping, "mapping pq"), (no_mapping, "mapping none")] {
+        for version in [3, 4] {
+            let mut fixture = fixture.clone();
+            fixture["version"] = json!(version);
+            let sidecar: L1Sidecar = serde_json::from_value(fixture).unwrap();
+            let error = validate_l1_sidecar(&sidecar, &hlg_expectation()).unwrap_err();
+            let message = error.to_string();
+            assert!(
+                matches!(error, SidecarError::LuminanceMappingMismatch(_)),
+                "{message}"
+            );
+            assert!(
+                message.contains(&format!("v{version} ({mapping})"))
+                    && message.contains("measured without the Dolby Vision 8.4 HLG mapping"),
+                "{message}"
+            );
+        }
+    }
+    // The same fixture naming the selected composer is accepted.
+    let sidecar: L1Sidecar = serde_json::from_value(v3_hlg_sidecar_json()).unwrap();
+    assert!(validate_l1_sidecar(&sidecar, &hlg_expectation()).is_ok());
 }
 
 #[test]
@@ -2839,4 +2909,174 @@ fn corpus_cuts_are_classified_like_their_manifests() {
         }
     }
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+/// HLG signalled only by the MKV colour element: the VUI names BT.2020 10-bit (not
+/// "unspecified", which a decoder could fill in from the container) and mkvmerge sets
+/// transfer characteristics 18 (ARIB STD-B67) on the track.
+fn container_only_hlg_clip(dir: &Path) -> PathBuf {
+    let raw = encode_clip(
+        dir,
+        "container_hlg.hevc",
+        "colorprim=bt2020:transfer=bt2020-10:colormatrix=bt2020nc",
+    )
+    .unwrap();
+    let clip = dir.join("container_hlg.mkv");
+    run_tool(
+        Command::new("mkvmerge")
+            .arg("-q")
+            .arg("-o")
+            .arg(&clip)
+            .args(["--colour-transfer-characteristics", "0:18"])
+            .arg(&raw),
+    );
+    clip
+}
+
+#[test]
+fn hlg_transfer_is_found_in_the_bitstream_or_the_container_but_not_in_pq() {
+    if let Some(reason) =
+        missing_clip_tools(&[HDR_FORMAT_TOOLS, &[("mkvmerge", "--version")]].concat())
+    {
+        eprintln!(
+            "Skipping hlg_transfer_is_found_in_the_bitstream_or_the_container_but_not_in_pq: {reason}"
+        );
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    // (clip, has_hlg_transfer, hlg_bitstream_lacks_transfer)
+    let cases = [
+        (
+            encode_clip(dir.path(), "vui.mkv", HLG_X265).unwrap(),
+            true,
+            false,
+        ),
+        (
+            encode_clip(dir.path(), "sei.mkv", SEI_HLG_X265).unwrap(),
+            true,
+            false,
+        ),
+        (container_only_hlg_clip(dir.path()), true, true),
+        (
+            encode_clip(dir.path(), "pq.mkv", PQ_X265).unwrap(),
+            false,
+            true,
+        ),
+    ];
+    for (clip, has, lacks) in cases {
+        let input = clip.to_str().unwrap();
+        assert_eq!(has_hlg_transfer(input), has, "has_hlg_transfer({input})");
+        assert_eq!(
+            hlg_bitstream_lacks_transfer(input),
+            lacks,
+            "hlg_bitstream_lacks_transfer({input})"
+        );
+    }
+}
+
+/// Write `rpus` in the `RPU.bin` layout `dovi_tool` writes: a 4-byte start code, then the
+/// unspec62 NAL without its 2-byte NAL header.
+fn write_rpu_bin(path: &Path, rpus: &[dolby_vision::rpu::dovi_rpu::DoviRpu]) {
+    let mut bytes = Vec::new();
+    for rpu in rpus {
+        let nal = rpu.write_hevc_unspec62_nalu().unwrap();
+        bytes.extend_from_slice(&[0, 0, 0, 1]);
+        bytes.extend_from_slice(&nal[2..]);
+    }
+    fs::write(path, bytes).unwrap();
+}
+
+/// A three-frame HDR10 stream with a Profile 7 RPU injected and muxed by mkvmerge (which writes
+/// a dvhe.07 configuration record). The MEL RPU is `dovi_tool editor` mode 1 applied to a
+/// generated 8.1 RPU; the FEL one is that RPU with a non-zero NLQ offset, a residual a MEL
+/// cannot carry.
+fn profile7_clip(dir: &Path, fel: bool) -> PathBuf {
+    use dolby_vision::rpu::utils::parse_rpu_file;
+
+    let raw = encode_clip(dir, "clip.hevc", PQ_X265).unwrap();
+    let config = dir.join("generate.json");
+    fs::write(
+        &config,
+        json!({"cm_version": "V40", "length": 3, "profile": "8.1"}).to_string(),
+    )
+    .unwrap();
+    let rpu = dir.join("RPU.bin");
+    run_tool(
+        Command::new("dovi_tool")
+            .arg("generate")
+            .arg("-j")
+            .arg(&config)
+            .arg("-o")
+            .arg(&rpu),
+    );
+    let edit = dir.join("edit.json");
+    fs::write(&edit, json!({"mode": 1}).to_string()).unwrap();
+    let p7 = dir.join("P7_RPU.bin");
+    run_tool(
+        Command::new("dovi_tool")
+            .arg("editor")
+            .arg("-i")
+            .arg(&rpu)
+            .arg("-j")
+            .arg(&edit)
+            .arg("-o")
+            .arg(&p7),
+    );
+    if fel {
+        let mut rpus = parse_rpu_file(&p7).unwrap();
+        for rpu in &mut rpus {
+            rpu.modified = true;
+            let nlq = rpu.rpu_data_mapping.as_mut().unwrap().nlq.as_mut().unwrap();
+            nlq.nlq_offset[0] = 64;
+        }
+        write_rpu_bin(&p7, &rpus);
+    }
+    let injected = dir.join("injected.hevc");
+    run_tool(
+        Command::new("dovi_tool")
+            .arg("inject-rpu")
+            .arg("-i")
+            .arg(&raw)
+            .arg("--rpu-in")
+            .arg(&p7)
+            .arg("-o")
+            .arg(&injected),
+    );
+    let clip = dir.join("clip.mkv");
+    run_tool(
+        Command::new("mkvmerge")
+            .arg("-q")
+            .arg("-o")
+            .arg(&clip)
+            .arg(&injected),
+    );
+    let mediainfo = mediainfo_dolby_vision_text(&clip);
+    assert!(
+        mediainfo.contains("dvhe.07"),
+        "MediaInfo no longer reports Profile 7 for the clip, so it does not reach the Profile 7 \
+             probe: {mediainfo}"
+    );
+    clip
+}
+
+#[test]
+fn profile7_mel_clip_is_dolby_vision_mel() {
+    if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+        eprintln!("Skipping profile7_mel_clip_is_dolby_vision_mel: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let clip = profile7_clip(dir.path(), false);
+    assert_eq!(hdr_format_of(&clip), HdrFormat::DolbyVisionMel);
+}
+
+#[test]
+fn profile7_fel_clip_is_dolby_vision_fel() {
+    if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+        eprintln!("Skipping profile7_fel_clip_is_dolby_vision_fel: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let clip = profile7_clip(dir.path(), true);
+    assert_eq!(hdr_format_of(&clip), HdrFormat::DolbyVisionFel);
 }

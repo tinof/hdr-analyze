@@ -942,4 +942,71 @@ mod tests {
         assert!(report.suspicious);
         assert!(report.clipped_frame_ratio > 0.01);
     }
+
+    /// `rpus` in the `RPU.bin` layout `dovi_tool` writes: a 4-byte start code, then the
+    /// unspec62 NAL without its 2-byte NAL header.
+    fn write_rpu_bin(dir: &Path, name: &str, rpus: &[DoviRpu]) -> PathBuf {
+        let mut bytes = Vec::new();
+        for rpu in rpus {
+            let nal = rpu.write_hevc_unspec62_nalu().unwrap();
+            bytes.extend_from_slice(&[0, 0, 0, 1]);
+            bytes.extend_from_slice(&nal[2..]);
+        }
+        let path = dir.join(name);
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    /// Generated Profile 8.1 RPUs converted the way `dovi_tool editor` mode 1 does: the EL flags
+    /// set and a zero (MEL) NLQ, which makes the header Profile 7 with a 12-bit VDR.
+    fn profile7_mel() -> Vec<DoviRpu> {
+        let mut rpus = generated(RpuCmVersion::V40, vec![vec![]]);
+        for rpu in &mut rpus {
+            rpu.convert_with_mode(1u8).unwrap();
+        }
+        rpus
+    }
+
+    #[test]
+    fn classify_rpu_format_tells_profile7_mel_fel_profile8_and_other_profiles_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mel = profile7_mel();
+        // One non-zero NLQ offset is a residual the enhancement layer must carry: FEL.
+        let mut fel = profile7_mel();
+        for rpu in &mut fel {
+            let nlq = rpu.rpu_data_mapping.as_mut().unwrap().nlq.as_mut().unwrap();
+            nlq.nlq_offset[0] = 64;
+        }
+        let profile5 = GenerateConfig {
+            length: 2,
+            shots: vec![VideoShot {
+                duration: 2,
+                ..Default::default()
+            }],
+            profile: dolby_vision::rpu::generate::GenerateProfile::Profile5,
+            ..Default::default()
+        }
+        .generate_rpu_list()
+        .unwrap();
+        for (name, rpus, expected) in [
+            (
+                "p8.bin",
+                generated(RpuCmVersion::V40, vec![vec![]]),
+                RpuFormatKind::Profile8,
+            ),
+            ("mel.bin", mel, RpuFormatKind::Profile7Mel),
+            ("fel.bin", fel, RpuFormatKind::Profile7Fel),
+            ("p5.bin", profile5, RpuFormatKind::OtherDolbyVision),
+        ] {
+            let path = write_rpu_bin(dir.path(), name, &rpus);
+            assert_eq!(classify_rpu_format(&path).unwrap(), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn classify_rpu_format_rejects_a_file_without_rpus() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_rpu_bin(dir.path(), "empty.bin", &[]);
+        assert!(classify_rpu_format(&path).is_err());
+    }
 }
