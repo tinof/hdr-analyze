@@ -393,7 +393,9 @@ fn resume_settings(args: &Args, hlg_composer: Option<Composer>, hdr10plus_hybrid
     settings
 }
 
-/// The CM version `--verify` requires of every RPU frame: the one `--cm-version` asked for.
+/// The CM version `--verify` requires of RPU frame 0 (like its L9/L11/L254 checks): the one
+/// `--cm-version` asked for. `cm_version` is one key of the generator config, so it holds for
+/// every frame.
 pub(super) fn expected_cm_version(cm_version: CmVersion) -> &'static str {
     match cm_version {
         CmVersion::V40 => "V40",

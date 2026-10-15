@@ -221,6 +221,32 @@ fn expected_source_range_is_the_preset_for_profile_84() {
 }
 
 #[test]
+fn extra_json_names_the_requested_cm_version() {
+    // dovi_tool generate defaults to CM v4.0, so v29 must be named explicitly (ROADMAP P13).
+    let write = |cm_v40_config: Option<&CmV40Config>| -> Value {
+        let text = extra_json_text(
+            "8.1",
+            &mastering(0.005, 1000.0),
+            &[100],
+            cm_v40_config,
+            None,
+            None,
+        );
+        serde_json::from_str(&text).unwrap()
+    };
+
+    let v29 = write(None);
+    assert_eq!(v29["cm_version"], "V29");
+    assert!(v29.get("default_metadata_blocks").is_none());
+
+    let v40 = write(Some(&CmV40Config::default()));
+    assert_eq!(v40["cm_version"], "V40");
+    assert!(v40["default_metadata_blocks"]
+        .as_array()
+        .is_some_and(|blocks| !blocks.is_empty()));
+}
+
+#[test]
 fn extra_json_carries_the_source_range_for_profile_81_only() {
     let write = |profile: &str, meta: &HashMap<String, f64>| -> Value {
         let output = tempfile::NamedTempFile::new().unwrap();
