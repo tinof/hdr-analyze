@@ -776,6 +776,7 @@ fn dv_bl_signal_compatibility_id(output_file: &Path) -> Option<u8> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     use dolby_vision::rpu::generate::{GenerateConfig, VideoShot};
 
@@ -1186,5 +1187,394 @@ mod tests {
         let mut malformed = valid_frame();
         set_level6(&mut malformed, "max_frame_average_light_level", json!(-1));
         assert!(!assert_rpu_invariants(&malformed, Some("V40"), true));
+    }
+
+    // End-to-end checks of `verify_post_mux_with_options` on tiny generated Dolby Vision MKVs.
+    // Some outcomes are only printed (the advisory input/output frame-count warning), so every
+    // call runs in a child process of this test binary that prints the result after the log.
+
+    /// Environment variable that hands `verify_runs_in_a_child_process` its arguments.
+    const VERIFY_CHILD_ENV: &str = "MKVDOVI_VERIFY_CHILD_ARGS";
+    const VERIFY_RESULT_PREFIX: &str = "verify_post_mux_with_options returned ";
+
+    const CLIP_TOOLS: &[(&str, &str)] = &[
+        ("ffmpeg", "-version"),
+        ("ffprobe", "-version"),
+        ("mediainfo", "--version"),
+        ("mkvmerge", "--version"),
+        ("dovi_tool", "--version"),
+    ];
+    const PQ_X265: &str = "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc";
+    const HLG_X265: &str = "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc";
+    /// Frames of every generated clip and of its RPU.
+    const CLIP_FRAMES: u64 = 6;
+
+    /// Reason to skip, or `None` when ffmpeg with libx265 and the Dolby Vision tools run.
+    fn missing_verify_tools() -> Option<String> {
+        for &(tool, arg) in CLIP_TOOLS {
+            if Command::new(tool).arg(arg).output().is_err() {
+                return Some(format!("{tool} not found in PATH"));
+            }
+        }
+        let encoders = Command::new("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .ok()?;
+        if !String::from_utf8_lossy(&encoders.stdout).contains("libx265") {
+            return Some("ffmpeg has no libx265 encoder".into());
+        }
+        None
+    }
+
+    /// The workspace-built `hdr_analyzer_mvp` (this test binary lives in `target/<profile>/deps`).
+    fn sibling_analyzer() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        let path = exe
+            .parent()?
+            .parent()?
+            .join(format!("hdr_analyzer_mvp{}", std::env::consts::EXE_SUFFIX));
+        path.exists().then_some(path)
+    }
+
+    fn run_tool(command: &mut Command) {
+        let output = command
+            .output()
+            .unwrap_or_else(|error| panic!("failed to start {command:?}: {error}"));
+        assert!(
+            output.status.success(),
+            "{command:?} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// `frames` 64x64 10-bit frames encoded by libx265 into the raw HEVC stream `dir/name`.
+    fn encode_hevc(dir: &Path, name: &str, frames: u64, x265_params: &str) -> PathBuf {
+        let output = dir.join(name);
+        run_tool(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+                .arg("testsrc2=s=64x64:r=24,format=yuv420p10le")
+                .arg("-frames:v")
+                .arg(frames.to_string())
+                .args(["-c:v", "libx265", "-preset", "ultrafast", "-x265-params"])
+                .arg(format!("log-level=error:{x265_params}"))
+                .args(["-pix_fmt", "yuv420p10le", "-f", "hevc", "-y"])
+                .arg(&output),
+        );
+        output
+    }
+
+    fn mux(input: &Path, output: &Path) {
+        run_tool(
+            Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(output)
+                .arg(input),
+        );
+    }
+
+    /// A Dolby Vision clip: the HDR source (`source.mkv`) and, as `DV.hevc`, the same stream
+    /// with a `dovi_tool generate` RPU of `profile` ("8.1" or "8.4") on every frame.
+    struct DvClip {
+        source: PathBuf,
+        injected: PathBuf,
+    }
+
+    fn dv_clip(dir: &Path, x265_params: &str, profile: &str) -> DvClip {
+        let raw = encode_hevc(dir, "source.hevc", CLIP_FRAMES, x265_params);
+        let source = dir.join("source.mkv");
+        mux(&raw, &source);
+        let config = dir.join("generate.json");
+        std::fs::write(
+            &config,
+            json!({
+                "cm_version": "V40",
+                "length": CLIP_FRAMES,
+                "profile": profile,
+                "level6": {
+                    "max_display_mastering_luminance": 1000,
+                    "min_display_mastering_luminance": 50,
+                    "max_content_light_level": 1000,
+                    "max_frame_average_light_level": 400
+                },
+                // One shot with L1, which a generated RPU needs to pass the structural checks.
+                "shots": [{
+                    "start": 0,
+                    "duration": CLIP_FRAMES,
+                    "metadata_blocks": [{
+                        "Level1": { "min_pq": 0, "max_pq": 2081, "avg_pq": 1000 }
+                    }]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let rpu = dir.join("RPU.bin");
+        run_tool(
+            Command::new("dovi_tool")
+                .arg("generate")
+                .arg("-j")
+                .arg(&config)
+                .arg("-o")
+                .arg(&rpu),
+        );
+        let injected = dir.join("DV.hevc");
+        run_tool(
+            Command::new("dovi_tool")
+                .arg("inject-rpu")
+                .arg("-i")
+                .arg(&raw)
+                .arg("--rpu-in")
+                .arg(&rpu)
+                .arg("-o")
+                .arg(&injected),
+        );
+        DvClip { source, injected }
+    }
+
+    /// Measurements of `source` by the workspace analyzer: `<dir>/measurements.bin` and its L1
+    /// sidecar.
+    fn analyze(analyzer: &Path, source: &Path, dir: &Path, extra: &[&str]) -> PathBuf {
+        let measurements = dir.join("measurements.bin");
+        run_tool(
+            Command::new(analyzer)
+                .arg(source)
+                .arg("-o")
+                .arg(&measurements)
+                .args(["--hwaccel", "none"])
+                .args(extra),
+        );
+        assert!(metadata::l1_sidecar_path(&measurements).exists());
+        measurements
+    }
+
+    /// Runs `verify_post_mux_with_options` with these arguments in a child process; returns its
+    /// result and everything it printed.
+    fn verify_in_child(
+        input: &Path,
+        output: &Path,
+        measurements: Option<&Path>,
+        hlg_composer: Option<Composer>,
+    ) -> (bool, String) {
+        let temp = tempfile::tempdir().unwrap();
+        let args = json!({
+            "input": input,
+            "output": output,
+            "measurements": measurements,
+            "temp_dir": temp.path(),
+            "hlg_composer": hlg_composer.map(Composer::cli_name),
+        });
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "verify::tests::verify_runs_in_a_child_process",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(VERIFY_CHILD_ENV, args.to_string())
+            .output()
+            .unwrap();
+        let log = format!(
+            "{}{}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert!(child.status.success(), "verify child failed:\n{log}");
+        let result = log
+            .lines()
+            .find_map(|line| line.strip_prefix(VERIFY_RESULT_PREFIX))
+            .unwrap_or_else(|| panic!("verify child printed no result:\n{log}"));
+        (result.trim() == "true", log)
+    }
+
+    #[test]
+    #[ignore = "started by verify_in_child with its arguments in the environment"]
+    fn verify_runs_in_a_child_process() {
+        let Ok(args) = std::env::var(VERIFY_CHILD_ENV) else {
+            return;
+        };
+        let args: serde_json::Value = serde_json::from_str(&args).unwrap();
+        let path = |key: &str| args[key].as_str().map(PathBuf::from);
+        let hlg_composer = args["hlg_composer"].as_str().map(|name| {
+            Composer::ALL
+                .into_iter()
+                .find(|composer| composer.cli_name() == name)
+                .unwrap()
+        });
+        let ok = verify_post_mux_with_options(
+            args["input"].as_str().unwrap(),
+            &path("output").unwrap(),
+            path("measurements").as_deref(),
+            &path("temp_dir").unwrap(),
+            None,
+            hlg_composer,
+            None,
+        );
+        println!("{VERIFY_RESULT_PREFIX}{ok}");
+    }
+
+    #[test]
+    fn verify_passes_when_the_rpu_covers_every_video_frame() {
+        if let Some(reason) = missing_verify_tools() {
+            eprintln!("Skipping verify_passes_when_the_rpu_covers_every_video_frame: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dv_clip(dir.path(), PQ_X265, "8.1");
+        let output = dir.path().join("out.DV.mkv");
+        mux(&clip.injected, &output);
+
+        let (ok, log) = verify_in_child(&clip.source, &output, None, None);
+        assert!(ok, "{log}");
+        assert!(
+            log.contains("Frame count: RPU 6 = output video 6."),
+            "{log}"
+        );
+        // Source and output both have 6 frames: no truncation warning.
+        assert!(!log.contains("check for truncation"), "{log}");
+    }
+
+    #[test]
+    fn verify_fails_when_the_rpu_is_shorter_than_the_video_track() {
+        if let Some(reason) = missing_verify_tools() {
+            eprintln!(
+                "Skipping verify_fails_when_the_rpu_is_shorter_than_the_video_track: {reason}"
+            );
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dv_clip(dir.path(), PQ_X265, "8.1");
+        // Three frames without an RPU appended to the six with one: the RPU covers 6 of 9.
+        let tail = encode_hevc(dir.path(), "tail.hevc", 3, PQ_X265);
+        let long = dir.path().join("long.hevc");
+        let mut bytes = std::fs::read(&clip.injected).unwrap();
+        bytes.extend(std::fs::read(&tail).unwrap());
+        std::fs::write(&long, bytes).unwrap();
+        let output = dir.path().join("out.DV.mkv");
+        mux(&long, &output);
+
+        let (ok, log) = verify_in_child(&output, &output, None, None);
+        assert!(!ok, "{log}");
+        assert!(
+            log.contains("RPU covers 6 frames but the output video track has 9."),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn verify_warns_without_failing_when_the_output_has_fewer_frames_than_the_input() {
+        if let Some(reason) = missing_verify_tools() {
+            eprintln!("Skipping verify_warns_without_failing_when_the_output_has_fewer_frames_than_the_input: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dv_clip(dir.path(), PQ_X265, "8.1");
+        let output = dir.path().join("out.DV.mkv");
+        mux(&clip.injected, &output);
+        // A 9-frame input (3 frames longer, 0.125 s inside the duration tolerance).
+        let long_raw = encode_hevc(dir.path(), "long.hevc", 9, PQ_X265);
+        let long_input = dir.path().join("long.mkv");
+        mux(&long_raw, &long_input);
+
+        let (ok, log) = verify_in_child(&long_input, &output, None, None);
+        assert!(ok, "the input frame count is advisory:\n{log}");
+        assert!(
+            log.contains("Output video has 6 frames but the input reports 9"),
+            "{log}"
+        );
+    }
+
+    /// HLG Profile 8.4 output measured through the preset composer (the one `dovi_tool
+    /// generate` writes), with the sidecar kept or deleted.
+    fn hlg_case(keep_sidecar: bool) -> Option<(bool, String)> {
+        let reason = missing_verify_tools().or_else(|| {
+            sibling_analyzer()
+                .is_none()
+                .then(|| "hdr_analyzer_mvp is not built (cargo build -p hdr_analyzer_mvp)".into())
+        });
+        if let Some(reason) = reason {
+            eprintln!("Skipping HLG verify sidecar test: {reason}");
+            return None;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dv_clip(dir.path(), HLG_X265, "8.4");
+        let output = dir.path().join("out.DV.mkv");
+        mux(&clip.injected, &output);
+        let measurements = analyze(
+            &sibling_analyzer().unwrap(),
+            &clip.source,
+            dir.path(),
+            &["--transfer", "hlg", "--hlg-composer", "preset"],
+        );
+        if !keep_sidecar {
+            std::fs::remove_file(metadata::l1_sidecar_path(&measurements)).unwrap();
+        }
+        Some(verify_in_child(
+            &clip.source,
+            &output,
+            Some(&measurements),
+            Some(Composer::Preset),
+        ))
+    }
+
+    #[test]
+    fn hlg_verify_passes_with_the_sidecar_of_the_rpu_composer() {
+        let Some((ok, log)) = hlg_case(true) else {
+            return;
+        };
+        assert!(ok, "{log}");
+        assert!(
+            log.contains("Dolby Vision compatibility ID 4 (HLG)."),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn hlg_verify_fails_when_the_sidecar_is_missing() {
+        let Some((ok, log)) = hlg_case(false) else {
+            return;
+        };
+        assert!(!ok, "{log}");
+        assert!(
+            log.contains("HLG output: the L1 sidecar cannot be verified"),
+            "{log}"
+        );
+        // Everything else about this output is valid, so the sidecar alone fails it.
+        assert!(
+            log.contains("Dolby Vision compatibility ID 4 (HLG)."),
+            "{log}"
+        );
+        assert!(
+            log.contains("Frame count: RPU 6 = output video 6."),
+            "{log}"
+        );
+        assert!(log.contains("RPU structural invariants passed."), "{log}");
+    }
+
+    #[test]
+    fn pq_verify_passes_when_the_sidecar_is_missing() {
+        let reason = missing_verify_tools().or_else(|| {
+            sibling_analyzer()
+                .is_none()
+                .then(|| "hdr_analyzer_mvp is not built (cargo build -p hdr_analyzer_mvp)".into())
+        });
+        if let Some(reason) = reason {
+            eprintln!("Skipping pq_verify_passes_when_the_sidecar_is_missing: {reason}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dv_clip(dir.path(), PQ_X265, "8.1");
+        let output = dir.path().join("out.DV.mkv");
+        mux(&clip.injected, &output);
+        let measurements = analyze(&sibling_analyzer().unwrap(), &clip.source, dir.path(), &[]);
+        std::fs::remove_file(metadata::l1_sidecar_path(&measurements)).unwrap();
+
+        let (ok, log) = verify_in_child(&clip.source, &output, Some(&measurements), None);
+        assert!(ok, "a PQ output needs no sidecar:\n{log}");
+        assert!(!log.contains("cannot be verified"), "{log}");
+        // The compatibility ID is only checked for HLG output.
+        assert!(!log.contains("compatibility ID"), "{log}");
     }
 }
