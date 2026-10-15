@@ -704,7 +704,16 @@ fn assert_rpu_invariants(
         None => failures.push("required L6 metadata block is missing".to_string()),
     }
 
+    let has_cm_v40 = frame
+        .pointer("/vdr_dm_data/cmv40_metadata")
+        .is_some_and(|data| !data.is_null());
+    if expected_cm_version == Some("V29") && has_cm_v40 {
+        failures.push("expected a CM v2.9 RPU, found CM v4.0 metadata".to_string());
+    }
     if expected_cm_version == Some("V40") {
+        if !has_cm_v40 {
+            failures.push("expected a CM v4.0 RPU, found no CM v4.0 metadata".to_string());
+        }
         if metadata_block(frame, "cmv40", "Level9").is_none() {
             failures.push("required CM v4.0 L9 metadata block is missing".to_string());
         }
@@ -1081,6 +1090,44 @@ mod tests {
     #[test]
     fn rpu_invariants_accept_valid_v40_frame() {
         assert!(assert_rpu_invariants(&valid_frame(), Some("V40"), false));
+    }
+
+    fn cm_version_acceptance_v29_frame() -> serde_json::Value {
+        let mut frame = valid_frame();
+        frame["vdr_dm_data"]["cmv40_metadata"] = serde_json::Value::Null;
+        frame
+    }
+
+    #[test]
+    fn cm_version_acceptance_verify_accepts_v40_for_v40() {
+        assert!(
+            assert_rpu_invariants(&valid_frame(), Some("V40"), false),
+            "verification must accept CM v4.0 when V40 is requested"
+        );
+    }
+
+    #[test]
+    fn cm_version_acceptance_verify_accepts_v29_for_v29() {
+        assert!(
+            assert_rpu_invariants(&cm_version_acceptance_v29_frame(), Some("V29"), false),
+            "verification must accept CM v2.9 when V29 is requested"
+        );
+    }
+
+    #[test]
+    fn cm_version_acceptance_verify_rejects_v40_for_v29() {
+        assert!(
+            !assert_rpu_invariants(&valid_frame(), Some("V29"), false),
+            "verification must reject CM v4.0 when V29 is requested"
+        );
+    }
+
+    #[test]
+    fn cm_version_acceptance_verify_rejects_v29_for_v40() {
+        assert!(
+            !assert_rpu_invariants(&cm_version_acceptance_v29_frame(), Some("V40"), false),
+            "verification must reject CM v2.9 when V40 is requested"
+        );
     }
 
     #[test]

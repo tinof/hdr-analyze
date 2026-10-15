@@ -312,10 +312,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     if args.verify {
         progress::print_info("Running post-mux verification (--verify)...");
         let measurements_file_path = measured.measurements_file.clone();
-        let expected_cm = match args.cm_version {
-            CmVersion::V40 => Some("V40"),
-            CmVersion::V29 => None,
-        };
+        let expected_cm = Some(expected_cm_version(args.cm_version));
         let ok = crate::verify::verify_post_mux_with_options(
             input_file,
             &output_file,
@@ -394,6 +391,14 @@ fn resume_settings(args: &Args, hlg_composer: Option<Composer>, hdr10plus_hybrid
         settings.push_str(" hdr10plus_l1=hybrid");
     }
     settings
+}
+
+/// The CM version `--verify` requires of every RPU frame: the one `--cm-version` asked for.
+pub(super) fn expected_cm_version(cm_version: CmVersion) -> &'static str {
+    match cm_version {
+        CmVersion::V40 => "V40",
+        CmVersion::V29 => "V29",
+    }
 }
 
 fn warn_output_exists(output_file: &Path) {
