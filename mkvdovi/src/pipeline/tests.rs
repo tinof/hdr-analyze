@@ -778,6 +778,7 @@ fn run_acquire_measurements(
         true,
         hlg_composer,
         format,
+        None,
         &mut total,
         &mut current,
     );

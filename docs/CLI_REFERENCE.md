@@ -224,7 +224,7 @@ mkvdovi "input.mkv"     # process a specific file
 |------|---------|-------------|
 | `[INPUT]...` | cwd `*.mkv` | One or more input files; recurses cwd if omitted |
 | `--keep-source` | off | Keep a non-DV source (DV inputs and `--mdfix` runs are always kept by default) |
-| `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8.1 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv`. Profile 8.4 (HLG base layer) and Profile 7 FEL inputs are refused |
+| `--mdfix` | off | Rebuild Profile 7 MEL/Profile 8.1 RPU metadata from fresh base-layer measurements; writes `*.mdfix.DV.mkv`. Profile 8.4 (HLG base layer) and Profile 7 FEL inputs are refused. Prints which authored levels of the source RPU it replaces or drops |
 | `--no-resume` | off | Discard a leftover temp directory and re-run from scratch (by default an interrupted run **resumes**, reusing completed steps, when the temp dir was created for the same input, mkvdovi version, and settings; a temp dir left by an older mkvdovi, with no fingerprint, resumes with a warning, or is discarded when a non-preset `--hlg-composer` is selected) |
 | `--stall-timeout <SECS>` | `300` | Warn if the current step's output file stops growing for this long (`0` disables). This tells a stalled tool apart from merely slow storage |
 | `--verify` | off | After muxing, validate the result: RPU structure, and RPU frame count against the muxed video track and the L1 sidecar. For HLG output it fails when the measurements are missing or the sidecar does not load, and checks that every RPU frame carries the composer the sidecar names (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md#post-mux-verification)) |

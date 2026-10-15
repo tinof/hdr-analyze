@@ -13,12 +13,13 @@ use super::analyzer::{
 use super::dovi_steps::extract_clean_base_layer;
 use super::hdr10plus::extract_hdr10plus_metadata;
 use super::hybrid;
+use super::mdfix_notice::print_mdfix_notice;
 use super::{add_optimizer_args, analyzer_executable, is_dolby_vision, FEL_UNSUPPORTED_MESSAGE};
 use crate::cli::{Args, Hdr10PlusL1};
 use crate::external;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
-use crate::rpu_check::{self, Level5Offsets};
+use crate::rpu_check::{self, AuthoredLevels, Level5Offsets};
 
 /// What the measurement phase hands to the configuration: the format after any fallback or
 /// `--mdfix` rebuild, and where the L1 comes from.
@@ -34,22 +35,32 @@ pub(super) struct Measured {
     pub(super) hdr10plus_hybrid: bool,
 }
 
-/// Step 1: samples a Dolby Vision source RPU and reports the detected format. Returns the L5
-/// offsets sampled from the source RPU.
+/// What the source RPU sample of a Dolby Vision input gives the later phases.
+#[derive(Default)]
+pub(super) struct Detection {
+    /// L5 offsets sampled from the source RPU.
+    pub(super) level5: Option<Level5Offsets>,
+    /// Authored levels seen in the sample, for the `--mdfix` notice; `None` when the input is not
+    /// Dolby Vision or the sample failed.
+    pub(super) authored: Option<AuthoredLevels>,
+}
+
+/// Step 1: samples a Dolby Vision source RPU and reports the detected format.
 pub(super) fn report_detection(
     input_file: &str,
     temp_dir: &Path,
     hdr_type: HdrFormat,
     colour_warnings: &[String],
     custom_composer: Option<Composer>,
-) -> Option<Level5Offsets> {
+) -> Detection {
     progress::print_step(1, 0, "Detecting HDR format...");
-    let mut level5_offsets: Option<Level5Offsets> = None;
+    let mut detection = Detection::default();
 
     if is_dolby_vision(hdr_type) {
         match rpu_check::sample_rpu_windows(input_file, temp_dir) {
             Ok(sample) => {
-                level5_offsets = sample.level5;
+                detection.level5 = sample.level5;
+                detection.authored = Some(sample.authored);
                 if let Ok(report) =
                     rpu_check::analyze_rpus(sample.l1_frames, sample.mastering_peak_pq)
                 {
@@ -90,7 +101,7 @@ pub(super) fn report_detection(
             composer.luminance_mapping()
         ));
     }
-    level5_offsets
+    detection
 }
 
 /// Refuses an unsupported format after the detection report. The only early return that removes
@@ -127,6 +138,7 @@ pub(super) fn acquire_measurements(
     resume_enabled: bool,
     hlg_composer: Option<Composer>,
     hdr_type: HdrFormat,
+    authored: Option<&AuthoredLevels>,
     total_steps: &mut u8,
     current_step: &mut u8,
 ) -> Result<Option<Measured>> {
@@ -214,6 +226,7 @@ pub(super) fn acquire_measurements(
             progress::print_info(
                 "Rebuilding Profile 7 MEL metadata from fresh base-layer measurements (--mdfix).",
             );
+            print_mdfix_notice(authored, args, input_file);
             let clean_bl = extract_clean_base_layer(
                 input_file,
                 temp_dir,
@@ -254,6 +267,7 @@ pub(super) fn acquire_measurements(
             progress::print_info(
                 "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
             );
+            print_mdfix_notice(authored, args, input_file);
             let clean_bl = extract_clean_base_layer(
                 input_file,
                 temp_dir,

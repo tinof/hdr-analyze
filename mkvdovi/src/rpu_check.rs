@@ -1,10 +1,14 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use colored::Colorize;
-use dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlock;
+use dolby_vision::rpu::dovi_rpu::DoviRpu;
+use dolby_vision::rpu::extension_metadata::blocks::{
+    ExtMetadataBlock, ExtMetadataBlockLevel2, ExtMetadataBlockLevel3, ExtMetadataBlockLevel8,
+};
 use dolby_vision::rpu::rpu_data_nlq::DoviELType;
 use dolby_vision::rpu::utils::parse_rpu_file;
 
@@ -24,7 +28,7 @@ pub enum RpuFormatKind {
     OtherDolbyVision,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Level5Offsets {
     pub left: u16,
     pub right: u16,
@@ -175,6 +179,134 @@ pub struct SampledRpu {
     pub mastering_peak_pq: Option<u16>,
     pub level5: Option<Level5Offsets>,
     pub windows_sampled: usize,
+    pub authored: AuthoredLevels,
+}
+
+/// Authored metadata seen in the sampled windows that a `--mdfix` rebuild does not keep as it is.
+/// An absence means only "not seen in the sample".
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuthoredLevels {
+    /// Windows whose RPUs were parsed.
+    pub windows: usize,
+    /// `target_max_pq` of every L2 block with a non-neutral trim.
+    pub l2_trims: BTreeSet<u16>,
+    /// A non-neutral L3 block.
+    pub l3: bool,
+    pub l4: bool,
+    /// Distinct L5 active areas.
+    pub l5_values: BTreeSet<Level5Offsets>,
+    pub l6: bool,
+    /// `target_display_index` of every L8 block with a non-neutral trim or vector field.
+    pub l8_trims: BTreeSet<u8>,
+    /// Source primary index of each L9 block.
+    pub l9: BTreeSet<u8>,
+    /// `target_display_index` -> `target_max_pq` of every L10 block (custom target displays).
+    pub l10_targets: BTreeMap<u8, u16>,
+    /// Distinct L11 (content type, whitepoint, reference mode flag).
+    pub l11: BTreeSet<(u8, u8, bool)>,
+    /// Distinct L254 (DM mode, DM version index).
+    pub l254: BTreeSet<(u8, u8)>,
+    pub l255: bool,
+}
+
+const NEUTRAL_TRIM: u16 = 2048;
+const NEUTRAL_L8_VECTOR: u8 = 128;
+
+fn l2_is_neutral(b: &ExtMetadataBlockLevel2) -> bool {
+    [
+        b.trim_slope,
+        b.trim_offset,
+        b.trim_power,
+        b.trim_chroma_weight,
+        b.trim_saturation_gain,
+    ]
+    .iter()
+    .all(|&v| v == NEUTRAL_TRIM)
+        && b.ms_weight == NEUTRAL_TRIM as i16
+}
+
+fn l3_is_neutral(b: &ExtMetadataBlockLevel3) -> bool {
+    [b.min_pq_offset, b.max_pq_offset, b.avg_pq_offset]
+        .iter()
+        .all(|&v| v == NEUTRAL_TRIM)
+}
+
+/// `length` and `target_display_index` are not trims; fields a short block does not carry are
+/// parsed as these neutral values.
+fn l8_is_neutral(b: &ExtMetadataBlockLevel8) -> bool {
+    [
+        b.trim_slope,
+        b.trim_offset,
+        b.trim_power,
+        b.trim_chroma_weight,
+        b.trim_saturation_gain,
+        b.ms_weight,
+        b.target_mid_contrast,
+        b.clip_trim,
+    ]
+    .iter()
+    .all(|&v| v == NEUTRAL_TRIM)
+        && [
+            b.saturation_vector_field0,
+            b.saturation_vector_field1,
+            b.saturation_vector_field2,
+            b.saturation_vector_field3,
+            b.saturation_vector_field4,
+            b.saturation_vector_field5,
+            b.hue_vector_field0,
+            b.hue_vector_field1,
+            b.hue_vector_field2,
+            b.hue_vector_field3,
+            b.hue_vector_field4,
+            b.hue_vector_field5,
+        ]
+        .iter()
+        .all(|&v| v == NEUTRAL_L8_VECTOR)
+}
+
+/// Adds the authored levels of one window's RPUs to `acc`. Does not count the window.
+pub fn record_authored_levels(acc: &mut AuthoredLevels, rpus: &[DoviRpu]) {
+    for dm in rpus.iter().filter_map(|rpu| rpu.vdr_dm_data.as_ref()) {
+        for level in [2, 3, 4, 5, 6, 8, 9, 10, 11, 254, 255] {
+            for block in dm.level_blocks_iter(level) {
+                match block {
+                    ExtMetadataBlock::Level2(b) if !l2_is_neutral(b) => {
+                        acc.l2_trims.insert(b.target_max_pq);
+                    }
+                    ExtMetadataBlock::Level3(b) if !l3_is_neutral(b) => acc.l3 = true,
+                    ExtMetadataBlock::Level4(_) => acc.l4 = true,
+                    ExtMetadataBlock::Level5(b) => {
+                        acc.l5_values.insert(Level5Offsets {
+                            left: b.active_area_left_offset,
+                            right: b.active_area_right_offset,
+                            top: b.active_area_top_offset,
+                            bottom: b.active_area_bottom_offset,
+                        });
+                    }
+                    ExtMetadataBlock::Level6(_) => acc.l6 = true,
+                    ExtMetadataBlock::Level8(b) if !l8_is_neutral(b) => {
+                        acc.l8_trims.insert(b.target_display_index);
+                    }
+                    ExtMetadataBlock::Level9(b) => {
+                        acc.l9.insert(b.source_primary_index);
+                    }
+                    ExtMetadataBlock::Level10(b) => {
+                        acc.l10_targets
+                            .insert(b.target_display_index, b.target_max_pq);
+                    }
+                    ExtMetadataBlock::Level11(b) => {
+                        acc.l11
+                            .insert((b.content_type, b.whitepoint, b.reference_mode_flag));
+                    }
+                    ExtMetadataBlock::Level254(b) => {
+                        acc.l254.insert((b.dm_mode, b.dm_version_index));
+                    }
+                    ExtMetadataBlock::Level255(_) => acc.l255 = true,
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
 /// Sample short windows spread across the file so the auto-inspect verdict is
@@ -185,6 +317,7 @@ pub fn sample_rpu_windows(input: &str, temp_dir: &Path) -> Result<SampledRpu> {
     let mut mastering_peak_pq = None;
     let mut level5 = None;
     let mut windows_sampled = 0usize;
+    let mut authored = AuthoredLevels::default();
 
     for (idx, offset) in offsets.iter().enumerate() {
         let Some(rpu_path) = extract_rpu_window(input, temp_dir, *offset, idx) else {
@@ -200,8 +333,10 @@ pub fn sample_rpu_windows(input: &str, temp_dir: &Path) -> Result<SampledRpu> {
         if level5.is_none() {
             level5 = rpus.iter().find_map(level5_from_rpu);
         }
+        record_authored_levels(&mut authored, &rpus);
         windows_sampled += 1;
     }
+    authored.windows = windows_sampled;
 
     if windows_sampled == 0 || l1_frames.is_empty() {
         anyhow::bail!("No Dolby Vision RPU data found in sampled windows");
@@ -212,6 +347,7 @@ pub fn sample_rpu_windows(input: &str, temp_dir: &Path) -> Result<SampledRpu> {
         mastering_peak_pq,
         level5,
         windows_sampled,
+        authored,
     })
 }
 
@@ -452,7 +588,7 @@ pub fn analyze_rpus(l1_frames: Vec<L1Stats>, mastering_peak_pq: Option<u16>) -> 
     })
 }
 
-fn l1_from_rpu(rpu: &dolby_vision::rpu::dovi_rpu::DoviRpu) -> Option<L1Stats> {
+fn l1_from_rpu(rpu: &DoviRpu) -> Option<L1Stats> {
     match rpu.vdr_dm_data.as_ref()?.get_block(1)? {
         ExtMetadataBlock::Level1(level1) => Some(L1Stats {
             min_pq: level1.min_pq,
@@ -463,7 +599,7 @@ fn l1_from_rpu(rpu: &dolby_vision::rpu::dovi_rpu::DoviRpu) -> Option<L1Stats> {
     }
 }
 
-fn level5_from_rpu(rpu: &dolby_vision::rpu::dovi_rpu::DoviRpu) -> Option<Level5Offsets> {
+fn level5_from_rpu(rpu: &DoviRpu) -> Option<Level5Offsets> {
     match rpu.vdr_dm_data.as_ref()?.get_block(5)? {
         ExtMetadataBlock::Level5(level5) => Some(Level5Offsets {
             left: level5.active_area_left_offset,
@@ -475,7 +611,7 @@ fn level5_from_rpu(rpu: &dolby_vision::rpu::dovi_rpu::DoviRpu) -> Option<Level5O
     }
 }
 
-fn mastering_peak_from_rpu(rpu: &dolby_vision::rpu::dovi_rpu::DoviRpu) -> Option<u16> {
+fn mastering_peak_from_rpu(rpu: &DoviRpu) -> Option<u16> {
     match rpu.vdr_dm_data.as_ref()?.get_block(6)? {
         ExtMetadataBlock::Level6(level6) => Some(nits_to_pq_12_bit(
             level6.max_display_mastering_luminance as f64,
@@ -515,6 +651,187 @@ fn make_temp_dir(prefix: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dolby_vision::rpu::extension_metadata::blocks::{
+        ExtMetadataBlockLevel1, ExtMetadataBlockLevel10, ExtMetadataBlockLevel11,
+        ExtMetadataBlockLevel4, ExtMetadataBlockLevel5,
+    };
+    use dolby_vision::rpu::generate::{GenerateConfig, VideoShot};
+    use dolby_vision::rpu::vdr_dm_data::CmVersion as RpuCmVersion;
+
+    /// RPUs as `dovi_tool generate` writes them, one shot of two frames per block list. Generated
+    /// RPUs always carry L5 and L6; CM v4.0 adds a neutral L3, L9 0, L11 (1, 0, false) and L254.
+    fn generated(cm_version: RpuCmVersion, shots: Vec<Vec<ExtMetadataBlock>>) -> Vec<DoviRpu> {
+        let shots: Vec<VideoShot> = shots
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut blocks)| {
+                blocks.push(ExtMetadataBlock::Level1(ExtMetadataBlockLevel1::new(
+                    0, 2800, 1200,
+                )));
+                VideoShot {
+                    start: i * 2,
+                    duration: 2,
+                    metadata_blocks: blocks,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        GenerateConfig {
+            cm_version,
+            length: shots.len() * 2,
+            shots,
+            ..Default::default()
+        }
+        .generate_rpu_list()
+        .unwrap()
+    }
+
+    fn authored(rpus: &[DoviRpu]) -> AuthoredLevels {
+        let mut acc = AuthoredLevels::default();
+        record_authored_levels(&mut acc, rpus);
+        acc
+    }
+
+    fn retail_l2(target_max_pq: u16) -> ExtMetadataBlock {
+        ExtMetadataBlock::Level2(ExtMetadataBlockLevel2 {
+            target_max_pq,
+            trim_slope: 1602,
+            trim_power: 1550,
+            trim_saturation_gain: 1929,
+            ms_weight: 0,
+            ..Default::default()
+        })
+    }
+
+    fn l5(top: u16) -> ExtMetadataBlock {
+        ExtMetadataBlock::Level5(ExtMetadataBlockLevel5 {
+            active_area_top_offset: top,
+            active_area_bottom_offset: top,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn authored_levels_of_a_cm_v29_source() {
+        let rpus = generated(
+            RpuCmVersion::V29,
+            vec![vec![
+                retail_l2(2081),
+                ExtMetadataBlock::Level4(ExtMetadataBlockLevel4 {
+                    anchor_pq: 1200,
+                    anchor_power: 2000,
+                }),
+            ]],
+        );
+        let levels = authored(&rpus);
+        assert_eq!(levels.l2_trims, BTreeSet::from([2081]));
+        assert!(levels.l4);
+        assert!(levels.l6);
+        assert_eq!(levels.l5_values.len(), 1);
+        assert!(!levels.l3);
+        assert!(levels.l8_trims.is_empty());
+        assert!(levels.l9.is_empty() && levels.l11.is_empty() && levels.l254.is_empty());
+        assert!(levels.l10_targets.is_empty() && !levels.l255);
+    }
+
+    #[test]
+    fn authored_levels_of_a_cm_v40_source() {
+        let rpus = generated(
+            RpuCmVersion::V40,
+            vec![vec![
+                ExtMetadataBlock::Level2(ExtMetadataBlockLevel2 {
+                    target_max_pq: 2081,
+                    ..Default::default()
+                }),
+                ExtMetadataBlock::Level3(ExtMetadataBlockLevel3 {
+                    min_pq_offset: 2060,
+                    ..Default::default()
+                }),
+                ExtMetadataBlock::Level8(ExtMetadataBlockLevel8 {
+                    trim_slope: 2077,
+                    ..Default::default()
+                }),
+            ]],
+        );
+        let levels = authored(&rpus);
+        // A neutral L2 is not authored metadata the rebuild loses.
+        assert!(levels.l2_trims.is_empty(), "{levels:?}");
+        assert!(levels.l3);
+        assert_eq!(levels.l8_trims, BTreeSet::from([1]));
+        assert!(!levels.l4);
+        assert_eq!(levels.l9, BTreeSet::from([0]));
+        assert_eq!(levels.l11, BTreeSet::from([(1, 0, false)]));
+        assert_eq!(levels.l254, BTreeSet::from([(0, 2)]));
+    }
+
+    #[test]
+    fn neutral_cm_v40_defaults_are_not_authored() {
+        let levels = authored(&generated(RpuCmVersion::V40, vec![vec![]]));
+        assert!(!levels.l3 && levels.l8_trims.is_empty() && levels.l2_trims.is_empty());
+    }
+
+    #[test]
+    fn distinct_l5_and_l11_values_are_all_kept() {
+        let rpus = generated(
+            RpuCmVersion::V40,
+            vec![
+                vec![
+                    l5(0),
+                    ExtMetadataBlock::Level11(ExtMetadataBlockLevel11::default_reference_cinema()),
+                ],
+                vec![
+                    l5(276),
+                    ExtMetadataBlock::Level11(ExtMetadataBlockLevel11 {
+                        content_type: 1,
+                        whitepoint: 0,
+                        reference_mode_flag: false,
+                        ..Default::default()
+                    }),
+                ],
+            ],
+        );
+        let levels = authored(&rpus);
+        assert_eq!(levels.l5_values.len(), 2);
+        assert_eq!(levels.l11.len(), 2, "{levels:?}");
+        assert!(levels.l11.contains(&(1, 0, false)));
+    }
+
+    #[test]
+    fn custom_l8_targets_come_with_their_l10() {
+        let rpus = generated(
+            RpuCmVersion::V40,
+            vec![vec![
+                ExtMetadataBlock::Level10(ExtMetadataBlockLevel10 {
+                    target_display_index: 5,
+                    target_max_pq: 2851,
+                    ..Default::default()
+                }),
+                ExtMetadataBlock::Level8(ExtMetadataBlockLevel8 {
+                    target_display_index: 5,
+                    trim_power: 1900,
+                    ..Default::default()
+                }),
+            ]],
+        );
+        let levels = authored(&rpus);
+        assert_eq!(levels.l8_trims, BTreeSet::from([5]));
+        assert_eq!(levels.l10_targets.get(&5), Some(&2851));
+    }
+
+    #[test]
+    fn windows_accumulate_into_one_summary() {
+        let mut acc = AuthoredLevels::default();
+        record_authored_levels(
+            &mut acc,
+            &generated(RpuCmVersion::V29, vec![vec![retail_l2(2081), l5(0)]]),
+        );
+        record_authored_levels(
+            &mut acc,
+            &generated(RpuCmVersion::V29, vec![vec![retail_l2(2851), l5(140)]]),
+        );
+        assert_eq!(acc.l2_trims, BTreeSet::from([2081, 2851]));
+        assert_eq!(acc.l5_values.len(), 2);
+    }
 
     #[test]
     fn window_offsets_spread_across_known_duration() {

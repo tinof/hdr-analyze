@@ -14,6 +14,10 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- `mkvdovi --mdfix` names the authored Dolby Vision levels it replaces or drops (L2, L3, L4, L5, L6,
+  L8, L9, L10, L11, L254, L255), read from the sampled source RPU windows and printed after the
+  "Rebuilding … (--mdfix)." line. A failed sample gives a general notice; `-q` hides it. The
+  generated RPU is unchanged.
 - `mkvdovi --hdr10plus-l1 hdr10plus|hybrid` (opt-in; the default `hdr10plus` leaves output
   unchanged). Under `hybrid` an HDR10+ input also runs `hdr_analyzer_mvp`, which writes
   `<stem>_measurements.bin` and its `.l1.json` next to the input as for HDR10. Scenes are the union
