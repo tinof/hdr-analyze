@@ -49,8 +49,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-ffmpeg
-      - name: cargo test (locked)
-        run: cargo test --workspace --verbose
+      # Without these tools the HLG, open-GOP, HDR10+ and clip-based tests print `Skipping` and
+      # pass, so PR CI would be green on a broken conversion path. Same tools and pins as release.yml.
+      - uses: ./.github/actions/setup-test-tools
+      # The HLG tests use the hdr_analyzer_mvp built next to mkvdovi. There is no GPU, so the
+      # CUDA parity test is skipped by name. Ubuntu's libx265 has no HDR10_PLUS support.
+      # `shell: bash` runs with -eo pipefail, so a failing cargo test is not hidden by tee.
+      - name: cargo test, every skip accounted for
+        shell: bash
+        run: |
+          cargo build --locked -p hdr_analyzer_mvp
+          cargo test --locked --workspace --verbose -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee "$RUNNER_TEMP/test.log"
+          scripts/ci/check-test-skips.sh "$RUNNER_TEMP/test.log" 'built without HDR10_PLUS|does not accept dhdr10-info'
 
   l1-regression:
     name: L1 regression gate
