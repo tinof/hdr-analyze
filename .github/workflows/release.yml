@@ -18,6 +18,7 @@ on:
     paths:
       - .github/workflows/release.yml
       - .github/actions/setup-ffmpeg/**
+      - .github/actions/setup-test-tools/**
       - scripts/ci/release-*.sh
       - scripts/ci/check-test-skips.sh
       - scripts/ci/bundle-windows-ffmpeg.sh
@@ -43,13 +44,6 @@ env:
   # even an empty one, replaces it, so release binaries target the default baseline CPU
   # instead of whatever CPU this runner has (which crashes on other machines).
   RUSTFLAGS: ""
-  # dovi_tool for the mkvdovi integration tests; bump both together.
-  DOVI_TOOL_VERSION: 2.3.4
-  DOVI_TOOL_SHA256: 1844258e13c26607b32224bf1fa82b595d3b35949f5467405fda560daad32b3f
-  # hdr10plus_tool for the HDR10+ integration test (mkvdovi/tests/hdr10plus_hybrid.rs); bump
-  # both together.
-  HDR10PLUS_TOOL_VERSION: 1.7.2
-  HDR10PLUS_TOOL_SHA256: 06385f37a639d61ba21d4be3150c863846933bc3b58110e094d8fc8f1c2249f2
 
 jobs:
   check:
@@ -110,22 +104,7 @@ jobs:
       # --locked everywhere: a Cargo.lock that does not match the manifests fails here, before
       # any build, instead of each runner resolving its own dependency versions.
       # Without these tools the HLG, open-GOP and clip-based tests skip and pass.
-      - name: Install the tools the integration tests need
-        shell: bash
-        run: |
-          sudo apt-get install -y --no-install-recommends ffmpeg mkvtoolnix mediainfo
-          archive="$RUNNER_TEMP/dovi_tool.tar.gz"
-          curl -fsSL -o "$archive" \
-            "https://github.com/quietvoid/dovi_tool/releases/download/${DOVI_TOOL_VERSION}/dovi_tool-${DOVI_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          echo "${DOVI_TOOL_SHA256}  $archive" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/tools"
-          tar xzf "$archive" -C "$RUNNER_TEMP/tools"
-          archive="$RUNNER_TEMP/hdr10plus_tool.tar.gz"
-          curl -fsSL -o "$archive" \
-            "https://github.com/quietvoid/hdr10plus_tool/releases/download/${HDR10PLUS_TOOL_VERSION}/hdr10plus_tool-${HDR10PLUS_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz"
-          echo "${HDR10PLUS_TOOL_SHA256}  $archive" | sha256sum -c -
-          tar xzf "$archive" -C "$RUNNER_TEMP/tools"
-          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-test-tools
       # The HLG tests use the hdr_analyzer_mvp built next to mkvdovi. There is no GPU, so the
       # CUDA parity test is skipped by name. Ubuntu's libx265 has no HDR10_PLUS support.
       - name: cargo test, every skip accounted for

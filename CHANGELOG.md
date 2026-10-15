@@ -34,6 +34,10 @@ This document provides a historical record of completed milestones, feature impl
   candidate is re-analyzed instead). `--hdr10plus-l1 hybrid` with `--legacy-madvr-l1` is refused at
   startup.
 - The release workflow's test job installs a checksum-pinned `hdr10plus_tool` 1.7.2.
+- PR CI's test job installs the integration-test tools (ffmpeg, mkvtoolnix, mediainfo, pinned
+  `dovi_tool` and `hdr10plus_tool`) through the composite action `.github/actions/setup-test-tools`,
+  which the release workflow now shares, and fails on any `Skipping` line outside the allow-list of
+  `scripts/ci/check-test-skips.sh`. Before, those tests passed as skips in PR CI.
 
 ### Changed
 
