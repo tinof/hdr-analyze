@@ -1226,14 +1226,41 @@ mod tests {
         None
     }
 
-    /// The workspace-built `hdr_analyzer_mvp` (this test binary lives in `target/<profile>/deps`).
-    fn sibling_analyzer() -> Option<PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        let path = exe
-            .parent()?
-            .parent()?
-            .join(format!("hdr_analyzer_mvp{}", std::env::consts::EXE_SUFFIX));
-        path.exists().then_some(path)
+    /// The workspace-built `hdr_analyzer_mvp` (this test binary lives in `target/<profile>/deps`),
+    /// or the reason to skip. `cargo test -p mkvdovi` does not rebuild it, so its `--help` must
+    /// name every composer's sidecar mapping, as `tests/hlg_profile84.rs` requires.
+    fn sibling_analyzer() -> Result<PathBuf, String> {
+        let path = std::env::current_exe()
+            .ok()
+            .and_then(|exe| Some(exe.parent()?.parent()?.to_path_buf()))
+            .map(|dir| dir.join(format!("hdr_analyzer_mvp{}", std::env::consts::EXE_SUFFIX)))
+            .filter(|path| path.exists())
+            .ok_or("hdr_analyzer_mvp is not built (cargo build -p hdr_analyzer_mvp)")?;
+        let help = Command::new(&path)
+            .arg("--help")
+            .output()
+            .map_err(|error| format!("{} --help failed: {error}", path.display()))?;
+        let help = String::from_utf8_lossy(&help.stdout);
+        if let Some(composer) = Composer::ALL
+            .into_iter()
+            .find(|composer| !help.contains(composer.luminance_mapping()))
+        {
+            return Err(format!(
+                "{} predates the spec 4:2:0 HLG decode (its --help does not name {}); rebuild it \
+                 (cargo build -p hdr_analyzer_mvp)",
+                path.display(),
+                composer.luminance_mapping()
+            ));
+        }
+        Ok(path)
+    }
+
+    /// The analyzer for a verify test that needs the tools, or the reason to skip.
+    fn verify_analyzer() -> Result<PathBuf, String> {
+        match missing_verify_tools() {
+            Some(reason) => Err(reason),
+            None => sibling_analyzer(),
+        }
     }
 
     fn run_tool(command: &mut Command) {
@@ -1489,21 +1516,19 @@ mod tests {
     /// HLG Profile 8.4 output measured through the preset composer (the one `dovi_tool
     /// generate` writes), with the sidecar kept or deleted.
     fn hlg_case(keep_sidecar: bool) -> Option<(bool, String)> {
-        let reason = missing_verify_tools().or_else(|| {
-            sibling_analyzer()
-                .is_none()
-                .then(|| "hdr_analyzer_mvp is not built (cargo build -p hdr_analyzer_mvp)".into())
-        });
-        if let Some(reason) = reason {
-            eprintln!("Skipping HLG verify sidecar test: {reason}");
-            return None;
-        }
+        let analyzer = match verify_analyzer() {
+            Ok(analyzer) => analyzer,
+            Err(reason) => {
+                eprintln!("Skipping HLG verify sidecar test: {reason}");
+                return None;
+            }
+        };
         let dir = tempfile::tempdir().unwrap();
         let clip = dv_clip(dir.path(), HLG_X265, "8.4");
         let output = dir.path().join("out.DV.mkv");
         mux(&clip.injected, &output);
         let measurements = analyze(
-            &sibling_analyzer().unwrap(),
+            &analyzer,
             &clip.source,
             dir.path(),
             &["--transfer", "hlg", "--hlg-composer", "preset"],
@@ -1555,20 +1580,18 @@ mod tests {
 
     #[test]
     fn pq_verify_passes_when_the_sidecar_is_missing() {
-        let reason = missing_verify_tools().or_else(|| {
-            sibling_analyzer()
-                .is_none()
-                .then(|| "hdr_analyzer_mvp is not built (cargo build -p hdr_analyzer_mvp)".into())
-        });
-        if let Some(reason) = reason {
-            eprintln!("Skipping pq_verify_passes_when_the_sidecar_is_missing: {reason}");
-            return;
-        }
+        let analyzer = match verify_analyzer() {
+            Ok(analyzer) => analyzer,
+            Err(reason) => {
+                eprintln!("Skipping pq_verify_passes_when_the_sidecar_is_missing: {reason}");
+                return;
+            }
+        };
         let dir = tempfile::tempdir().unwrap();
         let clip = dv_clip(dir.path(), PQ_X265, "8.1");
         let output = dir.path().join("out.DV.mkv");
         mux(&clip.injected, &output);
-        let measurements = analyze(&sibling_analyzer().unwrap(), &clip.source, dir.path(), &[]);
+        let measurements = analyze(&analyzer, &clip.source, dir.path(), &[]);
         std::fs::remove_file(metadata::l1_sidecar_path(&measurements)).unwrap();
 
         let (ok, log) = verify_in_child(&clip.source, &output, Some(&measurements), None);

@@ -1073,11 +1073,7 @@ fn shims_installed() -> bool {
                 None => return false,
             }
         }
-        let bin = tempfile::Builder::new()
-            .prefix("mkvdovi-shims-")
-            .tempdir()
-            .unwrap()
-            .keep();
+        let mut scripts = Vec::new();
         for (tool, real_path) in real {
             // A sandbox call appends its argv to `<root>/fake/<tool>.calls` and runs
             // `<root>/fake/<tool>.sh` with IN (after -i), OUT (after -o, else the last
@@ -1106,9 +1102,29 @@ exec '{}' "$@"
 "#,
                 real_path.display()
             );
-            let shim = bin.join(tool);
-            fs::write(&shim, script).unwrap();
-            fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+            scripts.push((tool, script));
+        }
+        // One directory per set of scripts next to this test binary, reused by every process
+        // instead of a temp dir each run leaves behind. Each shim is written under a
+        // process-unique name and renamed into place, so concurrent processes never see a
+        // partial script.
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            scripts.hash(&mut hasher);
+            hasher.finish()
+        };
+        let exe = std::env::current_exe().unwrap();
+        let bin = exe
+            .parent()
+            .unwrap()
+            .join(format!("mkvdovi-shims-{key:016x}"));
+        fs::create_dir_all(&bin).unwrap();
+        for (tool, script) in scripts {
+            let staged = bin.join(format!(".{tool}.{}", std::process::id()));
+            fs::write(&staged, script).unwrap();
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::rename(&staged, bin.join(tool)).unwrap();
         }
         let path = std::env::var_os("PATH").unwrap_or_default();
         let mut dirs = vec![bin];
