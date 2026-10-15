@@ -34,14 +34,17 @@ cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee 
   && scripts/ci/check-test-skips.sh baseline.log 'built without HDR10_PLUS|does not accept dhdr10-info'
 # One module; mkvdovi and dovi84_composer need --test-workspace=true, so that the analyzer
 # binary is built next to the mkvdovi tests in the mutant copy and mkvdovi's tests run.
-cargo mutants -f 'mkvdovi/src/verify.rs' --test-workspace=true -j 3 --timeout-multiplier 3 \
+mkdir -p <dir>/verify
+cargo mutants -f 'mkvdovi/src/verify.rs' --test-workspace=true -j 3 --timeout 600 \
   -o <dir>/verify -- -- --nocapture --skip cuda_output_matches_cpu
 # Changes on a branch only:
-cargo mutants --in-diff <(git diff main...HEAD) --test-workspace=true -j 3
+cargo mutants --in-diff <(git diff main...HEAD) --test-workspace=true -j 3 --timeout 600
 ```
 
 - Run modules one after another. One run at `-j 3` with `CARGO_BUILD_JOBS=4` fits a 16-core, 10 GB host.
-- Check the run's own baseline log (`<dir>/mutants.out/log/baseline.log`) with `check-test-skips.sh`. A skip there means the run is invalid, and every survivor it reports is suspect.
+- The run's baseline ignores `--test-workspace`: it builds and tests only the mutated package, so for mkvdovi its log shows the "not built next to mkvdovi" skips. The mutants run the whole workspace. Check a few mutant logs (`<dir>/mutants.out/log/*.log`) with `check-test-skips.sh` instead. A skip there means the run is invalid, and every survivor it reports is suspect.
+- Pass `--timeout 600`. The automatic timeout comes from that short package-only baseline (20 s). A workspace run takes 20–30 s per mutant, so survivors show up as timeouts. On `verify.rs`, 20 of 26 "timeouts" were survivors.
+- Cost on the WSL CUDA host: about 10 s of wall time per mutant at `-j 3` (`verify.rs`: 119 mutants in 15 min).
 
 ### Triage: every survivor goes into exactly one bucket
 
