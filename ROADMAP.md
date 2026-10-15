@@ -719,6 +719,40 @@ The detailed gap table and validation method live in
   r4 MEL default in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`. Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
   optimizer-enabled default `.bin` (both gates pass `--disable-optimizer`).
 
+### E14: test-suite audit
+
+- **Status:** Open; step 1 (PR CI runs the tool-dependent tests) in review 2026-10-15. Rules:
+  [`docs/TESTING.md`](docs/TESTING.md).
+- **Why:** a test that has never been red has not been shown to test anything. Until 2026-10-15
+  the PR CI test job installed none of the integration-test tools, so the HLG 8.4, open-GOP, P7,
+  HDR10+ hybrid, synthetic-accuracy and clip tests passed as skips (0.00 s on main run
+  38715765973); only `release.yml` ran them. Mutation testing ran once (E13 step 2: 69 of 75
+  `metadata.rs` mutants caught) and was never repeated. A read-only sweep on 2026-10-15
+  (`~/mkvdovi-work/test-audit-2026-10-15/smells-*.md`, unverified) lists one-sided decisions
+  (`classify_rpu_format`, the `inject_rpu` length refusal, `hlg_bitstream_lacks_transfer`, the
+  verifier's accept path), assertions that only check `is_ok()`, and tests that restate the
+  production formula.
+- **Steps:**
+  1. PR CI installs the tools (`.github/actions/setup-test-tools`, shared with `release.yml`) and
+     fails on unexpected skips.
+  2. P13 pilot: Codex writes the P13 acceptance tests from a behaviour-only spec in a worktree
+     without the diagnosis; record whether they assert something an in-session test would not,
+     and the cost. The owner decides whether a separate test author becomes a roadmap step.
+  3. Mutation baseline (`cargo-mutants`) on `mkvdovi/src`, `verifier/src`,
+     `dovi84_composer/src` and the analyzer contract files (`l1_sidecar.rs`,
+     `leading_pictures.rs`, `ffmpeg_io.rs`, `writer.rs`, `cli.rs`), after a clean
+     `check-test-skips` baseline on the host. Analyzer numerics wait for E13 step 5; E8 is then the
+     validation case.
+  4. Triage every survivor (missing test / equivalent / actual bug / dead code /
+     characterization); actual-bug survivors go to the owner before any test.
+  5. Test-only PRs per crate area; each new test names the mutant it kills or the decision side it
+     adds.
+  6. After the pilot: a `cargo mutants --in-diff` gate in the pre-PR panel for mkvdovi, verifier
+     and dovi84_composer logic (fails only on infrastructure errors; survivors listed with their
+     bucket), and red-on-parent evidence for fix PRs.
+- **Acceptance evidence:** a clean `check-test-skips` log on the audit host; per-module mutant
+  counts (caught / missed / unviable / timeout) before and after; every survivor in a bucket.
+
 ## Checked and kept (2026-10-03)
 
 The review re-examined these decisions and found no evidence to change them:
