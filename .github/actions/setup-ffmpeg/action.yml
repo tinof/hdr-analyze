@@ -33,6 +33,11 @@ runs:
       run: |
         brew install ffmpeg
         echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(brew --prefix)/include" >> "$GITHUB_ENV"
+        # Without FFMPEG_DIR, ffmpeg-sys-next takes the versioned Cellar lib path from pkg-config,
+        # and rust-cache restores that build output after Homebrew bumps ffmpeg: the link then
+        # fails with "library 'avutil' not found" (9.0.1_1 -> 9.0.2_1, 2026-10-15). The opt/
+        # prefix is a version-independent symlink.
+        echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> "$GITHUB_ENV"
 
     - name: Download prebuilt FFmpeg (Windows)
       id: windows
