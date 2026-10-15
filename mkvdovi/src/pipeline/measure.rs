@@ -226,7 +226,7 @@ pub(super) fn acquire_measurements(
             progress::print_info(
                 "Rebuilding Profile 7 MEL metadata from fresh base-layer measurements (--mdfix).",
             );
-            print_mdfix_notice(authored, args);
+            print_mdfix_notice(authored, args, input_file);
             let clean_bl = extract_clean_base_layer(
                 input_file,
                 temp_dir,
@@ -267,7 +267,7 @@ pub(super) fn acquire_measurements(
             progress::print_info(
                 "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
             );
-            print_mdfix_notice(authored, args);
+            print_mdfix_notice(authored, args, input_file);
             let clean_bl = extract_clean_base_layer(
                 input_file,
                 temp_dir,

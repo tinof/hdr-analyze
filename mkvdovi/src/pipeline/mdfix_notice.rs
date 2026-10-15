@@ -2,21 +2,37 @@
 //! rebuild replaces or drops. `dovi_tool generate` regenerates the whole RPU, so the notice can
 //! only name what the sampled windows of the source showed; an absence means "not seen".
 
-use std::collections::BTreeSet;
-
 use dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlockLevel8;
 use dolby_vision::utils::{nits_to_pq_12_bit, pq_to_nits};
 
 use crate::cli::{Args, CmVersion};
+use crate::metadata;
 use crate::progress;
 use crate::rpu_check::AuthoredLevels;
 
 /// L254 that `dovi_tool generate` writes for CM v4.0 (`ExtMetadataBlockLevel254::cmv402_default`).
 const GENERATED_L254: (u8, u8) = (0, 2);
 
-/// Prints the notice: the first line as a warning, the rest as info lines.
-pub(super) fn print_mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args) {
-    let mut lines = mdfix_notice(authored, args).into_iter();
+/// L9 and L11 of a `--cm-version v29` RPU. mkvdovi writes no `cm_version` then
+/// (`metadata/rpu_config.rs`, `generate_extra_json`), so `dovi_tool generate` falls back to CM v4.0
+/// with `CmV40DmData::default_safe`: L9 DCI-P3 (index 0) and L11 cinema. ROADMAP lists this as a
+/// defect; when v29 output becomes CM v2.9, these lines change with it.
+const V29_GENERATED_L9: u8 = 0;
+const V29_GENERATED_L11: (u8, u8, bool) = (1, 0, false);
+const V29_DEFAULT: &str = "generator default under --cm-version v29";
+
+/// Prints the notice: the first line as a warning, the rest as info lines. Under CM v4.0 the L9 to
+/// be written is resolved here as `prepare_configuration` resolves it (MediaInfo unless
+/// `--source-primaries`), only when the sample saw an L9.
+pub(super) fn print_mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args, input_file: &str) {
+    let resolved_primaries = match authored {
+        Some(levels) if args.cm_version == CmVersion::V40 && !levels.l9.is_empty() => Some(
+            args.source_primaries
+                .unwrap_or_else(|| metadata::detect_source_primaries(input_file)),
+        ),
+        _ => args.source_primaries,
+    };
+    let mut lines = mdfix_notice(authored, args, resolved_primaries).into_iter();
     if let Some(header) = lines.next() {
         progress::print_warn(&header);
     }
@@ -27,7 +43,12 @@ pub(super) fn print_mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args)
 
 /// The notice lines: a header, then one line per authored level the rebuild does not keep.
 /// `None`: the source RPU could not be sampled; the header lists what `--mdfix` always does.
-pub(super) fn mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args) -> Vec<String> {
+/// `resolved_primaries`: the L9 index a CM v4.0 rebuild writes; `None` when it is not known.
+pub(super) fn mdfix_notice(
+    authored: Option<&AuthoredLevels>,
+    args: &Args,
+    resolved_primaries: Option<u8>,
+) -> Vec<String> {
     let Some(authored) = authored else {
         return vec![format!(
             "--mdfix rebuilds the whole RPU (L1 is measured again). The source RPU could not be \
@@ -47,7 +68,6 @@ pub(super) fn mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args) -> Ve
         if windows == 1 { "" } else { "s" }
     )];
     let v40 = args.cm_version == CmVersion::V40;
-    let generator_default = "replaced by the generator default";
 
     if !authored.l2_trims.is_empty() {
         let source = nits_list(authored.l2_trims.iter().map(|&pq| pq_label(pq)));
@@ -91,16 +111,32 @@ pub(super) fn mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args) -> Ve
         lines.push(format!("L8 trims for {}: dropped", targets.join(", ")));
     }
     if !authored.l9.is_empty() {
-        let source = join(authored.l9.iter().map(|&index| primaries_label(index)));
-        match (v40, args.source_primaries) {
-            (false, _) => lines.push(format!("L9 primaries {source}: {generator_default}")),
-            (true, Some(index)) if authored.l9 != BTreeSet::from([index]) => lines.push(format!(
-                "L9 primaries {source}: replaced by {} (--source-primaries)",
-                primaries_label(index)
-            )),
-            (true, Some(_)) => {}
-            (true, None) => lines.push(format!(
-                "L9 primaries {source}: rebuilt from the container's colour metadata"
+        let (written, origin) = if !v40 {
+            (Some(V29_GENERATED_L9), V29_DEFAULT)
+        } else if args.source_primaries.is_some() {
+            (resolved_primaries, "--source-primaries")
+        } else {
+            (resolved_primaries, "detected from the container")
+        };
+        match written {
+            Some(index) => {
+                let changed: Vec<u8> = authored
+                    .l9
+                    .iter()
+                    .copied()
+                    .filter(|&v| v != index)
+                    .collect();
+                if !changed.is_empty() {
+                    lines.push(format!(
+                        "L9 primaries {}: replaced by {} ({origin})",
+                        join(changed.iter().map(|&v| primaries_label(v))),
+                        primaries_label(index)
+                    ));
+                }
+            }
+            None => lines.push(format!(
+                "L9 primaries {}: rebuilt from the container's colour metadata",
+                join(authored.l9.iter().map(|&v| primaries_label(v)))
             )),
         }
     }
@@ -108,41 +144,39 @@ pub(super) fn mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args) -> Ve
         let indices = join(authored.l10_targets.keys().map(|index| index.to_string()));
         lines.push(format!("L10 custom target displays {indices}: dropped"));
     }
-    let generated_l11 = (args.content_type.as_u8(), 0, args.reference_mode);
-    let changed_l11 = if v40 {
-        authored
-            .l11
-            .iter()
-            .filter(|&&value| value != generated_l11)
-            .copied()
-            .collect()
+    let (generated_l11, l11_origin) = if v40 {
+        (
+            (args.content_type.as_u8(), 0, args.reference_mode),
+            "--content-type, --reference-mode",
+        )
     } else {
-        authored.l11.clone()
+        (V29_GENERATED_L11, V29_DEFAULT)
     };
+    let changed_l11: Vec<(u8, u8, bool)> = authored
+        .l11
+        .iter()
+        .copied()
+        .filter(|&value| value != generated_l11)
+        .collect();
     if !changed_l11.is_empty() {
-        let source = join(changed_l11.iter().map(|&value| l11_label(value)));
-        lines.push(if v40 {
-            format!(
-                "L11 {source}: replaced by {} (--content-type, --reference-mode)",
-                l11_label(generated_l11)
-            )
-        } else {
-            format!("L11 {source}: {generator_default}")
-        });
+        lines.push(format!(
+            "L11 {}: replaced by {} ({l11_origin})",
+            join(changed_l11.iter().map(|&value| l11_label(value))),
+            l11_label(generated_l11)
+        ));
     }
     let changed_l254: Vec<(u8, u8)> = authored
         .l254
         .iter()
-        .filter(|&&value| !v40 || value != GENERATED_L254)
         .copied()
+        .filter(|&value| value != GENERATED_L254)
         .collect();
     if !changed_l254.is_empty() {
-        let source = join(changed_l254.iter().map(|&value| l254_label(value)));
-        lines.push(if v40 {
-            format!("L254 {source}: replaced by {}", l254_label(GENERATED_L254))
-        } else {
-            format!("L254 {source}: {generator_default}")
-        });
+        lines.push(format!(
+            "L254 {}: replaced by {}",
+            join(changed_l254.iter().map(|&value| l254_label(value))),
+            l254_label(GENERATED_L254)
+        ));
     }
     if authored.l255 {
         lines.push("L255: dropped".to_string());
@@ -220,7 +254,7 @@ fn l254_label((dm_mode, dm_version_index): (u8, u8)) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use clap::Parser;
 
@@ -268,6 +302,11 @@ mod tests {
         }
     }
 
+    /// The notice with L9 resolved only from `--source-primaries`, as without MediaInfo.
+    fn notice(authored: Option<&AuthoredLevels>, args: &Args) -> Vec<String> {
+        mdfix_notice(authored, args, args.source_primaries)
+    }
+
     fn line<'a>(lines: &'a [String], level: &str) -> Option<&'a String> {
         lines[1..]
             .iter()
@@ -283,7 +322,7 @@ mod tests {
 
     #[test]
     fn mel_source_names_replaced_l2_and_dropped_l4() {
-        let lines = mdfix_notice(Some(&mel_v29()), &args(&["--mdfix"]));
+        let lines = notice(Some(&mel_v29()), &args(&["--mdfix"]));
         assert!(lines[0].contains("3 sampled windows"), "{lines:?}");
         assert_eq!(
             line(&lines, "L2").unwrap(),
@@ -298,7 +337,7 @@ mod tests {
 
     #[test]
     fn trim_targets_follow_the_option() {
-        let lines = mdfix_notice(Some(&mel_v29()), &args(&["--trim-targets", "100,300"]));
+        let lines = notice(Some(&mel_v29()), &args(&["--trim-targets", "100,300"]));
         assert!(line(&lines, "L2")
             .unwrap()
             .ends_with("neutral trims for 100, 300 nits (--trim-targets)"));
@@ -306,7 +345,7 @@ mod tests {
 
     #[test]
     fn cm_v40_source_names_l3_l8_and_keeps_equal_l9_l11_l254_quiet() {
-        let lines = mdfix_notice(Some(&p81_v40()), &args(&["--mdfix"]));
+        let lines = notice(Some(&p81_v40()), &args(&["--mdfix"]));
         assert!(line(&lines, "L2")
             .unwrap()
             .starts_with("L2 trims for 100, 600, 1000 nits: replaced"));
@@ -318,7 +357,7 @@ mod tests {
             line(&lines, "L8").unwrap(),
             "L8 trims for 100 nits: dropped"
         );
-        // Auto-detected L9 is resolved later, from the container.
+        // L9 unresolved (no MediaInfo here): it cannot be compared.
         assert!(line(&lines, "L9")
             .unwrap()
             .contains("rebuilt from the container"));
@@ -327,11 +366,23 @@ mod tests {
     }
 
     #[test]
+    fn detected_primaries_name_l9_only_when_they_differ() {
+        let authored = p81_v40();
+        let lines = mdfix_notice(Some(&authored), &args(&["--mdfix"]), Some(2));
+        assert!(line(&lines, "L9").is_none(), "{lines:?}");
+        let lines = mdfix_notice(Some(&authored), &args(&["--mdfix"]), Some(0));
+        assert_eq!(
+            line(&lines, "L9").unwrap(),
+            "L9 primaries 2 (BT.2020): replaced by 0 (P3-D65) (detected from the container)"
+        );
+    }
+
+    #[test]
     fn l11_reference_mode_and_whitepoint_differences_are_named() {
         let mut authored = p81_v40();
         authored.l11.insert((1, 0, true));
         authored.l11.insert((1, 3, false));
-        let lines = mdfix_notice(Some(&authored), &args(&[]));
+        let lines = notice(Some(&authored), &args(&[]));
         let l11 = line(&lines, "L11").expect("a mixed sample still names L11");
         assert!(l11.contains("reference mode on"), "{l11}");
         assert!(l11.contains("whitepoint 3"), "{l11}");
@@ -342,16 +393,16 @@ mod tests {
 
         // The options decide what is written: a matching --reference-mode keeps it quiet.
         authored.l11 = BTreeSet::from([(1, 0, true)]);
-        let lines = mdfix_notice(Some(&authored), &args(&["--reference-mode", "true"]));
+        let lines = notice(Some(&authored), &args(&["--reference-mode", "true"]));
         assert!(line(&lines, "L11").is_none(), "{lines:?}");
     }
 
     #[test]
     fn explicit_source_primaries_name_l9_only_when_they_differ() {
         let authored = p81_v40();
-        let lines = mdfix_notice(Some(&authored), &args(&["--source-primaries", "2"]));
+        let lines = notice(Some(&authored), &args(&["--source-primaries", "2"]));
         assert!(line(&lines, "L9").is_none(), "{lines:?}");
-        let lines = mdfix_notice(Some(&authored), &args(&["--source-primaries", "0"]));
+        let lines = notice(Some(&authored), &args(&["--source-primaries", "0"]));
         assert_eq!(
             line(&lines, "L9").unwrap(),
             "L9 primaries 2 (BT.2020): replaced by 0 (P3-D65) (--source-primaries)"
@@ -362,7 +413,7 @@ mod tests {
     fn authored_l254_is_named_only_when_it_differs() {
         let mut authored = p81_v40();
         authored.l254.insert((1, 1));
-        let lines = mdfix_notice(Some(&authored), &args(&[]));
+        let lines = notice(Some(&authored), &args(&[]));
         assert_eq!(
             line(&lines, "L254").unwrap(),
             "L254 (DM mode 1, version index 1): replaced by (DM mode 0, version index 2)"
@@ -370,28 +421,51 @@ mod tests {
     }
 
     #[test]
-    fn cm_v29_output_drops_l2_and_takes_generator_defaults() {
-        let lines = mdfix_notice(Some(&p81_v40()), &args(&["--cm-version", "v29"]));
+    fn cm_v29_output_drops_l2_and_names_the_generator_defaults() {
+        let v29 = args(&["--cm-version", "v29"]);
+        let mut authored = p81_v40();
+        authored.l9 = BTreeSet::from([2]);
+        authored.l11 = BTreeSet::from([(1, 0, true)]);
+        authored.l254 = BTreeSet::from([(1, 1)]);
+        let lines = notice(Some(&authored), &v29);
         assert_eq!(
             line(&lines, "L2").unwrap(),
             "L2 trims for 100, 600, 1000 nits: dropped (no L2 is written under --cm-version v29)"
         );
-        assert!(line(&lines, "L9").unwrap().ends_with("generator default"));
-        assert!(line(&lines, "L11").unwrap().ends_with("generator default"));
-        assert!(line(&lines, "L254").unwrap().ends_with("generator default"));
+        assert_eq!(
+            line(&lines, "L9").unwrap(),
+            "L9 primaries 2 (BT.2020): replaced by 0 (P3-D65) (generator default under --cm-version v29)"
+        );
+        assert_eq!(
+            line(&lines, "L11").unwrap(),
+            "L11 (content type 1, whitepoint 0, reference mode on): replaced by (content type 1, whitepoint 0, reference mode off) (generator default under --cm-version v29)"
+        );
+        assert_eq!(
+            line(&lines, "L254").unwrap(),
+            "L254 (DM mode 1, version index 1): replaced by (DM mode 0, version index 2)"
+        );
+
+        // Source values equal to what the generator writes are kept: no line.
+        authored.l9 = BTreeSet::from([V29_GENERATED_L9]);
+        authored.l11 = BTreeSet::from([V29_GENERATED_L11]);
+        authored.l254 = BTreeSet::from([GENERATED_L254]);
+        let lines = notice(Some(&authored), &v29);
+        for kept in ["L9", "L11", "L254"] {
+            assert!(line(&lines, kept).is_none(), "{kept}: {lines:?}");
+        }
     }
 
     #[test]
     fn l5_is_named_only_when_the_sample_saw_several_areas() {
         let mut authored = mel_v29();
-        assert!(line(&mdfix_notice(Some(&authored), &args(&[])), "L5").is_none());
+        assert!(line(&notice(Some(&authored), &args(&[])), "L5").is_none());
         authored.l5_values.insert(Level5Offsets {
             top: 140,
             bottom: 140,
             ..Default::default()
         });
         assert_eq!(
-            line(&mdfix_notice(Some(&authored), &args(&[])), "L5").unwrap(),
+            line(&notice(Some(&authored), &args(&[])), "L5").unwrap(),
             "L5: 2 different active areas; the first one is written for every frame"
         );
     }
@@ -403,13 +477,13 @@ mod tests {
             l8_trims: BTreeSet::from([1, 5]),
             ..Default::default()
         };
-        let lines = mdfix_notice(Some(&authored), &args(&[]));
+        let lines = notice(Some(&authored), &args(&[]));
         assert_eq!(
             line(&lines, "L8").unwrap(),
             "L8 trims for 100 nits, target display index 5: dropped"
         );
         authored.l10_targets = BTreeMap::from([(5, 2851)]);
-        let lines = mdfix_notice(Some(&authored), &args(&[]));
+        let lines = notice(Some(&authored), &args(&[]));
         assert_eq!(
             line(&lines, "L8").unwrap(),
             "L8 trims for 100 nits, custom target display 5 (600 nits, from L10): dropped"
@@ -427,7 +501,7 @@ mod tests {
             l5_values: BTreeSet::from([Level5Offsets::default()]),
             ..Default::default()
         };
-        let lines = mdfix_notice(Some(&authored), &args(&[]));
+        let lines = notice(Some(&authored), &args(&[]));
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("No other authored metadata"), "{lines:?}");
         assert!(lines[0].contains("1 sampled window of"), "{lines:?}");
@@ -435,12 +509,12 @@ mod tests {
 
     #[test]
     fn failed_sample_gives_the_general_notice() {
-        let lines = mdfix_notice(None, &args(&[]));
+        let lines = notice(None, &args(&[]));
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("could not be sampled"));
         assert!(lines[0].contains("L2 trims are replaced by neutral trims"));
         assert!(lines[0].contains("L4, L8, L10 and L255 are dropped"));
-        let lines = mdfix_notice(None, &args(&["--cm-version", "v29"]));
+        let lines = notice(None, &args(&["--cm-version", "v29"]));
         assert!(lines[0].contains("L2 trims are dropped"));
     }
 }
