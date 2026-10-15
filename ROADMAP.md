@@ -66,9 +66,8 @@ doing.
 
 1. **P9 peak parity for the other `--peak-source` values:** done 2026-10-14, PASS, no fix needed
    (see P9). Release: none
-2. **P11: `--mdfix` dropped-levels notice** (priority 5; `feat/p11-mdfix-notice`, own branch). Gate:
-   `--mdfix` names the authored levels it drops, with a unit test. In v0.7.0 only if merged by about
-   2026-10-19. Release: patch
+2. **P11: `--mdfix` dropped-levels notice:** done 2026-10-15 on `feat/p11-mdfix-notice`, gate met
+   (see P11). In v0.7.0 if merged by about 2026-10-19. Release: patch
 3. **P1 open (1): measure CPU `accurate` against `balanced`** (priority 4; no branch). Cost and L1 max
    / MaxCLL effect of `FAST_BILINEAR`; v0.7.0 binaries are CPU-only. E13 step 5 takes the first
    branch-free slot after P11 and the release PR. Release: none
@@ -90,7 +89,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13 step 5 (refactor), P1 step 1 measurement, P9 peak-parity measurement (done 2026-10-14, PASS, no fix) | No user-visible change |
-| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` notice only if merged by about 2026-10-19 | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
+| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (done on `feat/p11-mdfix-notice`, merge pending; in only if merged by about 2026-10-19) | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
 | v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract), both after E13 step 5 | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
@@ -103,6 +102,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-15 | P11 notice: `--mdfix` names the authored levels it replaces or drops, from the sampled source RPU windows; r4/r5 `--mdfix` RPUs identical to 0.6.0; two defects found (P12, P13). | P11, P12, P13 | `feat/p11-mdfix-notice` |
 | 2026-10-14 | P9 peak parity: under `histogram99`, `max-scl` and `max-scl-luminance` the hybrid max equals `dovi_tool`'s on every non-fallback frame of six cuts (0 mismatches), fallbacks carry the analyzer scene's max, `--boost` equals `histogram99`. | P9 | `docs/p9-peak-parity` |
 | 2026-10-14 | P9 hybrid flag: opt-in `--hdr10plus-l1 hybrid` (union pieces, HDR10+ peak, measured average and minimum); default RPUs byte-identical to 0.6.0, Alita pooled clamped MAE 37.58 / 18.91 as pre-registered. | P9 | `feat/p9-hdr10plus-hybrid` |
 | 2026-10-14 | P7: mkvdovi refuses PQ input tagged full range before any temp work (HDR10, HDR10+, `--mdfix`), including a full-range stream the container overrides as limited; 9/9 RPU baselines byte-identical to 0.6.0. | P7 | `fix-p7-full-range-pq` |
@@ -181,7 +181,8 @@ evidence for each priority is in its items and in
    first. **Prerequisite:** E13 step 5 (analyzer
    split) before E8 + E9, because E8 moves the default `.bin`.
 5. **`--mdfix` replaces the whole RPU** (P11): full regeneration stays (owner decision 2026-10-13);
-   open: a notice that names the authored levels it drops.
+   the notice that names the authored levels it drops landed 2026-10-15. Open defects found with it:
+   `--mdfix` ignores the source RPU's L6 (P12); `--cm-version v29` writes CM v4.0 (P13).
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts. Gate: the simulator reproduces the recomputed numbers in WS7.
 7. **Test material** (WS8): grain on synthetic highlights, unaligned positions, a same-master grainy
@@ -384,20 +385,42 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P11: `--mdfix` and authored metadata
 
-- **Status:** Open; decided 2026-10-13 (owner): full regeneration stays, with a notice.
-- `--mdfix` regenerates the whole RPU: authored L2 and L4 become neutral L2 and no L4, authored L5
-  is reduced to one sampled value, L6 comes from the container. Retail trims are far from neutral.
-- **Decision (owner, 2026-10-13):** keep full regeneration, since trims were authored for the
-  authored L1 and shot list; no targeted repair. **Open:** `--mdfix` states in its output which
-  authored levels it drops.
-- **Checked 2026-10-14 @f5d4ccc:** samplers `rpu_check::extract_rpu_sample` (`rpu_check.rs:132`,
-  from `metadata/format.rs:468`) and `sample_rpu_windows` (`rpu_check.rs:182`, from
-  `pipeline/measure.rs:50`); `SampledRpu` (`rpu_check.rs:173`) has no L2/L4. Name each level by what
-  happens: L1, L2, L6, L9, L11 regenerated (`generate_extra_json`, `metadata/rpu_config.rs:103`);
-  L3 replaced by neutral offsets (2048) and L254 added (`dovi_tool` CM v4.0 defaults, seen in the
-  0.6.0 `--mdfix` baselines); L4, L8, L10 removed; L5 reduced to one sampled value. To name them,
-  the sampler must also detect L2/L3/L4/L8. A sampled absence means "not seen"; a failed read
-  still gives a general notice.
+- **Status:** Done 2026-10-15 on `feat/p11-mdfix-notice` (merge pending); decided 2026-10-13
+  (owner): full regeneration stays, with a notice.
+- `--mdfix` regenerates the whole RPU: authored L2 and L4 become neutral L2 and no L4, L3 becomes
+  neutral, L8 and L10 are dropped, authored L5 is reduced to one sampled value, L6 comes from the
+  container (P12). Retail trims are far from neutral.
+- **Done:** after each "Rebuilding … (--mdfix)." line, `pipeline/mdfix_notice.rs` prints one line
+  per authored level it replaces or drops, compared with what the rebuild writes; a failed sample
+  gives a general notice; `-q` hides it. Unit tests in `rpu_check.rs` and `mdfix_notice.rs`; r4 and
+  r5 `--mdfix` RPUs identical to the 0.6.0 baselines
+  ([log](docs/ROADMAP_LOG.md)).
+
+### P12: `--mdfix` ignores the source RPU's L6
+
+- **Status:** Open defect, found 2026-10-15; not fixed.
+- Under `--mdfix` the mastering min/max come from the container or the defaults
+  (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:42-43`),
+  never from the source RPU's L6. On r5 Inside Out 2 (P8.1, no ST 2086 in the container) the RPU's
+  0.0001/1000 nits becomes 0.005/1000 nits and `source_min_pq` 7 becomes 62 on every frame
+  (baseline `~/mkvdovi-work/rpu-baseline/0.6.0/mdfix/r5-inside-out-2-mind-console`). The only
+  message is a generic "not found" warning.
+- **Fix:** under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults. Changes
+  delivered RPUs: own branch, RPU baselines updated.
+
+### P13: `--cm-version v29` writes a CM v4.0 RPU
+
+- **Status:** Open defect, found 2026-10-15; not fixed. A flag-contract defect; the owner may want
+  it before v0.7.0.
+- `generate_extra_json` writes `cm_version` only on the V40 branch
+  (`mkvdovi/src/metadata/rpu_config.rs:152`), and `dolby_vision` 3.4.0 `GenerateConfig.cm_version`
+  defaults to V40. Under `--cm-version v29` the RPU is CM v4.0 with no L2 and the crate's default
+  L3, L9 (DCI-P3, index 0), L11 (cinema) and L254. Confirmed 2026-10-15 with `dovi_tool generate` +
+  `dovi_tool info -s` ("DM version: 2 (CM v4.0)", "L9 MDP: DCI-P3 D65", no L2). `--verify` passes
+  no expected CM version for v29 (`mkvdovi/src/pipeline/mod.rs:315-318`), so it does not catch it.
+- **Fix:** write `"cm_version": "V29"` for v29 (or drop the flag), and make `--verify` check the CM
+  version for v29 too. The P11 notice describes today's v29 output through `V29_GENERATED_L9` /
+  `V29_GENERATED_L11` in `pipeline/mdfix_notice.rs`; they change with the fix.
 
 ## `cm_analyze` parity
 

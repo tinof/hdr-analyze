@@ -6,6 +6,35 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-15: P11, `--mdfix` dropped-levels notice
+
+Closes P11's open step. Notice only: no change to any generated RPU, `extra.json` or resume
+fingerprint.
+
+- Code: `rpu_check::sample_rpu_windows` also collects `AuthoredLevels` (non-neutral L2 targets,
+  non-neutral L3, L4, distinct L5, L6, non-neutral L8 indices, L9, L10 custom targets, L11, L254,
+  L255). After each "Rebuilding … (--mdfix)." line (MEL and Profile 8),
+  `pipeline/mdfix_notice.rs::print_mdfix_notice` prints a warning header and one line per level it
+  replaces or drops, compared with what the rebuild writes (L9 from `--source-primaries` or
+  MediaInfo, L11 from `--content-type`/`--reference-mode`, L254 (0,2)). A failed sample gives a
+  general notice; `-q` hides it. `Args::trim_targets_nits` is now the one `--trim-targets` parser.
+- Corpus census (18 development cuts with retail RPUs): of the `--mdfix`-eligible ones, 8 Profile 7
+  MEL cuts are CM v2.9 with non-neutral L2 (plus L4, L5, L6); 2 Profile 8.1 cuts are CM v4.0 and
+  also carry L3, L8, L9, L11 and L254.
+- Real inputs: r4 Skyfall (P7 MEL, CM v2.9) names L2 at 100 nits replaced, L4 dropped, L6 not taken
+  from the source RPU. r5 Inside Out 2 (P8.1, CM v4.0) names L2 at 100/600/1000 nits replaced, L3
+  neutral, L4 dropped, L6, L8 at 100 nits dropped; L9, L11 and L254 equal, no line. Profile 8
+  without `--mdfix` prints no notice. r4 and r5 `--mdfix` and the d1-hotd default capture are
+  identical to the 0.6.0 baselines (`scripts/rpu-baseline.sh compare --require-identical-l1`,
+  PASS).
+- Gates: fmt, clippy `-D warnings`, full workspace test, no unexpected skips. Unit tests:
+  `rpu_check::tests::authored_levels_*`, `distinct_l5_and_l11_values_are_all_kept`,
+  `custom_l8_targets_come_with_their_l10`, `windows_accumulate_into_one_summary`, 13 tests in
+  `pipeline/mdfix_notice.rs`, `cli::tests::trim_targets_parse_as_nits_in_order`.
+- Found on the way, not fixed: P12 (`--mdfix` ignores the source RPU's L6; r5 `source_min_pq` 7
+  becomes 62) and P13 (`--cm-version v29` writes a CM v4.0 RPU).
+- Evidence: `~/mkvdovi-work/p11-mdfix-notice-2026-10-15/` (`run.sh`, `run.log`, `compare-*.log`).
+
 ### 2026-10-14: P9, peak parity for the other `--peak-source` values
 
 Closes P9's open item "peak parity with `dovi_tool` is measured for the `histogram` source only".
