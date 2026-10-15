@@ -44,6 +44,14 @@ This document provides a historical record of completed milestones, feature impl
   Not checked: the MEL fast path without `--mdfix` (the authored RPU is kept), and untagged range,
   which is accepted. Only the range is checked for PQ, not the matrix or primaries.
 
+### Fixed
+
+- `mkvdovi --cm-version v29` writes a CM v2.9 RPU (L1, L5, L6). 0.6.0 wrote a CM v4.0
+  RPU under v29, with `dovi_tool`'s default L3, L9 (DCI-P3), L11 (cinema) and L254 and no L2. A
+  0.6.0 v29 temp directory regenerates its RPU on resume. `--verify` now checks the requested CM
+  version for v29 too and fails a mismatch. Under `--mdfix` with v29 the notice names L3, L9, L11
+  and L254 as dropped. CM v4.0 output is unchanged.
+
 ## [0.6.0] - 2026-10-13
 
 ### Upgrade notes

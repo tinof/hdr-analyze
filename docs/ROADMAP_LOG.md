@@ -6,6 +6,36 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-15: P13, `--cm-version v29` writes a CM v2.9 RPU
+
+Closes P13. Changes delivered output only under `--cm-version v29`.
+
+- Before: `generate_extra_json` wrote `cm_version` only for v40, and `dovi_tool generate` defaults
+  to V40. v29 output was CM v4.0 with the generator's L3, L9 (DCI-P3), L11 (cinema) and L254 and no
+  L2; `--verify` passed no expected CM version for v29.
+- Code: the v29 branch of `generate_extra_json` writes `"cm_version": "V29"`
+  (`mkvdovi/src/metadata/rpu_config.rs`). `pipeline::expected_cm_version` passes the requested
+  version to `--verify` for both values; `verify::assert_rpu_invariants` fails CM v4.0 metadata on
+  frame 0 under V29 and a missing CM v4.0 block under V40. The `--mdfix` notice
+  (`pipeline/mdfix_notice.rs`) no longer names generator-default L9/L11/L254 under v29; it names
+  L3, L9, L11 and L254 as dropped ("a CM v2.9 RPU has no CM v4.0 levels"). The `V29_GENERATED_*`
+  constants are gone.
+- v29 output: r2 HDR10, g3 HLG (bt2100 composer) and the r4 MEL `--mdfix` rebuild report "DM
+  version: 1 (CM v2.9)" in `dovi_tool info --summary`, carry no CM v4.0 data (cmv29 blocks L1, L5,
+  L6; no L2) and pass `--verify`.
+- CM v4.0 unchanged: the default d1 RPU and the r4/r5 `--mdfix` RPUs are identical to the 0.6.0
+  baselines (`scripts/rpu-baseline.sh compare --require-identical-l1`).
+- Resume: a 0.6.0 v29 temp dir regenerates its RPU, because `config::withdraw_stale_rpu` sees the
+  changed `extra.json`.
+- Tests: `extra_json_names_the_requested_cm_version` (hermetic). The `cm_version_acceptance_*`
+  tests in `metadata/tests.rs` and `verify.rs` were written by Codex from a behaviour-only spec (the
+  E14 pilot, `~/mkvdovi-work/test-audit-2026-10-15/p13-pilot.md`); three were red on main. The
+  `dovi_tool`-backed ones skip without `dovi_tool`.
+- Gates: fmt, clippy `-D warnings`, full workspace test on 38ff64f; only allowed skips.
+- Evidence: `~/mkvdovi-work/p13-cm-v29-2026-10-15/` (`run.sh`, `run.log`, `run-v29.log`,
+  `capture-v29-gen.log`, `compare-*.log`).
+- Open for the owner: should v29 RPUs carry neutral L2 trims? v40 writes them; v29 never did.
+
 ### 2026-10-15: P11, `--mdfix` dropped-levels notice
 
 Closes P11's open step. Notice only: no change to any generated RPU, `extra.json` or resume

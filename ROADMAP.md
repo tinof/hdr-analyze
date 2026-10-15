@@ -80,6 +80,8 @@ startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 - **P9: default change.** Whether hybrid mode becomes the default, after holdout HDR10+ scoring (development tier
   scored 2026-10-14).
 - **P10 step 3: write L1 in-process.** Needs WS7 or playback evidence first.
+- **P13: L2 under `--cm-version v29`.** Should v29 RPUs carry neutral L2 trims, as v40 does? v29
+  never wrote L2 and still does not. A question, not a decision.
 
 ### Release plan (2026-10-14)
 
@@ -89,7 +91,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13 step 5 (refactor), P1 step 1 measurement, P9 peak-parity measurement (done 2026-10-14, PASS, no fix) | No user-visible change |
-| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (done on `feat/p11-mdfix-notice`, merge pending; in only if merged by about 2026-10-19) | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
+| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (done on `fix-p13-cm-v29`, merge pending; owner decision 2026-10-15) | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
 | v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract), both after E13 step 5 | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
@@ -102,6 +104,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-15 | P13: `--cm-version v29` writes a CM v2.9 RPU (L1, L5, L6) and `--verify` checks the requested CM version; CM v4.0 RPUs identical to 0.6.0. | P13 | `fix-p13-cm-v29` |
 | 2026-10-15 | P11 notice: `--mdfix` names the authored levels it replaces or drops, from the sampled source RPU windows; r4/r5 `--mdfix` RPUs identical to 0.6.0; two defects found (P12, P13). | P11, P12, P13 | `feat/p11-mdfix-notice` |
 | 2026-10-14 | P9 peak parity: under `histogram99`, `max-scl` and `max-scl-luminance` the hybrid max equals `dovi_tool`'s on every non-fallback frame of six cuts (0 mismatches), fallbacks carry the analyzer scene's max, `--boost` equals `histogram99`. | P9 | `docs/p9-peak-parity` |
 | 2026-10-14 | P9 hybrid flag: opt-in `--hdr10plus-l1 hybrid` (union pieces, HDR10+ peak, measured average and minimum); default RPUs byte-identical to 0.6.0, Alita pooled clamped MAE 37.58 / 18.91 as pre-registered. | P9 | `feat/p9-hdr10plus-hybrid` |
@@ -182,7 +185,7 @@ evidence for each priority is in its items and in
    split) before E8 + E9, because E8 moves the default `.bin`.
 5. **`--mdfix` replaces the whole RPU** (P11): full regeneration stays (owner decision 2026-10-13);
    the notice that names the authored levels it drops landed 2026-10-15. Open defects found with it:
-   `--mdfix` ignores the source RPU's L6 (P12); `--cm-version v29` writes CM v4.0 (P13).
+   `--mdfix` ignores the source RPU's L6 (P12); P13 (`--cm-version v29` wrote CM v4.0) fixed 2026-10-15.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts. Gate: the simulator reproduces the recomputed numbers in WS7.
 7. **Test material** (WS8): grain on synthetic highlights, unaligned positions, a same-master grainy
@@ -410,17 +413,18 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P13: `--cm-version v29` writes a CM v4.0 RPU
 
-- **Status:** Open defect, found 2026-10-15; not fixed. A flag-contract defect; the owner may want
-  it before v0.7.0.
-- `generate_extra_json` writes `cm_version` only on the V40 branch
-  (`mkvdovi/src/metadata/rpu_config.rs:152`), and `dolby_vision` 3.4.0 `GenerateConfig.cm_version`
-  defaults to V40. Under `--cm-version v29` the RPU is CM v4.0 with no L2 and the crate's default
-  L3, L9 (DCI-P3, index 0), L11 (cinema) and L254. Confirmed 2026-10-15 with `dovi_tool generate` +
-  `dovi_tool info -s` ("DM version: 2 (CM v4.0)", "L9 MDP: DCI-P3 D65", no L2). `--verify` passes
-  no expected CM version for v29 (`mkvdovi/src/pipeline/mod.rs:315-318`), so it does not catch it.
-- **Fix:** write `"cm_version": "V29"` for v29 (or drop the flag), and make `--verify` check the CM
-  version for v29 too. The P11 notice describes today's v29 output through `V29_GENERATED_L9` /
-  `V29_GENERATED_L11` in `pipeline/mdfix_notice.rs`; they change with the fix.
+- **Status:** Done 2026-10-15 on `fix-p13-cm-v29` (merge pending). In v0.7.0 (owner decision
+  2026-10-15).
+- Before the fix `generate_extra_json` wrote `cm_version` only on the V40 branch, and
+  `dovi_tool generate` defaults to V40: v29 output was CM v4.0 with the generator's L3, L9
+  (DCI-P3), L11 (cinema) and L254 and no L2, and `--verify` checked no CM version for v29.
+- **Done:** `generate_extra_json` writes `"cm_version": "V29"` for v29
+  (`mkvdovi/src/metadata/rpu_config.rs`); `--verify` requires the requested version on frame 0
+  for both values (`pipeline::expected_cm_version`, `verify::assert_rpu_invariants`); the `--mdfix`
+  notice names L3, L9, L11 and L254 as dropped under v29. r2 HDR10, g3 HLG and r4 MEL `--mdfix`
+  under v29 report "DM version: 1 (CM v2.9)" (L1, L5, L6; no L2) and pass `--verify`; d1, r4 and
+  r5 CM v4.0 RPUs identical to the 0.6.0 baselines ([log](docs/ROADMAP_LOG.md)).
+- **Open (owner):** should v29 RPUs carry neutral L2 trims? See "Waiting for the owner".
 
 ## `cm_analyze` parity
 

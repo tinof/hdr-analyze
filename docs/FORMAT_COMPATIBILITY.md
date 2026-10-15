@@ -224,6 +224,11 @@ mkvdovi "input.mkv" --cm-version v29
 mkvdovi "input.mkv" --source-primaries 0
 ```
 
+`--cm-version v29` writes a CM v2.9 RPU: L1, L5 and L6, no L2 and none of the CM v4.0 levels (L3,
+L8, L9, L10, L11, L254). Before the 2026-10-15 fix it wrote a CM v4.0 RPU with `dovi_tool`'s default
+L3, L9 (DCI-P3), L11 (cinema) and L254 and no L2. The table below describes the default CM v4.0
+output.
+
 ### Metadata levels generated
 
 | Level | Current output |
@@ -289,7 +294,8 @@ mkvdovi --keep-source --verify "input.mkv"
 
 For HDR10/HLG inputs with measurements, `mkvdovi` resolves `verifier` from `PATH`. It also extracts
 the final RPU and validates structured `dovi_tool info --frame 0` JSON: Profile 8, ordered L1 values,
-sane L6 metadata, and required L9/L11/L254 blocks for CM v4.0. It fails when the RPU frame count
+sane L6 metadata, the CM version `--cm-version` asked for (CM v4.0 metadata fails a v29 run, its
+absence fails a v40 run), and required L9/L11/L254 blocks for CM v4.0. It fails when the RPU frame count
 differs from the muxed video track's frame count or from the L1 sidecar, and warns when the output
 and input video frame counts differ. For an RPU that `mkvdovi` generated (every path except the
 Profile 7 MEL passthrough), the RPU is parsed in-process, which also gives the frame count. Every
