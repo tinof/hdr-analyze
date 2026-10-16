@@ -14,9 +14,10 @@ Next up).
 
 ## Readiness rules
 
-- A change to the analysis or decode path (`hdr_analyzer_mvp/src/analysis/`,
-  `hdr_analyzer_mvp/src/{ffmpeg_io,pipeline,cli,crop}` as `.rs` or directory, `dovi84_composer/src/`,
-  or the build inputs listed under Gates) needs `scripts/cuda-parity.sh` (probe `gpu`).
+- A change to any path the **clippy-cuda + CUDA parity** gate lists under Gates (the analysis and
+  decode path, `dovi84_composer/src/`, `scripts/cuda-parity.sh`,
+  `hdr_analyzer_mvp/tests/cuda_parity.rs` and the build inputs) needs `scripts/cuda-parity.sh`
+  (probe `gpu`).
 - A step whose gate is scored on real content needs the development corpus (probe `corpus`).
 
 ## Material
