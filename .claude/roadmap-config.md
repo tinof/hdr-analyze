@@ -32,9 +32,14 @@ Next up).
 The pre-PR review computes them with `.claude/workflows/pre-pr-panel.js` (`gatesOnly: true`);
 name them in the draft so the cost of each step is visible.
 
-- **Tests:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test --workspace`; every Rust change. Integration tests with media and tools skip
-  without them, and CI fails on an unexpected `Skipping` line.
+- **Tests** (`fmt`, `clippy`, `test`): `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`; Rust or
+  Cargo files outside `tools/`, plus `.cargo/`, `rust-toolchain.toml`, `clippy.toml` and
+  `rustfmt.toml`. Integration tests with media and tools skip without them, and CI fails on an
+  unexpected `Skipping` line.
+- **Tool crates** (`tool:<crate>`): `cargo fmt`/`clippy -D warnings`/`test` with
+  `--manifest-path tools/<crate>/Cargo.toml`; any `.rs` or `Cargo.toml`/`Cargo.lock` under
+  `tools/<crate>/`. The tool crates are outside the workspace, so the Tests gate never builds them.
 - **clippy-cuda + CUDA parity** (`scripts/cuda-parity.sh`): `hdr_analyzer_mvp/src/analysis/`,
   `hdr_analyzer_mvp/src/{ffmpeg_io,pipeline,cli,crop}` (`.rs` or directory; not mkvdovi's
   `pipeline/`), `dovi84_composer/src/`, `scripts/cuda-parity.sh`,
