@@ -57,8 +57,8 @@ name them in the draft so the cost of each step is visible.
   `gh pr list --state merged --limit 10`).
 - Sharing rule: two steps may share a branch when they are in the same crate, need the same test
   gate and change no L1.
-- Hand-off: the step branch goes out with the step's code through `/codex-ship`;
-  `/pre-pr-review` and `/codex-ship` work on a branch that already exists.
+- Hand-off: the step branch goes out with the step's code through `/ship`;
+  `/pre-pr-review` and `/ship` work on a branch that already exists.
 - Exceptions: a step that moves L1 always has its own branch. A module-size split (E13) is a pure
   move in its own commit and needs no other branch open in the files it moves.
 

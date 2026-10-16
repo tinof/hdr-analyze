@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /codex-ship runs it in ship mode (step 1b); the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship runs it in ship mode (step 1b); the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
 ---
@@ -10,12 +10,15 @@ disable-model-invocation: true
 **Modes.**
 - **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including both
   passes of step 2 (Codex and Gemini). End as step 8 says.
-- **Ship mode:** `/codex-ship` step 1b told you to follow this file. Skip step 2a (Codex focused
-  pass): the focus text from step 7 goes to `/codex-ship`'s steered Codex pass instead, so the same
-  diff never gets two steered Codex runs. Still run step 2b (Gemini). A blocker from step 4 or 5 stops `/codex-ship` before its push.
+- **Ship mode:** `/ship` step 1b told you to follow this file. Skip step 2a (Codex focused
+  pass): the focus text from step 7 goes to `/ship`'s steered Codex pass instead, so the same
+  diff never gets two steered Codex runs. Still run step 2b (Gemini). A blocker from step 4 or 5 stops `/ship` before its push.
+- **What this review is.** This repo has no `docs/REVIEW.md`, so `/ship` runs in legacy mode, and its
+  Codex review is the cross-family review. This panel's Claude lenses are a builder self-check on
+  Claude-built code; they add coverage but never replace that review.
 
-Both modes end with the record in step 8. `/codex-ship` step 1b reuses that record instead of
-running this review again while HEAD is unchanged, so a standalone run followed by `/codex-ship`
+Both modes end with the record in step 8. `/ship` step 1b reuses that record instead of
+running this review again while HEAD is unchanged, so a standalone run followed by `/ship`
 costs one review, not two.
 
 Either way, the user's command is the opt-in for the Gemini pass in step 2b, the `pre-pr-panel`
@@ -32,7 +35,7 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
    head names). Then commit the task's staged, unstaged and untracked files in the base's commit
    style (`git log --oneline -15 origin/<base>`). Leave out untracked files that do not clearly
    belong (downloads, media, logs, scratch output). If you cannot tell, ask once. Never delete
-   them. In ship mode, `/codex-ship` step 1 has already done this.
+   them. In ship mode, `/ship` step 1 has already done this.
    Scope = `git diff --name-only origin/<base>...HEAD`.
    Then remove any record for this HEAD (step 8), so a run that stops early cannot leave an
    older, reusable one behind:
@@ -57,7 +60,7 @@ background Codex runs (it kills a silent run after 8 minutes, retries once, and 
 and `-o <prefix>.md`):
 
 ```
-~/.claude/skills/codex-ship/scripts/codex-watch.sh <scratchpad>/prepr-codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none."
+~/.claude/skills/ship/scripts/codex-watch.sh <scratchpad>/prepr-codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none."
 ```
 
 The review text is in `<scratchpad>/prepr-codex.md`. `--json` prints no header, so report
@@ -162,7 +165,7 @@ Fable. The gates and the item's acceptance checks (`rpu-baseline compare
    Rerun the workflow without `kind` (a fresh run, not a resume) before you fix anything.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
    reason that cites code) / deferred (real, out of scope). A deferred or rejected P0/P1 is not a
-   blocker here: it goes into the record, and `/codex-ship` asks the user about it at its merge
+   blocker here: it goes into the record, and `/ship` asks the user about it at its merge
    gate, the same way it does for Codex findings.
 4. Call the `advisor` tool once with the merged list before you settle on the fixes.
 5. Fix the confirmed findings; add a regression test where the defect is testable.
@@ -174,7 +177,7 @@ scope, and those files can add gates. So first commit the fixes (step 6 gives th
 recompute the list: call the Workflow tool with the same `scriptPath` as step 3 and
 `args: {"base": "origin/<base>", "files": [<git diff --name-only origin/<base>...HEAD>], "gatesOnly": true}`.
 That returns `requiredGates` from the same path rules and starts no agents. Use the union of
-that list and step 3's list. Do the same after every later fix round, here or in `/codex-ship`
+that list and step 3's list. Do the same after every later fix round, here or in `/ship`
 steps 4–6, and run the gates again. When the last run passes, save the commit it ran on,
 `git rev-parse HEAD`, as `gatedCommit` for step 8. The gate commands:
 
@@ -217,7 +220,7 @@ analyzer, an HLG or open-GOP test) fails the gate: required coverage did not run
 to move L1; say so in the PR body with the reference diff.
 
 **Blockers.** A nonzero exit from any gate command is a blocker, whatever a log grep shows. A gate that fails or cannot run (no GPU, missing tool or media) is a blocker. Never
-report it as passed. In ship mode it stops `/codex-ship` before the push.
+report it as passed. In ship mode it stops `/ship` before the push.
 
 **Acceptance gate.** The commands above do not prove the step's acceptance gate (a corpus score,
 precision/recall, a playback result). The evidence must be in the PR body or in
@@ -242,7 +245,7 @@ Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort,
 `reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finders, verdict, fix
 commit or reason), gate results, blockers, docs changed.
 
-**Reviewer yield.** The `findings` list in step 8 (and `/codex-ship`'s PR comment) is what decides
+**Reviewer yield.** The `findings` list in step 8 (and `/ship`'s PR comment) is what decides
 whether a reviewer stays. When the records of 5 more code PRs since 2026-10-07 exist, and a finder
 (Gemini, or Fable on paths outside the CUDA-parity and L1 gates) has no confirmed finding whose
 `finders` is that finder alone, say so in the report as a candidate for removal. For Gemini,
@@ -253,12 +256,12 @@ sentences.
 
 ## 8. Record
 
-The record lets `/codex-ship` skip a second review of the same commit. It also carries what
-`/codex-ship` needs if it has to rerun the gates or the docs keeper later in another session.
+The record lets `/ship` skip a second review of the same commit. It also carries what
+`/ship` needs if it has to rerun the gates or the docs keeper later in another session.
 
 **Tree check.** The gates ran on the working tree, so the record is valid only if that tree was
 HEAD. This check is mechanical, not a judgment of which files belong to the task, and
-`/codex-ship` step 1b runs the same one. Both commands must print nothing:
+`/ship` step 1b runs the same one. Both commands must print nothing:
 
 ```bash
 git status --porcelain --untracked-files=no
@@ -272,7 +275,7 @@ The `docs: …` commit after the gates may change only Markdown files:
 `git diff --name-only <gatedCommit> HEAD` must list only `*.md`. `<gatedCommit>` is the sha saved
 in step 5, never one looked up afterwards. Otherwise write no record.
 
-Use the **full** sha and an **absolute** path. `/codex-ship` looks the record up with
+Use the **full** sha and an **absolute** path. `/ship` looks the record up with
 `git rev-parse HEAD`, and the Write tool needs an absolute path:
 
 ```bash
@@ -282,7 +285,7 @@ echo "$D/$S.json"
 ```
 
 The common dir is shared by every worktree of the repo and is never committed. The copies are
-needed because the scratchpad belongs to one session, and `/codex-ship` usually runs in another.
+needed because the scratchpad belongs to one session, and `/ship` usually runs in another.
 Then write the echoed path with the Write tool:
 
 ```json
@@ -311,12 +314,12 @@ Then write the echoed path with the Write tool:
   `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
   claims (verdict `refuted`) and the ones you rejected, so a finder's false alarms count too.
 - `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass`, `geminiReason` and `geminiCost` are informational and do not affect reuse. `geminiCost` comes from the Gemini result: `seconds`, the length of `attempts`, and `usage` (`thinking_tokens`, `output_tokens`, `partial`); omit it when the pass was skipped.
-- `deferredP0P1` and `rejectedP0P1` do not block reuse. `/codex-ship` asks the user about them at
+- `deferredP0P1` and `rejectedP0P1` do not block reuse. `/ship` asks the user about them at
   its merge gate.
-- Write the record also when there are blockers. `/codex-ship` reads it and refuses to reuse it.
+- Write the record also when there are blockers. `/ship` reads it and refuses to reuse it.
 
-Standalone mode ends by naming the next command, `/codex-ship`. When the record is reusable
+Standalone mode ends by naming the next command, `/ship`. When the record is reusable
 (`complete` true, no blockers, `unfixedConfirmedP0P1` 0, every gate `pass`), add: "It reuses
 this review while HEAD stays at <short sha>; a new commit makes it run the review again."
 Otherwise name what blocks reuse (no record and why, or the blockers), and say that
-`/codex-ship` will stop on it or run the review again.
+`/ship` will stop on it or run the review again.
