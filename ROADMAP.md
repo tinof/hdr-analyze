@@ -66,11 +66,11 @@ doing.
 
 1. **P9 peak parity for the other `--peak-source` values:** done 2026-10-14, PASS, no fix needed
    (see P9). Release: none
-2. **P11: `--mdfix` dropped-levels notice:** done 2026-10-15 on `feat/p11-mdfix-notice`, gate met
-   (see P11). In v0.7.0 if merged by about 2026-10-19. Release: patch
+2. **P11: `--mdfix` dropped-levels notice:** merged 2026-10-15 (#52), gate met (see P11). In
+   v0.7.0
 3. **P1 open (1): measure CPU `accurate` against `balanced`** (priority 4; no branch). Cost and L1 max
    / MaxCLL effect of `FAST_BILINEAR`; v0.7.0 binaries are CPU-only. E13 step 5 takes the first
-   branch-free slot after P11 and the release PR. Release: none
+   branch-free slot after the release PR. Release: none
 
 ### Waiting for the owner
 
@@ -739,15 +739,18 @@ The detailed gap table and validation method live in
   files (878 mutants) and the analyzer contract files (273; counts from `cargo mutants --list` at
   main@6f92306).
 - **Order (2026-10-16):** none of it gates a release.
-  1. After the v0.7.0 release PR (due about 2026-10-21). E14 changes only tests and the pre-PR
-     gate, so it runs beside E13 step 5, which moves only the analyzer's `pipeline.rs`,
-     `analysis/gpu.rs` and `analysis/frame.rs`.
+  1. After the v0.7.0 release PR (due about 2026-10-21). Steps 3 and 4 (mutation runs, triage)
+     are local, in a detached worktree, and need no branch, so they can run at any time. Steps 5
+     and 6 are PRs: they open only when no E13 move PR is in flight (the E13 sequencing rule).
+     E13 step 5 keeps the first branch-free slot, so E14 PRs go between its move PRs or after it.
   2. Step 3 on the mkvdovi contract modules: `resume.rs`, `external.rs`,
      `metadata/{mod,probe}.rs` and `pipeline/{mod,config,analyzer,hybrid,hdr10plus,temp_dir,mdfix_notice}.rs`
      (413 mutants, about 70 min at `-j 3`), then `metadata/static_metadata.rs` (323, about
-     55 min). Triage, then step 5 for the medium-risk groups of both runs.
+     55 min). Triage, then step 5 for the 17 open medium-risk groups (115 mutants) of the c74effb
+     run and the medium-risk groups of both new runs.
   3. Step 3 on the analyzer contract files `l1_sidecar.rs`, `leading_pictures.rs`, `ffmpeg_io.rs`
-     and `writer.rs` (273; `cli.rs` has no functions). E13 step 5 does not move them.
+     and `writer.rs` (273; `cargo mutants --list` gives no mutants in `cli.rs`). E13 step 5 does
+     not move them.
   4. Step 6, the `--in-diff` gate. It does not depend on the test-author decision. Run it by hand
      on two PRs first to measure its cost per PR.
   5. Low-risk groups get no sweep of their own: they are fixed when the step 6 gate lists them in
