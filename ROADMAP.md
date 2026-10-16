@@ -41,6 +41,8 @@ same item stay startable. `/roadmap-next` reads this list; remove an entry when 
   try it once more on a new feature's gate. E14 step 6 does not wait for this.
 - **P8 step 1: playback test on a second device.** Needs the owner's hardware and the WS6
   written procedure (WS6 open (2)).
+- **E12: `v0.8.0-rc.1` on a Windows NVIDIA host.** The release-candidate test in E12's gate; the
+  build, the `+cuda` smoke test and the CPU fallback stay startable.
 - **Acceptance gate not stated** (`**Gate:** TODO(owner)`; `/roadmap-next` never recommends these
   steps): P3, P4, P5, P6, P9 step 2 (sidecar v6), P10 L2 `ms_weight`, P13, WS0, WS1, WS2 steps 2–4,
   WS5, WS6, WS8, FEL, E1, E2, E3, E5, E6, E7, E10, E11.
