@@ -82,6 +82,10 @@ startable. `/roadmap-next` reads this list; remove an entry when it is settled.
 - **P10 step 3: write L1 in-process.** Needs WS7 or playback evidence first.
 - **P13: L2 under `--cm-version v29`.** Should v29 RPUs carry neutral L2 trims, as v40 does? v29
   never wrote L2 and still does not. A question, not a decision.
+- **E14 step 2: separate test author.** Should a separate session (Codex, without the diagnosis)
+  write the acceptance tests for steps whose gate is a stated behaviour? The P13 pilot found
+  nothing an in-session test missed and missed the pipeline wiring. Recommendation: not mandatory;
+  try it once more on a new feature's gate. E14 step 6 does not wait for this.
 
 ### Release plan (2026-10-14)
 
@@ -90,8 +94,8 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | E13 step 5 (refactor), P1 step 1 measurement, P9 peak-parity measurement (done 2026-10-14, PASS, no fix) | No user-visible change |
-| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (done on `fix-p13-cm-v29`, merge pending; owner decision 2026-10-15) | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
+| none | E13 step 5 (refactor), P1 step 1 measurement, P9 peak-parity measurement (done 2026-10-14, PASS, no fix), E14 remaining steps (tests and the pre-PR gate only; order in E14) | No user-visible change |
+| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15) | MINOR (new flag). P7 is priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
 | v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract), both after E13 step 5 | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
@@ -389,7 +393,7 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P11: `--mdfix` and authored metadata
 
-- **Status:** Done 2026-10-15 on `feat/p11-mdfix-notice` (merge pending); decided 2026-10-13
+- **Status:** Done 2026-10-15 (#52); decided 2026-10-13
   (owner): full regeneration stays, with a notice.
 - `--mdfix` regenerates the whole RPU: authored L2 and L4 become neutral L2 and no L4, L3 becomes
   neutral, L8 and L10 are dropped, authored L5 is reduced to one sampled value, L6 comes from the
@@ -414,8 +418,7 @@ and broader hardware acceleration (E5). Neutral trims stay.
 
 ### P13: `--cm-version v29` writes a CM v4.0 RPU
 
-- **Status:** Done 2026-10-15 on `fix-p13-cm-v29` (merge pending). In v0.7.0 (owner decision
-  2026-10-15).
+- **Status:** Done 2026-10-15 (#53). In v0.7.0 (owner decision 2026-10-15).
 - Before the fix `generate_extra_json` wrote `cm_version` only on the V40 branch, and
   `dovi_tool generate` defaults to V40: v29 output was CM v4.0 with the generator's L3, L9
   (DCI-P3), L11 (cinema) and L254 and no L2, and `--verify` checked no CM version for v29.
@@ -728,10 +731,29 @@ The detailed gap table and validation method live in
 
 - **Status:** Open. Rules: [`docs/TESTING.md`](docs/TESTING.md). Step 1 done (#54, CI run
   38753171952, only allowed skips). Step 2 done: 3 of the pilot's tests red on main, nothing new
-  found, pipeline wiring missed; owner decision on a separate test author open. Steps 3 and 4 done
-  on main@c74effb for `verify.rs` and the riskiest modules only (owner choice): 336 survivors, 0
-  actual bugs, 19 high-risk groups. Step 5: high-risk groups covered on `test/e14-high-risk` (0
-  missed after); medium/low-risk groups and the unrun modules of step 3 open.
+  found, pipeline wiring missed; whether a separate test author becomes a roadmap step is under
+  "Waiting for the owner". Steps 3 and 4 done on main@c74effb for `verify.rs` and the riskiest
+  modules only (owner choice): 336 survivors, 0 actual bugs; missing tests in 19 high-risk groups
+  (57 mutants), 17 medium (115) and 14 low (43); 121 print-only or equivalent. Step 5: high-risk
+  groups done (#55, 0 missed after); medium and low groups open. Step 3 not yet run on 15 mkvdovi
+  files (878 mutants) and the analyzer contract files (273; counts from `cargo mutants --list` at
+  main@6f92306).
+- **Order (2026-10-16):** none of it gates a release.
+  1. After the v0.7.0 release PR (due about 2026-10-21). E14 changes only tests and the pre-PR
+     gate, so it runs beside E13 step 5, which moves only the analyzer's `pipeline.rs`,
+     `analysis/gpu.rs` and `analysis/frame.rs`.
+  2. Step 3 on the mkvdovi contract modules: `resume.rs`, `external.rs`,
+     `metadata/{mod,probe}.rs` and `pipeline/{mod,config,analyzer,hybrid,hdr10plus,temp_dir,mdfix_notice}.rs`
+     (413 mutants, about 70 min at `-j 3`), then `metadata/static_metadata.rs` (323, about
+     55 min). Triage, then step 5 for the medium-risk groups of both runs.
+  3. Step 3 on the analyzer contract files `l1_sidecar.rs`, `leading_pictures.rs`, `ffmpeg_io.rs`
+     and `writer.rs` (273; `cli.rs` has no functions). E13 step 5 does not move them.
+  4. Step 6, the `--in-diff` gate. It does not depend on the test-author decision. Run it by hand
+     on two PRs first to measure its cost per PR.
+  5. Low-risk groups get no sweep of their own: they are fixed when the step 6 gate lists them in
+     code a PR changes. `main.rs`, `progress.rs` and `cli.rs` (142 mutants, mostly output text)
+     run last, if at all.
+  6. Analyzer numerics after E13 step 5, with E8 as the validation case.
 - **Why:** a test that has never been red has not been shown to test anything. Until 2026-10-15
   the PR CI test job installed none of the integration-test tools, so the HLG 8.4, open-GOP, P7
   full-range refusal (`pq_input_contract`), HDR10+ hybrid, synthetic-accuracy and clip tests
@@ -756,7 +778,7 @@ The detailed gap table and validation method live in
      characterization); actual-bug survivors go to the owner before any test.
   5. Test-only PRs per crate area; each new test names the mutant it kills or the decision side it
      adds.
-  6. After the pilot: a `cargo mutants --in-diff` gate in the pre-PR panel for mkvdovi, verifier
+  6. A `cargo mutants --in-diff` gate in the pre-PR panel for mkvdovi, verifier
      and dovi84_composer logic (fails only on infrastructure errors; survivors listed with their
      bucket), and red-on-parent evidence for fix PRs.
 - **Acceptance evidence:** a clean `check-test-skips` log on the audit host; per-module mutant
