@@ -39,9 +39,11 @@ same item stay startable. `/roadmap-next` reads this list; remove an entry when 
   write the acceptance tests for steps whose gate is a stated behaviour? The P13 pilot found
   nothing an in-session test missed and missed the pipeline wiring. Recommendation: not mandatory;
   try it once more on a new feature's gate. E14 step 6 does not wait for this.
+- **P8 step 1: playback test on a second device.** Needs the owner's hardware and the WS6
+  written procedure (WS6 open (2)).
 - **Acceptance gate not stated** (`**Gate:** TODO(owner)`; `/roadmap-next` never recommends these
   steps): P3, P4, P5, P6, P9 step 2 (sidecar v6), P10 L2 `ms_weight`, P13, WS0, WS1, WS2 steps 2–4,
-  WS5, WS6, WS8, FEL, E1, E2 (per-scene crop and the probe-cost measurement), E3, E5, E6, E7, E11.
+  WS5, WS6, WS8, FEL, E1, E2, E3, E5, E6, E7, E10, E11.
 
 ### Release plan (2026-10-14)
 
@@ -222,7 +224,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   neutrals (75% grey ΔE_ITP 6.8, up to 10.3 near black) and decodes nominal white to about
   1150 nits.
 - **Gate:** the WS6 playback test shows that devices apply a mapping that is not the preset
-  (priority 1); met for the LG OLED C9.
+  (priority 1); met for the LG OLED C9 (2026-10-13). Step 1: the same canary test on a second
+  device shows that the display applies the RPU composer.
 - **Open:** (1) the playback test on devices other than the C9 (procedure in WS6; the WS6
   `code / 1023` question is tracked there).
 - **Done 2026-10-13: playback test.** An LG OLED C9 (Plex on the TV, and Plex on an Nvidia Shield TV Pro) shows a
@@ -333,12 +336,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - **Fix:** under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults. Changes
   delivered RPUs: own branch, RPU baselines updated.
 
-### P13: L2 under `--cm-version v29`
+### P13: `--cm-version v29` writes a CM v4.0 RPU
 
-- **Status:** Open; owner question. The fix itself (`--cm-version v29` writes a CM v2.9 RPU and
-  `--verify` checks the CM version, #53) is in `CHANGELOG.md` `[Unreleased]` / Fixed and ships in
-  v0.7.0.
-- v29 RPUs carry L1, L5 and L6 only; v40 RPUs carry neutral L2 trims. v29 never wrote L2.
+- **Status:** Core complete 2026-10-15 (#53; `CHANGELOG.md` `[Unreleased]` / Fixed, ships in
+  v0.7.0); the owner question on L2 remains.
+- Fixed: `--cm-version v29` writes a CM v2.9 RPU (L1, L5, L6) and `--verify` checks the requested
+  CM version. v40 RPUs carry neutral L2 trims; v29 never wrote L2.
 - **Gate:** TODO(owner)
 - **Open:** (1) the owner decides whether v29 RPUs carry neutral L2 trims (see "Waiting for the
   owner").
@@ -519,12 +522,11 @@ The detailed gap table and validation method live in
 - **Status:** Partial. Seven-position crop probing, low-signal rejection, modal voting and
   variable-AR union shipped in PR [#4](https://github.com/tinof/hdr-analyze/pull/4), closing issue
   [#3](https://github.com/tinof/hdr-analyze/issues/3).
-- **Gate:** an NVDEC crop probe reproduces `detect_crop` exactly (every 10th sample, at least 10%
-  non-black per row and column, `crop.rs`). Per-scene crop and the probe-cost measurement:
-  TODO(owner).
+- **Gate:** TODO(owner)
 - **Open:** (1) per-scene crop application, a continuity-sensitive follow-up; (2) the crop probe
   decodes on the CPU in CUDA runs: measure its cost on a full episode, then decide an NVDEC probe.
-  Per-scene crop application needs a second pass, because the crop is fixed before the histograms
+  A kernel crop reduction must reproduce `detect_crop` exactly (every 10th sample, at least 10%
+  non-black per row and column, `crop.rs`); per-scene crop application needs a second pass, because the crop is fixed before the histograms
   are built (affordable on NVDEC, not on the CPU).
 
 ### E3: `mkvdovi` debug options
@@ -604,7 +606,7 @@ The detailed gap table and validation method live in
   ETSI GS CCM 001 §6.2.2 encodes L1 as `clip(round(x × 4096))`. The difference is at most one
   code. The generator's own conversion (`dolby_vision::utils::nits_to_pq_12_bit`, also used for
   the P10 source range) is ×4095 too, so analyzer and generator agree (checked 2026-10-04).
-- **Gate:** a check against retail RPUs shows which scaling they use.
+- **Gate:** TODO(owner)
 - **Open:** (1) the check against retail RPUs.
 
 ### E11: `l1_diff` and open-GOP cuts
