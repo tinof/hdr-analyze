@@ -44,7 +44,7 @@ fingerprints resume directories with its version, so an rc and the final release
 4. **Release candidate first** (`vX.Y.0-rc.N`) only when the release needs a test outside CI
    before it becomes latest: playback on a device, CUDA on Windows, a changed release workflow.
 
-`/roadmap-next` tags each **Next up** entry `Release: minor | patch | none` and keeps the Release
+`/ship:roadmap-next` tags each **Next up** entry `Release: minor | patch | none` and keeps the Release
 plan current, so the decision is made per step, not afterwards.
 
 ## Checklist

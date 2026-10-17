@@ -65,7 +65,7 @@ AGENTS.md
 !.claude/skills/
 !.claude/agents/
 !.claude/workflows/
-!.claude/roadmap-config.md
+!.claude/workflow.md
 .codex/
 
 # Local scratch/checkouts

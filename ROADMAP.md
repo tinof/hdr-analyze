@@ -16,10 +16,10 @@ the stated outcome; **Core complete** meets the original gate but retains named 
 **How to update.** Change the item's status and open steps in place. Add one row to the progress
 log (one sentence plus the PR link) and the full text of the step to
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md). Measurements go to the log or to the doc the item
-links, not into the item. `/roadmap-next` keeps **Next up** current and adds a **Checked** bullet
+links, not into the item. `/ship:roadmap-next` keeps **Next up** current and adds a **Checked** bullet
 (date, commit, `file:line`) to each item it examined, so a later session re-checks only what
-changed since that commit. Format: `~/.claude/skills/roadmap-next/reference/roadmap-format.md`;
-project rules: [`.claude/roadmap-config.md`](.claude/roadmap-config.md).
+changed since that commit. Format: `~/.claude/skills/ship/reference/roadmap-format.md`;
+project rules: [`.claude/workflow.md`](.claude/workflow.md).
 
 ### Next up (checked 2026-10-17 at main@941489d)
 <!-- roadmap-next: rev=1 scope=all config=73415b8825d0 probes=gpu:ok,corpus:ok -->
@@ -36,7 +36,7 @@ project rules: [`.claude/roadmap-config.md`](.claude/roadmap-config.md).
 ### Waiting for the owner
 
 Steps that need a decision, material or a test only the owner can provide. Other steps of the
-same item stay startable. `/roadmap-next` reads this list; remove an entry when it is settled.
+same item stay startable. `/ship:roadmap-next` reads this list; remove an entry when it is settled.
 
 Owner decisions of 2026-10-17 settled the earlier entries (P9 scoring rule, P13 L2, E14 step 2,
 P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` step; detail in
@@ -51,7 +51,7 @@ hardware after a startable step has prepared it:
 ### Release plan (2026-10-14)
 
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
-`/roadmap-next` keeps this table current. Latest release: v0.6.0 (2026-10-13; with the L6 fixes of #41 and the ffprobe HLG fix of #43, both merged after rc.1).
+`/ship:roadmap-next` keeps this table current. Latest release: v0.6.0 (2026-10-13; with the L6 fixes of #41 and the ffprobe HLG fix of #43, both merged after rc.1).
 
 | Release | Content | Trigger / gate |
 |---|---|---|
