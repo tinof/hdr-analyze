@@ -6,6 +6,79 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-17: P9 holdout scoring, P6 check list, WS6 and P10 hand-offs
+
+**P9 step 1, holdout scoring** (evidence `~/mkvdovi-work/p9-holdout-2026-10-17/`; mkvdovi and
+hdr_analyzer_mvp 0.6.0 +cuda, dovi_tool 2.3.4). The one scoring of `q-alita-01/02` and
+`q-the-shining-01/02`, under the rule written before it; Alien and Deadloch were not opened. Retail
+L1 from each cut's RPU (the parser reproduces the four development `embedded_l1.csv` files byte for
+byte); a DV-free remux keeping HDR10+; two conversions each through `scripts/rpu-baseline.sh
+capture` (`--analysis-quality accurate --hwaccel cuda`, the second with `--hdr10plus-l1 hybrid`),
+all eight `--verify` passed; scored with a copy of the development `score.py` extended with max and
+min MAE (it reproduces the development 37.58 / 18.91 / 338.43). Delivered RPU values (after the
+generator's clamps) against retail per frame:
+
+| Pooled, today → hybrid | MAE | Clause |
+|---|---|---|
+| Average, frames above the floor (4,095) | 276.58 → 33.83 | PASS |
+| Average, all frames (5,806) | 315.90 → 25.24 | PASS |
+| L1 max | 105.58 → 105.58 | PASS (equal by construction) |
+| L1 min | 5.98 → 4.91 | PASS |
+
+Per cut (average above the floor / all / max / min): alita-01 236.08 → 33.34 / 236.08 → 33.34 /
+27.98 = / 0.00 → 10.86; alita-02 425.73 → 67.11 / 413.57 → 15.24 / 108.32 = / 0.00 → 8.72;
+the-shining-01 291.33 → 17.43 / 291.33 → 17.43 / 246.54 = / 12.00 → 0.00; the-shining-02
+262.69 → 49.32 / 321.88 → 35.02 / 39.77 = / 12.00 → 0.00. Hybrid: 15, 25, 12 and 14 pieces, 0
+fallbacks, 0 mismatches against the hybrid rule. Caveats: the minimum splits by title (retail
+writes 0 on every Alita frame, 12 on every Shining frame; libplacebo ignores L1 min); the max
+clause cannot fail, since both paths take the HDR10+ peak; two titles, four one-minute cuts. Owner
+decision: the default flips in the minor after v0.7.0.
+
+**P6 step 1, check list** (evidence `~/mkvdovi-work/p6-checks-2026-10-17/list.md`, survey of the 45
+development cuts, read-only). Every check warns only, so RPU baselines stay byte-identical. Owner
+pick: C5, C1, C4, C7, C3.
+
+| Check | Threshold | Development corpus |
+|---|---|---|
+| **C1** measured MaxCLL above the stated MaxCLL (`light_level`, `sample_rate` and `downscale` 1) | > 1.25 × | 6 of 25 cuts with a stated MaxCLL (The Shining mountain road 2.53×, Joker 972 / 676); Fury Road 1.01× is the negative |
+| C2 stated MaxCLL above the mastering peak | > 1.10 × | 7 retail cuts (Fury Road, Saving Private Ryan); not picked, warns on correct discs |
+| **C3** stated MaxFALL above MaxCLL (silent today: `resolve_light_levels` returns early) | any | none; needs a synthetic mux |
+| **C4** HDR10+ peak or sampled RPU L1 max above MaxCLL | > 1.25 × | The Shining mountain road (MaxScl 3710 / 1633); the RPU form sees only the sampled windows |
+| **C5** source RPU L6 against the container (decides the `--mdfix` output; pairs with P12) | MDL any, CLL/FALL > 2 % | Joker (RPU 992 / 285, container 676 / 87); First Man and Saving Private Ryan disagree too but are FEL |
+| C6 RPU source range against its own L6 | > 2 codes | The Revenant only; no spec found that requires equality |
+| **C7** HDR10+ MaxScl 0 on every frame (L1 max at the 100-nit floor under `max-scl*`, expected, not run) | all frames | Alien ×2, Alita ×2 |
+| C8 HDR10+ frame count against the video, outside hybrid | any | none; needs a packet count (MediaInfo `FrameCount` is stale on 16 of 45 cuts) |
+| C9 mastering primaries matching no standard set (label fallback picks BT.2020 silently) | > 0.002 | none |
+| C10 container static metadata against the stream SEI | > 1 % | none |
+
+Observation, not a check: in all nine HDR10+ JSONs the `DistributionValues` are not a monotonic
+percentile list (one entry looks like a percentage). The `histogram` peak source takes their
+maximum; whether that reads what it intends is not checked against ST 2094-40.
+
+**WS6 (3), the `code / 1023` canary** (evidence `~/mkvdovi-work/ws6-normalization-2026-10-17/`).
+Feasible: the chroma coefficient range (−65536 to 65535) lets a steep chroma composer (3.73 on u,
+u², u³ and v, v², v³; constant about −9.3; bt2100 luma) turn the 0.93-code difference between the
+conventions at BL chroma 956 into one patch step of ΔE_ITP 39–40. Pattern: three rows (about 90,
+150 and 270 nits) of seven patches at BL chroma 953–959. WS6_1 is neutral under `code / 1024`,
+WS6_2 under `code / 1023`, WS6_3 is the normal bt2100 control. Under `/1023` WS6_1 is grey at
+patch 3 and WS6_2 at patch 4; under `/1024` at patches 4 and 5; a `(code + 0.5) / 1024` device
+shows two equally near-grey patches. Lossless base layer, every decoded frame equal to the source,
+identical base layers, RPUs checked per frame. libplacebo (`/1023`) matches the prediction within
+0.47 of a 12-bit code with `upscaler=bilinear`; its default chroma upscaler moves the canary by
+about half a code, so the test measures the device's effective chroma offset at the composer
+input. Untested: lossless decode on the C9 (the guide has a "does not play" outcome).
+
+**P10 step 4, `ms_weight` A/B** (evidence `~/mkvdovi-work/p10-ms-weight-2026-10-17/`, key in
+`KEY.txt` there only). Two Fury Road cuts (4000-nit master, peaks above 800 nits); the 512 files
+are rebuilt from mkvdovi's own `extra.json` with only `ms_weight` changed. A field diff of every
+frame shows only the three `Level2.ms_weight` values and the CRC; base layers byte-identical. 2048
+is the `dolby_vision` crate's zero point (`round(t·2048 + 2048)`), not documented as neutral for a
+device. Retail RPUs in the development corpus carry 512 (First Man, Saving Private Ryan, The
+Shining), 0 (Top Gun: Maverick, Alita, Skyfall) and 2048 (House of the Dragon, Joker, Inside Out 2).
+
+**WS6 (2):** the procedure draft is [`PLAYBACK.md`](PLAYBACK.md), from how P8 ran and what it did
+not record.
+
 ### 2026-10-17: owner decisions on the waiting list and the missing gates
 
 No code change. The owner settled every "Waiting for the owner" entry and stated a gate for

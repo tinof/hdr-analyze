@@ -43,11 +43,10 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left needs the owner's eyes or
 hardware after a startable step has prepared it:
 
-- **P9: confirm the default change** once the holdout scoring (P9 step 1, rule pre-registered)
-  has numbers.
-- **P6: pick the source checks** from the list P6 step 1 drafts.
-- **WS6 / P10 viewings on the LG OLED C9:** the discriminating `code / 1023` canary (WS6 (3)) and
-  the blinded L2 `ms_weight` A/B (P10), once their files are in the hand-off folder.
+- **WS6 / P10 viewings on the LG OLED C9** (files and guides in the hand-off folder since
+  2026-10-17): the discriminating `code / 1023` canary (`WS6-normalization-2026-10-17`) and the
+  blinded L2 `ms_weight` A/B (`P10-ms-weight-2026-10-17`).
+- **WS6 (2): correct the playback procedure draft** in [`docs/PLAYBACK.md`](docs/PLAYBACK.md).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
 
@@ -60,7 +59,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 |---|---|---|
 | none | P1 step 1 measurement, E13 step 6, E14 remaining steps (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15); P12 `--mdfix` source L6 (PATCH-class fix) only if merged before the release PR, else the next patch | MINOR (new flag). P7 was priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
-| v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
+| v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract); both unblocked by E13 step 5 (#59) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary; a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
@@ -72,6 +71,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-17 | P9 holdout scoring: the pre-registered rule passes on the four holdout cuts (average clamped MAE 276.6 → 33.8 above the floor, 315.9 → 25.2 over all frames; max equal; min 5.98 → 4.91); the owner flips the default after v0.7.0. P6 check list drafted, five picked; WS6 canary and P10 `ms_weight` A/B handed off. | P9, P6, WS6, P10 | `docs/owner-decisions-2026-10-17` |
 | 2026-10-17 | Owner decisions: P9 holdout rule pre-registered, P13 keeps v29 without L2 (closed), E14 step 2 dropped, no second P8 device, E12 bundles NVRTC, P10 waits for WS7, gates stated for every `TODO(owner)` step. | P3–P6, P8–P10, P13, WS0–WS8, FEL, E1–E7, E10–E12, E14 | `docs/owner-decisions-2026-10-17` |
 | 2026-10-17 | E13 step 5: analyzer split, `frame.rs`, `gpu.rs` and `pipeline.rs` into module directories by pure move; 12 optimizer-enabled CPU and CUDA runs byte-identical to main@941489d, CUDA parity PASS. | E13 | [#59](https://github.com/tinof/hdr-analyze/pull/59) |
 | 2026-10-15 | E14 step 5, first PR: tests for the 19 high-risk survivor groups (composer, `--verify`, sidecar/RPU/HLG probes, pipeline delivery steps); 0 of the targeted mutants missed. Steps 1, 2 and 3–4 (partial) recorded. | E14 | `test/e14-high-risk` |
@@ -125,8 +125,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    canary.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
-   opt-in flag landed 2026-10-14. Gate: opt-in, scored on the development tier and the holdout
-   HDR10+ cuts before any default change (rule in P9). **Prerequisite:** E13 step 5 before the
+   opt-in flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and the default flips
+   after v0.7.0 (owner). Gate: the P9 step 3 gate. **Prerequisite:** E13 step 5 before the
    sidecar v6 step (met 2026-10-17, #59).
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: the WS7 simulator decides
@@ -229,7 +229,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   peak, HDR10+ and ST 2086 disagreeing) in `docs/ROADMAP_LOG.md`, from which the owner picks.
   Step 2: each picked check warns on a clip that has the problem and stays silent on one that does
   not, and all RPU baselines stay byte-identical (owner, 2026-10-17).
-- **Open:** (1) draft the list; (2) implement the checks the owner picks.
+- **Open:** (2) implement the five picked checks, warn-only: C5 source RPU L6 against the
+  container, C1 measured MaxCLL above 1.25 × the stated MaxCLL, C4 HDR10+ or RPU L1 peak above
+  1.25 × MaxCLL, C7 HDR10+ MaxScl 0 on every frame, C3 stated MaxFALL above MaxCLL. Step 1 done
+  2026-10-17 (list in [log](docs/ROADMAP_LOG.md) 2026-10-17).
 - Fixed 2026-10-11: a container MaxCLL/MaxFALL of 0 no longer hides the stream's value
   (`track_light_level` reads `MaxCLL_Original`/`MaxFALL_Original`; a non-zero container value
   still wins), and `Details.txt` thousands separators are read (`parse_details_number`).
@@ -289,16 +292,22 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   (`q-alita-01/02`, `q-the-shining-01/02`) against it; Alien and Deadloch stay unseen. Pre-registered
   rule: hybrid becomes the default if the average's pooled clamped MAE (above the floor and over all
   frames) is lower than today's HDR10+ path, and the per-frame MAE of L1 max and of L1 min against
-  retail is not higher than today's path; the owner confirms the flip. Step 2: v6 written with a
+  retail is not higher than today's path; the owner confirms the flip. Done 2026-10-17: PASS on
+  every clause, flip confirmed for the minor after v0.7.0. Step 3, the flip: `--hdr10plus-l1`
+  defaults to `hybrid` and the old path stays selectable by name; HDR10+ RPU baselines are
+  re-captured and every other baseline stays byte-identical; CHANGELOG entry under Changed. Step 2: v6 written with a
   per-frame max and the resolved `--peak-source`; mkvdovi and `tools/l1_diff` accept 1–6;
   `check_measurements` refuses a percentile-peak sidecar under hybrid; the fallback peak equals the
   per-frame max over the piece; default RPU baselines byte-identical; CUDA parity; the L1 gate
   without `--update`.
-- **Open:** (1) score the four holdout HDR10+ cuts before any default change, where the union
-  could show whether HDR10+ starts rescue cuts the analyzer misses; (2) sidecar v6 with a per-frame
-  max for an exact fallback peak, also recording the analyzer's resolved `--peak-source` so
-  `check_measurements` can refuse a percentile peak (after E13 step 5). Peak against retail is not
-  scored.
+- **Open:** (2) sidecar v6 with a per-frame max for an exact fallback peak, also recording the
+  analyzer's resolved `--peak-source` so `check_measurements` can refuse a percentile peak;
+  (3) flip the default, after the v0.7.0 release PR. Peak against retail is not scored: hybrid
+  takes the same HDR10+ peak as `dovi_tool`, about 104 codes below retail on the holdout cuts.
+- **Done 2026-10-17: step 1, holdout scoring.** The pre-registered rule passes on every clause
+  (four holdout cuts, 0 fallbacks, all eight runs `--verify` passed). The minimum passes only
+  pooled: hybrid is worse on Alita (retail 0) and better on The Shining (retail 12). Evidence:
+  `~/mkvdovi-work/p9-holdout-2026-10-17/` ([log](docs/ROADMAP_LOG.md) 2026-10-17).
 - **Done 2026-10-08: step 0, HDR10+ scene boundaries against the picture.** HDR10+ frame n is
   picture frame n: offset 0 on all six multi-scene HDR10+ cuts (five by the scan, one by
   corroboration), no confirmed off-by-one (Alien 298 ambiguous), v5 runs and mkvdovi's extraction path
@@ -347,7 +356,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
     generated RPU, and reports per field how many scenes the generator's limits changed.
 - **Gate:** step 3: the WS7 simulator shows that unclamped L1 is better (priority 3; owner,
   2026-10-17: WS7 first, no playback test). Step 4: a blinded A/B on the LG OLED C9 of
-  `ms_weight` 2048 against 512; no visible difference closes the step with 2048 unchanged.
+  `ms_weight` 2048 against 512; no visible difference closes the step with 2048 unchanged. Files
+  handed off 2026-10-17 (two Fury Road cuts, RPUs differ only in `ms_weight`). Retail RPUs in the
+  development corpus carry 512, 0 and 2048 (three titles each), so 2048 is not unlike retail.
 - **Open:** (3) decide whether to write L1 in-process so the measured minimum and sub-100-nit
   maxima reach the RPU; raising the average floor to 1229 is not planned. (4) Generated L2 carries
   `ms_weight` 2048 where retail RPUs carry 512 or 0; the effect is unverified.
@@ -460,8 +471,9 @@ The detailed gap table and validation method live in
   template recording player, firmware, picture mode and HDMI path) and used once, for (3); (3) a
   discriminating canary, a composer that is neutral under one normalization and visibly coloured
   under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded.
-- **Open:** (1) the final-RPU regression corpus; (2) the written playback procedure (Claude
-  drafts it, the owner corrects it); (3) the `code / 1023` question below.
+- **Open:** (1) the final-RPU regression corpus; (2) the written playback procedure: draft in
+  [`docs/PLAYBACK.md`](docs/PLAYBACK.md) (2026-10-17), for the owner to correct; (3) the
+  `code / 1023` question below: canary files handed off 2026-10-17, viewing pending.
 - **Open question (2026-10-06):** do devices evaluate the 8.4 composer at `code / 1023` (as
   libplacebo and the `bt2100` fit) or at the spec's `code / 1024`? Under the latter `bt2100` is
   5.9 codes off neutral, probably too little to see on a neutral ramp, so the test needs a pattern
