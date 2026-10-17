@@ -1,0 +1,74 @@
+<TEST NAME> - <the one question, in plain words>?
+Built <YYYY-MM-DD>, mkvdovi <version> (<commit>), dovi_tool <version>. All files of one group
+share the same picture, byte for byte. Only the Dolby Vision RPU differs. <Delete this sentence
+if the files do not share one base layer, and say why.>
+
+Why: <one or two sentences: what the result decides, e.g. a default change or a refit.>
+
+
+0. BEFORE YOU START, WRITE DOWN
+
+   Player app and version      : ____________
+   Device and its software     : ____________  (e.g. Shield TV Pro + Shield software version)
+   TV firmware version         : ____________  (C9: Settings > All Settings > General > About This TV)
+   TV picture mode             : ____________
+   HDMI path                   : ____________  (input number; AVR/soundbar in between; or the TV's own app)
+   Room light                  : ____________
+
+   Play every file through the same path. A second path is a separate result.
+
+
+1. WHAT TO PLAY
+
+   <TEST>_1.DV.mkv     <neutral description, no hint of the expected answer>
+   <TEST>_2.DV.mkv     ...
+   <TEST>_control.DV.mkv   <optional: the normal mkvdovi output>
+
+   <What is on screen: duration, pages/patches, how to number them, where to look.>
+
+   Do not open reference-renders/ before you have written down your answers in section 2.
+
+
+2. WHAT TO REPORT, PER FILE
+
+   a) Dolby Vision badge / DV picture mode: yes / no
+   b) <The question, answerable with a number, a colour or "same / different".>
+   c) How sure: sure / fairly sure / guess. Anything unexpected, in your own words.
+
+   Example answer: "<TEST>_1: DV yes, <answer>. <TEST>_2: DV yes, <answer>."
+
+
+3. QUICK SELF-CHECK (optional)
+
+   <A check whose answer does not depend on the hypothesis, showing the difference is visible
+   on this screen; or "none".>
+
+
+----------------------------------------------------------------------------------------------
+4. WHAT IT MEANS (read after section 2 is written down)
+
+   <Key: which file is which.>
+
+   Observation                Meaning / decision
+   -----------                ------------------
+   <outcome 1>                <decision>
+   <outcome 2>                <decision>
+   all files/patches the same <say whether that matches the control; usually: no verdict>
+   anything else              Report exactly what you see; no conclusion from this test.
+   No DV badge                The player or TV dropped Dolby Vision; no verdict. Report the path.
+
+   <Size of the effect, e.g. delta E ITP per step, and what the reference renders show and
+   which decoder made them (libplacebo, version, settings).>
+
+   Brightness: the TV tone-maps, and the SDR renders are not the TV picture. <Compare colours,
+   not brightness / or what to compare instead.>
+
+
+Work files and logs: ~/mkvdovi-work/<test>-<date>/ (local).
+
+
+RESULT (filled in by Claude from the owner's report, <date>)
+   Section 0: <player, device software, TV firmware, picture mode, HDMI path, room light;
+   "not recorded" where missing>
+   Per file: <the owner's words>
+   Outcome: <row of the table in section 4>

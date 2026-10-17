@@ -14,7 +14,9 @@ light. Answers are given as reported, before the interpretation or the key were 
 
 **WS6 (3), `WS6-normalization-2026-10-17`:** Dolby Vision on all three files. WS6_1 and WS6_2:
 "no grey patch", "all green", the same green on all seven patches. WS6_3 (control): strong
-pink/purple, as predicted. The pre-registered table has no row for this: under `code / 1023`,
+pink/purple, as predicted. This falls under the guide's "anything else" row (no conclusion); its "no grey patch at all,
+all patches strong purple" row does not match either, since the canaries differed from the
+purple control. Under `code / 1023`,
 `code / 1024` and `(code + 0.5) / 1024` alike, the model predicts a green-to-magenta row with one
 or two near-grey patches (ΔE_ITP 0 to about 130 across the row, `design.txt`). The TV applies
 these RPUs (they differ from the control) but does not follow the steep chroma curve: the

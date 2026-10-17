@@ -62,8 +62,8 @@ result.
 ## Naming and hand-off
 
 - Folder: `<test>-<YYYY-MM-DD>` in the owner's hand-off folder (`forplex`, scanned by the media
-  servers). It holds the files, `VIEWING_GUIDE.txt` (from the template in
-  `~/mkvdovi-work/ws6-normalization-2026-10-17/VIEWING_GUIDE.template.txt`) and
+  servers). It holds the files, `VIEWING_GUIDE.txt` (from
+  [`VIEWING_GUIDE.template.txt`](VIEWING_GUIDE.template.txt)) and
   `reference-renders/`.
 - Copy with `command cp` and `cmp` every file after copying (the 9P mount).
 - Add one line to `TESTS_PENDING.txt` in the hand-off folder when the files are delivered. Move

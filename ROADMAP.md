@@ -43,8 +43,8 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left needs the owner's eyes or
 hardware after a startable step has prepared it:
 
-- **WS6 (3): view the redesigned canary** on the LG OLED C9, once Claude has built it (the first
-  canary gave no verdict, 2026-10-17).
+- **WS6 (3): view the slope ladder, then the redesigned canary,** on the LG OLED C9, once Claude
+  has built each (the first canary gave no verdict, 2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
 
@@ -69,7 +69,8 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
-| 2026-10-17 | P9 holdout scoring: the pre-registered rule passes on the four holdout cuts (average clamped MAE 276.6 → 33.8 above the floor, 315.9 → 25.2 over all frames; max equal; min 5.98 → 4.91); the owner flips the default after v0.7.0. P6 check list drafted, five picked; WS6 canary and P10 `ms_weight` A/B handed off. | P9, P6, WS6, P10 | `docs/owner-decisions-2026-10-17` |
+| 2026-10-17 | C9 viewings: P10 step 4 closed (blind A/B, no difference, `ms_weight` 2048 kept); first WS6 `code / 1023` canary no verdict (uniform green, slope ladder next); WS6 (2) playback procedure written ([`docs/PLAYBACK.md`](docs/PLAYBACK.md)) and corrected. | P10, WS6 | `docs/owner-decisions-2026-10-17` |
+| 2026-10-17 | P9 holdout scoring: the pre-registered rule passes on the four holdout cuts (average clamped MAE 276.6 → 33.8 above the floor, 315.9 → 25.2 over all frames; max equal; min 5.98 → 4.91); the owner flips the default after v0.7.0. P6 check list drafted, five picked; WS6 canary and P10 `ms_weight` A/B built and handed off. | P9, P6, WS6, P10 | `docs/owner-decisions-2026-10-17` |
 | 2026-10-17 | Owner decisions: P9 holdout rule pre-registered, P13 keeps v29 without L2 (closed), E14 step 2 dropped, no second P8 device, E12 bundles NVRTC, P10 waits for WS7, gates stated for every `TODO(owner)` step. | P3–P6, P8–P10, P13, WS0–WS8, FEL, E1–E7, E10–E12, E14 | `docs/owner-decisions-2026-10-17` |
 | 2026-10-17 | E13 step 5: analyzer split, `frame.rs`, `gpu.rs` and `pipeline.rs` into module directories by pure move; 12 optimizer-enabled CPU and CUDA runs byte-identical to main@941489d, CUDA parity PASS. | E13 | [#59](https://github.com/tinof/hdr-analyze/pull/59) |
 | 2026-10-15 | E14 step 5, first PR: tests for the 19 high-risk survivor groups (composer, `--verify`, sidecar/RPU/HLG probes, pipeline delivery steps); 0 of the targeted mutants missed. Steps 1, 2 and 3–4 (partial) recorded. | E14 | `test/e14-high-risk` |
@@ -293,7 +294,16 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   retail is not higher than today's path; the owner confirms the flip. Done 2026-10-17: PASS on
   every clause, flip confirmed for the minor after v0.7.0. Step 3, the flip: `--hdr10plus-l1`
   defaults to `hybrid` and the old path stays selectable by name; HDR10+ RPU baselines are
-  re-captured and every other baseline stays byte-identical; CHANGELOG entry under Changed. Step 2: v6 written with a
+  re-captured and every other baseline stays byte-identical; CHANGELOG entry under Changed. The
+  checks that today fire on the flag value alone, whatever the input, must not turn on for every
+  user, each with a test on both sides: `--legacy-madvr-l1` without `--hdr10plus-l1` still runs,
+  and only an explicit `--hdr10plus-l1 hybrid` conflicts with it (`Args::flag_conflict`,
+  `mkvdovi/src/cli.rs`; the existing test
+  `hdr10plus_l1_defaults_to_hdr10plus_and_hybrid_excludes_legacy_madvr_l1` is extended, not
+  flipped); a non-HDR10+ input prints no "applies only to HDR10+ inputs; ignored" line under the
+  default (`convert_file`, `pipeline/mod.rs`); an HDR10+ input under `--analysis-quality fast`
+  without an explicit flag still converts, through the `hdr10plus` path with a visible notice,
+  and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`). Step 2: v6 written with a
   per-frame max and the resolved `--peak-source`; mkvdovi and `tools/l1_diff` accept 1–6;
   `check_measurements` refuses a percentile-peak sidecar under hybrid; the fallback peak equals the
   per-frame max over the piece; default RPU baselines byte-identical; CUDA parity; the L1 gate
