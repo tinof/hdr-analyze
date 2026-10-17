@@ -45,7 +45,6 @@ hardware after a startable step has prepared it:
 
 - **WS6 (3): view the redesigned canary** on the LG OLED C9, once Claude has built it (the first
   canary gave no verdict, 2026-10-17).
-- **WS6 (2): correct the playback procedure draft** in [`docs/PLAYBACK.md`](docs/PLAYBACK.md).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
 
@@ -472,11 +471,13 @@ The detailed gap table and validation method live in
   template recording player, firmware, picture mode and HDMI path) and used once, for (3); (3) a
   discriminating canary, a composer that is neutral under one normalization and visibly coloured
   under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded.
-- **Open:** (1) the final-RPU regression corpus; (2) the written playback procedure: draft in
-  [`docs/PLAYBACK.md`](docs/PLAYBACK.md) (2026-10-17), for the owner to correct; (3) the
+- **Open:** (1) the final-RPU regression corpus; (3) the
   `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
   canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
   steep a chroma curve the C9 still follows.
+- **Done 2026-10-17: (2) the written playback procedure,** [`docs/PLAYBACK.md`](docs/PLAYBACK.md),
+  used for the WS6 and P10 viewings and corrected afterwards with what they showed (owner asked
+  Claude to make the corrections).
 - **Open question (2026-10-06):** do devices evaluate the 8.4 composer at `code / 1023` (as
   libplacebo and the `bt2100` fit) or at the spec's `code / 1024`? Under the latter `bt2100` is
   5.9 codes off neutral, probably too little to see on a neutral ramp, so the test needs a pattern

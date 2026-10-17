@@ -101,8 +101,12 @@ is the `dolby_vision` crate's zero point (`round(t·2048 + 2048)`), not document
 device. Retail RPUs in the development corpus carry 512 (First Man, Saving Private Ryan, The
 Shining), 0 (Top Gun: Maverick, Alita, Skyfall) and 2048 (House of the Dragon, Joker, Inside Out 2).
 
-**WS6 (2):** the procedure draft is [`PLAYBACK.md`](PLAYBACK.md), from how P8 ran and what it did
-not record.
+**WS6 (2):** the procedure is [`PLAYBACK.md`](PLAYBACK.md), from how P8 ran and what it did
+not record. After the C9 viewings the same day, at the owner's request, Claude corrected it: the
+WS6 and P10 paths and picture mode, where to find the C9 firmware, lossless streams play through
+the Shield, stay inside the coefficient range the device follows, an interpretation row for every
+observation, how Claude asks the report questions, and finished test folders deleted only on
+request (the WS6, P10 and P8 folders were deleted 2026-10-17).
 
 ### 2026-10-17: owner decisions on the waiting list and the missing gates
 
