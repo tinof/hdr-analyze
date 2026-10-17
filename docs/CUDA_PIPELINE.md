@@ -116,7 +116,7 @@ fps (HDR10) and 125 → 172 fps (HLG). The copies now dominated.
 
 ### 3. Analyzing NVDEC frames where they are
 
-- **One shared context.** Before cudarc opens its context, `gpu::prepare_primary_context` sets
+- **One shared context.** Before cudarc opens its context, `gpu::backend::prepare_primary_context` sets
   device 0's primary context to `CU_CTX_SCHED_BLOCKING_SYNC`. The decoder is then created with
   `AV_CUDA_USE_PRIMARY_CONTEXT` (`ffmpeg_io::open_cuda_hwdevice_decoder`). FFmpeg accepts a shared
   primary context only with exactly that flag, and CUDA allows the flag to be set only while the
@@ -260,9 +260,9 @@ What it does not prove:
 ## Rules for future changes
 
 - Keep the result-buffer layout (`SUMS_WORD` and the counts before it) and the `dovi_params` layout
-  (`DOVI_*`) identical in `kernels.cu` and `gpu.rs`.
+  (`DOVI_*`) identical in `kernels.cu` and `gpu/mod.rs`.
 - Keep `GpuAnalyzer::new` ahead of `setup_hardware_decoder`.
-- Keep the HLG chroma pass identical to `frame.rs` operation for operation: the same pre-pass
+- Keep the HLG chroma pass identical to `frame/mod.rs` operation for operation: the same pre-pass
   rectangle (crop chroma rect plus the taps' reach, clamped to the frame) and the same tap and bilinear
   arithmetic in f32 with `__fmul_rn`/`__fadd_rn`, no FMA.
 - Never pass an `AV_PIX_FMT_CUDA` frame to host code; go through `host_view`.

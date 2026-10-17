@@ -6,6 +6,32 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-17: E13 step 5, analyzer split
+
+Pure move in `hdr_analyzer_mvp`; no behaviour change. Hook line counts (`.claude/hooks/rust-check.sh`)
+before → after: `pipeline.rs` 1348 → `pipeline/mod.rs` 338, `analyze.rs` 629, `crop_space.rs` 162,
+`scenes.rs` 252; `analysis/frame.rs` 1026 → `frame/mod.rs` 643, `peak.rs` 397; `analysis/gpu.rs` 951
+→ `gpu/mod.rs` 224, `backend.rs` 728. Test modules keep their names as files.
+
+- Proof (`~/mkvdovi-work/rpu-baseline/e13-step5/proof/`): `split.py` and `verify_move.py` from step 3,
+  extended with `unwrap` ranges (an inline `mod x { }` moved to a file, body dedented by exactly four
+  spaces) and `import_only` files (only `use` lines added). Each of the six move commits prints
+  PURE MOVE OK against its parent; the fmt commit is reproduced by `cargo fmt --all` at its parent.
+  Allowed edits: 23 `pub(super)` widenings, `include_str!("../kernels.cu")`, the rewritten import
+  block of `pipeline/mod.rs`, one `use` line in four test files.
+- `cargo test -p hdr_analyzer_mvp -- --list`: the same 125 names before and after.
+- `proof/run-proofs.sh` reruns every proof in clean worktrees (`E13 STEP 5 PROOF OK`).
+  `git diff --color-moved=plain --color-moved-ws=allow-indentation-change 9d33d85 28d341e`: the only
+  non-moved lines are `mod` lines, imports, the widenings, the `include_str!` path and two rustfmt
+  re-wraps (`CudaContext::new(0)` in `backend.rs`, one `kernel_composed` call in `gpu/tests.rs`).
+- Gates on 28d341e: fmt, clippy, clippy `--features cuda`, `cargo test --workspace` CI-style
+  (`--nocapture`, 429 passed, only the 7 allowed `Skipping` lines), `scripts/ci/l1-regression-gate.sh`
+  without `--update`, `scripts/cuda-parity.sh` PASS.
+- Optimizer on (both gates pass `--disable-optimizer`): release CPU and `+cuda` builds of main@941489d
+  and 28d341e, analyzer defaults, on the synthetic PQ and HLG gate clips, d1 HOTD, g3 Green Planet
+  (bt2100 and preset) and r1 Joker; every CUDA run `analysis.gpu: true`. All 12 `.bin` and `.l1.json`
+  pairs byte-identical (`proof/evidence.sh`, `premove/`, `postmove/`).
+
 ### 2026-10-15: E14 steps 1 to 5, high-risk survivors covered
 
 Test-only; no production code changes. E14 stays open.

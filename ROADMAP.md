@@ -21,9 +21,17 @@ links, not into the item. `/roadmap-next` keeps **Next up** current and adds a *
 changed since that commit. Format: `~/.claude/skills/roadmap-next/reference/roadmap-format.md`;
 project rules: [`.claude/roadmap-config.md`](.claude/roadmap-config.md).
 
-### Next up
+### Next up (checked 2026-10-17 at main@941489d)
+<!-- roadmap-next: rev=1 scope=all config=73415b8825d0 probes=gpu:ok,corpus:ok -->
 
-Filled in by the first `/roadmap-next` run.
+1. **P1 step 1: measure the CPU default** (priority 4). Gate: CPU cost of `accurate` and the
+   `FAST_BILINEAR` effect on L1 max and MaxCLL measured (forced CPU, fresh analyses); then flip or
+   keep (the note exists); a flip adds `cargo mutants --in-diff`. Between E13 moves. Release: minor
+   if CPU `auto` flips, none if `balanced` stays.
+2. **P12: `--mdfix` source L6** (priority 5). Gate: as in P12, "every other RPU baseline
+   byte-identical" checked with `sha256sum` of the `RPU.bin` files (`rpu-baseline.sh compare`
+   ignores CRC), plus `cargo mutants --in-diff`. Own branch `fix-p12-mdfix-source-l6`, between E13
+   moves. Release: patch (rides v0.7.0 if merged before it).
 
 ### Waiting for the owner
 
@@ -55,7 +63,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13 step 5 (refactor), P1 step 1 measurement, E14 remaining steps (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15) | MINOR (new flag). P7 was priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
+| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15); P12 `--mdfix` source L6 (PATCH-class fix) only if merged before the release PR, else the next patch | MINOR (new flag). P7 was priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
 | v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract), both after E13 step 5 | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
@@ -68,6 +76,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-17 | E13 step 5: analyzer split, `frame.rs`, `gpu.rs` and `pipeline.rs` into module directories by pure move; 12 optimizer-enabled CPU and CUDA runs byte-identical to main@941489d, CUDA parity PASS. | E13 | `refactor/e13-analyzer-split` |
 | 2026-10-15 | E14 step 5, first PR: tests for the 19 high-risk survivor groups (composer, `--verify`, sidecar/RPU/HLG probes, pipeline delivery steps); 0 of the targeted mutants missed. Steps 1, 2 and 3–4 (partial) recorded. | E14 | `test/e14-high-risk` |
 | 2026-10-15 | P13: `--cm-version v29` writes a CM v2.9 RPU (L1, L5, L6) and `--verify` checks the requested CM version; CM v4.0 RPUs identical to 0.6.0. | P13 | `fix-p13-cm-v29` |
 | 2026-10-15 | P11 notice: `--mdfix` names the authored levels it replaces or drops, from the sampled source RPU windows; r4/r5 `--mdfix` RPUs identical to 0.6.0; two defects found (P12, P13). | P11, P12, P13 | `feat/p11-mdfix-notice` |
@@ -118,7 +127,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
    opt-in flag landed 2026-10-14. Gate: opt-in, scored on the development tier and the holdout
-   HDR10+ cuts before any default change. **Prerequisite:** E13 step 5 before the sidecar v6 step.
+   HDR10+ cuts before any default change. **Prerequisite:** E13 step 5 before the sidecar v6 step (met 2026-10-17,
+   `refactor/e13-analyzer-split`).
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
    a playback test.
@@ -126,7 +136,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    values, half-resolution CPU default, L1 scaling note (the three L6 defects found 2026-10-07 were
    fixed 2026-10-11). Gate: unit tests for the reader and the option; measure the CPU default
    first. **Prerequisite:** E13 step 5 (analyzer split) before E8 + E9, because E8 moves the
-   default `.bin`.
+   default `.bin` (met 2026-10-17, `refactor/e13-analyzer-split`).
 5. **`--mdfix` fidelity** (P12, P13): full regeneration stays (owner decision 2026-10-13) and the
    notice that names the dropped levels shipped 2026-10-15 (`CHANGELOG.md` `[Unreleased]`). Open:
    `--mdfix` ignores the source RPU's L6 (P12), and whether v29 RPUs carry neutral L2 (P13, owner
@@ -177,6 +187,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
      flip CPU `auto` to `accurate` (the same file then gives the same L1 on any host) or keep
      `balanced` with a visible note. `fast` puts cuts on a 3-frame grid and misses peaks on skipped
      frames.
+- **Checked 2026-10-17 @941489d:** the visible note for CPU `auto` already exists
+  (`analysis_quality_notice`, `mkvdovi/src/pipeline/analyzer.rs:246`), so keeping `balanced` needs
+  no code. Measure with CPU analysis forced and fresh analyses for both presets (`auto` picks
+  `accurate` with GPU analysis, and an existing sidecar can be reused); compare measured MaxCLL
+  from the sidecar, since a source-stated MaxCLL wins in L6.
 - **Done 2026-10-06** (former open items 2–4; evidence: unit tests `coarser_sampling`,
   `rejects_coarser_sidecar`, `analysis_quality_notice`, `gpu_analysis_missing` in
   `mkvdovi/src/pipeline/tests.rs`, e2e test `accurate_reanalyzes_coarser_measurements` in
@@ -337,6 +352,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   baseline byte-identical.
 - **Fix:** under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults. Changes
   delivered RPUs: own branch, RPU baselines updated.
+- **Checked 2026-10-17 @941489d:** the sampled L6 values are not kept: the authored-levels scan
+  records only `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu`
+  (`rpu_check.rs:177`) has no L6 field, and `prepare_configuration` (`pipeline/config.rs:42`) gets
+  no sampled metadata, so the fix threads the values through and tests the pipeline wiring.
+  `scripts/rpu-baseline.sh compare` strips the CRC (`:245`), so "byte-identical" needs `sha256sum`.
 
 ### P13: `--cm-version v29` writes a CM v4.0 RPU
 
@@ -584,7 +604,8 @@ The detailed gap table and validation method live in
   `--peak-source histogram99/histogram999` or `--peak-domain luma` with a non-conservative
   optimizer profile.
 - **Gate:** a bin-edge round-trip unit test and an optimizer unit test (CUDA parity and the L1 gate
-  run with `--disable-optimizer`, so they do not cover it). **Prerequisite:** E13 step 5.
+  run with `--disable-optimizer`, so they do not cover it). **Prerequisite:** E13 step 5 (met 2026-10-17,
+  `refactor/e13-analyzer-split`).
 - **Checked 2026-10-06 @df54ad4:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
   on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
   (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
@@ -599,7 +620,8 @@ The detailed gap table and validation method live in
 - **Status:** Open. `--pre-denoise` accepts any string and its help text names `nlmeans`, but only
   `median3` is implemented; every other value silently does nothing and is still written into the
   sidecar provenance.
-- **Gate:** a unit test for the option (priority 4). **Prerequisite:** E13 step 5.
+- **Gate:** a unit test for the option (priority 4). **Prerequisite:** E13 step 5 (met 2026-10-17,
+  `refactor/e13-analyzer-split`).
 - **Fix:** restrict the values to `off` and `median3`.
 
 ### E10: L1 code scaling
@@ -639,9 +661,9 @@ The detailed gap table and validation method live in
 - **Status:** Partial; step 2 (safety net) done 2026-10-07; step 3 (mkvdovi split) done 2026-10-07,
   evidence in the PR body and `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/`; step 4
   (`convert_file` by phase) done 2026-10-13, evidence in
-  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 open. Still over the 800-line limit in CLAUDE.md ("Module size"), test modules not counted:
-  `hdr_analyzer_mvp/src/pipeline.rs` (1348), `analysis/frame.rs` (1026) and `analysis/gpu.rs` (951).
-  The mkvdovi `metadata/` submodules are all under it.
+  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 (analyzer split) done 2026-10-17 on
+  `refactor/e13-analyzer-split`, evidence in `~/mkvdovi-work/rpu-baseline/e13-step5/`. No
+  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; step 6 open.
 - **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
   directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
   for the untested high-risk mkvdovi paths (source deletion, format detection, static L6, the whole
@@ -665,14 +687,30 @@ The detailed gap table and validation method live in
   only fmt, clippy and test (plus the CUDA gates) for mkvdovi paths. An automatic rpu-baseline gate
   would need a baseline-path convention and an update mode for PRs that change the RPU on purpose;
   it is not planned.
-- **Open:** (5) the analyzer split (see Steps).
+- **Open:** (6) split the long functions by phase, each a behaviour-neutral PR, not a move:
+  `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`), `run` (281, `pipeline/mod.rs`),
+  `analyze_native_frame_cropped` (276, `analysis/frame/mod.rs`; after E8, which edits its bin
+  edges) and `launch_and_collect` (243, `analysis/gpu/backend.rs`).
+  Follow-up chore PR (comments and strings only): stale `gpu.rs` references, now `analysis/gpu/mod.rs`,
+  in `kernels.cu:23`, `:52` and the `:54` static_assert message (needs a CUDA parity run),
+  `.claude/workflows/pre-pr-panel.js:133` and `pre-pr-gemini.prompt.md:25` (adds `gemini-harness`).
+- **Done 2026-10-17: step 5, analyzer split** (pure move, 7 commits). `analysis/frame.rs` →
+  `frame/{mod,peak}.rs` (peak estimators and grain statistics in `peak.rs`), `analysis/gpu.rs` →
+  `gpu/{mod,backend}.rs` (the `cuda`-gated backend; `include_str!("../kernels.cu")`), `pipeline.rs`
+  → `pipeline/{mod,analyze,crop_space,scenes}.rs`; test modules in files under their old names.
+  Gates: `verify_move.py` PURE MOVE OK per commit, the fmt commit reproduced, 125 analyzer test names
+  identical, fmt/clippy (also `cuda`)/tests pass (only allowed skips), the L1 gate without
+  `--update`, CUDA parity PASS, and 12 optimizer-enabled runs (synthetic PQ/HLG, d1, g3 bt2100 and
+  preset, r1; CPU and CUDA, `gpu: true`) byte-identical `.bin` and sidecar to main@941489d
+  ([log](docs/ROADMAP_LOG.md) 2026-10-17).
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
 - **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
-- **Checked 2026-10-11 @8db4ad6:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3;
-  r4 MEL default in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`. Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
-  optimizer-enabled default `.bin` (both gates pass `--disable-optimizer`).
+- **Checked 2026-10-17 @941489d:** before the split the Stop hook's count (`.claude/hooks/rust-check.sh`)
+  gave `pipeline.rs` 1348, `analysis/frame.rs` 1026 and `analysis/gpu.rs` 951 lines; both gates pass
+  `--disable-optimizer`, so the step diffed optimizer-enabled `.bin` files. Baselines from
+  2026-10-11 in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`.
 
 ### E14: test-suite audit
 
