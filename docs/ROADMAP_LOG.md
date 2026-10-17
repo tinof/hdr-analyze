@@ -6,6 +6,41 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-17: owner decisions on the waiting list and the missing gates
+
+No code change. The owner settled every "Waiting for the owner" entry and stated a gate for
+every `TODO(owner)` step; the gates themselves are in the `ROADMAP.md` items.
+
+- **P9 holdout scoring:** score the four holdout cuts that carry retail DV L1 (`q-alita-01/02`,
+  `q-the-shining-01/02`); Alien and Deadloch stay unseen (scoring them would need `cm_analyze`).
+  The rule is written before any scoring: hybrid becomes the default if the average's pooled
+  clamped MAE (above the floor and over all frames) is lower than today's HDR10+ path and the
+  per-frame MAE of L1 max and L1 min against retail is not higher; the owner confirms the flip.
+- **P13:** v29 RPUs stay without L2. A display treats a missing L2 for its target like a neutral
+  trim, and v29 output never carried L2. P13 has no follow-up left and leaves the roadmap; its fix
+  is in `CHANGELOG.md` `[Unreleased]`.
+- **E14 step 2:** a separate test author is dropped as a rule; in-session tests plus the step 6
+  `cargo mutants --in-diff` gate stay.
+- **P8 step 1:** no second Dolby Vision device is available. The LG OLED C9 result stands alone;
+  1.0.0 needs the WS6 `code / 1023` answer instead.
+- **WS6:** Claude builds a discriminating canary (neutral under one normalization, visibly
+  coloured under the other), checks it in libplacebo and hands A/B files to the owner for the C9;
+  Claude drafts the written playback procedure for the owner to correct.
+- **E12:** the Windows zip bundles the NVRTC DLLs, because the driver ships none and the
+  analyzer compiles `kernels.cu` at runtime. The rc test runs on the Windows side of the RTX 4070
+  dev host through WSL interop, with the CUDA toolkits (12.4 to 13.1 installed there) hidden from
+  `PATH`, so it stands in for a driver-only user host.
+- **P10 step 3:** decided by the WS7 simulator, not by a playback test.
+- **E1 (2):** a self-hosted runner on the WSL2 host, for trusted runs only (no fork PRs).
+- **E7 (2):** an always-on RPU frame-count check; full `--verify` stays opt-in.
+- **E6:** tool versions go into a global MKV tag on the output.
+- **P6:** Claude drafts a list of concrete source checks; the owner picks.
+- **WS1:** a new peak estimator must beat `max` on pooled per-shot MAE against retail on the
+  development tier, lose no frozen synthetic case by more than 1 code, match on CPU and CUDA, and
+  hold on unseen holdout cuts.
+- **Deferred items** got reopen conditions instead of gates: P4 (WS7 shows a gain), WS5 (R2),
+  E5 (a user request), FEL (the owner lifts the hold), WS2 step 3 (something reads L4).
+
 ### 2026-10-17: E13 step 5, analyzer split
 
 Pure move in `hdr_analyzer_mvp`; no behaviour change. Hook line counts (`.claude/hooks/rust-check.sh`)
