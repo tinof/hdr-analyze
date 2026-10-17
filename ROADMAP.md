@@ -21,9 +21,22 @@ links, not into the item. `/roadmap-next` keeps **Next up** current and adds a *
 changed since that commit. Format: `~/.claude/skills/roadmap-next/reference/roadmap-format.md`;
 project rules: [`.claude/roadmap-config.md`](.claude/roadmap-config.md).
 
-### Next up
+### Next up (checked 2026-10-17 at main@941489d)
+<!-- roadmap-next: rev=1 scope=all config=73415b8825d0 probes=gpu:ok,corpus:ok -->
 
-Filled in by the first `/roadmap-next` run.
+1. **E13 step 5: analyzer split** (prerequisite of priorities 2 and 4: E8, E9, P9 step 2). Gate:
+   per move fmt, clippy (also `--features cuda`), tests, the L1 gate without `--update`,
+   `scripts/cuda-parity.sh`, and an optimizer-enabled default `.bin` captured on main@941489d
+   before the first move and byte-identical after each. Branch `refactor/e13-analyzer-split`; no
+   other branch open while a move is in flight (Sequencing). Release: none.
+2. **P1 step 1: measure the CPU default** (priority 4). Gate: CPU cost of `accurate` and the
+   `FAST_BILINEAR` effect on L1 max and MaxCLL measured (forced CPU, fresh analyses); then flip or
+   keep (the note exists); a flip adds `cargo mutants --in-diff`. Between E13 moves. Release: minor
+   if CPU `auto` flips, none if `balanced` stays.
+3. **P12: `--mdfix` source L6** (priority 5). Gate: as in P12, "every other RPU baseline
+   byte-identical" checked with `sha256sum` of the `RPU.bin` files (`rpu-baseline.sh compare`
+   ignores CRC), plus `cargo mutants --in-diff`. Own branch `fix-p12-mdfix-source-l6`, between E13
+   moves. Release: patch (rides v0.7.0 if merged before it).
 
 ### Waiting for the owner
 
@@ -55,7 +68,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13 step 5 (refactor), P1 step 1 measurement, E14 remaining steps (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15) | MINOR (new flag). P7 was priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
+| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15); P12 `--mdfix` source L6 (PATCH-class fix) only if merged before the release PR, else the next patch | MINOR (new flag). P7 was priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
 | v0.8.0 | E12 CUDA release binaries (Linux x64, Windows x64) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on a Windows NVIDIA host first. Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8 and E9 (they move the default `.bin`); P9 sidecar v6 (cross-binary contract), both after E13 step 5 | MINOR |
 | 1.0.0 | P8 playback verified (WS6; device application shown 2026-10-13 on an LG OLED C9 only, `code / 1023` question open), sidecar schema and CLI unchanged for one minor cycle, no open priority-1 defect | Owner decision |
@@ -177,6 +190,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
      flip CPU `auto` to `accurate` (the same file then gives the same L1 on any host) or keep
      `balanced` with a visible note. `fast` puts cuts on a 3-frame grid and misses peaks on skipped
      frames.
+- **Checked 2026-10-17 @941489d:** the visible note for CPU `auto` already exists
+  (`analysis_quality_notice`, `mkvdovi/src/pipeline/analyzer.rs:246`), so keeping `balanced` needs
+  no code. Measure with CPU analysis forced and fresh analyses for both presets (`auto` picks
+  `accurate` with GPU analysis, and an existing sidecar can be reused); compare measured MaxCLL
+  from the sidecar, since a source-stated MaxCLL wins in L6.
 - **Done 2026-10-06** (former open items 2–4; evidence: unit tests `coarser_sampling`,
   `rejects_coarser_sidecar`, `analysis_quality_notice`, `gpu_analysis_missing` in
   `mkvdovi/src/pipeline/tests.rs`, e2e test `accurate_reanalyzes_coarser_measurements` in
@@ -337,6 +355,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   baseline byte-identical.
 - **Fix:** under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults. Changes
   delivered RPUs: own branch, RPU baselines updated.
+- **Checked 2026-10-17 @941489d:** the sampled L6 values are not kept: the authored-levels scan
+  records only `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu`
+  (`rpu_check.rs:177`) has no L6 field, and `prepare_configuration` (`pipeline/config.rs:42`) gets
+  no sampled metadata, so the fix threads the values through and tests the pipeline wiring.
+  `scripts/rpu-baseline.sh compare` strips the CRC (`:245`), so "byte-identical" needs `sha256sum`.
 
 ### P13: `--cm-version v29` writes a CM v4.0 RPU
 
@@ -670,9 +693,11 @@ The detailed gap table and validation method live in
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
 - **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
-- **Checked 2026-10-11 @8db4ad6:** baselines: default d1, g3, h1, r1, r2; mdfix r4, r5; preset g3;
-  r4 MEL default in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`. Step 5: test modules between production code, `gpu.rs` `include_str!`, and diff an
-  optimizer-enabled default `.bin` (both gates pass `--disable-optimizer`).
+- **Checked 2026-10-17 @941489d:** step 5 files unchanged since 2026-10-06. Non-blank, non-comment
+  lines outside test modules: `pipeline.rs` 1171 (test mods at :649, :680, :1410), `gpu.rs` 811
+  (:952; `include_str!` of `kernels.cu`), `frame.rs` 782 (:1026, :1066), so `frame.rs` is at the
+  limit only by this count. Both gates pass `--disable-optimizer`: diff an optimizer-enabled
+  default `.bin` per move. Baselines from 2026-10-11 in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`.
 
 ### E14: test-suite audit
 
