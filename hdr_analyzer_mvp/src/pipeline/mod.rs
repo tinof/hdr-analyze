@@ -647,67 +647,10 @@ pub fn run(
 }
 
 #[cfg(test)]
-mod scene_cut_tests {
-    use super::*;
-
-    fn frame(bin: usize) -> MadVRFrame {
-        let mut lum_histogram = vec![0.0; 256];
-        lum_histogram[bin] = 100.0;
-        MadVRFrame {
-            lum_histogram,
-            ..Default::default()
-        }
-    }
-
-    /// With `--sample-rate 3` the frames in between hold a copy of the last analyzed frame.
-    /// The shot changes at source frame 40; the first analyzed frame of the new shot is 42.
-    #[test]
-    fn sampled_analysis_cuts_at_the_first_analyzed_frame_of_a_shot() {
-        let frames: Vec<MadVRFrame> = (0..90)
-            .map(|index| frame(if index - index % 3 < 40 { 30 } else { 180 }))
-            .collect();
-        let (cuts, frame_indices, series) = detect_scene_cuts(&frames, 3, 3.0, 12);
-        assert_eq!(cuts, vec![42]);
-        assert_eq!(frame_indices.len(), 30);
-        assert_eq!(series.diff.len(), 30);
-
-        // Every frame analyzed: the copies make the picture change at 42 as well.
-        let (cuts, _, _) = detect_scene_cuts(&frames, 1, 3.0, 12);
-        assert_eq!(cuts, vec![42]);
-    }
-}
+mod scene_cut_tests;
 
 #[cfg(test)]
-mod crop_space_tests {
-    use super::*;
-
-    #[test]
-    fn cpu_crop_maps_back_to_full_resolution() {
-        let letterbox = CropRect {
-            x: 0,
-            y: 140,
-            width: 1920,
-            height: 800,
-        };
-        let full = crop_to_full_resolution(letterbox, 2, (1920, 1080), (3840, 2160));
-        assert_eq!(
-            (full.x, full.y, full.width, full.height),
-            (0, 280, 3840, 1600)
-        );
-        let unscaled = crop_to_full_resolution(letterbox, 1, (1920, 1080), (1920, 1080));
-        assert_eq!(unscaled.height, 800);
-    }
-
-    #[test]
-    fn edge_touching_crop_snaps_to_odd_source_border() {
-        let full_frame = CropRect::full(958, 538);
-        let mapped = crop_to_full_resolution(full_frame, 2, (958, 538), (1917, 1077));
-        assert_eq!(
-            (mapped.x, mapped.y, mapped.width, mapped.height),
-            (0, 0, 1917, 1077)
-        );
-    }
-}
+mod crop_space_tests;
 
 fn compute_scene_diff(cli: &Cli, curr_hist: &[f64], prev_hist: &[f64]) -> f64 {
     match cli.scene_metric.to_lowercase().as_str() {
@@ -1408,13 +1351,4 @@ fn precompute_scene_stats(scenes: &mut [MadVRScene], frames: &[MadVRFrame]) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn average_smoothing_has_no_scene_initialization_bias() {
-        let mut ema = None;
-        let mut history = VecDeque::new();
-        assert_eq!(smooth_average(0.75, &mut ema, &mut history, 0.1, 3), 0.75);
-    }
-}
+mod tests;
