@@ -202,9 +202,8 @@ fn dovi84_kernel_spatial_decode_matches_the_cpu() {
                         for cx in cx0..=cx1 {
                             let index = (cy * chroma_width + cx) as usize;
                             let mmr_luma = kernel_downsample(&luma, width, height, cx, cy);
-                            composed.extend(kernel_composed(
-                                &params, mmr_luma, cb[index], cr[index],
-                            ));
+                            composed
+                                .extend(kernel_composed(&params, mmr_luma, cb[index], cr[index]));
                         }
                     }
                     let cpu_composed = |cx: usize, cy: usize| {

@@ -160,8 +160,8 @@ impl GpuAnalyzer {
         // libloading first so `--hwaccel cuda` can reliably fall back to CPU.
         let (cuda_driver, nvrtc) = Self::load_cuda_libraries()?;
         prepare_primary_context()?;
-        let context = CudaContext::new(0)
-            .map_err(|err| anyhow!("failed to open CUDA device 0: {err:?}"))?;
+        let context =
+            CudaContext::new(0).map_err(|err| anyhow!("failed to open CUDA device 0: {err:?}"))?;
         let stream = context.default_stream();
         let ptx = compile_ptx(include_str!("../kernels.cu"))
             .map_err(|err| anyhow!("NVRTC failed to compile HDR analysis kernel: {err}"))?;

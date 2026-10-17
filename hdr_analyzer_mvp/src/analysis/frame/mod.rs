@@ -17,11 +17,11 @@ use crate::l1_sidecar::FrameL1Measurement;
 
 mod peak;
 
+use self::peak::record_cross_quad_diff;
 pub(crate) use self::peak::{
     effective_tail_count, high_percentile_pq, low_percentile_pq, robust_peak_pq,
     sigma_from_diff_hist, DIFF_BINS, DIFF_VALUE_BANDS,
 };
-use self::peak::record_cross_quad_diff;
 
 const PQ_HIST_BINS: usize = 4096;
 
