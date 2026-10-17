@@ -81,6 +81,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-17 | E13 step 5: analyzer split, `frame.rs`, `gpu.rs` and `pipeline.rs` into module directories by pure move; 12 optimizer-enabled CPU and CUDA runs byte-identical to main@941489d, CUDA parity PASS. | E13 | `refactor/e13-analyzer-split` |
 | 2026-10-15 | E14 step 5, first PR: tests for the 19 high-risk survivor groups (composer, `--verify`, sidecar/RPU/HLG probes, pipeline delivery steps); 0 of the targeted mutants missed. Steps 1, 2 and 3–4 (partial) recorded. | E14 | `test/e14-high-risk` |
 | 2026-10-15 | P13: `--cm-version v29` writes a CM v2.9 RPU (L1, L5, L6) and `--verify` checks the requested CM version; CM v4.0 RPUs identical to 0.6.0. | P13 | `fix-p13-cm-v29` |
 | 2026-10-15 | P11 notice: `--mdfix` names the authored levels it replaces or drops, from the sampled source RPU windows; r4/r5 `--mdfix` RPUs identical to 0.6.0; two defects found (P12, P13). | P11, P12, P13 | `feat/p11-mdfix-notice` |
@@ -662,9 +663,9 @@ The detailed gap table and validation method live in
 - **Status:** Partial; step 2 (safety net) done 2026-10-07; step 3 (mkvdovi split) done 2026-10-07,
   evidence in the PR body and `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/`; step 4
   (`convert_file` by phase) done 2026-10-13, evidence in
-  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 open. Still over the 800-line limit in CLAUDE.md ("Module size"), test modules not counted:
-  `hdr_analyzer_mvp/src/pipeline.rs` (1348), `analysis/frame.rs` (1026) and `analysis/gpu.rs` (951).
-  The mkvdovi `metadata/` submodules are all under it.
+  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 (analyzer split) done 2026-10-17 on
+  `refactor/e13-analyzer-split`, evidence in `~/mkvdovi-work/rpu-baseline/e13-step5/`. No
+  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; step 6 open.
 - **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
   directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
   for the untested high-risk mkvdovi paths (source deletion, format detection, static L6, the whole
@@ -688,16 +689,27 @@ The detailed gap table and validation method live in
   only fmt, clippy and test (plus the CUDA gates) for mkvdovi paths. An automatic rpu-baseline gate
   would need a baseline-path convention and an update mode for PRs that change the RPU on purpose;
   it is not planned.
-- **Open:** (5) the analyzer split (see Steps).
+- **Open:** (6) split the long functions by phase, each a behaviour-neutral PR, not a move:
+  `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`), `run` (281, `pipeline/mod.rs`),
+  `analyze_native_frame_cropped` (276, `analysis/frame/mod.rs`; after E8, which edits its bin
+  edges) and `launch_and_collect` (243, `analysis/gpu/backend.rs`).
+- **Done 2026-10-17: step 5, analyzer split** (pure move, 7 commits). `analysis/frame.rs` →
+  `frame/{mod,peak}.rs` (peak estimators and grain statistics in `peak.rs`), `analysis/gpu.rs` →
+  `gpu/{mod,backend}.rs` (the `cuda`-gated backend; `include_str!("../kernels.cu")`), `pipeline.rs`
+  → `pipeline/{mod,analyze,crop_space,scenes}.rs`; test modules in files under their old names.
+  Gates: `verify_move.py` PURE MOVE OK per commit, the fmt commit reproduced, 125 analyzer test names
+  identical, fmt/clippy (also `cuda`)/tests pass (only allowed skips), the L1 gate without
+  `--update`, CUDA parity PASS, and 12 optimizer-enabled runs (synthetic PQ/HLG, d1, g3 bt2100 and
+  preset, r1; CPU and CUDA, `gpu: true`) byte-identical `.bin` and sidecar to main@941489d
+  ([log](docs/ROADMAP_LOG.md) 2026-10-17).
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
 - **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
-- **Checked 2026-10-17 @941489d:** step 5 files unchanged since 2026-10-06. Non-blank, non-comment
-  lines outside test modules: `pipeline.rs` 1171 (test mods at :649, :680, :1410), `gpu.rs` 811
-  (:952; `include_str!` of `kernels.cu`), `frame.rs` 782 (:1026, :1066), so `frame.rs` is at the
-  limit only by this count. Both gates pass `--disable-optimizer`: diff an optimizer-enabled
-  default `.bin` per move. Baselines from 2026-10-11 in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`.
+- **Checked 2026-10-17 @941489d:** before the split the Stop hook's count (`.claude/hooks/rust-check.sh`)
+  gave `pipeline.rs` 1348, `analysis/frame.rs` 1026 and `analysis/gpu.rs` 951 lines; both gates pass
+  `--disable-optimizer`, so the step diffed optimizer-enabled `.bin` files. Baselines from
+  2026-10-11 in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`.
 
 ### E14: test-suite audit
 

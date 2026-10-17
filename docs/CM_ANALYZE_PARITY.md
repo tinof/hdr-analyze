@@ -53,9 +53,9 @@ trims are a separate, higher-risk tone-mapping problem.
 
 | Stage | Implementation | Current output |
 |-------|----------------|----------------|
-| Per-frame analysis | `hdr_analyzer_mvp/src/analysis/frame.rs` (CPU), `analysis/gpu.rs` + `analysis/kernels.cu` (CUDA), `analysis/hlg.rs` (HLG through the Profile 8.4 decode) | Direct/percentile/grain-robust peak, true Y/max-RGB means, robust 4096-bin minimum, 256-bin luma histogram, 31-bin hue histogram |
-| Peak selection | `analysis/frame.rs`, `analysis/histogram.rs` | Direct `max` (default), opt-in fine-histogram percentile or grain-robust max-RGB, or Y-based P99/P99.9 peak |
-| Active area | `crop.rs`, `ffmpeg_io.rs`, `pipeline.rs` | Multi-position crop probe with low-signal rejection, tolerance clustering, and conservative variable-AR union |
+| Per-frame analysis | `hdr_analyzer_mvp/src/analysis/frame/` (CPU), `analysis/gpu/` + `analysis/kernels.cu` (CUDA), `analysis/hlg.rs` (HLG through the Profile 8.4 decode) | Direct/percentile/grain-robust peak, true Y/max-RGB means, robust 4096-bin minimum, 256-bin luma histogram, 31-bin hue histogram |
+| Peak selection | `analysis/frame/peak.rs`, `analysis/histogram.rs` | Direct `max` (default), opt-in fine-histogram percentile or grain-robust max-RGB, or Y-based P99/P99.9 peak |
+| Active area | `crop.rs`, `ffmpeg_io.rs`, `pipeline/` | Multi-position crop probe with low-signal rejection, tolerance clustering, and conservative variable-AR union |
 | Scene detection | `analysis/scene.rs` | Histogram-distance cuts and minimum scene length |
 | Optimizer | `optimizer.rs` | madVR `target_nits`; this is not itself a Dolby metadata level |
 | DV configuration | `mkvdovi/src/metadata/` | Neutral L2, L6, L9, L11 |
