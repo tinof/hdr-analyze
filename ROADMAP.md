@@ -43,9 +43,8 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left needs the owner's eyes or
 hardware after a startable step has prepared it:
 
-- **WS6 / P10 viewings on the LG OLED C9** (files and guides in the hand-off folder since
-  2026-10-17): the discriminating `code / 1023` canary (`WS6-normalization-2026-10-17`) and the
-  blinded L2 `ms_weight` A/B (`P10-ms-weight-2026-10-17`).
+- **WS6 (3): view the redesigned canary** on the LG OLED C9, once Claude has built it (the first
+  canary gave no verdict, 2026-10-17).
 - **WS6 (2): correct the playback procedure draft** in [`docs/PLAYBACK.md`](docs/PLAYBACK.md).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
@@ -356,12 +355,14 @@ and 7 about how it is judged. The evidence for each priority is in its items and
     generated RPU, and reports per field how many scenes the generator's limits changed.
 - **Gate:** step 3: the WS7 simulator shows that unclamped L1 is better (priority 3; owner,
   2026-10-17: WS7 first, no playback test). Step 4: a blinded A/B on the LG OLED C9 of
-  `ms_weight` 2048 against 512; no visible difference closes the step with 2048 unchanged. Files
-  handed off 2026-10-17 (two Fury Road cuts, RPUs differ only in `ms_weight`). Retail RPUs in the
-  development corpus carry 512, 0 and 2048 (three titles each), so 2048 is not unlike retail.
+  `ms_weight` 2048 against 512; no visible difference closes the step with 2048 unchanged.
+- **Done 2026-10-17: step 4, `ms_weight` A/B.** Blind on the C9 (Plex on the Shield, Dolby
+  Vision Cinema Home, DV badge on all four files): no difference on either Fury Road cut, so
+  generated L2 keeps `ms_weight` 2048. Retail RPUs in the development corpus carry 512, 0 and 2048
+  (three titles each). Evidence: `~/mkvdovi-work/p10-ms-weight-2026-10-17/`
+  ([log](docs/ROADMAP_LOG.md) 2026-10-17).
 - **Open:** (3) decide whether to write L1 in-process so the measured minimum and sub-100-nit
-  maxima reach the RPU; raising the average floor to 1229 is not planned. (4) Generated L2 carries
-  `ms_weight` 2048 where retail RPUs carry 512 or 0; the effect is unverified.
+  maxima reach the RPU; raising the average floor to 1229 is not planned.
 
 ### P12: `--mdfix` ignores the source RPU's L6
 
@@ -464,8 +465,8 @@ The detailed gap table and validation method live in
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
-  firmware, TV picture mode and HDMI path. It is the gate for P8 and for the default changes of P9
-  and P10.
+  firmware, TV picture mode and HDMI path. It is the gate for P8, the WS6 normalization question
+  and P10's device steps.
 - **Gate:** (owner, 2026-10-17) (1) `scripts/rpu-baseline.sh` holds one captured baseline per
   listed feature; (2) the procedure is written (a docs section plus a `VIEWING_GUIDE.txt`
   template recording player, firmware, picture mode and HDMI path) and used once, for (3); (3) a
@@ -473,12 +474,21 @@ The detailed gap table and validation method live in
   under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded.
 - **Open:** (1) the final-RPU regression corpus; (2) the written playback procedure: draft in
   [`docs/PLAYBACK.md`](docs/PLAYBACK.md) (2026-10-17), for the owner to correct; (3) the
-  `code / 1023` question below: canary files handed off 2026-10-17, viewing pending.
+  `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
+  canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
+  steep a chroma curve the C9 still follows.
 - **Open question (2026-10-06):** do devices evaluate the 8.4 composer at `code / 1023` (as
   libplacebo and the `bt2100` fit) or at the spec's `code / 1024`? Under the latter `bt2100` is
   5.9 codes off neutral, probably too little to see on a neutral ramp, so the test needs a pattern
   that separates the two. A `code / 1024` answer means a refit (new composer and RPU). The P8
   canary test (2026-10-13) does not answer it.
+- **First canary (2026-10-17): no verdict.** On the C9 (Plex on the Shield, Dolby Vision Cinema
+  Home, DV badge on all three files) both steep canaries (chroma coefficients 3.73 on u, u², u³
+  and a constant of about −9.3) showed the same uniform green on all seven patches, where either
+  normalization predicts a green-to-magenta row with one grey patch; the bt2100 control showed
+  the predicted purple. So the TV applies these composers but does not follow the steep curve:
+  its composed chroma comes out flat and low, as if clamped. This is the guide's "anything else"
+  row. Not recorded: TV firmware, room light.
 - **P8 result (2026-10-13):** an LG OLED C9 applies the 8.4 composer in the RPU (canary method in
   [log](docs/ROADMAP_LOG.md)). Not recorded for that test: firmware, picture mode, HDMI path. The
   preset's grey tint looked yellow on the C9, where the libplacebo SDR render predicted lavender

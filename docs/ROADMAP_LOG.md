@@ -6,6 +6,31 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-17: C9 viewings, WS6 canary and P10 `ms_weight`
+
+Viewed by the owner the same day. Path: Plex on the Nvidia Shield TV Pro into the LG OLED C9,
+picture mode Dolby Vision Cinema Home. Not recorded: TV firmware, Shield software version, room
+light. Answers are given as reported, before the interpretation or the key were shown.
+
+**WS6 (3), `WS6-normalization-2026-10-17`:** Dolby Vision on all three files. WS6_1 and WS6_2:
+"no grey patch", "all green", the same green on all seven patches. WS6_3 (control): strong
+pink/purple, as predicted. The pre-registered table has no row for this: under `code / 1023`,
+`code / 1024` and `(code + 0.5) / 1024` alike, the model predicts a green-to-magenta row with one
+or two near-grey patches (ΔE_ITP 0 to about 130 across the row, `design.txt`). The TV applies
+these RPUs (they differ from the control) but does not follow the steep chroma curve: the
+composed chroma comes out flat and low. A plausible reading, not tested: the C9 clamps either
+large MMR coefficients or the composed chroma, and a clamp to the bottom of the range renders
+green. That reading would also fit the P8 green canary, but P8's subtle evidence (the preset's
+visible tint against a neutral bt2100) still shows that composers in the normal coefficient range
+are applied. No verdict on `code / 1023`. Next: a slope ladder (rows of increasing chroma slope,
+from bt2100's magnitude upward) to find where the C9 stops following the curve, then a canary
+inside that range, with more patches if the step gets smaller.
+
+**P10 step 4, `P10-ms-weight-2026-10-17`:** Dolby Vision on all four files; "no difference" on
+both cuts. Key, opened after the report: storm-X = 2048, storm-Y = 512, firechase-X = 512,
+firechase-Y = 2048. By the rule set before the test, generated L2 keeps `ms_weight` 2048 and the
+step closes.
+
 ### 2026-10-17: P9 holdout scoring, P6 check list, WS6 and P10 hand-offs
 
 **P9 step 1, holdout scoring** (evidence `~/mkvdovi-work/p9-holdout-2026-10-17/`; mkvdovi and
