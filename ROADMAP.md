@@ -48,7 +48,8 @@ hardware after a startable step has prepared it:
 - **P6: pick the source checks** from the list P6 step 1 drafts.
 - **WS6 / P10 viewings on the LG OLED C9:** the discriminating `code / 1023` canary (WS6 (3)) and
   the blinded L2 `ms_weight` A/B (P10), once their files are in the hand-off folder.
-- **FEL:** on hold by the owner (2026-10-13); no gate until the hold is lifted.
+- **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
+  until the hold is lifted.
 
 ### Release plan (2026-10-14)
 
