@@ -19,7 +19,7 @@ roadmap-memory: on
 push-roadmap:   yes
 docs-prefix:    "docs(roadmap): "
 gate:           cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && scripts/ci/test-gate.sh
-gate-focused:   cargo test --workspace -- <pattern>
+gate-focused:   scripts/ci/test-gate.sh target/test-gate-focused.log <pattern>
 gate-fallback:  none
 gate-skip:      '*.md' 'docs/**'
 ci:             pr-checks
@@ -162,8 +162,9 @@ check of `scripts/ci/check-test-skips.sh`.
 `review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff` and
 `gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push.
 
-`gate-focused` uses `--workspace` because the skills only fill in `<pattern>`; narrow it with `-p <crate>` by
-hand.
+`gate-focused` runs `scripts/ci/test-gate.sh` with a test filter: it builds the analyzer next to mkvdovi and
+applies the same skip check, so a focused test that prints `Skipping` fails instead of passing silently. Do not
+narrow it with `-p <crate>`: `cargo test -p mkvdovi` would not rebuild the sibling analyzer.
 
 The roadmap item names its media and evidence paths; `test -e` each one before a step starts. Measurements
 and long evidence go to `docs/ROADMAP_LOG.md`, not into the item. `push-roadmap: yes`: where the pre-commit

@@ -45,7 +45,7 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
 3. Item ID: the argument, else from the branch name or the commit messages, else ask once. In
    self-check mode `/ship` passes the step ID; with `/ship --step none` it passes its spec file
    (`<scratch>/ship-spec.md`) instead: use that paragraph as the item and the acceptance gate, and
-   skip step 4.
+   skip item 4 below (the ROADMAP.md lookup).
 4. Read the item's section in `ROADMAP.md`: note the step being closed and its **acceptance
    gate** (what evidence closes it, e.g. a development-tier score, precision/recall against
    authored shot lists, a playback test).
