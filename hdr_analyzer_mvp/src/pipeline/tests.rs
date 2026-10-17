@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::VecDeque;
 
 #[test]
 fn average_smoothing_has_no_scene_initialization_bias() {

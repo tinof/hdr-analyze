@@ -1,4 +1,5 @@
 use super::*;
+use madvr_parse::MadVRFrame;
 
 fn frame(bin: usize) -> MadVRFrame {
     let mut lum_histogram = vec![0.0; 256];

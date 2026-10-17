@@ -1,4 +1,5 @@
 use super::*;
+use crate::crop::CropRect;
 
 #[test]
 fn cpu_crop_maps_back_to_full_resolution() {
