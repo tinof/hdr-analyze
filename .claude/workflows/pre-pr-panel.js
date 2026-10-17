@@ -1,7 +1,7 @@
 export const meta = {
   name: 'pre-pr-panel',
   description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort plus Fable on high-risk diffs, each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
-  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone or from /ship step 1b). args: {base, files, item, acceptanceGate, scopeFile, kind?, moveProof?, moveFiles?}; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; pre-pr-review step 5 and /ship steps 4 and 6 call it that way to recompute gates after fixes.',
+  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone, or as the /ship step 3b self-check). args: {base, files, item, acceptanceGate, scopeFile, kind?, moveProof?, moveFiles?}; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; only pre-pr-review step 5 (standalone) calls it that way, to recompute gates after fixes. /ship no longer calls gatesOnly: it reads the same path rules from .claude/workflow.md.',
   phases: [
     { title: 'Review', detail: 'correctness, repo contracts, tests and gates (Opus, high); whole diff (Fable, medium) on high-risk paths; or one move-integrity lens (Opus, high) on a pure move' },
     { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder' },
@@ -21,6 +21,8 @@ const files = a.files.map(f => String(f).replace(/^\.\//, ''))
 const any = re => files.some(f => re.test(f))
 
 // Required gates, computed from the touched paths (not left to judgment).
+// Keep in sync with .claude/workflow.md: its `## Gates` paths copy these rules and its
+// `## Tier 2 paths` copy `highRisk` below. Change both in the same PR.
 const gates = new Set()
 const workspaceRust = files.some(f => !f.startsWith('tools/') && /\.rs$|(^|\/)Cargo\.(toml|lock)$|^\.cargo\/|^rust-toolchain\.toml$|^clippy\.toml$|^rustfmt\.toml$/.test(f))
 if (workspaceRust) { gates.add('fmt'); gates.add('clippy'); gates.add('test') }

@@ -4,7 +4,7 @@
 # missing sibling analyzer. Skips for media that never lives in the repository are allowed.
 #
 # Usage: scripts/ci/check-test-skips.sh <test log> [extra allowed regex]
-# The same allow-list as the pre-PR test gate (.claude/skills/pre-pr-review/SKILL.md).
+# The same allow-list as the test gate (scripts/ci/test-gate.sh).
 set -euo pipefail
 
 log=${1:?usage: $0 <test log> [extra allowed regex]}
