@@ -1,4 +1,5 @@
 use super::*;
+use super::peak::{code_grid_step, normal_upper_quantile, rank_level, GRAIN_TAIL_SIGMAS, MAX_CODE_GRID_STEP};
 
 #[test]
 fn high_percentile_mirrors_low_percentile() {
