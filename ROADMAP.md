@@ -24,16 +24,11 @@ project rules: [`.claude/roadmap-config.md`](.claude/roadmap-config.md).
 ### Next up (checked 2026-10-17 at main@941489d)
 <!-- roadmap-next: rev=1 scope=all config=73415b8825d0 probes=gpu:ok,corpus:ok -->
 
-1. **E13 step 5: analyzer split** (prerequisite of priorities 2 and 4: E8, E9, P9 step 2). Gate:
-   per move fmt, clippy (also `--features cuda`), tests, the L1 gate without `--update`,
-   `scripts/cuda-parity.sh`, and an optimizer-enabled default `.bin` captured on main@941489d
-   before the first move and byte-identical after each. Branch `refactor/e13-analyzer-split`; no
-   other branch open while a move is in flight (Sequencing). Release: none.
-2. **P1 step 1: measure the CPU default** (priority 4). Gate: CPU cost of `accurate` and the
+1. **P1 step 1: measure the CPU default** (priority 4). Gate: CPU cost of `accurate` and the
    `FAST_BILINEAR` effect on L1 max and MaxCLL measured (forced CPU, fresh analyses); then flip or
    keep (the note exists); a flip adds `cargo mutants --in-diff`. Between E13 moves. Release: minor
    if CPU `auto` flips, none if `balanced` stays.
-3. **P12: `--mdfix` source L6** (priority 5). Gate: as in P12, "every other RPU baseline
+2. **P12: `--mdfix` source L6** (priority 5). Gate: as in P12, "every other RPU baseline
    byte-identical" checked with `sha256sum` of the `RPU.bin` files (`rpu-baseline.sh compare`
    ignores CRC), plus `cargo mutants --in-diff`. Own branch `fix-p12-mdfix-source-l6`, between E13
    moves. Release: patch (rides v0.7.0 if merged before it).
@@ -132,7 +127,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
    opt-in flag landed 2026-10-14. Gate: opt-in, scored on the development tier and the holdout
-   HDR10+ cuts before any default change. **Prerequisite:** E13 step 5 before the sidecar v6 step.
+   HDR10+ cuts before any default change. **Prerequisite:** E13 step 5 before the sidecar v6 step (met 2026-10-17,
+   `refactor/e13-analyzer-split`).
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process. Gate: unclamped L1 needs WS7 or
    a playback test.
@@ -140,7 +136,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    values, half-resolution CPU default, L1 scaling note (the three L6 defects found 2026-10-07 were
    fixed 2026-10-11). Gate: unit tests for the reader and the option; measure the CPU default
    first. **Prerequisite:** E13 step 5 (analyzer split) before E8 + E9, because E8 moves the
-   default `.bin`.
+   default `.bin` (met 2026-10-17, `refactor/e13-analyzer-split`).
 5. **`--mdfix` fidelity** (P12, P13): full regeneration stays (owner decision 2026-10-13) and the
    notice that names the dropped levels shipped 2026-10-15 (`CHANGELOG.md` `[Unreleased]`). Open:
    `--mdfix` ignores the source RPU's L6 (P12), and whether v29 RPUs carry neutral L2 (P13, owner
@@ -608,7 +604,8 @@ The detailed gap table and validation method live in
   `--peak-source histogram99/histogram999` or `--peak-domain luma` with a non-conservative
   optimizer profile.
 - **Gate:** a bin-edge round-trip unit test and an optimizer unit test (CUDA parity and the L1 gate
-  run with `--disable-optimizer`, so they do not cover it). **Prerequisite:** E13 step 5.
+  run with `--disable-optimizer`, so they do not cover it). **Prerequisite:** E13 step 5 (met 2026-10-17,
+  `refactor/e13-analyzer-split`).
 - **Checked 2026-10-06 @df54ad4:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
   on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
   (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
@@ -623,7 +620,8 @@ The detailed gap table and validation method live in
 - **Status:** Open. `--pre-denoise` accepts any string and its help text names `nlmeans`, but only
   `median3` is implemented; every other value silently does nothing and is still written into the
   sidecar provenance.
-- **Gate:** a unit test for the option (priority 4). **Prerequisite:** E13 step 5.
+- **Gate:** a unit test for the option (priority 4). **Prerequisite:** E13 step 5 (met 2026-10-17,
+  `refactor/e13-analyzer-split`).
 - **Fix:** restrict the values to `off` and `median3`.
 
 ### E10: L1 code scaling
@@ -693,6 +691,9 @@ The detailed gap table and validation method live in
   `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`), `run` (281, `pipeline/mod.rs`),
   `analyze_native_frame_cropped` (276, `analysis/frame/mod.rs`; after E8, which edits its bin
   edges) and `launch_and_collect` (243, `analysis/gpu/backend.rs`).
+  Follow-up chore PR (comments and strings only): stale `gpu.rs` references, now `analysis/gpu/mod.rs`,
+  in `kernels.cu:23`, `:52` and the `:54` static_assert message (needs a CUDA parity run),
+  `.claude/workflows/pre-pr-panel.js:133` and `pre-pr-gemini.prompt.md:25` (adds `gemini-harness`).
 - **Done 2026-10-17: step 5, analyzer split** (pure move, 7 commits). `analysis/frame.rs` →
   `frame/{mod,peak}.rs` (peak estimators and grain statistics in `peak.rs`), `analysis/gpu.rs` →
   `gpu/{mod,backend}.rs` (the `cuda`-gated backend; `include_str!("../kernels.cu")`), `pipeline.rs`
