@@ -205,9 +205,12 @@ unexpected skip (`scripts/ci/check-test-skips.sh`).
 `MKVDOVI_CORPUS_DIR` (the opt-in corpus classification test in `metadata.rs`), the
 `integration.rs` "sample not found", and mkvdovi's own "Output file '…' already exists. Skipping."
 warning, which the `convert_file` tests in `pipeline/tests.rs` print (not a test skip; the list
-lives in `scripts/ci/check-test-skips.sh`). The CUDA parity test is skipped by name because its own gate
-runs it. Any other `Skipping` line (missing ffmpeg, dovi_tool, mkvmerge, libx265, a sibling
-analyzer, an HLG or open-GOP test) fails the gate: required coverage did not run.
+lives in `scripts/ci/check-test-skips.sh`). The script also allows the libx265 HDR10+ skips that
+CI allows (`built without HDR10_PLUS`, `does not accept dhdr10-info`: Ubuntu's libx265 has no
+HDR10_PLUS). The CUDA parity test is skipped by name because its own gate runs it. Any other
+`Skipping` line (missing ffmpeg, dovi_tool, mkvmerge, libx265, a sibling analyzer, an HLG or
+open-GOP test) fails the gate: required coverage did not run. With a test filter (the second
+argument, used by `gate-focused`) the gate also fails when no test ran.
 
 **L1 references.** `l1-regression` runs in check mode. Use `--update` only when the step is meant
 to move L1; say so in the PR body with the reference diff.
