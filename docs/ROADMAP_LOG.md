@@ -6,6 +6,26 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-18: v0.7.0 released
+
+Release PR #63 (squash a65dcd9) set every shipped crate, README and CITATION to 0.7.0 and dated
+the CHANGELOG section. The section adds an upgrade note for `--cm-version v29` users. Contents: P7
+(#49), P9 opt-in flag (#50), P11 (#52) and P13 (#53). There was no rc, because nothing needed a
+test outside CI (owner decision 2026-10-14). P12.1 was not merged and moves to the next patch.
+
+Before the tag, on a65dcd9 (`mkvdovi 0.7.0`, `hdr_analyzer_mvp 0.7.0 (+cuda)`):
+
+- The `release.yml` dry run (run 39118006758) passed on all five targets. `scripts/release-check.sh
+  v0.7.0` passed.
+- `scripts/cuda-parity.sh`: PASS.
+- Nine fresh RPU captures (six default, two `--mdfix`, one `--hlg-composer preset`) against
+  `~/mkvdovi-work/rpu-baseline/0.6.0/`: `compare --require-identical-l1` exit 0 and `RPU.bin`
+  byte-identical on all nine. mkvdovi's own log lines are identical, with versions normalized,
+  except for the P11 notice lines in the two `--mdfix` logs. Script and logs:
+  `~/mkvdovi-work/rpu-baseline/0.7.0/` (these captures are also the 0.7.0 baselines).
+
+The tag run published v0.7.0 as the latest release. P9.3 and E12.1 (v0.8.0) can start now.
+
 ### 2026-10-17: C9 viewings, WS6 canary and P10 `ms_weight`
 
 Viewed by the owner the same day. Path: Plex on the Nvidia Shield TV Pro into the LG OLED C9,
