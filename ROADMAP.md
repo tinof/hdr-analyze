@@ -532,7 +532,8 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open.
+- **Status:** Open. The WS6.3 slope ladder was built and handed off on 2026-10-18 (8 files; the
+  [log](docs/ROADMAP_LOG.md) has the design and checks). The owner's viewing (WS6.4) is pending.
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,

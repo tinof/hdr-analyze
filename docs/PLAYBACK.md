@@ -46,7 +46,9 @@ result.
   same uniform green on every patch, where the model predicted a green-to-magenta row: the C9
   applied the RPU but did not follow the curve. Keep coefficients near the magnitude of the
   composers the device is known to follow (bt2100, the preset), or first test a ladder of
-  increasing steepness to find where it stops following.
+  increasing steepness to find where it stops following. Scale the patch spacing with the
+  steepness: the WS6.3 ladder uses rows 1, 2 and 4 codes apart, because at 4 codes the steep
+  rungs pushed even the middle patches past what the display can show (600 nits, P3).
 - **A row for every observation.** The interpretation table includes "all patches look the same"
   and "nothing looks as predicted", so a result outside the hypotheses is still logged as an
   outcome, not argued into one.
@@ -56,8 +58,11 @@ result.
 - **Reference renders.** libplacebo with pinned settings: `apply_dolbyvision=1`,
   `upscaler=bilinear`, clip tone mapping and clip gamut mapping for numeric checks. The libplacebo
   version goes into `versions.txt`. With its default chroma upscaler, vf_libplacebo v7.374.0
-  moved the WS6 canary by about half a code. Renders are SDR approximations: they show hue,
-  not the TV's brightness. In P8 the preset's grey tint was predicted lavender and seen yellow.
+  moved the WS6 canary by about half a code. Gate the numeric check on patches inside the
+  display range. On saturated patches with a channel near black, v7.374.0 departs from the
+  model by up to 53 codes (WS6.3, 2026-10-18), so check only their hue order. Renders are SDR
+  approximations: they show hue, not the TV's brightness. In P8 the preset's grey tint was
+  predicted lavender and seen yellow.
 
 ## Naming and hand-off
 

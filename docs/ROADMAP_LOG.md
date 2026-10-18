@@ -6,6 +6,94 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-18: WS6.3 slope ladder built and handed off
+
+The 2026-10-17 canary gave no verdict. Its chroma composer had a slope of 20.46 times identity
+(0.02 per BL code) and a constant of −9.28, and the C9 showed it as one flat green. Composers the
+C9 is known to follow have constants between −1.25 and +1.14 (bt2100, the preset). The ladder
+measures how steep a chroma curve the C9 still follows. Three probes separate the slope from
+term size and from the out-of-range constant. Design: a judge panel of three Opus designers
+(least effort, separating the causes, working back from WS6.5), the owner's choice of 8 files,
+and two Codex plan reviews.
+
+**Composers.** All keep the bt2100 luma curve. Cb = c + a1·u + a2·u² + a3·u³, with Cr the same
+on v and no luma or cross terms. Each is neutral at u0 = 944·(1/1023 + 1/1024)/2, so patch 4
+sits 0.46 code from grey under both normalizations and the ladder does not answer WS6.5's
+question. Gain g is dCb/du at u0.
+
+| Rung | g | Constant | Coefficients u, u², u³ | Largest term at u0 |
+|---|---|---|---|---|
+| H2.5 | 2.5 | −1.25 | 1.064, 1.154, −0.271 | 0.98 |
+| H5 | 5 | −1.25 | −0.171, 1.121, 1.216 | 0.95 |
+| H10 | 10 | −1.25 | −3.103, 2.057, 3.647 | 2.86 |
+| H20 | 20.46 | −1.25 | −8.333, 2.057, 9.795 | 7.69 |
+| HT | 5 | 0 | −5.853, 9.034, −2.277 | 7.69 (H20's) |
+| HK10 | 10 | −9.2807 (the old constant) | 7.271, 7.883, −4.629 | 6.71 |
+| HA | 20.46 | −9.1964 | k = 3.791 on all three (the old structure) | 3.50 |
+
+All coefficients lie inside the preset's range [−18.26, 18.76]. The H constants are the
+preset's own −1.25.
+
+**Pattern.** One HLG page (x265 lossless, level 5.1, 750 frames). Three rows at BL luma 640
+(117 nits grey through bt2100) hold seven patches each, around Cb = Cr = 944, spaced 1, 2 and 4
+codes. The background is (64, 944, 944) and there is no centre marker.
+
+The plan had rows at luma 600/680/760 with 4-code spacing. Its own design check failed: the
+central patches of H10, H20 and HA fell outside the C9's range, which is ≤ 600 nits and P3. A
+row therefore counts for a rung only when patches 3–5 stay inside that range and the
+neighbouring steps are ≥ 8 ΔE_ITP. Steep rungs are read on the fine rows, shallow rungs on the
+coarse rows.
+
+Patch 4's tint is 2 / 4.5 / 9 / 18 ΔE_ITP from H2.5 to H20. On the 1-code row, patch 3 or 5 is
+almost as grey as patch 4, and which one depends on the normalization, so that row accepts any
+of 3–5.
+
+**Counterfactual decodes.** Before viewing, the tool decoded the 2026-10-17 canaries and the
+ladder under these models:
+- order-3 terms dropped;
+- coefficient clamps at 2, 4 and 8;
+- a ±8 saturating accumulator, terms first or constant first;
+- constant clamps at 2 and 4;
+- a [0.4, 0.6] output clamp;
+- stored-chroma clamps at 940 and 948;
+- 17- and 33-node 3-D LUTs.
+
+Three models reproduce the 2026-10-17 patch colours (both canaries uniform green, control
+purple): the terms-first ±8 accumulator, and the clamps at 940 and 948. Each predicts a
+different ladder vector, so none collide, and each has its own row in the guide's
+pre-registered table. All three also predict a green background for the 2026-10-17 canaries,
+which that test did not ask about.
+
+**Checks (all passed):**
+- **Design:** f(u0) = 0.5 to 2^−24, slope within 0.1%. Patch 4 is greyest on every reading row
+  under /1023 float, /1024 spec fixed point and (c+0.5)/1024. Spec composed chroma never clips.
+  The background stays ≤ 0.05 nits.
+- **Files:** every frame of each extracted RPU carries its composer and none of the other seven.
+  Each extracted RPU equals the written one byte for byte. Between rungs only the mapping
+  differs. Against the control only the mapping, L1 `avg_pq` (3071 → 2291, shared H20 L1
+  62/2291/3079) and the CRC differ.
+- **Decode:** the base layers of all 8 files are `cmp`-identical, and 750/750 decoded frames
+  equal the page.
+- **libplacebo v7.374.0** (pinned settings): within 0.54 12-bit codes of the model on every
+  decisive patch, and patch 4 is the greyest rendered patch on every reading row.
+  - The 1-code tolerance was gated on the decisive patches, not on every patch in [0.02, 0.98]
+    as planned. Saturated outer patches with a channel near black differ by up to 53 codes, and
+    are identical under `gamut_mode=clip` and `warn`. Clipped patches differ by up to about
+    1460. Those patches get a hue-order check.
+
+**Viewing guide.** It records the section 0 fields, plays the control last and stops playback
+between files. Report form per file: plays, DV badge, background, then for each row changes /
+same / partly and the patch closest to grey. The key and the table follow the answers. g* is
+the steepest of H2.5–H20 that passes together with every shallower one. It is nominal: WS6.5
+checks the gain itself. An Opus reviewer checked the guide against the tool output twice before
+the hand-off.
+
+Files: forplex `WS6-slope-ladder-2026-10-18/` (`WS6L_1`…`WS6L_7`, `WS6L_control`,
+`VIEWING_GUIDE.txt`, `reference-renders/`). Work directory, `run.sh` (rebuilds the set),
+`versions.txt` (mkvdovi and hdr_analyzer_mvp 0.7.0 +cuda, dovi_tool 2.3.4) and the
+`ws6ladder` evidence crate: `~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`. Next: WS6.4, the
+owner's viewing.
+
 ### 2026-10-18: v0.7.0 released
 
 Release PR #63 (squash a65dcd9) set every shipped crate, README and CITATION to 0.7.0 and dated
