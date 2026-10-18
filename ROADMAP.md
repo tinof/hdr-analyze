@@ -57,8 +57,8 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.4: view the slope ladder, then the redesigned canary,** on the LG OLED C9, once Claude
-  has built each (the first canary gave no verdict, 2026-10-17).
+- **WS6.4 and WS6.6: view the slope ladder, then the redesigned canary,** on the LG OLED C9, once
+  Claude has built each (WS6.3, WS6.5; the first canary gave no verdict, 2026-10-17).
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **P9.3 and E12.1: start after the v0.7.0 release PR** (owner decisions 2026-10-14 and
@@ -73,11 +73,11 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.8, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
+| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.10, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15); P12.1 `--mdfix` source L6 (PATCH-class fix) only if merged before the release PR, else the next patch | MINOR (new flag). P7 was priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`); P9.2 sidecar v6 (cross-binary contract); both unblocked by E13.5 (#59) | MINOR |
-| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary (WS6.3, WS6.4); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
+| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary (WS6.3–WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Progress log
 
@@ -134,12 +134,12 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
-1. **HLG → Profile 8.4 composer** (P8, WS6.3). `--hlg-composer bt2100` and the input refusal landed
+1. **HLG → Profile 8.4 composer** (P8, WS6.3, WS6.5). `--hlg-composer bt2100` and the input refusal landed
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
    available, so other devices stay untested (owner, 2026-10-17). Open: the WS6 `code / 1023`
-   canary (WS6.3, WS6.4).
+   canary (WS6.3–WS6.6).
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
    opt-in flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and the default flips
@@ -171,7 +171,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, P3, P5, WS0, WS6): the remaining
-    E13 PRs (E13.6–E13.8), the E14 test audit, CUDA release binaries (E12.1, after v0.7.0), CI and
+    E13 PRs (E13.6–E13.10), the E14 test audit, CUDA release binaries (E12.1, after v0.7.0), CI and
     corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options, provenance,
     open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
@@ -179,7 +179,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
-  remaining steps E13.6–E13.8 are behaviour-neutral PRs, not moves.
+  remaining steps E13.6–E13.10 are behaviour-neutral PRs, not moves.
 - **Conditional** (R2, WS5): Profile 5 through an established encoder, only if matched playback
   tests justify it.
 - **Landed before this order:** dependable HDR10/HDR10+ → Profile 8.1 with source-derived L1, L5,
@@ -210,7 +210,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   `balanced` with a visible note. `fast` puts cuts on a 3-frame grid and misses peaks on skipped
   frames. Gate: the item gate (CPU cost of `accurate` and the `FAST_BILINEAR` effect on L1 max and
   MaxCLL measured, forced CPU and fresh analyses, then flip or keep); a flip adds
-  `cargo mutants --in-diff`. Between E13 PRs.
+  `cargo mutants --in-diff`. Between E13 moves.
 - **Checked 2026-10-17 @941489d:** the visible note for CPU `auto` already exists
   (`analysis_quality_notice`, `mkvdovi/src/pipeline/analyzer.rs:246`), so keeping `balanced` needs
   no code. Measure with CPU analysis forced and fresh analyses for both presets (`auto` picks
@@ -282,7 +282,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   (priority 1); met for the LG OLED C9 (2026-10-13). Step 1: the same canary test on a second
   device shows that the display applies the RPU composer: dropped 2026-10-17, no second device is
   available (owner); the C9 result stands alone.
-- Open follow-up: the WS6 `code / 1023` canary, tracked as WS6.3 (build) and WS6.4 (viewing), no step of its own here. A
+- Open follow-up: the WS6 `code / 1023` canary, tracked as WS6.3–WS6.6 (build and viewing alternate), no step of its own here. A
   second device stays a non-blocking note: test one if it becomes available.
 - **Done 2026-10-13: playback test.** An LG OLED C9 (Plex on the TV, and Plex on an Nvidia Shield TV Pro) shows a
   canary composer (bt2100 with both chroma MMR constants shifted, `fit_hlg_composer canary-rpu`)
@@ -421,7 +421,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   baseline byte-identical.
 - [P12.1][corpus] Under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults.
   Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
-  E13 PRs. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
+  E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
   of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
 - **Checked 2026-10-17 @941489d:** the sampled L6 values are not kept: the authored-levels scan
   records only `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu`
@@ -498,7 +498,7 @@ The detailed gap table and validation method live in
   per-frame peak in the sidecar (a version bump; P9.2 adds a per-frame max in sidecar v6) and
   transition test material (WS8.3), and can cause pumping. Gate: on WS8 transition material, per-frame L1 inside detected dissolves and fades
   is closer to the truth than shot-constant L1, and the WS7 simulator shows no added
-  frame-to-frame steps (no pumping); opt-in only. Needs: WS8.3, WS7.1.
+  frame-to-frame steps (no pumping); opt-in only. Needs: WS8.3, WS7.1, P9.2 (code).
 - Step 3, deferred (no step line, like the deferred items): L4 emission, until something can
   validate it (no open renderer reads L4). Reopen when an open renderer or a tested device reads
   L4 (owner, 2026-10-17); it then becomes WS2.3.
@@ -534,15 +534,21 @@ The detailed gap table and validation method live in
   under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded.
 - [WS6.1][corpus] The final-RPU regression corpus. Gate: `scripts/rpu-baseline.sh` holds one
   captured baseline per listed feature.
-- [WS6.3][desk] The `code / 1023` question below: the first canary gave no verdict (2026-10-17,
-  below); next, a canary within the coefficient range real RPUs use, preceded by a slope ladder
-  that shows how steep a chroma curve the C9 still follows. Claude builds each, checks it in
-  libplacebo and hands the A/B files to the owner (owner decision 2026-10-17). Gate: the slope
-  ladder and a discriminating canary, a composer that is neutral under one normalization and
-  visibly coloured under the other, checked in libplacebo and handed off for the C9 with a
-  `VIEWING_GUIDE.txt`.
-- [WS6.4][owner] View the slope ladder, then the redesigned canary, on the LG OLED C9. Gate: the
-  item's gate (3): viewed on the LG OLED C9, answer recorded. Needs: WS6.3.
+- The `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
+  canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
+  steep a chroma curve the C9 still follows. Claude builds each, checks it in libplacebo and hands
+  the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
+  showed, so build and viewing alternate (WS6.3 to WS6.6).
+- [WS6.3][desk] Build the slope ladder. Gate: the ladder checked in libplacebo and handed off for
+  the C9 with a `VIEWING_GUIDE.txt`.
+- [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9
+  still follows recorded in the log. Needs: WS6.3.
+- [WS6.5][desk] Build the redesigned canary inside the slope range the C9 follows (WS6.4) and
+  within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
+  neutral under one normalization and visibly coloured under the other, checked in libplacebo and
+  handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.4.
+- [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
+  on the LG OLED C9, answer recorded. Needs: WS6.5.
 - **Done 2026-10-17: (2) the written playback procedure,** [`docs/PLAYBACK.md`](docs/PLAYBACK.md),
   used for the WS6 and P10 viewings and corrected afterwards with what they showed (owner asked
   Claude to make the corrections).
@@ -814,7 +820,7 @@ The detailed gap table and validation method live in
   (`convert_file` by phase) done 2026-10-13, evidence in
   `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 (analyzer split) done 2026-10-17
   (#59, efbb948), evidence in `~/mkvdovi-work/rpu-baseline/e13-step5/`. No
-  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; E13.6–E13.8
+  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; E13.6–E13.10
   open.
 - **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
   directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
@@ -839,21 +845,24 @@ The detailed gap table and validation method live in
   only fmt, clippy and test (plus the CUDA gates) for mkvdovi paths. An automatic rpu-baseline gate
   would need a baseline-path convention and an update mode for PRs that change the RPU on purpose;
   it is not planned.
-- Step 6 is split in three: E13.6 keeps the number; the chore PR and the function that waits for
-  E8.1 took the next free numbers (2026-10-17, step format).
-- [E13.6][gpu][corpus] Split the long functions by phase, each a behaviour-neutral PR, not a move:
-  `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`), `run` (281, `pipeline/mod.rs`)
-  and `launch_and_collect` (243, `analysis/gpu/backend.rs`). Gate (owner, 2026-10-17: the step 5
-  evidence): fmt, clippy (also `--features cuda`), tests; the L1 regression gate without
+- Step 6 (split the long functions by phase, each a behaviour-neutral PR, not a move) is split
+  into one step per PR: E13.6 keeps the number; the chore PR, the function that waits for E8.1 and
+  the other two functions took the next free numbers (2026-10-17, step format).
+- [E13.6][gpu][corpus] Split `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`) by
+  phase. Gate: fmt, clippy (also `--features cuda`), tests; the L1 regression gate without
   `--update`; `scripts/cuda-parity.sh` PASS; optimizer-enabled CPU and CUDA `.bin` and sidecar
   byte-identical to main on the step 5 run set; for mkvdovi code,
-  `scripts/rpu-baseline.sh compare --require-identical-l1`.
+  `scripts/rpu-baseline.sh compare --require-identical-l1` (owner, 2026-10-17: the step 5
+  evidence).
 - [E13.7][gpu] Chore PR (comments and strings only): stale `gpu.rs` references, now
   `analysis/gpu/mod.rs`, in `kernels.cu:23`, `:52` and the `:54` static_assert message,
   `.claude/workflows/pre-pr-panel.js:133` and `pre-pr-gemini.prompt.md:25`. Gate: a CUDA parity run
   (for the `kernels.cu` edit) and `gemini-harness` (for the prompt edit) pass.
 - [E13.8][gpu][corpus] Split `analyze_native_frame_cropped` (276 lines, `analysis/frame/mod.rs`) by
   phase, after E8.1, which edits its bin edges. Gate: as E13.6. Needs: E8.1.
+- [E13.9][gpu][corpus] Split `run` (281 lines, `pipeline/mod.rs`) by phase. Gate: as E13.6.
+- [E13.10][gpu][corpus] Split `launch_and_collect` (243 lines, `analysis/gpu/backend.rs`) by phase.
+  Gate: as E13.6.
 - **Done 2026-10-17: step 5, analyzer split** (pure move, 7 commits). `analysis/frame.rs` →
   `frame/{mod,peak}.rs` (peak estimators and grain statistics in `peak.rs`), `analysis/gpu.rs` →
   `gpu/{mod,backend}.rs` (the `cuda`-gated backend; `include_str!("../kernels.cu")`), `pipeline.rs`
@@ -929,11 +938,13 @@ The detailed gap table and validation method live in
 - [E14.4][desk] Triage every survivor (missing test / equivalent / actual bug / dead code /
   characterization); actual-bug survivors go to the owner before any test. Gate: every survivor of
   the E14.3 runs in a bucket. Needs: E14.3.
-- [E14.5][desk] Test-only PRs per crate area; each new test names the mutant it kills or the
-  decision side it adds. High-risk groups done (#55); open: the 17 medium-risk groups (115
-  mutants) of the c74effb run and the medium-risk groups of the new runs (low-risk groups per
-  Order 5). Opens only when no E13 move PR is in flight. Gate: the targeted mutants caught
-  (per-module counts before and after), each new test naming its mutant or decision side.
+- Step 5, test-only PRs per crate area (each new test names the mutant it kills or the decision
+  side it adds): high-risk groups done (#55). One step per PR from here: E14.5 takes the medium
+  groups of the c74effb run; the medium-risk groups of the E14.3 runs get their own step IDs after
+  E14.4 (low-risk groups per Order 5). They open only when no E13 move PR is in flight.
+- [E14.5][gpu] Tests for the 17 medium-risk groups (115 mutants) of the c74effb run (they include
+  `dovi84_composer`, a `cuda-parity` path). Gate: the targeted mutants caught (per-module counts
+  before and after), each new test naming its mutant or decision side.
 - [E14.6][desk] A `cargo mutants --in-diff` gate in the pre-PR panel for mkvdovi, verifier and
   dovi84_composer logic (fails only on infrastructure errors; survivors listed with their bucket),
   and red-on-parent evidence for fix PRs. Run it by hand on two PRs first to measure its cost per
