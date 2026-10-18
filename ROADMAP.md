@@ -61,20 +61,18 @@ hardware after a startable step has prepared it, a gate not stated, and steps ti
   Claude has built each (WS6.3, WS6.5; the first canary gave no verdict, 2026-10-17).
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
-- **P9.3 and E12.1: start after the v0.7.0 release PR** (owner decisions 2026-10-14 and
-  2026-10-17: both go into v0.8.0). Remove this entry when v0.7.0 is tagged.
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
 
 ### Release plan (2026-10-14)
 
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
-`/ship:roadmap-next` keeps this table current. Latest release: v0.6.0 (2026-10-13; with the L6 fixes of #41 and the ffprobe HLG fix of #43, both merged after rc.1).
+`/ship:roadmap-next` keeps this table current. Latest release: v0.7.0 (2026-10-18; P7, P9, P11 and P13, tagged without an rc).
 
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.10, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| **v0.7.0** | P7 full-range PQ refusal (#49); P9 `--hdr10plus-l1 hybrid` opt-in flag (#50); P11 `--mdfix` dropped-levels notice (#52); P13 `--cm-version v29` writes CM v2.9 (#53; owner decision 2026-10-15); P12.1 `--mdfix` source L6 (PATCH-class fix) only if merged before the release PR, else the next patch | MINOR (new flag). P7 was priority 1, so due about 2026-10-21 (`docs/RELEASING.md` rule 1). No rc: no test outside CI. Owner decision 2026-10-14: no separate 0.6.1 |
+| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`); P9.2 sidecar v6 (cross-binary contract); both unblocked by E13.5 (#59) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary (WS6.3–WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
@@ -87,6 +85,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-18 | v0.7.0 released (#63): P7, P9, P11, P13; no rc. CUDA parity PASS and all nine RPUs byte-identical to 0.6.0 before the tag (only the P11 notice lines differ in the `--mdfix` logs). P12.1 moves to the next patch; P9.3 and E12.1 can start. | P7, P9, P11, P13 | [v0.7.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.7.0) |
 | 2026-10-17 | C9 viewings: P10 step 4 closed (blind A/B, no difference, `ms_weight` 2048 kept); first WS6 `code / 1023` canary no verdict (uniform green, slope ladder next); WS6 (2) playback procedure written ([`docs/PLAYBACK.md`](docs/PLAYBACK.md)) and corrected. | P10, WS6 | `docs/owner-decisions-2026-10-17` |
 | 2026-10-17 | P9 holdout scoring: the pre-registered rule passes on the four holdout cuts (average clamped MAE 276.6 → 33.8 above the floor, 315.9 → 25.2 over all frames; max equal; min 5.98 → 4.91); the owner flips the default after v0.7.0. P6 check list drafted, five picked; WS6 canary and P10 `ms_weight` A/B built and handed off. | P9, P6, WS6, P10 | `docs/owner-decisions-2026-10-17` |
 | 2026-10-17 | Owner decisions: P9 holdout rule pre-registered, P13 keeps v29 without L2 (closed), E14 step 2 dropped, no second P8 device, E12 bundles NVRTC, P10 waits for WS7, gates stated for every `TODO(owner)` step. | P3–P6, P8–P10, P13, WS0–WS8, FEL, E1–E7, E10–E12, E14 | `docs/owner-decisions-2026-10-17` |
