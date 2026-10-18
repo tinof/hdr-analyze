@@ -6,11 +6,16 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-18
+
 ### Upgrade notes
 
 - **Some HDR10, HDR10+ and `--mdfix` files are refused** that 0.6.0 converted: PQ input tagged full
   range in MediaInfo, the ffprobe stream or the first decoded frame. The analyzer and the Profile 8.1
   RPU assume limited range, and the base layer is copied unchanged. The error lists every tag it read.
+- **`--cm-version v29` output changes:** it now writes a CM v2.9 RPU (L1, L5, L6) instead of the CM
+  v4.0 RPU 0.6.0 wrote. Re-convert files made with 0.6.0 under v29 if you need a CM v2.9 RPU. The
+  default (`v40`) output is unchanged.
 
 ### Added
 
