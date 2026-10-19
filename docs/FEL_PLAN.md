@@ -157,13 +157,40 @@ Validation, in this order:
 2. The oracle found in the review: on real frames the chroma prediction stays within about 0.2 to
    2.8 10-bit codes of the BL chroma. It needs no EL decode.
 3. The control cut (identity mapping, NLQ active) to test NLQ and upsampling apart from prediction.
-4. Cross-checks against libplacebo's FEL composition and vs-nlq, with versions pinned. libplacebo
-   works in float at 4:4:4, so a tolerance must be set first; whether 4:2:0 against 4:4:4 differs
-   by more than about 1 LSB on real content is unverified.
+4. Cross-checks against libplacebo's FEL composition, DoViBaker and vs-nlq, with versions pinned.
+   libplacebo works in float at 4:4:4, so a tolerance must be set first; whether 4:2:0 against
+   4:4:4 differs by more than about 1 LSB on real content is unverified. DoViBaker is an integer
+   composer with its own EL filters. AetherEngine (section 9) follows DoViBaker's phases with a
+   bilinear filter, and its bit-exactness tests compare its GPU kernels with its own CPU model, so
+   it is not an independent oracle.
 
 Open points: Annex B is informative, so a hardware decoder may use another filter; the chroma
-siting question of section 4; frame alignment between BL, EL and RPU must be checked, not assumed.
+siting question of section 4; frame alignment between BL, EL and RPU must be checked, not assumed
+(AetherEngine pairs the layers by POC display slot, because the two layers' GOPs can differ).
 Nothing published validates a FEL reconstruction bit-exactly against Dolby hardware.
+
+EL siting in open-source composers (read from source on 2026-10-19). They disagree on the EL luma
+grid; the RPU carries no siting, only `el_spatial_resampling_filter_flag`.
+
+| Composer | EL luma grid relative to the BL | EL chroma |
+|---|---|---|
+| DoViBaker `ffba398`, `include/DoViProcessor.h:215-238` | texel-centre on both axes (spline16 at phases 0.25 and 0.75) | co-sited with the top-left luma sample on both axes (even output = source sample) |
+| libplacebo `ccb74c6`, `src/renderer.c` `sample_el()` (comment at 1602-1609) | "left": co-sited horizontally, centred vertically, found empirically | the stream's chroma location, "most likely top-left for all UHD HEVC content" |
+| AetherEngine (docs, section 6.2) | DoViBaker's phase, one bilinear fetch | DoViBaker's phase, one bilinear fetch |
+| ETSI GS CCM 001 Annex B (informative) | even output samples co-sited horizontally; agrees with libplacebo | vertical filter assumes centred chroma (section 4) |
+
+DoViBaker's source keeps the filters of the original paper commented out, with the note that they
+"seem to assume center-left chroma location which is actually incorrect for hdr sources". The
+reference reconstruction must make EL siting a parameter and score each variant against the
+oracles, not pick one.
+
+The `dolby_vision` crate 3.4.0 stops with `unimplemented!` on a polynomial piece with
+`poly_order_minus1 == 0` and `linear_interp_flag` set (parser `src/rpu/rpu_data_mapping.rs:415`,
+writer `:230`). Under the workspace's `panic = "abort"` that ends the process: no `Result` reaches
+the caller, and the crate's C API (`capi.rs`) has no `catch_unwind` either. Any code that parses
+authored FEL RPUs needs a pre-scan for this case; `mkvdovi/src/rpu_check.rs` already parses source
+RPUs with `parse_rpu_file` for the MEL/FEL classification. AetherEngine also reports a writer crash on curves that mix
+polynomial and MMR pieces. No such RPU was found on the test cuts.
 
 ## 7. Decision gates
 
@@ -213,10 +240,28 @@ offered as an explicit opt-in with the measured cost shown.
 - ETSI TS 103 572, the public text of the ST 2094-10 metadata syntax (absent L2 fields are
   inferred as 2048):
   <https://www.etsi.org/deliver/etsi_ts/103500_103599/103572/01.02.01_60/ts_103572v010201p.pdf>
-- libplacebo FEL composition (float, 4:4:4; states EL siting found empirically as co-sited
-  horizontally and centred vertically, which agrees with Annex B):
+- libplacebo FEL composition (float, 4:4:4):
   <https://github.com/haasn/libplacebo/blob/c42968d8616a1d1c8ad5f4f1a8d6f5a9cb396e56/src/shaders/colorspace.c>.
-  libplacebo's tone mapping changed on 2026-09-30, so any comparison must pin the version.
+  The EL upscaling and its siting comment are in `src/renderer.c` `sample_el()`: the EL luma grid
+  is co-sited horizontally and centred vertically, found empirically; the EL chroma follows the
+  stream's chroma location (table in section 6). libplacebo's tone mapping changed on 2026-09-30,
+  so any comparison must pin the version.
+- DoViBaker, an integer BL+EL+RPU composer (AviSynth/VapourSynth) with its own EL upsampling
+  filters: <https://github.com/erazortt/DoViBaker>. Its EL siting differs from libplacebo's
+  (section 6).
+- AetherEngine, a player engine for Apple platforms that composes Profile 7 FEL on the GPU at
+  playback and presents the result with a per-frame mode-2 Profile 8.1 RPU (identity mapping,
+  authored L1/L2/L5/L8/L9/L11 kept), which tvOS applies as Dolby Vision display management:
+  <https://github.com/superuser404notfound/AetherEngine/blob/main/docs/dolby-vision-fel.md>. Its
+  default route converts with mode 2 and drops the EL ("lossless for MEL and loses the residual for
+  FEL"), as candidate (a) does. It writes no file, so it is prior art for the reconstruction and
+  for carrying authored metadata, not for this scope. Its device evidence uses an identity mapping
+  and says nothing about gate 3. Its own documentation says bit-exact output cannot be claimed.
+  Useful details: a 1024-entry luma prediction table per frame when luma is polynomial; MMR luma
+  input `[1 2 1]` around the even column, two rows averaged, as in section 3 item 8; a missing or
+  CRC-failed RPU borrows the previous RPU's parameters for at most 3 frames; `use_prev_vdr_rpu_flag`
+  is resolved in decode order at demux; a 4-tap Catmull-Rom EL upsampler lowered the per-pixel
+  error spread against DoViBaker by only about 0.7% on luma.
 - vs-nlq, integer NLQ step on an already mapped 16-bit BL: <https://github.com/quietvoid/vs-nlq>
 - `dovi_tool` conversion modes (mode 2 removes the mapping only for FEL and keeps it for MEL; mode
   5 converts to 8.1 with the mapping preserved; read from the crate source, mode 5 not run in the
