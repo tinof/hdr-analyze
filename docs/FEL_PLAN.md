@@ -175,7 +175,7 @@ grid; the RPU carries no siting, only `el_spatial_resampling_filter_flag`.
 | Composer | EL luma grid relative to the BL | EL chroma |
 |---|---|---|
 | DoViBaker `ffba398`, `include/DoViProcessor.h:215-238` | texel-centre on both axes (spline16 at phases 0.25 and 0.75) | co-sited with the top-left luma sample on both axes (even output = source sample) |
-| libplacebo `ccb74c6`, `src/renderer.c` `sample_el()` (comment at 1602-1609) | "left": co-sited horizontally, centred vertically, found empirically | the stream's chroma location, "most likely top-left for all UHD HEVC content" |
+| libplacebo `ccb74c6`, `src/renderer.c` `sample_el()` (comment at 1602-1609) | "left": co-sited horizontally, centred vertically, "for all the samples" (no metadata) | the stream's chroma location, "most likely top-left for all UHD HEVC content" |
 | AetherEngine (docs, section 6.2) | DoViBaker's phase, one bilinear fetch | DoViBaker's phase, one bilinear fetch |
 | ETSI GS CCM 001 Annex B (informative) | even output samples co-sited horizontally; agrees with libplacebo | vertical filter assumes centred chroma (section 4) |
 
@@ -189,8 +189,9 @@ The `dolby_vision` crate 3.4.0 stops with `unimplemented!` on a polynomial piece
 writer `:230`). Under the workspace's `panic = "abort"` that ends the process: no `Result` reaches
 the caller, and the crate's C API (`capi.rs`) has no `catch_unwind` either. Any code that parses
 authored FEL RPUs needs a pre-scan for this case; `mkvdovi/src/rpu_check.rs` already parses source
-RPUs with `parse_rpu_file` for the MEL/FEL classification. AetherEngine also reports a writer crash on curves that mix
-polynomial and MMR pieces. No such RPU was found on the test cuts.
+RPUs with `parse_rpu_file` for the Profile 7 MEL/FEL classification (ROADMAP E15). AetherEngine also
+reports a crash in libdovi's writer on curves that mix polynomial and MMR pieces, and rejects such
+RPUs before libdovi sees them. No such RPU was found on the test cuts.
 
 ## 7. Decision gates
 
@@ -243,7 +244,8 @@ offered as an explicit opt-in with the measured cost shown.
 - libplacebo FEL composition (float, 4:4:4):
   <https://github.com/haasn/libplacebo/blob/c42968d8616a1d1c8ad5f4f1a8d6f5a9cb396e56/src/shaders/colorspace.c>.
   The EL upscaling and its siting comment are in `src/renderer.c` `sample_el()`: the EL luma grid
-  is co-sited horizontally and centred vertically, found empirically; the EL chroma follows the
+  is co-sited horizontally and centred vertically "for all the samples", with no metadata to say
+  so; the EL chroma follows the
   stream's chroma location (table in section 6). libplacebo's tone mapping changed on 2026-09-30,
   so any comparison must pin the version.
 - DoViBaker, an integer BL+EL+RPU composer (AviSynth/VapourSynth) with its own EL upsampling
