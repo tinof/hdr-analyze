@@ -635,7 +635,8 @@ The detailed gap table and validation method live in
   F1, F2 and R1. Profile 7 MEL conversion is unchanged.
 - **Gate:** none while on hold; when the owner lifts the hold, the F0 gate of the local
   `FEL_ROADMAP.md` applies (owner, 2026-10-17).
-- Not held: E15.1 keeps a malformed Profile 7 RPU from aborting `mkvdovi` before the FEL refusal.
+- Not held: E15.1 keeps a malformed source RPU (Profile 7, or one found by the RPU sniff) from
+  aborting `mkvdovi` before the FEL refusal.
 - FEL_PLAN gate 3 (does the player apply a non-identity 8.1 mapping) is partly answered on the
   local F2 track: clip 1 (2026-10-07, Plex on the Shield → C9) showed a non-identity 8.1 luma
   mapping applied. The chroma MMR and L1 clips (F2 clips 3 and 4) stay held with the rest of FEL.
@@ -963,11 +964,12 @@ The detailed gap table and validation method live in
   `rpu_check::classify_rpu_format` (format detection, before the FEL refusal: the Profile 7 MEL/FEL
   split, and the RPU sniff for inputs MediaInfo does not report as Dolby Vision; Profile 8 is
   classified from the MediaInfo text without a parse; also `inspect`), `analyze_rpu_file`
-  (`inspect`) and `sample_rpu_windows` (the `--mdfix` notice). The crate (3.4.0) calls
-  `unimplemented!` on a polynomial piece with `poly_order_minus1 == 0` and `linear_interp_flag` set
-  (`src/rpu/rpu_data_mapping.rs:415`). Under the release profile's `panic = "abort"` that ends the
-  process: no `Result` reaches the caller, a multi-file run stops, and a Profile 7 FEL input that
-  carries such a piece is never refused cleanly. No such RPU was found on the FEL test cuts; a
+  (`inspect`) and `sample_rpu_windows` (step 1 of every Dolby Vision conversion, after the FEL
+  refusal: L5 offsets, the unreliable-metadata warning and the `--mdfix` notice). The crate
+  (3.4.0) calls `unimplemented!` on a polynomial piece with `poly_order_minus1 == 0` and
+  `linear_interp_flag` set (`src/rpu/rpu_data_mapping.rs:415`). Under the release profile's
+  `panic = "abort"` that ends the process: no `Result` reaches the caller, a multi-file run stops,
+  and a Profile 7 FEL input that carries such a piece is never refused cleanly. No such RPU was found on the FEL test cuts; a
   corrupt or unusual stream can carry one ([`docs/FEL_PLAN.md`](docs/FEL_PLAN.md) section 6).
   `verify.rs` parses only RPUs that mkvdovi generated or rewrote with the same crate, whose writer
   panics on that piece, so it is outside this step.
