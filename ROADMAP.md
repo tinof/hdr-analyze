@@ -85,6 +85,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-20 | AetherEngine's FEL playback read against FEL_PLAN: FEL_PLAN gains prior art and an EL siting table; E15 (abort-safe RPU parsing) added. | FEL, E15 | [#65](https://github.com/tinof/hdr-analyze/pull/65) |
 | 2026-10-18 | v0.7.0 released (#63): P7, P9, P11, P13; no rc. CUDA parity PASS and all nine RPUs byte-identical to 0.6.0 before the tag (only the P11 notice lines differ in the `--mdfix` logs). P12.1 moves to the next patch; P9.3 and E12.1 can start. | P7, P9, P11, P13 | [v0.7.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.7.0) |
 | 2026-10-17 | C9 viewings: P10 step 4 closed (blind A/B, no difference, `ms_weight` 2048 kept); first WS6 `code / 1023` canary no verdict (uniform green, slope ladder next); WS6 (2) playback procedure written ([`docs/PLAYBACK.md`](docs/PLAYBACK.md)) and corrected. | P10, WS6 | `docs/owner-decisions-2026-10-17` |
 | 2026-10-17 | P9 holdout scoring: the pre-registered rule passes on the four holdout cuts (average clamped MAE 276.6 → 33.8 above the floor, 315.9 → 25.2 over all frames; max equal; min 5.98 → 4.91); the owner flips the default after v0.7.0. P6 check list drafted, five picked; WS6 canary and P10 `ms_weight` A/B built and handed off. | P9, P6, WS6, P10 | `docs/owner-decisions-2026-10-17` |
@@ -634,6 +635,13 @@ The detailed gap table and validation method live in
   F1, F2 and R1. Profile 7 MEL conversion is unchanged.
 - **Gate:** none while on hold; when the owner lifts the hold, the F0 gate of the local
   `FEL_ROADMAP.md` applies (owner, 2026-10-17).
+- Not held: E15.1 keeps a malformed source RPU (Profile 7, or one found by the RPU sniff) from
+  aborting `mkvdovi` before the FEL refusal.
+- FEL_PLAN gate 3 (does the player apply a non-identity 8.1 mapping) is partly answered on the
+  local F2 track: clip 1 (2026-10-07, Plex on the Shield → C9) showed a non-identity 8.1 luma
+  mapping applied. The chroma MMR and L1 clips (F2 clips 3 and 4) stay held with the rest of FEL.
+  A fixed-pixel 8.1 chroma canary like the P8 one needs new code: `tools/fit_hlg_composer
+  canary-rpu` accepts only `bt2100` Profile 8.4 RPUs.
 
 ### R2: Profile 5
 
@@ -949,6 +957,27 @@ The detailed gap table and validation method live in
   and red-on-parent evidence for fix PRs. Run it by hand on two PRs first to measure its cost per
   PR (Order 4). Gate: the gate runs in the pre-PR panel, fails only on infrastructure errors,
   lists survivors with their bucket, and its cost on two PRs is recorded.
+
+### E15: abort-safe RPU parsing
+
+- **Status:** Open. `mkvdovi` parses source RPUs in-process with the `dolby_vision` crate in
+  `rpu_check::classify_rpu_format` (format detection, before the FEL refusal: the Profile 7 MEL/FEL
+  split, and the RPU sniff for inputs MediaInfo does not report as Dolby Vision; Profile 8 is
+  classified from the MediaInfo text without a parse; also `inspect`), `analyze_rpu_file`
+  (`inspect`) and `sample_rpu_windows` (step 1 of every Dolby Vision conversion, after the FEL
+  refusal: L5 offsets, the unreliable-metadata warning and the `--mdfix` notice). The crate
+  (3.4.0) calls `unimplemented!` on a polynomial piece with `poly_order_minus1 == 0` and
+  `linear_interp_flag` set (`src/rpu/rpu_data_mapping.rs:415`). Under the release profile's
+  `panic = "abort"` that ends the process: no `Result` reaches the caller, a multi-file run stops,
+  and a Profile 7 FEL input that carries such a piece is never refused cleanly. No such RPU was found on the FEL test cuts; a
+  corrupt or unusual stream can carry one ([`docs/FEL_PLAN.md`](docs/FEL_PLAN.md) section 6).
+  `verify.rs` parses only RPUs that mkvdovi generated or rewrote with the same crate, whose writer
+  panics on that piece, so it is outside this step.
+- [E15.1][desk] Pre-scan each source RPU's data mapping for that piece before `parse_rpu_file` in the
+  three functions, and return an error instead; re-check the scan when the crate is bumped. Gate: a
+  unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
+  too) gets an error from each of the three functions where the parent panics; a multi-file run
+  continues with the next file; the existing mkvdovi tests pass unchanged.
 
 ## Explicit non-goals
 
