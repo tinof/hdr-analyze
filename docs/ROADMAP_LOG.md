@@ -6,6 +6,63 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-21: WS6.4 slope ladder viewed on the C9 (outcome "anything else")
+
+Viewed by the owner, who sent one photo per file (kept locally); Claude read each photo in the
+guide's terms and the owner confirmed the reading by eye. Section 0: Plex on the Nvidia Shield
+TV Pro, picture mode Dolby Vision Cinema. Not recorded: TV firmware, Shield software version,
+HDMI path, room light. Dolby Vision badge on all eight files.
+
+| File | Rung | Background | Row 1 | Row 2 | Row 3 | Class |
+|---|---|---|---|---|---|---|
+| WS6L_4 | H2.5 (g 2.5) | dark | (not counted) changes, 5/6 | changes, 5 | changes, 4/5 | O |
+| WS6L_5 | HT (g 5) | dark | changes, 7 | changes, 6/7 | changes, 5 | O |
+| WS6L_2 | H5 (g 5) | dark | changes, 7 | changes, 7 near grey | changes, 5/6 | O |
+| WS6L_7 | H10 (g 10) | dark green | changes, all green, 7 | changes, 7 | changes, 7, none grey | O |
+| WS6L_1 | HK10 (g 10, constant −9.28) | faint green | changes, all green, 7 | changes, 7 | changes, 7, none grey | O |
+| WS6L_6 | H20 (g 20.46) | clearly green | changes slightly, all green, 7 | changes, 7 | changes, 7, none grey | O |
+| WS6L_3 | HA (g 20.46, old structure) | clearly green | almost the same, green | changes slightly, 7 | changes, 7, none grey | X/O |
+| control | bt2100 | purple | purple | purple | purple | as predicted |
+
+(Patch numbers are "closest to grey"; row 1 is 941–947 in 1-code steps, row 2 938–950 in
+2-code steps, row 3 932–956 in 4-code steps; patch 4 = 944 everywhere.)
+
+**Outcome under the pre-registered table: "anything else".** No H rung passes (H2.5 is O on
+row 2), so g\* is not defined, and none of the A, B, C rows fits (no flat or kinked H rung).
+By the guide, WS6.5 gets no verdict from this test, and a follow-up probe comes first.
+
+**What the viewing does show:**
+- **The C9 follows the curve's shape at every slope up to 20.46.** Every counted row grades
+  monotonically from green to the high-code end; nothing is flat or clamped. The 2026-10-17
+  "uniform green" was not a slope limit.
+- **The neutral point moves to higher BL chroma codes, more for steeper curves.** The
+  apparent neutral is about 946 for H2.5 (model 943.5 under /1023, 944.5 under /1024), about
+  948.5 for HT and 950 for H5, and above 956 (beyond the last patch) for H10, HK10, H20 and HA.
+  In composed chroma that is about 0.006 below the model at g 2.5, 0.024–0.032 at g 5 and more
+  than 0.12 at g 10 (more than 0.25 at g 20.46). Code shifts this size are 3 to 14 times the
+  0.92-code `code / 1023` vs `code / 1024` difference.
+- **The shift follows the gain, not the coefficients.** HT (gain 5, a term of 7.7) matches H5
+  (gain 5, terms below 1); HK10 (constant −9.28) matches H10 (constant −1.25); HA matches
+  H20. So the out-of-range constant and large terms were not the 2026-10-17 problem.
+- **No input transform explains it.** Every rung is neutral at the same u0, so any change of
+  how the TV reads the BL chroma code (another normalization, an offset, a clamp, coarser
+  quantization) would move all rungs' neutral to the same code. A constant offset of the
+  composed chroma would move it less for steeper rungs. The observed shift grows with gain.
+- **All three pre-registered device models are out.** The ±8 running sum, and the
+  stored-chroma clamps at 940 and 948 each predicted a different pattern (C, B, A); none
+  appears. The owner also recalls the 2026-10-17 canaries' surround as black, where all three
+  predicted green (a recollection, not recorded at the time). The ladder's steep files do show
+  a green surround (code 944 at black luma), consistent with the shift.
+
+Not covered: why the neutral moves (the C9's composer arithmetic, or its display management
+acting on these curves), and whether the shift extrapolates to the production bt2100 composer
+(gain about 0.7–1.1; at the observed rate the shift would be under about one code). The
+`code / 1023` question stays open: a slope canary needs the shift to be known first, since it
+exceeds the normalization difference at every gain tested.
+
+Photos: `docs/in/` in the working tree (not committed); hand-off folder
+`WS6-slope-ladder-2026-10-18/`; work directory `~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`.
+
 ### 2026-10-18: WS6.3 slope ladder built and handed off
 
 The 2026-10-17 canary gave no verdict. Its chroma composer had a slope of 20.46 times identity

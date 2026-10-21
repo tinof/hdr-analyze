@@ -66,8 +66,9 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.4 and WS6.6: view the slope ladder, then the redesigned canary,** on the LG OLED C9, once
-  Claude has built each (WS6.3, WS6.5; the first canary gave no verdict, 2026-10-17).
+- **WS6.6: view the redesigned canary** on the LG OLED C9, once Claude has built it (WS6.5). The
+  slope ladder (WS6.4) was viewed on 2026-10-21 with outcome "anything else": the neutral shift
+  it found must be measured by a follow-up probe before WS6.5 (owner to confirm the probe).
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
@@ -533,7 +534,13 @@ The detailed gap table and validation method live in
 ### WS6: final-RPU corpus and playback procedure
 
 - **Status:** Open. The WS6.3 slope ladder was built and handed off on 2026-10-18 (8 files; the
-  [log](docs/ROADMAP_LOG.md) has the design and checks). The owner's viewing (WS6.4) is pending.
+  [log](docs/ROADMAP_LOG.md) has the design and checks). Viewed on the C9 on 2026-10-21 (WS6.4):
+  outcome "anything else" in the pre-registered table, so WS6.5 as written cannot start. The C9
+  follows the curve's shape at every slope up to 20.46, but the neutral moves to higher BL
+  chroma codes as the slope grows (about +2.5 codes at gain 2.5, +5–6.5 at gain 5, more than
+  +12 at gain 10), independent of the constant and the term size. A follow-up probe that
+  measures this shift comes before any `code / 1023` canary ([log](docs/ROADMAP_LOG.md)
+  2026-10-21).
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
