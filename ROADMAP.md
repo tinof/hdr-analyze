@@ -86,7 +86,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`); P9.2 sidecar v6 (cross-binary contract); both unblocked by E13.5 (#59) | MINOR |
-| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary (WS6.3–WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
+| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3)); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Progress log
 
@@ -150,7 +150,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
    available, so other devices stay untested (owner, 2026-10-17). Open: the WS6 `code / 1023`
-   canary (WS6.3–WS6.6).
+   question (WS6.3–WS6.9).
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
    opt-in flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and the default flips
@@ -293,7 +293,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   (priority 1); met for the LG OLED C9 (2026-10-13). Step 1: the same canary test on a second
   device shows that the display applies the RPU composer: dropped 2026-10-17, no second device is
   available (owner); the C9 result stands alone.
-- Open follow-up: the WS6 `code / 1023` canary, tracked as WS6.3–WS6.6 (build and viewing alternate), no step of its own here. A
+- Open follow-up: the WS6 `code / 1023` question, tracked as WS6.3–WS6.9 (build and viewing alternate), no step of its own here. A
   second device stays a non-blocking note: test one if it becomes available.
 - **Done 2026-10-13: playback test.** An LG OLED C9 (Plex on the TV, and Plex on an Nvidia Shield TV Pro) shows a
   canary composer (bt2100 with both chroma MMR constants shifted, `fit_hlg_composer canary-rpu`)
@@ -551,14 +551,17 @@ The detailed gap table and validation method live in
   listed feature; (2) the procedure is written (a docs section plus a `VIEWING_GUIDE.txt`
   template recording player, firmware, picture mode and HDMI path) and used once, for (3); (3) a
   discriminating canary, a composer that is neutral under one normalization and visibly coloured
-  under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded.
+  under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded; or
+  (owner, 2026-10-22) the neutral-finder probe (WS6.9), when its fit of neutral code against
+  gain separates the two normalizations, answer recorded.
 - [WS6.1][corpus] The final-RPU regression corpus. Gate: `scripts/rpu-baseline.sh` holds one
   captured baseline per listed feature.
 - The `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
   canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
   steep a chroma curve the C9 still follows. Claude builds each, checks it in libplacebo and hands
   the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
-  showed, so build and viewing alternate (WS6.3 to WS6.6).
+  showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
+  neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
 - [WS6.3][desk] Build the slope ladder. Gate: the ladder checked in libplacebo and handed off for
   the C9 with a `VIEWING_GUIDE.txt`.
 - [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9
@@ -575,12 +578,12 @@ The detailed gap table and validation method live in
   with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
   (943.5 under `code / 1023`, 944.5 under `code / 1024` for u0 half-way), the slope the
   gain-dependent shift. Needs: WS6.8.
-- [WS6.5][desk] Build the redesigned canary inside the slope range the C9 follows (WS6.4) and
-  within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
+- [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
+  no slope limit) and within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
   handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
-  showed a gain-dependent neutral shift larger than the normalization difference; WS6.9 may
-  answer the question on its own, which would drop WS6.5 and WS6.6).
+  showed a gain-dependent neutral shift larger than the normalization difference; if WS6.9
+  answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped).
 - [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
   on the LG OLED C9, answer recorded. Needs: WS6.5.
 - **Checked 2026-10-18 @affb04c:** `canary_mapping` (`tools/fit_hlg_composer/src/canary.rs:43`)
@@ -602,7 +605,8 @@ The detailed gap table and validation method live in
   normalization predicts a green-to-magenta row with one grey patch; the bt2100 control showed
   the predicted purple. So the TV applies these composers but does not follow the steep curve:
   its composed chroma comes out flat and low, as if clamped. This is the guide's "anything else"
-  row. Not recorded: TV firmware, room light.
+  row. Not recorded: TV firmware, room light. Reread 2026-10-21 (WS6.4): not a slope limit; the
+  C9 follows steep curves, but its neutral moves with the gain.
 - **P8 result (2026-10-13):** an LG OLED C9 applies the 8.4 composer in the RPU (canary method in
   [log](docs/ROADMAP_LOG.md)). Not recorded for that test: firmware, picture mode, HDMI path. The
   preset's grey tint looked yellow on the C9, where the libplacebo SDR render predicted lavender

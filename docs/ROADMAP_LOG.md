@@ -9,9 +9,14 @@ status, the open work and a one-line log; the detail is here, newest first.
 ### 2026-10-21: WS6.4 slope ladder viewed on the C9 (outcome "anything else")
 
 Viewed by the owner, who sent one photo per file (kept locally); Claude read each photo in the
-guide's terms and the owner confirmed the reading by eye. Section 0: Plex on the Nvidia Shield
-TV Pro, picture mode Dolby Vision Cinema. Not recorded: TV firmware, Shield software version,
-HDMI path, room light. Dolby Vision badge on all eight files.
+guide's terms and the owner confirmed the reading by eye. The confirmed readings are the RESULT
+block of the work directory's `VIEWING_GUIDE.txt`; the earlier `owner-report.txt` holds the
+2026-10-19 in-person answers for WS6L_1 and unconfirmed drafts for WS6L_2/WS6L_3. Section 0:
+Plex on the Nvidia Shield TV Pro, picture mode Dolby Vision Cinema (owner, 2026-10-22). That
+differs from Dolby Vision Cinema Home, the mode announced for the 2026-10-19 in-person session
+and used for the 2026-10-17 canaries. Not recorded for the photos: TV firmware, Shield software
+version, HDMI input, room light (2026-10-19: Shield → C9, dim). Dolby Vision badge on all eight
+files.
 
 | File | Rung | Background | Row 1 | Row 2 | Row 3 | Class |
 |---|---|---|---|---|---|---|
@@ -25,7 +30,9 @@ HDMI path, room light. Dolby Vision badge on all eight files.
 | control | bt2100 | purple | purple | purple | purple | as predicted |
 
 (Patch numbers are "closest to grey"; row 1 is 941–947 in 1-code steps, row 2 938–950 in
-2-code steps, row 3 932–956 in 4-code steps; patch 4 = 944 everywhere.)
+2-code steps, row 3 932–956 in 4-code steps; patch 4 = 944 everywhere. WS6L_1's background:
+black in the owner's in-person report of 2026-10-19 (Cinema Home), faint green in the
+confirmed photo reading of 2026-10-21 (Cinema); the rows agree.)
 
 **Outcome under the pre-registered table: "anything else".** No H rung passes (H2.5 is O on
 row 2), so g\* is not defined, and none of the A, B, C rows fits (no flat or kinked H rung).
@@ -34,7 +41,7 @@ By the guide, WS6.5 gets no verdict from this test, and a follow-up probe comes 
 **What the viewing does show:**
 - **The C9 follows the curve's shape at every slope up to 20.46.** Every counted row grades
   monotonically from green to the high-code end; nothing is flat or clamped. The 2026-10-17
-  "uniform green" was not a slope limit.
+  "uniform green" was not a slope limit (that viewing was in Cinema Home, this one in Cinema).
 - **The neutral point moves to higher BL chroma codes, more for steeper curves.** The
   apparent neutral is about 946 for H2.5 (model 943.5 under /1023, 944.5 under /1024), about
   948.5 for HT and 950 for H5, and above 956 (beyond the last patch) for H10, HK10, H20 and HA.
@@ -50,9 +57,11 @@ By the guide, WS6.5 gets no verdict from this test, and a follow-up probe comes 
   composed chroma would move it less for steeper rungs. The observed shift grows with gain.
 - **All three pre-registered device models are out.** The ±8 running sum, and the
   stored-chroma clamps at 940 and 948 each predicted a different pattern (C, B, A); none
-  appears. The owner also recalls the 2026-10-17 canaries' surround as black, where all three
-  predicted green (a recollection, not recorded at the time). The ladder's steep files do show
-  a green surround (code 944 at black luma), consistent with the shift.
+  appears. This rests on the ladder rows alone. The 2026-10-17 canaries' surround, which all
+  three predicted green, is unresolved: answered green from memory on 2026-10-19
+  (`owner-report.txt`), later recalled as black, and the owner is not sure (2026-10-22). The
+  ladder's steep files do show a green surround (code 944 at black luma), consistent with the
+  shift.
 
 Not covered: why the neutral moves (the C9's composer arithmetic, or its display management
 acting on these curves), and whether the shift extrapolates to the production bt2100 composer
@@ -127,8 +136,9 @@ which that test did not ask about.
   The background stays ≤ 0.05 nits.
 - **Files:** every frame of each extracted RPU carries its composer and none of the other seven.
   Each extracted RPU equals the written one byte for byte. Between rungs only the mapping
-  differs. Against the control only the mapping, L1 `avg_pq` (3071 → 2291, shared H20 L1
-  62/2291/3079) and the CRC differ.
+  differs. Against the control only the mapping, L1 `avg_pq` (3071 → 2291) and the CRC
+  differ. The shared L1 is H20's, measured 62/2291/3079 and written 12/2291/3079 after the
+  generator's min clamp; the control's measured min (2214) is clamped to 12 too (`run.log`).
 - **Decode:** the base layers of all 8 files are `cmp`-identical, and 750/750 decoded frames
   equal the page.
 - **libplacebo v7.374.0** (pinned settings): within 0.54 12-bit codes of the model on every
@@ -136,7 +146,9 @@ which that test did not ask about.
   - The 1-code tolerance was gated on the decisive patches, not on every patch in [0.02, 0.98]
     as planned. Saturated outer patches with a channel near black differ by up to 53 codes, and
     are identical under `gamut_mode=clip` and `warn`. Clipped patches differ by up to about
-    1460. Those patches get a hue-order check.
+    1460 on the rungs and 1833 on the control. Those patches get a hue-order check. The
+    bt2100 control has no patch inside the display range, so it got only the hue-order check
+    (`render/compare.txt`).
 
 **Viewing guide.** It records the section 0 fields, plays the control last and stops playback
 between files. Report form per file: plays, DV badge, background, then for each row changes /

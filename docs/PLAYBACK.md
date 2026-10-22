@@ -41,14 +41,17 @@ result.
   fields changed.
 - **A canary first.** A test that depends on the device applying the RPU includes a file whose
   RPU makes the picture obviously wrong if it is applied, for example the green canary of P8.
-- **Stay inside the range the device follows.** The device's arithmetic is not the model's. In
-  WS6 a steep chroma composer (coefficients 3.73 on u, u², u³, constant about −9.3) came out the
-  same uniform green on every patch, where the model predicted a green-to-magenta row: the C9
-  applied the RPU but did not follow the curve. Keep coefficients near the magnitude of the
-  composers the device is known to follow (bt2100, the preset), or first test a ladder of
-  increasing steepness to find where it stops following. Scale the patch spacing with the
-  steepness: the WS6.3 ladder uses rows 1, 2 and 4 codes apart, because at 4 codes the steep
-  rungs pushed even the middle patches past what the display can show (600 nits, P3).
+- **Do not assume the device's neutral is the model's.** The device's arithmetic is not the
+  model's. In WS6 a steep chroma composer (coefficients 3.73 on u, u², u³, constant about −9.3)
+  came out the same uniform green on every patch, where the model predicted a green-to-magenta
+  row. The slope ladder (WS6.4, 2026-10-21) showed why: the C9 follows the curve's shape at every
+  slope up to 20.46, but the apparent neutral moves to higher BL chroma codes as the gain grows
+  (about +2.5 codes at gain 2.5, +5 to +6.5 at gain 5, more than +12 at gain 10), which is
+  consistent with the uniform green. A test whose verdict depends on where grey sits must
+  measure or cancel that shift first (WS6.8/WS6.9), or span it with its patches. Scale the patch
+  spacing with the steepness: the WS6.3 ladder uses rows 1, 2 and 4 codes apart, because at 4
+  codes the steep rungs pushed even the middle patches past what the display can show (600
+  nits, P3).
 - **A row for every observation.** The interpretation table includes "all patches look the same"
   and "nothing looks as predicted", so a result outside the hypotheses is still logged as an
   outcome, not argued into one.
