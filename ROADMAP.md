@@ -1034,7 +1034,7 @@ The detailed gap table and validation method live in
   later DV7.3 entry point that rewrites a source RPU with `scene_refresh_flag` cleared, which parses
   an RPU from outside and therefore needs the E15.1 guard first. Not FEL work: the canary is the P8
   Profile 8.4 composer canary, not the held FEL F2 clips.
-- [E16.1][desk][corpus] A new workspace crate with the RPU builders: one complete RPU NAL per access
+- [E16.1][gpu][corpus] A new workspace crate with the RPU builders: one complete RPU NAL per access
   unit for 8.1 and 8.4 (composers preset, bt2100, canary), HDR10+ ST 2094-40 payload → L1, static
   8.1 and 8.4 (owner, 2026-10-22: static 8.4 L1 max 3079, average the pooled measured bt2100 scene
   average of the four HLG development cuts, `l1_avg_pq_cm_version` V29); `mkvdovi` takes its
