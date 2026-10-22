@@ -6,6 +6,88 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-22: E16.1 In-process RPU builder library (PR #67)
+
+Step: [E16.1][gpu][corpus] A new workspace crate with the RPU builders: one complete RPU NAL per access
+  unit for 8.1 and 8.4 (composers preset, bt2100, canary), HDR10+ ST 2094-40 payload → L1, static
+  8.1 and 8.4 (owner, 2026-10-22: static 8.4 L1 max 3079, average the pooled measured bt2100 scene
+  average of the four HLG development cuts, `l1_avg_pq_cm_version` V29); `mkvdovi` takes its
+  extra.json definition from the crate and still calls `dovi_tool generate`. Gate: `mkvdovi`
+  extra.json and RPUs unchanged (`scripts/rpu-baseline.sh compare --require-identical-l1` and
+  `sha256sum` of `RPU.bin` on the nine 0.7.0 baselines); the builder's output equals the `RPU.bin`
+  records of `dovi_tool` 2.3.4 for every case (8.1 shots V29 and V40, 8.4 preset/bt2100/canary,
+  static 8.1 and 8.4, HDR10+ for each peak source); `cargo check --target aarch64-linux-android`
+  passes; unit tests for each builder.
+
+Resolution: closes E16.1 and the item E16. A new workspace crate, `dovi_rpu_builder`
+([`docs/RPU_BUILDER.md`](RPU_BUILDER.md)), builds one complete RPU NAL per access unit in-process,
+byte-identical to `dovi_tool generate` 2.3.4. `mkvdovi` takes its `extra.json` from it
+(`RpuParams::extra_json`) and still calls `dovi_tool generate`; no CLI flag, sidecar or delivered
+RPU changed. The canary shift moved to `dovi84_composer::canary_mapping`, next to a new
+`check_mapping_writable`. The fork's later DV7.3 rewrite entry point still needs E15.1 first.
+Cross-review: Codex (gpt-6.1-sol, high) and Gemini (3.8 Flash) LGTM; the pre-PR panel found
+nothing.
+
+Why this item: the NuvioTV fork (`tinof/NuvioTV-Fork`, branch `perf/shield-pass`, `ROADMAP.md`
+Appendix A, step DV2.1) adds an RPU to each access unit during playback on a Shield TV Pro 2019
+and wraps this crate in a JNI staticlib (DV2.2; JNI stays in the fork). Its DV3.2 (HLG → 8.4
+static) is gated by the P8 canary turning green through the app's own conversion, so the library
+carries the canary. Not in this item: switching `mkvdovi` to in-process generation (an owner
+decision tied to P10.3; [`HLG_COMPOSER.md`](HLG_COMPOSER.md) section 7 (c)).
+
+Static 8.4 L1 (owner, 2026-10-22): min 0, avg 1283, max 3079, `l1_avg_pq_cm_version` V29. The
+average is the frame-weighted mean of the measured scene averages of the four HLG development
+cuts, from fresh `dovi84-bt2100-v1-spec420` runs (accurate sampling, CUDA). The g3 run was
+identical to its 0.7.0 baseline sidecar. Scene peaks run from 2293 to 3079, 36 of 65 at 3079.
+
+| Cut | Frames | Mean scene average (12-bit PQ) |
+|---|---|---|
+| Wimbledon 2024 final rally | 3051 | 874.9 |
+| Glastonbury 2025 Supergrass stage | 1550 | 1511.9 |
+| Green Planet tropical canopy | 1526 | 1377.1 |
+| UCL Bayern–PSG match action | 3033 | 1528.2 |
+| Pooled | 9160 | 1282.67, rounded to 1283 |
+
+Evidence (WSL2 RTX 4070 host; `~/mkvdovi-work/e16-1-2026-10-22/EVIDENCE.md`):
+
+- **`mkvdovi` unchanged.** `scripts/rpu-baseline.sh compare --require-identical-l1` against
+  `~/mkvdovi-work/rpu-baseline/0.7.0`:
+  - cases: default d1, g3, h1, r1, r2, r4; `--mdfix` r4, r5; `--hlg-composer preset` g3
+  - all nine pass, every `RPU.bin` sha256-identical, and `mkvdovi`'s own log lines identical
+    after normalization
+  - captures in `~/mkvdovi-work/rpu-baseline/e16-1-0e07f62/`
+  - the byte-exact `extra.json` goldens pass, plus new HDR10+ (V40, no sidecar) and CM v2.9
+    goldens captured from main@67632bc before the move
+- **Builders = `dovi_tool` 2.3.4**, checked four ways:
+  - committed fixtures (`dovi_rpu_builder/tests/fixtures`, from `make_fixtures.sh`; bt2100 and
+    canary through `fit_hlg_composer`)
+  - the cases: 8.1 with shots (V40 with the V29 floor, V40 with the V40 floor, V29), 8.4 preset,
+    bt2100 and canary, static 8.1, static 8.4 bt2100 and canary, and two synthetic HDR10+
+    sequences for every peak source under V29 and V40
+  - a live `dovi_tool` test (runs in the test gate; CI installs the pinned 2.3.4)
+  - a serde-path equivalence over 96 parameter combinations (`tools/rpu_builder_check`)
+- **HDR10+ real content.** The eight HDR10+ development cuts × 4 peak sources × V29/V40, the
+  stream's own SEI payloads ordered as `hdr10plus_tool` 1.7.2 orders them:
+  - 64/64 runs byte-identical over 11,841 frames
+  - parsed values equal to the JSON for every frame and peak source
+  - scene starts equal to `SceneInfoSummary` on every run
+- **Android.** `cargo check --target aarch64-linux-android -p dovi_rpu_builder` passes (new CI job
+  `rpu-builder`). No NDK on the host, so no cargo-ndk build (the fork's DV2.2).
+- **Unit tests for each builder.** They cover both sides of the clamps, the composer and
+  block-level guards, the HDR10+ identity fields, malformed and multi-window payloads, every
+  `SceneKey` field and the scene-refresh flag. Two deliberate mutations of the builder turned the
+  fixture tests red.
+- **Gates on the final code:**
+  - the gate (only allowed skips), clippy-cuda, `scripts/cuda-parity.sh` PASS, the L1 gate
+    without `--update`
+  - `tool:fit_hlg_composer`, `tool:rpu_builder_check`
+  - `cargo deny` (Android target added to its graph), `cargo audit`, `release-version-check v0.7.0`
+
+Found on the way: `hdr10plus/json` and `dolby_vision/serde` turn on `serde_json/preserve_order`,
+so they live only in the excluded tool. Raising `clippy.toml` msrv to 1.88 turned on new lints in
+`fit_hlg_composer`, so it stays at 1.82. `tools/compare_baseline` fails clippy under the current
+toolchain on main too (pre-existing).
+
 ### 2026-10-21: WS6.4 View the slope ladder on the LG OLED C9 (PR #66)
 
 Step: [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9

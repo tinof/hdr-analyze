@@ -82,7 +82,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.10, E14.3–E14.6 (tests and the pre-PR gate only; order in E14), E16.1 (a library; `mkvdovi` output byte-identical) | No user-visible change |
+| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.10, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`); P9.2 sidecar v6 (cross-binary contract); both unblocked by E13.5 (#59) | MINOR |
@@ -96,6 +96,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-22 | E16.1: `dovi_rpu_builder`, in-process RPU builders for the NuvioTV fork (DV2.1): 8.1 and 8.4 (preset, bt2100, canary), HDR10+ → L1, static 8.4 (avg 1283, owner); `mkvdovi` RPUs identical to 0.7.0 on all nine baselines; builders = `dovi_tool` 2.3.4 on every fixture and 64/64 HDR10+ corpus runs; E16 closed. | E16 | [#67](https://github.com/tinof/hdr-analyze/pull/67) |
 | 2026-10-22 | WS6.3 slope ladder built and handed off (2026-10-18); WS6.4 viewed on the C9 (2026-10-21): shape followed up to slope 20.46, neutral moves with gain, outcome "anything else". Neutral-finder probe WS6.8/WS6.9 added; WS6.9 may answer the `code / 1023` question (owner). | WS6 | [#66](https://github.com/tinof/hdr-analyze/pull/66) |
 | 2026-10-20 | AetherEngine's FEL playback read against FEL_PLAN: FEL_PLAN gains prior art and an EL siting table; E15 (abort-safe RPU parsing) added. | FEL, E15 | [#65](https://github.com/tinof/hdr-analyze/pull/65) |
 | 2026-10-18 | v0.7.0 released (#63): P7, P9, P11, P13; no rc. CUDA parity PASS and all nine RPUs byte-identical to 0.6.0 before the tag (only the P11 notice lines differ in the `--mdfix` logs). P12.1 moves to the next patch; P9.3 and E12.1 can start. | P7, P9, P11, P13 | [v0.7.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.7.0) |
@@ -1018,32 +1019,6 @@ The detailed gap table and validation method live in
   unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
   too) gets an error from each of the three functions where the parent panics; a multi-file run
   continues with the next file; the existing mkvdovi tests pass unchanged.
-
-### E16: in-process RPU builder library
-
-- **Status:** Open. Asked for by the NuvioTV fork (`tinof/NuvioTV-Fork`, branch `perf/shield-pass`,
-  `ROADMAP.md` Appendix A), which adds one RPU NAL to each access unit during playback on a Shield TV
-  Pro 2019. Its step DV2.1 asks for "a lib crate with the RPU builders (8.1, 8.4, HDR10+, static).
-  Gate: `mkvdovi` output is byte-identical on the test corpus"; DV2.2 wraps the crate in a JNI
-  staticlib (JNI stays in the fork), and DV3.2 (HLG → 8.4 static) is gated by the P8 canary turning
-  green through the app's own conversion, so the library carries the canary too. Today every
-  generated RPU comes from `dovi_tool generate` (`mkvdovi/src/pipeline/dovi_steps.rs`), plus the
-  HLG composer rewrite (`dovi84_composer::rewrite_rpu_file`).
-- Not in this item: switching `mkvdovi` to in-process generation (an owner decision, tied to P10.3;
-  [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md) section 7 (c) rejected it for now), and the fork's
-  later DV7.3 entry point that rewrites a source RPU with `scene_refresh_flag` cleared, which parses
-  an RPU from outside and therefore needs the E15.1 guard first. Not FEL work: the canary is the P8
-  Profile 8.4 composer canary, not the held FEL F2 clips.
-- [E16.1][gpu][corpus] A new workspace crate with the RPU builders: one complete RPU NAL per access
-  unit for 8.1 and 8.4 (composers preset, bt2100, canary), HDR10+ ST 2094-40 payload → L1, static
-  8.1 and 8.4 (owner, 2026-10-22: static 8.4 L1 max 3079, average the pooled measured bt2100 scene
-  average of the four HLG development cuts, `l1_avg_pq_cm_version` V29); `mkvdovi` takes its
-  extra.json definition from the crate and still calls `dovi_tool generate`. Gate: `mkvdovi`
-  extra.json and RPUs unchanged (`scripts/rpu-baseline.sh compare --require-identical-l1` and
-  `sha256sum` of `RPU.bin` on the nine 0.7.0 baselines); the builder's output equals the `RPU.bin`
-  records of `dovi_tool` 2.3.4 for every case (8.1 shots V29 and V40, 8.4 preset/bt2100/canary,
-  static 8.1 and 8.4, HDR10+ for each peak source); `cargo check --target aarch64-linux-android`
-  passes; unit tests for each builder.
 
 ## Explicit non-goals
 
