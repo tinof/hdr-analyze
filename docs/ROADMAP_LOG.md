@@ -6,7 +6,14 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
-### 2026-10-21: WS6.4 slope ladder viewed on the C9 (outcome "anything else")
+### 2026-10-21: WS6.4 View the slope ladder on the LG OLED C9 (PR #66)
+
+Step: [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9
+still follows recorded in the log. Needs: WS6.3.
+
+Resolution: closed by owner decision (2026-10-22). Gate answer: the C9 follows the curve's shape at
+every slope tested, up to 20.46; the pre-registered g\* is undefined (outcome "anything else")
+because the neutral moves with the gain. Follow-up: WS6.8/WS6.9.
 
 Viewed by the owner, who sent one photo per file (kept locally); Claude read each photo in the
 guide's terms and the owner confirmed the reading by eye. The confirmed readings are the RESULT
@@ -72,7 +79,14 @@ exceeds the normalization difference at every gain tested.
 Photos: `docs/in/` in the working tree (not committed); hand-off folder
 `WS6-slope-ladder-2026-10-18/`; work directory `~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`.
 
-### 2026-10-18: WS6.3 slope ladder built and handed off
+### 2026-10-18: WS6.3 Build the slope ladder (PR #66)
+
+Step: [WS6.3][desk] Build the slope ladder. Gate: the ladder checked in libplacebo and handed off for
+the C9 with a `VIEWING_GUIDE.txt`.
+
+Resolution: gate met. libplacebo v7.374.0 within 0.54 12-bit codes of the model on every decisive
+patch (`render/compare.txt`); handed off in forplex `WS6-slope-ladder-2026-10-18/` with
+`VIEWING_GUIDE.txt`.
 
 The 2026-10-17 canary gave no verdict. Its chroma composer had a slope of 20.46 times identity
 (0.02 per BL code) and a constant of −9.28, and the C9 showed it as one flat green. Composers the

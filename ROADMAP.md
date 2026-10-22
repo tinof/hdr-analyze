@@ -96,6 +96,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-22 | WS6.3 slope ladder built and handed off (2026-10-18); WS6.4 viewed on the C9 (2026-10-21): shape followed up to slope 20.46, neutral moves with gain, outcome "anything else". Neutral-finder probe WS6.8/WS6.9 added; WS6.9 may answer the `code / 1023` question (owner). | WS6 | [#66](https://github.com/tinof/hdr-analyze/pull/66) |
 | 2026-10-20 | AetherEngine's FEL playback read against FEL_PLAN: FEL_PLAN gains prior art and an EL siting table; E15 (abort-safe RPU parsing) added. | FEL, E15 | [#65](https://github.com/tinof/hdr-analyze/pull/65) |
 | 2026-10-18 | v0.7.0 released (#63): P7, P9, P11, P13; no rc. CUDA parity PASS and all nine RPUs byte-identical to 0.6.0 before the tag (only the P11 notice lines differ in the `--mdfix` logs). P12.1 moves to the next patch; P9.3 and E12.1 can start. | P7, P9, P11, P13 | [v0.7.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.7.0) |
 | 2026-10-17 | C9 viewings: P10 step 4 closed (blind A/B, no difference, `ms_weight` 2048 kept); first WS6 `code / 1023` canary no verdict (uniform green, slope ladder next); WS6 (2) playback procedure written ([`docs/PLAYBACK.md`](docs/PLAYBACK.md)) and corrected. | P10, WS6 | `docs/owner-decisions-2026-10-17` |
@@ -145,7 +146,7 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
-1. **HLG → Profile 8.4 composer** (P8, WS6.3, WS6.5). `--hlg-composer bt2100` and the input refusal landed
+1. **HLG → Profile 8.4 composer** (P8, WS6.8, WS6.5). `--hlg-composer bt2100` and the input refusal landed
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
@@ -534,8 +535,8 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open. The WS6.3 slope ladder was built and handed off on 2026-10-18 (8 files; the
-  [log](docs/ROADMAP_LOG.md) has the design and checks). Viewed on the C9 on 2026-10-21 (WS6.4):
+- **Status:** Open. WS6.3 and WS6.4 closed (PR #66). The slope ladder was built and handed off on
+  2026-10-18 (8 files; the [log](docs/ROADMAP_LOG.md) has the design and checks). Viewed on the C9 on 2026-10-21 (WS6.4):
   outcome "anything else" in the pre-registered table, so WS6.5 as written cannot start. The C9
   follows the curve's shape at every slope up to 20.46, but the neutral moves to higher BL
   chroma codes as the slope grows (about +2.5 codes at gain 2.5, +5–6.5 at gain 5, more than
@@ -562,10 +563,6 @@ The detailed gap table and validation method live in
   the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
   showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
   neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
-- [WS6.3][desk] Build the slope ladder. Gate: the ladder checked in libplacebo and handed off for
-  the C9 with a `VIEWING_GUIDE.txt`.
-- [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9
-  still follows recorded in the log. Needs: WS6.3.
 - [WS6.8][desk] Build the neutral-finder probe (owner, 2026-10-22): composers neutral at the same
   BL chroma code u0 with gains about 1 (bt2100-like), 1.5, 2.5 and 5, each over a fine sweep of
   BL chroma codes covering the shift WS6.4 found (about 938–962), so the code where the C9 shows
