@@ -1,0 +1,64 @@
+Third-party notices
+===================
+
+hdr-analyze is MIT-licensed (see LICENSE). Parts of it port code from the projects below; their
+copyright and permission notices follow.
+
+dovi_tool 2.3.4 (https://github.com/quietvoid/dovi_tool)
+--------------------------------------------------------
+
+Ported: the HDR10+ to L1 arithmetic of `src/dovi/generator.rs` (`parse_hdr10plus_for_l1`) in
+`dovi_rpu_builder/src/hdr10plus.rs`, and its reading of a generate config
+(`tools/rpu_builder_check/src/equivalence.rs`).
+
+MIT License
+
+Copyright (c) 2026 quietvoid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+hdr10plus_tool 1.7.2 (https://github.com/quietvoid/hdr10plus_tool)
+-----------------------------------------------------------------
+
+Ported: the HDR10+ SEI selection, gap filling and presentation reordering of `src/core/parser.rs`
+and `src/core/mod.rs` (`st2094_40_sei_msg`) in `tools/rpu_builder_check/src/payloads.rs`, and the
+scene comparison of the `hdr10plus` crate's `compute_scene_information` in
+`dovi_rpu_builder/src/hdr10plus.rs` (`SceneKey`).
+
+MIT License
+
+Copyright (c) 2025 quietvoid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

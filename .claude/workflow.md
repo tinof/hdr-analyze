@@ -38,6 +38,7 @@ self-check:     skill:pre-pr-review
 - `tool:compare_baseline`: `cargo fmt --manifest-path tools/compare_baseline/Cargo.toml -- --check && cargo clippy --manifest-path tools/compare_baseline/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/compare_baseline/Cargo.toml`; paths `'tools/compare_baseline/*.rs'` `'tools/compare_baseline/*Cargo.toml'` `'tools/compare_baseline/*Cargo.lock'`; where `local`.
 - `tool:fit_hlg_composer`: `cargo fmt --manifest-path tools/fit_hlg_composer/Cargo.toml -- --check && cargo clippy --manifest-path tools/fit_hlg_composer/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/fit_hlg_composer/Cargo.toml`; paths `'tools/fit_hlg_composer/*.rs'` `'tools/fit_hlg_composer/*Cargo.toml'` `'tools/fit_hlg_composer/*Cargo.lock'`; where `local`.
 - `tool:l1_diff`: `cargo fmt --manifest-path tools/l1_diff/Cargo.toml -- --check && cargo clippy --manifest-path tools/l1_diff/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/l1_diff/Cargo.toml`; paths `'tools/l1_diff/*.rs'` `'tools/l1_diff/*Cargo.toml'` `'tools/l1_diff/*Cargo.lock'`; where `local`.
+- `tool:rpu_builder_check`: `cargo fmt --manifest-path tools/rpu_builder_check/Cargo.toml -- --check && cargo clippy --manifest-path tools/rpu_builder_check/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/rpu_builder_check/Cargo.toml`; paths `'tools/rpu_builder_check/*.rs'` `'tools/rpu_builder_check/*Cargo.toml'` `'tools/rpu_builder_check/*Cargo.lock'` `'dovi_rpu_builder/'`; where `local`.
 - `gemini-harness`: `.claude/workflows/tests/pre-pr-gemini-test.sh`; paths `'.claude/workflows/pre-pr-gemini.*'` `'.claude/workflows/tests/'` `'.agents/agents/pre-pr-reviewer.md'`; where `local`.
 
 ## Tier 2 paths
@@ -63,12 +64,14 @@ mkvdovi/src/external.rs
 mkvdovi/src/external/**
 mkvdovi/src/resume.rs
 mkvdovi/src/resume/**
+dovi_rpu_builder/src/**
 ```
 
 The build inputs can change measured output without a code change. The analyzer, the composer, `l1_diff` and
 the two gate scripts decide the L1 output, CPU/CUDA bit identity and how L1 is scored. The mkvdovi modules
 hold the cross-binary contracts (L1 sidecar, `--help` probes, `+cuda` probe) and the `resume_settings`
-fingerprint. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.js`; `l1_sidecar` is inside
+fingerprint; `dovi_rpu_builder` defines mkvdovi's `extra.json` (which resume compares) and the RPUs the NuvioTV
+fork delivers. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.js`; `l1_sidecar` is inside
 `hdr_analyzer_mvp/src/**`.
 
 ## Routing

@@ -2835,6 +2835,213 @@ fn extra_json_for_profile_84_hlg_is_byte_identical() {
     assert_eq!(text, EXTRA_JSON_84_GOLDEN, "actual:\n{text}");
 }
 
+// Captured from main@67632bc's `generate_extra_json` before it moved into `dovi_rpu_builder`
+// (E16.1), so the shared definition is checked against the old code, not against itself.
+const EXTRA_JSON_HDR10PLUS_V40_GOLDEN: &str = r#"{
+  "cm_version": "V40",
+  "default_metadata_blocks": [
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 2081,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 2851,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level2": {
+        "ms_weight": 2048,
+        "target_max_pq": 3079,
+        "trim_chroma_weight": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_saturation_gain": 2048,
+        "trim_slope": 2048
+      }
+    },
+    {
+      "Level9": {
+        "length": 1,
+        "source_primary_index": 2
+      }
+    },
+    {
+      "Level11": {
+        "content_type": 1,
+        "reference_mode_flag": false,
+        "whitepoint": 0
+      }
+    }
+  ],
+  "level5": {
+    "active_area_bottom_offset": 276,
+    "active_area_left_offset": 0,
+    "active_area_right_offset": 0,
+    "active_area_top_offset": 276
+  },
+  "level6": {
+    "max_content_light_level": 1500,
+    "max_display_mastering_luminance": 4000,
+    "max_frame_average_light_level": 350,
+    "min_display_mastering_luminance": 1
+  },
+  "profile": "8.1",
+  "source_max_pq": 3696,
+  "source_min_pq": 7
+}"#;
+
+const EXTRA_JSON_81_V29_SHOTS_GOLDEN: &str = r#"{
+  "cm_version": "V29",
+  "l1_avg_pq_cm_version": "V29",
+  "length": 22,
+  "level6": {
+    "max_content_light_level": 1000,
+    "max_display_mastering_luminance": 1000,
+    "max_frame_average_light_level": 400,
+    "min_display_mastering_luminance": 50
+  },
+  "profile": "8.1",
+  "shots": [
+    {
+      "duration": 12,
+      "metadata_blocks": [
+        {
+          "Level1": {
+            "avg_pq": 500,
+            "max_pq": 2400,
+            "min_pq": 1
+          }
+        }
+      ],
+      "start": 0
+    },
+    {
+      "duration": 10,
+      "metadata_blocks": [
+        {
+          "Level1": {
+            "avg_pq": 600,
+            "max_pq": 2500,
+            "min_pq": 2
+          }
+        }
+      ],
+      "start": 12
+    }
+  ],
+  "source_max_pq": 3079,
+  "source_min_pq": 62
+}"#;
+
+const EXTRA_JSON_81_V29_NO_SHOTS_GOLDEN: &str = r#"{
+  "cm_version": "V29",
+  "level6": {
+    "max_content_light_level": 1000,
+    "max_display_mastering_luminance": 1000,
+    "max_frame_average_light_level": 400,
+    "min_display_mastering_luminance": 50
+  },
+  "profile": "8.1",
+  "source_max_pq": 3079,
+  "source_min_pq": 62
+}"#;
+
+fn two_scene_sidecar() -> L1Sidecar {
+    L1Sidecar {
+        version: 5,
+        scenes: vec![
+            L1SidecarScene {
+                start: 0,
+                end: 9,
+                min_pq_12bit: 1,
+                avg_luma_pq_12bit: 480,
+                avg_max_rgb_pq_12bit: 500,
+                max_pq_12bit: 2400,
+            },
+            L1SidecarScene {
+                start: 10,
+                end: 19,
+                min_pq_12bit: 2,
+                avg_luma_pq_12bit: 590,
+                avg_max_rgb_pq_12bit: 600,
+                max_pq_12bit: 2500,
+            },
+        ],
+        source: accounted_source(22, 2),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn extra_json_for_hdr10plus_without_sidecar_is_byte_identical() {
+    // HDR10+ has no sidecar: no shots and no `l1_avg_pq_cm_version`, so `dovi_tool` uses the CM
+    // version's floor. Fractions are truncated in L6, the 0.0001-nit minimum becomes 1.
+    let metadata = meta(&[
+        ("min_dml", 0.0001),
+        ("max_dml", 4000.0),
+        ("max_cll", 1500.7),
+        ("max_fall", 350.2),
+    ]);
+    let offsets = Level5Offsets {
+        left: 0,
+        right: 0,
+        top: 276,
+        bottom: 276,
+    };
+    let text = extra_json_text(
+        "8.1",
+        &metadata,
+        &[100, 600, 1000],
+        Some(&CmV40Config::default()),
+        Some(offsets),
+        None,
+    );
+    assert_eq!(text, EXTRA_JSON_HDR10PLUS_V40_GOLDEN, "actual:\n{text}");
+}
+
+#[test]
+fn extra_json_for_cm_v29_is_byte_identical_with_and_without_shots() {
+    let metadata = meta(&[
+        ("min_dml", 0.005),
+        ("max_dml", 1000.0),
+        ("max_cll", 1000.0),
+        ("max_fall", 400.0),
+    ]);
+    // Trim targets are ignored under CM v2.9 (no L2).
+    let sidecar = two_scene_sidecar();
+    let with_shots = extra_json_text(
+        "8.1",
+        &metadata,
+        &[100, 600, 1000],
+        None,
+        None,
+        Some(&sidecar),
+    );
+    assert_eq!(
+        with_shots, EXTRA_JSON_81_V29_SHOTS_GOLDEN,
+        "actual:\n{with_shots}"
+    );
+    let without = extra_json_text("8.1", &metadata, &[100, 600, 1000], None, None, None);
+    assert_eq!(
+        without, EXTRA_JSON_81_V29_NO_SHOTS_GOLDEN,
+        "actual:\n{without}"
+    );
+}
+
 /// The variant the manifest of a corpus cut implies. Both HDR10 variants count as HDR10,
 /// because they differ only by a measurements file next to the input.
 fn manifest_hdr_format(manifest: &Value) -> &'static str {

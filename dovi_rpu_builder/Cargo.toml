@@ -1,0 +1,24 @@
+[package]
+name = "dovi_rpu_builder"
+version = "0.7.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+description = "Dolby Vision Profile 8.1 / 8.4 RPU builders, one RPU NAL per access unit, shared by mkvdovi and the NuvioTV fork"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+dolby_vision = "3.4"
+dovi84_composer = { path = "../dovi84_composer" }
+# No `json` feature: it (and dolby_vision's `serde`) turns on serde_json/preserve_order for the
+# whole workspace, which reorders mkvdovi's extra.json keys. Pinned to dovi_tool 2.3.4's lock.
+hdr10plus = { version = "=2.1.5", default-features = false }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

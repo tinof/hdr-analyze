@@ -1,0 +1,75 @@
+{
+  "profile": "8.4",
+  "level6": {
+    "max_display_mastering_luminance": 1000,
+    "min_display_mastering_luminance": 50,
+    "max_content_light_level": 1000,
+    "max_frame_average_light_level": 400
+  },
+  "cm_version": "V40",
+  "default_metadata_blocks": [
+    {
+      "Level2": {
+        "target_max_pq": 2081,
+        "trim_slope": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_chroma_weight": 2048,
+        "trim_saturation_gain": 2048,
+        "ms_weight": 2048
+      }
+    },
+    {
+      "Level2": {
+        "target_max_pq": 2851,
+        "trim_slope": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_chroma_weight": 2048,
+        "trim_saturation_gain": 2048,
+        "ms_weight": 2048
+      }
+    },
+    {
+      "Level2": {
+        "target_max_pq": 3079,
+        "trim_slope": 2048,
+        "trim_offset": 2048,
+        "trim_power": 2048,
+        "trim_chroma_weight": 2048,
+        "trim_saturation_gain": 2048,
+        "ms_weight": 2048
+      }
+    },
+    {
+      "Level9": {
+        "length": 1,
+        "source_primary_index": 2
+      }
+    },
+    {
+      "Level11": {
+        "content_type": 1,
+        "whitepoint": 0,
+        "reference_mode_flag": false
+      }
+    }
+  ],
+  "length": 4,
+  "l1_avg_pq_cm_version": "V29",
+  "shots": [
+    {
+      "start": 0,
+      "duration": 4,
+      "metadata_blocks": [
+        {
+          "Level1": {
+            "min_pq": 0,
+            "max_pq": 3079,
+            "avg_pq": 1283
+          }
+        }
+      ]
+    }
+  ]
+}

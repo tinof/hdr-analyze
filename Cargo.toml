@@ -5,8 +5,14 @@ members = [
     "mkvdovi",
     "verifier",
     "dovi84_composer",
+    "dovi_rpu_builder",
 ]
-exclude = ["tools/compare_baseline", "tools/l1_diff", "tools/fit_hlg_composer"]
+exclude = [
+    "tools/compare_baseline",
+    "tools/l1_diff",
+    "tools/fit_hlg_composer",
+    "tools/rpu_builder_check",
+]
 
 [profile.release]
 lto = "fat"

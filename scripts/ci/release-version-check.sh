@@ -23,7 +23,7 @@ base=${BASH_REMATCH[1]}
 failed=0
 
 # The crates whose binaries or code ship in the release archives.
-for crate in hdr_analyzer_mvp mkvdovi verifier dovi84_composer; do
+for crate in hdr_analyzer_mvp mkvdovi verifier dovi84_composer dovi_rpu_builder; do
     manifest=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$crate/Cargo.toml" | head -n 1)
     locked=$(awk -v name="name = \"$crate\"" '
         $0 == name { getline; gsub(/^version = "|"$/, ""); print; exit }' Cargo.lock)
@@ -39,7 +39,7 @@ done
 
 # Excluded tool crates keep their own Cargo.lock; any shipped crate they pin must match too.
 for lock in tools/*/Cargo.lock; do
-    for crate in hdr_analyzer_mvp mkvdovi verifier dovi84_composer; do
+    for crate in hdr_analyzer_mvp mkvdovi verifier dovi84_composer dovi_rpu_builder; do
         locked=$(awk -v name="name = \"$crate\"" '
             $0 == name { getline; gsub(/^version = "|"$/, ""); print; exit }' "$lock")
         if [[ -n $locked && $locked != "$version" ]]; then

@@ -2,7 +2,8 @@
 //! both chroma MMR constants shifted by the same offset, so a device that applies the RPU's
 //! composer shows a strong tint (green for a negative offset) and a device that ignores it
 //! shows the normal picture. Diagnostic only: never written by mkvdovi, and no analyzer
-//! measures through it, so the L1 of the input RPU (measured through `bt2100`) is kept.
+//! measures through it, so the L1 of the input RPU (measured through `bt2100`) is kept. The
+//! mapping itself is `dovi84_composer::canary_mapping`, shared with `dovi_rpu_builder`.
 //!
 //! ```text
 //! fit_hlg_composer canary-rpu <bt2100 RPU.bin> <out RPU.bin> [--offset <v>]
@@ -16,12 +17,9 @@ use anyhow::{bail, ensure, Context, Result};
 use dolby_vision::rpu::dovi_rpu::DoviRpu;
 use dolby_vision::rpu::rpu_data_mapping::RpuDataMapping;
 use dolby_vision::rpu::utils::parse_rpu_file;
-use dovi84_composer::{mappings_equal, Composer, COEFFICIENT_LOG2_DENOM};
+use dovi84_composer::{canary_mapping, mappings_equal, Composer, DEFAULT_CANARY_OFFSET};
 
 use crate::model::Decoder;
-
-/// Default shift of both normalized chroma outputs: −1/16, about −64 10-bit codes.
-const DEFAULT_OFFSET: f64 = -0.0625;
 
 /// Start code before each RPU in an `RPU.bin` (as `dovi84_composer::rewrite` writes it).
 const RPU_START_CODE: [u8; 4] = [0, 0, 0, 1];
@@ -38,29 +36,9 @@ fn encode_rpu_file(rpus: &[DoviRpu]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// The `bt2100` mapping with `offset` added to both chroma MMR constants (fixed point,
-/// `int + frac / 2^23`).
-pub fn canary_mapping(offset: f64) -> Result<RpuDataMapping> {
-    ensure!(
-        offset.is_finite() && offset.abs() <= 1.0,
-        "offset {offset} must be finite and within [-1, 1]"
-    );
-    let one = 1_i64 << COEFFICIENT_LOG2_DENOM;
-    let shift = (offset * one as f64).round() as i64;
-    ensure!(shift != 0, "offset {offset} rounds to zero");
-    let mut mapping = Composer::Bt2100V1.rpu_data_mapping();
-    for curve in &mut mapping.curves[1..] {
-        let mmr = curve.mmr.as_mut().context("bt2100 chroma is not MMR")?;
-        let value = mmr.mmr_constant_int[0] * one + mmr.mmr_constant[0] as i64 + shift;
-        mmr.mmr_constant_int[0] = value.div_euclid(one);
-        mmr.mmr_constant[0] = value.rem_euclid(one) as u64;
-    }
-    Ok(mapping)
-}
-
 fn parse_offset(args: &[String]) -> Result<f64> {
     match args {
-        [] => Ok(DEFAULT_OFFSET),
+        [] => Ok(DEFAULT_CANARY_OFFSET),
         [flag, value] if flag == "--offset" => Ok(value.parse()?),
         _ => bail!("expected [--offset <v>]"),
     }
@@ -143,53 +121,4 @@ pub fn run_check(args: &[String]) -> Result<()> {
         rpus.len()
     );
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn constants(mapping: &RpuDataMapping) -> Vec<i64> {
-        let one = 1_i64 << COEFFICIENT_LOG2_DENOM;
-        mapping.curves[1..]
-            .iter()
-            .map(|curve| {
-                let mmr = curve.mmr.as_ref().unwrap();
-                assert!(mmr.mmr_constant[0] < one as u64);
-                mmr.mmr_constant_int[0] * one + mmr.mmr_constant[0] as i64
-            })
-            .collect()
-    }
-
-    #[test]
-    fn default_offset_shifts_both_chroma_constants_only() {
-        let bt2100 = Composer::Bt2100V1.rpu_data_mapping();
-        let canary = canary_mapping(DEFAULT_OFFSET).unwrap();
-        let shift = (DEFAULT_OFFSET * f64::from(1_u32 << COEFFICIENT_LOG2_DENOM)).round() as i64;
-        let expected: Vec<i64> = constants(&bt2100).iter().map(|c| c + shift).collect();
-        assert_eq!(constants(&canary), expected);
-
-        let mut restored = canary.clone();
-        for (curve, original) in restored.curves[1..].iter_mut().zip(&bt2100.curves[1..]) {
-            let (mmr, base) = (curve.mmr.as_mut().unwrap(), original.mmr.as_ref().unwrap());
-            mmr.mmr_constant_int[0] = base.mmr_constant_int[0];
-            mmr.mmr_constant[0] = base.mmr_constant[0];
-        }
-        assert!(mappings_equal(&restored, &bt2100));
-    }
-
-    #[test]
-    fn rejects_offsets_that_round_to_zero_or_are_out_of_range() {
-        for offset in [
-            1e-9,
-            -1e13,
-            1e13,
-            f64::NEG_INFINITY,
-            f64::INFINITY,
-            f64::NAN,
-            -1.5,
-        ] {
-            assert!(canary_mapping(offset).is_err(), "offset {offset} accepted");
-        }
-    }
 }

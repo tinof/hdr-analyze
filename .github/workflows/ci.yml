@@ -86,6 +86,32 @@ jobs:
       - name: Score the synthetic corpus against the committed references
         run: scripts/ci/l1-regression-gate.sh
 
+  # dovi_rpu_builder is linked into an Android app by the NuvioTV fork (aarch64-linux-android).
+  # A check of a library needs only the target's std, not the NDK. tools/rpu_builder_check is
+  # outside the workspace (its serde features would reorder mkvdovi's extra.json), so the lint
+  # and test jobs do not cover it.
+  rpu-builder:
+    name: RPU builder (Android check, fixture tool)
+    runs-on: ubuntu-24.04
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            tools/rpu_builder_check -> target
+      - name: cargo check, aarch64-linux-android
+        run: cargo check --locked --target aarch64-linux-android -p dovi_rpu_builder
+      - name: rpu_builder_check fmt, clippy, test
+        run: |
+          cargo fmt --manifest-path tools/rpu_builder_check/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path tools/rpu_builder_check/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path tools/rpu_builder_check/Cargo.toml
+
   # The Gemini pre-PR pass (.claude/workflows/pre-pr-gemini.sh) against a fake agy: no network,
   # no model, about a minute. Linux only, because its cleanup scans /proc/*/environ.
   gemini-harness:

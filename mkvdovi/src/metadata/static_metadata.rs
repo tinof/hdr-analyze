@@ -143,16 +143,24 @@ pub fn apply_static_defaults(meta: &mut HashMap<String, f64>, keys: &[&str], hlg
     let fallbacks: &[(&str, f64, &str)] = &[
         (
             "max_dml",
-            1000.0,
+            dovi_rpu_builder::DEFAULT_MAX_DML_NITS,
             "mastering display peak luminance (L6 MaxDML)",
         ),
         (
             "min_dml",
-            0.005,
+            dovi_rpu_builder::DEFAULT_MIN_DML_NITS,
             "mastering display min luminance (L6 MinDML)",
         ),
-        ("max_cll", 1000.0, "MaxCLL (L6)"),
-        ("max_fall", 400.0, "MaxFALL (L6)"),
+        (
+            "max_cll",
+            dovi_rpu_builder::DEFAULT_MAX_CLL_NITS,
+            "MaxCLL (L6)",
+        ),
+        (
+            "max_fall",
+            dovi_rpu_builder::DEFAULT_MAX_FALL_NITS,
+            "MaxFALL (L6)",
+        ),
     ];
     for &(key, default, label) in fallbacks {
         if keys.contains(&key) && !meta.contains_key(key) {
