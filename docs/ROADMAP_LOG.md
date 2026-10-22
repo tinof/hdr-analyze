@@ -6,6 +6,177 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-21: WS6.4 View the slope ladder on the LG OLED C9 (PR #66)
+
+Step: [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9
+still follows recorded in the log. Needs: WS6.3.
+
+Resolution: closed by owner decision (2026-10-22). Gate answer: the C9 follows the curve's shape at
+every slope tested, up to 20.46; the pre-registered g\* is undefined (outcome "anything else")
+because the neutral moves with the gain. Follow-up: WS6.8/WS6.9.
+
+Viewed by the owner, who sent one photo per file (kept locally); Claude read each photo in the
+guide's terms and the owner confirmed the reading by eye. The confirmed readings are the RESULT
+block of the work directory's `VIEWING_GUIDE.txt`; the earlier `owner-report.txt` holds the
+2026-10-19 in-person answers for WS6L_1 and unconfirmed drafts for WS6L_2/WS6L_3. Section 0:
+Plex on the Nvidia Shield TV Pro, picture mode Dolby Vision Cinema (owner, 2026-10-22). That
+differs from Dolby Vision Cinema Home, the mode announced for the 2026-10-19 in-person session
+and used for the 2026-10-17 canaries. Not recorded for the photos: TV firmware, Shield software
+version, HDMI input, room light (2026-10-19: Shield → C9, dim). Dolby Vision badge on all eight
+files.
+
+| File | Rung | Background | Row 1 | Row 2 | Row 3 | Class |
+|---|---|---|---|---|---|---|
+| WS6L_4 | H2.5 (g 2.5) | dark | (not counted) changes, 5/6 | changes, 5 | changes, 4/5 | O |
+| WS6L_5 | HT (g 5) | dark | changes, 7 | changes, 6/7 | changes, 5 | O |
+| WS6L_2 | H5 (g 5) | dark | changes, 7 | changes, 7 near grey | changes, 5/6 | O |
+| WS6L_7 | H10 (g 10) | dark green | changes, all green, 7 | changes, 7 | changes, 7, none grey | O |
+| WS6L_1 | HK10 (g 10, constant −9.28) | faint green | changes, all green, 7 | changes, 7 | changes, 7, none grey | O |
+| WS6L_6 | H20 (g 20.46) | clearly green | changes slightly, all green, 7 | changes, 7 | changes, 7, none grey | O |
+| WS6L_3 | HA (g 20.46, old structure) | clearly green | almost the same, green | changes slightly, 7 | changes, 7, none grey | X/O |
+| control | bt2100 | purple | purple | purple | purple | as predicted |
+
+(Patch numbers are "closest to grey"; row 1 is 941–947 in 1-code steps, row 2 938–950 in
+2-code steps, row 3 932–956 in 4-code steps; patch 4 = 944 everywhere. WS6L_1's background:
+black in the owner's in-person report of 2026-10-19 (Cinema Home), faint green in the
+confirmed photo reading of 2026-10-21 (Cinema); the rows agree.)
+
+**Outcome under the pre-registered table: "anything else".** No H rung passes (H2.5 is O on
+row 2), so g\* is not defined, and none of the A, B, C rows fits (no flat or kinked H rung).
+By the guide, WS6.5 gets no verdict from this test, and a follow-up probe comes first.
+
+**What the viewing does show:**
+- **The C9 follows the curve's shape at every slope up to 20.46.** Every counted row grades
+  monotonically from green to the high-code end; nothing is flat or clamped. The 2026-10-17
+  "uniform green" was not a slope limit (that viewing was in Cinema Home, this one in Cinema).
+- **The neutral point moves to higher BL chroma codes, more for steeper curves.** The
+  apparent neutral is about 946 for H2.5 (model 943.5 under /1023, 944.5 under /1024), about
+  948.5 for HT and 950 for H5, and above 956 (beyond the last patch) for H10, HK10, H20 and HA.
+  In composed chroma that is about 0.006 below the model at g 2.5, 0.024–0.032 at g 5 and more
+  than 0.12 at g 10 (more than 0.25 at g 20.46). Code shifts this size are 3 to 14 times the
+  0.92-code `code / 1023` vs `code / 1024` difference.
+- **The shift follows the gain, not the coefficients.** HT (gain 5, a term of 7.7) matches H5
+  (gain 5, terms below 1); HK10 (constant −9.28) matches H10 (constant −1.25); HA matches
+  H20. So the out-of-range constant and large terms were not the 2026-10-17 problem.
+- **No input transform explains it.** Every rung is neutral at the same u0, so any change of
+  how the TV reads the BL chroma code (another normalization, an offset, a clamp, coarser
+  quantization) would move all rungs' neutral to the same code. A constant offset of the
+  composed chroma would move it less for steeper rungs. The observed shift grows with gain.
+- **All three pre-registered device models are out.** The ±8 running sum, and the
+  stored-chroma clamps at 940 and 948 each predicted a different pattern (C, B, A); none
+  appears. This rests on the ladder rows alone. The 2026-10-17 canaries' surround, which all
+  three predicted green, is unresolved: answered green from memory on 2026-10-19
+  (`owner-report.txt`), later recalled as black, and the owner is not sure (2026-10-22). The
+  ladder's steep files do show a green surround (code 944 at black luma), consistent with the
+  shift.
+
+Not covered: why the neutral moves (the C9's composer arithmetic, or its display management
+acting on these curves), and whether the shift extrapolates to the production bt2100 composer
+(gain about 0.7–1.1; at the observed rate the shift would be under about one code). The
+`code / 1023` question stays open: a slope canary needs the shift to be known first, since it
+exceeds the normalization difference at every gain tested.
+
+Photos: `docs/in/` in the working tree (not committed); hand-off folder
+`WS6-slope-ladder-2026-10-18/`; work directory `~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`.
+
+### 2026-10-18: WS6.3 Build the slope ladder (PR #66)
+
+Step: [WS6.3][desk] Build the slope ladder. Gate: the ladder checked in libplacebo and handed off for
+the C9 with a `VIEWING_GUIDE.txt`.
+
+Resolution: gate met. libplacebo v7.374.0 within 0.54 12-bit codes of the model on every decisive
+patch (`render/compare.txt`); handed off in forplex `WS6-slope-ladder-2026-10-18/` with
+`VIEWING_GUIDE.txt`.
+
+The 2026-10-17 canary gave no verdict. Its chroma composer had a slope of 20.46 times identity
+(0.02 per BL code) and a constant of −9.28, and the C9 showed it as one flat green. Composers the
+C9 is known to follow have constants between −1.25 and +1.14 (bt2100, the preset). The ladder
+measures how steep a chroma curve the C9 still follows. Three probes separate the slope from
+term size and from the out-of-range constant. Design: a judge panel of three Opus designers
+(least effort, separating the causes, working back from WS6.5), the owner's choice of 8 files,
+and two Codex plan reviews.
+
+**Composers.** All keep the bt2100 luma curve. Cb = c + a1·u + a2·u² + a3·u³, with Cr the same
+on v and no luma or cross terms. Each is neutral at u0 = 944·(1/1023 + 1/1024)/2, so patch 4
+sits 0.46 code from grey under both normalizations and the ladder does not answer WS6.5's
+question. Gain g is dCb/du at u0.
+
+| Rung | g | Constant | Coefficients u, u², u³ | Largest term at u0 |
+|---|---|---|---|---|
+| H2.5 | 2.5 | −1.25 | 1.064, 1.154, −0.271 | 0.98 |
+| H5 | 5 | −1.25 | −0.171, 1.121, 1.216 | 0.95 |
+| H10 | 10 | −1.25 | −3.103, 2.057, 3.647 | 2.86 |
+| H20 | 20.46 | −1.25 | −8.333, 2.057, 9.795 | 7.69 |
+| HT | 5 | 0 | −5.853, 9.034, −2.277 | 7.69 (H20's) |
+| HK10 | 10 | −9.2807 (the old constant) | 7.271, 7.883, −4.629 | 6.71 |
+| HA | 20.46 | −9.1964 | k = 3.791 on all three (the old structure) | 3.50 |
+
+All coefficients lie inside the preset's range [−18.26, 18.76]. The H constants are the
+preset's own −1.25.
+
+**Pattern.** One HLG page (x265 lossless, level 5.1, 750 frames). Three rows at BL luma 640
+(117 nits grey through bt2100) hold seven patches each, around Cb = Cr = 944, spaced 1, 2 and 4
+codes. The background is (64, 944, 944) and there is no centre marker.
+
+The plan had rows at luma 600/680/760 with 4-code spacing. Its own design check failed: the
+central patches of H10, H20 and HA fell outside the C9's range, which is ≤ 600 nits and P3. A
+row therefore counts for a rung only when patches 3–5 stay inside that range and the
+neighbouring steps are ≥ 8 ΔE_ITP. Steep rungs are read on the fine rows, shallow rungs on the
+coarse rows.
+
+Patch 4's tint is 2 / 4.5 / 9 / 18 ΔE_ITP from H2.5 to H20. On the 1-code row, patch 3 or 5 is
+almost as grey as patch 4, and which one depends on the normalization, so that row accepts any
+of 3–5.
+
+**Counterfactual decodes.** Before viewing, the tool decoded the 2026-10-17 canaries and the
+ladder under these models:
+- order-3 terms dropped;
+- coefficient clamps at 2, 4 and 8;
+- a ±8 saturating accumulator, terms first or constant first;
+- constant clamps at 2 and 4;
+- a [0.4, 0.6] output clamp;
+- stored-chroma clamps at 940 and 948;
+- 17- and 33-node 3-D LUTs.
+
+Three models reproduce the 2026-10-17 patch colours (both canaries uniform green, control
+purple): the terms-first ±8 accumulator, and the clamps at 940 and 948. Each predicts a
+different ladder vector, so none collide, and each has its own row in the guide's
+pre-registered table. All three also predict a green background for the 2026-10-17 canaries,
+which that test did not ask about.
+
+**Checks (all passed):**
+- **Design:** f(u0) = 0.5 to 2^−24, slope within 0.1%. Patch 4 is greyest on every reading row
+  under /1023 float, /1024 spec fixed point and (c+0.5)/1024. Spec composed chroma never clips.
+  The background stays ≤ 0.05 nits.
+- **Files:** every frame of each extracted RPU carries its composer and none of the other seven.
+  Each extracted RPU equals the written one byte for byte. Between rungs only the mapping
+  differs. Against the control only the mapping, L1 `avg_pq` (3071 → 2291) and the CRC
+  differ. The shared L1 is H20's, measured 62/2291/3079 and written 12/2291/3079 after the
+  generator's min clamp; the control's measured min (2214) is clamped to 12 too (`run.log`).
+- **Decode:** the base layers of all 8 files are `cmp`-identical, and 750/750 decoded frames
+  equal the page.
+- **libplacebo v7.374.0** (pinned settings): within 0.54 12-bit codes of the model on every
+  decisive patch, and patch 4 is the greyest rendered patch on every reading row.
+  - The 1-code tolerance was gated on the decisive patches, not on every patch in [0.02, 0.98]
+    as planned. Saturated outer patches with a channel near black differ by up to 53 codes, and
+    are identical under `gamut_mode=clip` and `warn`. Clipped patches differ by up to about
+    1460 on the rungs and 1833 on the control. Those patches get a hue-order check. The
+    bt2100 control has no patch inside the display range, so it got only the hue-order check
+    (`render/compare.txt`).
+
+**Viewing guide.** It records the section 0 fields, plays the control last and stops playback
+between files. Report form per file: plays, DV badge, background, then for each row changes /
+same / partly and the patch closest to grey. The key and the table follow the answers. g* is
+the steepest of H2.5–H20 that passes together with every shallower one. It is nominal: WS6.5
+checks the gain itself. An Opus reviewer checked the guide against the tool output twice before
+the hand-off.
+
+Files: forplex `WS6-slope-ladder-2026-10-18/` (`WS6L_1`…`WS6L_7`, `WS6L_control`,
+`VIEWING_GUIDE.txt`, `reference-renders/`). Work directory, `run.sh` (rebuilds the set),
+`versions.txt` (mkvdovi and hdr_analyzer_mvp 0.7.0 +cuda, dovi_tool 2.3.4) and the
+`ws6ladder` evidence crate: `~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`. Next: WS6.4, the
+owner's viewing.
+
 ### 2026-10-18: v0.7.0 released
 
 Release PR #63 (squash a65dcd9) set every shipped crate, README and CITATION to 0.7.0 and dated

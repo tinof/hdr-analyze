@@ -43,9 +43,18 @@ steps from before the step format are cited in the log as "<item> step <n>", not
 `/ship:roadmap-next` keeps **Next up** current and adds a **Checked** bullet (date, commit,
 `file:line`) to each item it examined, so a later run re-checks only what changed since that commit.
 
-### Next up
+### Next up (checked 2026-10-18 at main@affb04c)
+<!-- roadmap-next: rev=2 scope=all config=66799c514044 probes=gpu:ok,corpus:ok -->
 
-Filled in by the first `/ship:roadmap-next` run.
+1. **WS6.3 Build the slope ladder** (priority 1). Gate: the ladder checked in libplacebo and handed
+   off for the C9 with a `VIEWING_GUIDE.txt`. Why: priority 1's only startable step; it opens
+   WS6.4 → WS6.6, which the 1.0.0 row needs. Branch `feat/ws6-3-slope-ladder`. Release: none
+2. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
+   the v0.7.0 condition is met; it ships in v0.8.0 with E12.1 (owner). Branch
+   `feat/p9-3-hybrid-default`, own branch (moves HDR10+ L1). Release: minor
+3. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate (CUDA parity, L1 gate without
+   `--update`). Why: exact fallback peak and a recorded `--peak-source`; Codex ranks it before
+   P9.3. Branch `feat/p9-2-sidecar-v6`. Release: minor
 
 ### Waiting for the owner
 
@@ -57,8 +66,10 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.4 and WS6.6: view the slope ladder, then the redesigned canary,** on the LG OLED C9, once
-  Claude has built each (WS6.3, WS6.5; the first canary gave no verdict, 2026-10-17).
+- **WS6.9, then WS6.6: view or measure the neutral-finder probe, then the redesigned canary,** on
+  the LG OLED C9, once Claude has built each (WS6.8, WS6.5). The slope ladder (WS6.4) was viewed
+  on 2026-10-21 with outcome "anything else"; the owner confirmed the probe on 2026-10-22 and
+  offered an X-Rite i1Display Pro for measured readings.
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
@@ -75,7 +86,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`); P9.2 sidecar v6 (cross-binary contract); both unblocked by E13.5 (#59) | MINOR |
-| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary (WS6.3–WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
+| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3)); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Progress log
 
@@ -85,6 +96,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-22 | WS6.3 slope ladder built and handed off (2026-10-18); WS6.4 viewed on the C9 (2026-10-21): shape followed up to slope 20.46, neutral moves with gain, outcome "anything else". Neutral-finder probe WS6.8/WS6.9 added; WS6.9 may answer the `code / 1023` question (owner). | WS6 | [#66](https://github.com/tinof/hdr-analyze/pull/66) |
 | 2026-10-20 | AetherEngine's FEL playback read against FEL_PLAN: FEL_PLAN gains prior art and an EL siting table; E15 (abort-safe RPU parsing) added. | FEL, E15 | [#65](https://github.com/tinof/hdr-analyze/pull/65) |
 | 2026-10-18 | v0.7.0 released (#63): P7, P9, P11, P13; no rc. CUDA parity PASS and all nine RPUs byte-identical to 0.6.0 before the tag (only the P11 notice lines differ in the `--mdfix` logs). P12.1 moves to the next patch; P9.3 and E12.1 can start. | P7, P9, P11, P13 | [v0.7.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.7.0) |
 | 2026-10-17 | C9 viewings: P10 step 4 closed (blind A/B, no difference, `ms_weight` 2048 kept); first WS6 `code / 1023` canary no verdict (uniform green, slope ladder next); WS6 (2) playback procedure written ([`docs/PLAYBACK.md`](docs/PLAYBACK.md)) and corrected. | P10, WS6 | `docs/owner-decisions-2026-10-17` |
@@ -134,12 +146,12 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
-1. **HLG → Profile 8.4 composer** (P8, WS6.3, WS6.5). `--hlg-composer bt2100` and the input refusal landed
+1. **HLG → Profile 8.4 composer** (P8, WS6.8, WS6.5). `--hlg-composer bt2100` and the input refusal landed
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
    available, so other devices stay untested (owner, 2026-10-17). Open: the WS6 `code / 1023`
-   canary (WS6.3–WS6.6).
+   question (WS6.3–WS6.9).
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
    opt-in flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and the default flips
@@ -282,7 +294,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   (priority 1); met for the LG OLED C9 (2026-10-13). Step 1: the same canary test on a second
   device shows that the display applies the RPU composer: dropped 2026-10-17, no second device is
   available (owner); the C9 result stands alone.
-- Open follow-up: the WS6 `code / 1023` canary, tracked as WS6.3–WS6.6 (build and viewing alternate), no step of its own here. A
+- Open follow-up: the WS6 `code / 1023` question, tracked as WS6.3–WS6.9 (build and viewing alternate), no step of its own here. A
   second device stays a non-blocking note: test one if it becomes available.
 - **Done 2026-10-13: playback test.** An LG OLED C9 (Plex on the TV, and Plex on an Nvidia Shield TV Pro) shows a
   canary composer (bt2100 with both chroma MMR constants shifted, `fit_hlg_composer canary-rpu`)
@@ -377,12 +389,14 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   equals `histogram99`. Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/`
   ([log](docs/ROADMAP_LOG.md) 2026-10-14). The unit test `hdr10plus_peak_sources_follow_dovi_tool`
   pins the mirror, not parity: re-run that evidence's `run.sh` after a `dovi_tool` bump.
-- **Checked 2026-10-14 @f5d4ccc:** mirror `hdr10plus_peak_nits` (`pipeline/hdr10plus.rs:81`);
-  `--boost` remaps to `histogram99` (`main.rs:167`); the report prints only `MAX_FALLBACK_LINES`
-  ranges (`pipeline/hybrid.rs:93`); `check_measurements` admits a hand-made percentile sidecar
-  (`hybrid.rs:115`), so parity runs use fresh analyses. Of the HDR10+ development cuts, MaxSCL is
-  nonzero on h1 Deadloch, h4 The Shining and d2 Patriot (not run), 0 on every frame of the Alita
-  and Alien cuts (every `max-scl*` piece falls back there).
+- **Checked 2026-10-18 @affb04c:** for P9.3, `measure.rs:184` branches on `args.hdr10plus_l1`
+  apart from `hybrid_sampling_refusal` (`pipeline/mod.rs:60`), and `resume_settings`
+  (`pipeline/mod.rs:370`) takes the hybrid flag: resolve one effective mode for all three; extend
+  `tests/hdr10plus_hybrid.rs:340` ("no flag, nothing measured") to the named old path. The holdout
+  ran `accurate` on CUDA; CPU `auto` is `balanced`. `check_measurements` (`hybrid.rs:121`) still
+  admits a hand-made percentile sidecar; a fallback takes the holding analyzer scene's max
+  (`hybrid.rs:293`), never below the piece's own (P9.2). Earlier `@f5d4ccc` notes: `--boost`
+  remaps to `histogram99` (`main.rs:167`); MaxSCL 0 on every Alita/Alien frame.
 
 ### P10: measured against delivered
 
@@ -521,7 +535,14 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open.
+- **Status:** Open. WS6.3 and WS6.4 closed (PR #66). The slope ladder was built and handed off on
+  2026-10-18 (8 files; the [log](docs/ROADMAP_LOG.md) has the design and checks). Viewed on the C9 on 2026-10-21 (WS6.4):
+  outcome "anything else" in the pre-registered table, so WS6.5 as written cannot start. The C9
+  follows the curve's shape at every slope up to 20.46, but the neutral moves to higher BL
+  chroma codes as the slope grows (about +2.5 codes at gain 2.5, +5–6.5 at gain 5, more than
+  +12 at gain 10), independent of the constant and the term size. A follow-up probe that
+  measures this shift comes before any `code / 1023` canary ([log](docs/ROADMAP_LOG.md)
+  2026-10-21). The probe is WS6.8 (build) and WS6.9 (viewing or measurement), owner 2026-10-22.
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -531,24 +552,42 @@ The detailed gap table and validation method live in
   listed feature; (2) the procedure is written (a docs section plus a `VIEWING_GUIDE.txt`
   template recording player, firmware, picture mode and HDMI path) and used once, for (3); (3) a
   discriminating canary, a composer that is neutral under one normalization and visibly coloured
-  under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded.
+  under the other, checked in libplacebo first, viewed on the LG OLED C9, answer recorded; or
+  (owner, 2026-10-22) the neutral-finder probe (WS6.9), when its fit of neutral code against
+  gain separates the two normalizations, answer recorded.
 - [WS6.1][corpus] The final-RPU regression corpus. Gate: `scripts/rpu-baseline.sh` holds one
   captured baseline per listed feature.
 - The `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
   canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
   steep a chroma curve the C9 still follows. Claude builds each, checks it in libplacebo and hands
   the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
-  showed, so build and viewing alternate (WS6.3 to WS6.6).
-- [WS6.3][desk] Build the slope ladder. Gate: the ladder checked in libplacebo and handed off for
-  the C9 with a `VIEWING_GUIDE.txt`.
-- [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9
-  still follows recorded in the log. Needs: WS6.3.
-- [WS6.5][desk] Build the redesigned canary inside the slope range the C9 follows (WS6.4) and
-  within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
+  showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
+  neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
+- [WS6.8][desk] Build the neutral-finder probe (owner, 2026-10-22): composers neutral at the same
+  BL chroma code u0 with gains about 1 (bt2100-like), 1.5, 2.5 and 5, each over a fine sweep of
+  BL chroma codes covering the shift WS6.4 found (about 938–962), so the code where the C9 shows
+  grey can be read per gain. If the owner's X-Rite i1Display Pro can be read from a script
+  (ArgyllCMS `spotread -O`), the probe is a timed sequence of full-field codes per file, measured
+  automatically; otherwise patch rows read by eye. Gate: the probe checked in libplacebo and handed
+  off with a `VIEWING_GUIDE.txt` (plus the measurement script when metered).
+- [WS6.9][owner] View or measure the neutral-finder probe on the LG OLED C9. Gate: the apparent
+  neutral BL chroma code per gain recorded in the log (to about ±0.5 code by eye, ±0.25 metered),
+  with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
+  (943.5 under `code / 1023`, 944.5 under `code / 1024` for u0 half-way), the slope the
+  gain-dependent shift. Needs: WS6.8.
+- [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
+  no slope limit) and within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
-  handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.4.
+  handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
+  showed a gain-dependent neutral shift larger than the normalization difference; if WS6.9
+  answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped).
 - [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
   on the LG OLED C9, answer recorded. Needs: WS6.5.
+- **Checked 2026-10-18 @affb04c:** `canary_mapping` (`tools/fit_hlg_composer/src/canary.rs:43`)
+  only offsets the two chroma constants, so the ladder needs a slope parameter (new generator or
+  subcommand). The 2026-10-17 build (`~/mkvdovi-work/ws6-normalization-2026-10-17/`: `make_pattern.py`,
+  `design.txt`, `run.sh`) is the base; pin the libplacebo render settings (`docs/PLAYBACK.md`) and
+  keep a normal-range control. forplex `TESTS_PENDING.txt` lists nothing pending.
 - **Done 2026-10-17: (2) the written playback procedure,** [`docs/PLAYBACK.md`](docs/PLAYBACK.md),
   used for the WS6 and P10 viewings and corrected afterwards with what they showed (owner asked
   Claude to make the corrections).
@@ -563,7 +602,8 @@ The detailed gap table and validation method live in
   normalization predicts a green-to-magenta row with one grey patch; the bt2100 control showed
   the predicted purple. So the TV applies these composers but does not follow the steep curve:
   its composed chroma comes out flat and low, as if clamped. This is the guide's "anything else"
-  row. Not recorded: TV firmware, room light.
+  row. Not recorded: TV firmware, room light. Reread 2026-10-21 (WS6.4): not a slope limit; the
+  C9 follows steep curves, but its neutral moves with the gain.
 - **P8 result (2026-10-13):** an LG OLED C9 applies the 8.4 composer in the RPU (canary method in
   [log](docs/ROADMAP_LOG.md)). Not recorded for that test: firmware, picture mode, HDMI path. The
   preset's grey tint looked yellow on the C9, where the libplacebo SDR render predicted lavender
