@@ -5,6 +5,8 @@
 //! composer, and `mkvdovi` writes the same composer into the RPU. The sidecar's
 //! `analysis.luminance_mapping` names it ([`Composer::luminance_mapping`]), so a measurement
 //! is never paired with an RPU carrying a different composer. Design: `docs/HLG_COMPOSER.md`.
+//! `dovi_rpu_builder` writes the same composers, plus the diagnostic [`canary_mapping`], into
+//! RPUs it builds in-process, after [`check_mapping_writable`].
 
 use dolby_vision::rpu::profiles::profile84::Profile84;
 use dolby_vision::rpu::rpu_data_mapping::{
@@ -12,9 +14,13 @@ use dolby_vision::rpu::rpu_data_mapping::{
 };
 
 mod bt2100_v1;
+mod canary;
 pub mod rewrite;
+mod writable;
 
+pub use canary::{canary_mapping, DEFAULT_CANARY_OFFSET};
 pub use rewrite::{check_rpu_file, check_rpus, rewrite_rpu_file};
+pub use writable::check_mapping_writable;
 
 /// Fixed-point denominator (log2) of the reshaping coefficients: the RPU header's
 /// `coefficient_log2_denom` in the Profile 8 headers `dovi_tool` generates

@@ -1,0 +1,397 @@
+{
+  "JSONInfo": {
+    "HDR10plusProfile": "A",
+    "Version": "1.0"
+  },
+  "SceneInfo": [
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 1500,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            500,
+            1200,
+            2500,
+            4000,
+            5200,
+            6500,
+            8000,
+            9000,
+            9800,
+            9600
+          ]
+        },
+        "MaxScl": [
+          9000,
+          8500,
+          7000
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 0,
+      "SceneId": 0,
+      "SequenceFrameIndex": 0
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 1500,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            500,
+            1200,
+            2500,
+            4000,
+            5200,
+            6500,
+            8000,
+            9000,
+            9800,
+            9600
+          ]
+        },
+        "MaxScl": [
+          9000,
+          8500,
+          7000
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 1,
+      "SceneId": 0,
+      "SequenceFrameIndex": 1
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 1500,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            500,
+            1200,
+            2500,
+            4000,
+            5200,
+            6500,
+            8000,
+            9000,
+            9800,
+            9600
+          ]
+        },
+        "MaxScl": [
+          9000,
+          8500,
+          7000
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 2,
+      "SceneId": 0,
+      "SequenceFrameIndex": 2
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 800,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            100,
+            400,
+            900,
+            1500,
+            2600,
+            3300,
+            4100,
+            4600,
+            5000,
+            4800
+          ]
+        },
+        "MaxScl": [
+          5000,
+          4000,
+          3000
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 0,
+      "SceneId": 1,
+      "SequenceFrameIndex": 3
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 801,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            100,
+            400,
+            900,
+            1500,
+            2600,
+            3300,
+            4100,
+            4600,
+            5000,
+            4800
+          ]
+        },
+        "MaxScl": [
+          5001,
+          4000,
+          3000
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 0,
+      "SceneId": 2,
+      "SequenceFrameIndex": 4
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 801,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            100,
+            400,
+            900,
+            1500,
+            2600,
+            3300,
+            4100,
+            4600,
+            5000,
+            4800
+          ]
+        },
+        "MaxScl": [
+          5001,
+          4000,
+          3000
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 1,
+      "SceneId": 2,
+      "SequenceFrameIndex": 5
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 10,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            5,
+            20,
+            40,
+            80,
+            150,
+            250,
+            380,
+            450,
+            600,
+            550
+          ]
+        },
+        "MaxScl": [
+          600,
+          500,
+          400
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 0,
+      "SceneId": 3,
+      "SequenceFrameIndex": 6
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 20,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            5,
+            20,
+            40,
+            80,
+            150,
+            250,
+            380,
+            450,
+            700,
+            650
+          ]
+        },
+        "MaxScl": [
+          650,
+          500,
+          400
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 0,
+      "SceneId": 4,
+      "SequenceFrameIndex": 7
+    },
+    {
+      "LuminanceParameters": {
+        "AverageRGB": 20,
+        "LuminanceDistributions": {
+          "DistributionIndex": [
+            1,
+            5,
+            10,
+            25,
+            50,
+            75,
+            90,
+            95,
+            98,
+            99
+          ],
+          "DistributionValues": [
+            5,
+            20,
+            40,
+            80,
+            150,
+            250,
+            380,
+            450,
+            700,
+            650
+          ]
+        },
+        "MaxScl": [
+          650,
+          500,
+          400
+        ]
+      },
+      "NumberOfWindows": 1,
+      "TargetedSystemDisplayMaximumLuminance": 0,
+      "SceneFrameIndex": 1,
+      "SceneId": 4,
+      "SequenceFrameIndex": 8
+    }
+  ],
+  "SceneInfoSummary": {
+    "SceneFirstFrameIndex": [
+      0,
+      3,
+      4,
+      6,
+      7
+    ],
+    "SceneFrameNumbers": [
+      3,
+      1,
+      2,
+      1,
+      2
+    ]
+  },
+  "ToolInfo": {
+    "Tool": "hdr10plus_tool",
+    "Version": "1.7.2"
+  }
+}

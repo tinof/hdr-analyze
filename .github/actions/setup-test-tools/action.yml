@@ -12,7 +12,10 @@ runs:
     - name: Install the tools the integration tests need
       shell: bash
       env:
-        # dovi_tool for the mkvdovi integration tests; bump both together.
+        # dovi_tool for the mkvdovi integration tests; bump both together. dovi_rpu_builder pins the
+        # same version (DOVI_TOOL_VERSION in dovi_rpu_builder/tests/dovi_tool_live.rs, and
+        # tests/fixtures/make_fixtures.sh): bump those and regenerate the fixtures with it, or the
+        # live test prints `Skipping` and the test gate fails.
         DOVI_TOOL_VERSION: 2.3.4
         DOVI_TOOL_SHA256: 1844258e13c26607b32224bf1fa82b595d3b35949f5467405fda560daad32b3f
         # hdr10plus_tool for the HDR10+ integration test (mkvdovi/tests/hdr10plus_hybrid.rs);

@@ -398,6 +398,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dovi_rpu_builder"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "dolby_vision",
+ "dovi84_composer",
+ "hdr10plus",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -488,6 +501,16 @@ name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
+name = "hdr10plus"
+version = "2.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70a7bf4009c3d1d1df86a627808200b50b7ca607a2019ce4bae8aef90226d9b6"
+dependencies = [
+ "anyhow",
+ "bitvec_helpers",
+]
 
 [[package]]
 name = "hdr_analyzer_mvp"
@@ -644,6 +667,7 @@ dependencies = [
  "ctrlc",
  "dolby_vision",
  "dovi84_composer",
+ "dovi_rpu_builder",
  "indicatif 0.17.11",
  "predicates",
  "regex",

@@ -6,6 +6,15 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Added
+
+- `dovi_rpu_builder`, a library crate that builds Dolby Vision Profile 8.1 and 8.4 RPUs in-process,
+  one RPU NAL per access unit, byte-identical to `dovi_tool generate` 2.3.4. It covers shot L1,
+  HDR10+ payloads (with `dovi_tool`'s scene rule), static 8.1 and 8.4 RPUs, and the preset, bt2100
+  and P8 canary composers. It was made for the NuvioTV fork's on-device conversion and builds for
+  `aarch64-linux-android` ([`docs/RPU_BUILDER.md`](docs/RPU_BUILDER.md)). mkvdovi output is
+  unchanged: mkvdovi takes its `extra.json` from the crate and still runs `dovi_tool generate`.
+
 ## [0.7.0] - 2026-10-18
 
 ### Upgrade notes

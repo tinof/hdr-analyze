@@ -12,13 +12,16 @@
 # [GRAPH] - Dependency Graph Construction
 # =============================================================================
 [graph]
-# Target platforms to check (matches rust-toolchain.toml targets)
+# Target platforms to check (rust-toolchain.toml targets, plus Android)
 targets = [
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
     "x86_64-apple-darwin",
     "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc",
+    # dovi_rpu_builder is linked into an Android app (the NuvioTV fork), so its
+    # Android-only dependencies are checked too.
+    "aarch64-linux-android",
 ]
 
 # Include all features when checking

@@ -1,0 +1,17 @@
+[package]
+name = "rpu_builder_check"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Fixtures and dovi_tool equivalence checks for dovi_rpu_builder"
+publish = false
+
+# Outside the workspace on purpose: `hdr10plus/json` and `dolby_vision/serde` turn on
+# serde_json/preserve_order, which would reorder mkvdovi's extra.json keys in workspace builds.
+[dependencies]
+anyhow = "1.0"
+dolby_vision = { version = "3.4", features = ["serde"] }
+dovi_rpu_builder = { path = "../../dovi_rpu_builder" }
+hdr10plus = { version = "=2.1.5", features = ["json", "hevc"] }
+hevc_parser = { version = "=0.6.10", features = ["hevc_io"] }
+serde_json = "1.0"

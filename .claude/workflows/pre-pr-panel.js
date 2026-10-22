@@ -42,6 +42,9 @@ for (const f of files) {
   const m = /^tools\/([^/]+)\/(.+)$/.exec(f)
   if (m && /\.rs$|Cargo\.(toml|lock)$/.test(m[2])) gates.add('tool:' + m[1])
 }
+// tools/rpu_builder_check builds dovi_rpu_builder by path (and includes its fixture cases), so a
+// library change runs the tool's equivalence tests too.
+if (any(/^dovi_rpu_builder\//)) gates.add('tool:rpu_builder_check')
 // The Gemini pass and its fake-agy harness (no network, no model).
 if (any(/^\.claude\/workflows\/(pre-pr-gemini\.|tests\/)|^\.agents\/agents\/pre-pr-reviewer\.md$/)) gates.add('gemini-harness')
 const requiredGates = [...gates]
@@ -68,7 +71,7 @@ if (a.kind === 'pure-move' && !pureMove) {
 // gate, plus the cross-binary contract modules named in CLAUDE.md. A module counts as a file or as
 // a directory of submodules (metadata.rs or metadata/), so a split never drops the reviewer.
 const highRisk = !pureMove && (cuda || measurement ||
-  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)/))
+  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)|^dovi_rpu_builder\/src\//))
 
 const SCOPE = [
   `Scope: run \`git diff ${a.base}...HEAD\` for the committed part, and read the uncommitted files `,
