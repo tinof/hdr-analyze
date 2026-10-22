@@ -122,7 +122,10 @@ presentation order (`compute_scene_information`). `SceneKey` holds exactly the c
   key compares it whenever the frame is, so the two differ only for a stream that mixes profiles.
 
 **Order and gaps.** The rule runs in presentation order, so a player that sees AUs in decode
-order reorders first. An AU without a payload gets no L1 from this crate. `hdr10plus_tool` (like
+order reorders first. An injector that writes each AU's RPU as it reads the AU, in decode order,
+cannot always know whether that AU starts a scene: with B-frames the previous frame in
+presentation order may not have been read yet. Without buffering to presentation order, the L1 of
+each scene still matches `dovi_tool`, but the AU that carries the scene refresh can differ. An AU without a payload gets no L1 from this crate. `hdr10plus_tool` (like
 FFmpeg) gives it the previous payload in decode order, before reordering, and that is what
 `dovi_tool` sees. Not covered: `--hdr10plus-l1 hybrid` (the analyzer's cuts and averages), HDR10+
 together with a reused measurement sidecar, and multi-window payloads.
