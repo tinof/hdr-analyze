@@ -13,8 +13,8 @@
 # MSRV (Minimum Supported Rust Version)
 # =============================================================================
 # Prevents clippy from suggesting features newer than your MSRV
-# The workspace minimum: dolby_vision 3.4 needs 1.88 (`rust-version` of dovi_rpu_builder)
-msrv = "1.88.0"
+# Matches rust-toolchain.toml
+msrv = "1.82.0"
 
 # =============================================================================
 # COMPLEXITY THRESHOLDS
