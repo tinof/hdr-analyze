@@ -66,9 +66,10 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.6: view the redesigned canary** on the LG OLED C9, once Claude has built it (WS6.5). The
-  slope ladder (WS6.4) was viewed on 2026-10-21 with outcome "anything else": the neutral shift
-  it found must be measured by a follow-up probe before WS6.5 (owner to confirm the probe).
+- **WS6.9, then WS6.6: view or measure the neutral-finder probe, then the redesigned canary,** on
+  the LG OLED C9, once Claude has built each (WS6.8, WS6.5). The slope ladder (WS6.4) was viewed
+  on 2026-10-21 with outcome "anything else"; the owner confirmed the probe on 2026-10-22 and
+  offered an X-Rite i1Display Pro for measured readings.
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
@@ -540,7 +541,7 @@ The detailed gap table and validation method live in
   chroma codes as the slope grows (about +2.5 codes at gain 2.5, +5–6.5 at gain 5, more than
   +12 at gain 10), independent of the constant and the term size. A follow-up probe that
   measures this shift comes before any `code / 1023` canary ([log](docs/ROADMAP_LOG.md)
-  2026-10-21).
+  2026-10-21). The probe is WS6.8 (build) and WS6.9 (viewing or measurement), owner 2026-10-22.
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -562,10 +563,24 @@ The detailed gap table and validation method live in
   the C9 with a `VIEWING_GUIDE.txt`.
 - [WS6.4][owner] View the slope ladder on the LG OLED C9. Gate: the steepest chroma slope the C9
   still follows recorded in the log. Needs: WS6.3.
+- [WS6.8][desk] Build the neutral-finder probe (owner, 2026-10-22): composers neutral at the same
+  BL chroma code u0 with gains about 1 (bt2100-like), 1.5, 2.5 and 5, each over a fine sweep of
+  BL chroma codes covering the shift WS6.4 found (about 938–962), so the code where the C9 shows
+  grey can be read per gain. If the owner's X-Rite i1Display Pro can be read from a script
+  (ArgyllCMS `spotread -O`), the probe is a timed sequence of full-field codes per file, measured
+  automatically; otherwise patch rows read by eye. Gate: the probe checked in libplacebo and handed
+  off with a `VIEWING_GUIDE.txt` (plus the measurement script when metered).
+- [WS6.9][owner] View or measure the neutral-finder probe on the LG OLED C9. Gate: the apparent
+  neutral BL chroma code per gain recorded in the log (to about ±0.5 code by eye, ±0.25 metered),
+  with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
+  (943.5 under `code / 1023`, 944.5 under `code / 1024` for u0 half-way), the slope the
+  gain-dependent shift. Needs: WS6.8.
 - [WS6.5][desk] Build the redesigned canary inside the slope range the C9 follows (WS6.4) and
   within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
-  handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.4.
+  handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
+  showed a gain-dependent neutral shift larger than the normalization difference; WS6.9 may
+  answer the question on its own, which would drop WS6.5 and WS6.6).
 - [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
   on the LG OLED C9, answer recorded. Needs: WS6.5.
 - **Checked 2026-10-18 @affb04c:** `canary_mapping` (`tools/fit_hlg_composer/src/canary.rs:43`)
