@@ -19,8 +19,8 @@ How and when `hdr-analyze` makes a release. Which roadmap steps go into which re
 
 ## Versions
 
-Versions follow SemVer before 1.0: `0.MINOR.PATCH`. `hdr_analyzer_mvp`, `mkvdovi`, `verifier` and
-`dovi84_composer` always carry the same version. The `tools/*` crates do not ship and keep their
+Versions follow SemVer before 1.0: `0.MINOR.PATCH`. `hdr_analyzer_mvp`, `mkvdovi`, `verifier`,
+`dovi84_composer` and `dovi_rpu_builder` always carry the same version. The `tools/*` crates do not ship and keep their
 own versions.
 
 | Change since the last release | Bump |
@@ -52,11 +52,12 @@ plan current, so the decision is made per step, not afterwards.
 1. **CHANGELOG.** Merge `[Unreleased]` into one heading per kind (`Added`, `Changed`, `Fixed`,
    `Removed`). Put an **Upgrade notes** list at the top: the Breaking items, and anything users must
    do. Rename `[Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and add a new empty `## [Unreleased]`.
-2. **Versions.** Set `version` in `hdr_analyzer_mvp`, `mkvdovi`, `verifier` and `dovi84_composer`
-   (with the `-rc.N` suffix for a candidate), then `cargo build` to update `Cargo.lock`. Also set
-   "Current version" in `README.md` and `version` in `CITATION.cff`, and refresh the tool
-   lockfiles that pin `dovi84_composer`:
-   `cargo update -p dovi84_composer --offline --manifest-path tools/fit_hlg_composer/Cargo.toml`.
+2. **Versions.** Set `version` in `hdr_analyzer_mvp`, `mkvdovi`, `verifier`, `dovi84_composer` and
+   `dovi_rpu_builder` (with the `-rc.N` suffix for a candidate), then `cargo build` to update
+   `Cargo.lock`. Also set "Current version" in `README.md` and `version` in `CITATION.cff`, and
+   refresh the tool lockfiles that pin a shipped crate:
+   `cargo update -p dovi84_composer --offline --manifest-path tools/fit_hlg_composer/Cargo.toml` and
+   `cargo update -p dovi84_composer -p dovi_rpu_builder --offline --manifest-path tools/rpu_builder_check/Cargo.toml`.
    `scripts/ci/release-version-check.sh` fails on any of them left behind.
 3. **PR.** One commit `chore(release): vX.Y.Z`, a pull request, CI green, merge.
 4. **Dry run.** `gh workflow run release.yml --ref main`, then wait for it to pass
