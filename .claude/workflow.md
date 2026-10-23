@@ -163,7 +163,8 @@ check of `scripts/ci/check-test-skips.sh`.
 
 `cuda-parity` is not in CI (no GPU runner). Off the CUDA host it stays pending, the PR gets
 `review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff` and
-`gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push.
+`gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push. In CI the
+Rust jobs skip on a PR that changes only `gate-skip` paths, and `gemini-harness` runs only when its paths change.
 
 `gate-focused` runs `scripts/ci/test-gate.sh` with a test filter: it builds the analyzer next to mkvdovi and
 applies the same skip check, so a focused test that prints `Skipping` fails instead of passing silently. Do not
