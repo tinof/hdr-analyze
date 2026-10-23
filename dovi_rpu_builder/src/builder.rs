@@ -424,6 +424,17 @@ mod tests {
                 with_v40(0, 15, 8),
             ),
             ("source range 0..4095", with_source_range(0, 4095)),
+            ("9 trim targets, 8 PQ codes", {
+                let mut params = with_v40(2, 1, 8);
+                let CmMetadata::V40 {
+                    trim_targets_nits, ..
+                } = &mut params.cm
+                else {
+                    unreachable!()
+                };
+                trim_targets_nits.push(100);
+                params
+            }),
             ("source range 3078..3079", with_source_range(3078, 3079)),
         ];
         for (case, params) in accepted {

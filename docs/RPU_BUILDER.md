@@ -27,7 +27,8 @@ step: E16.1.
     `VdrDmData::replace_metadata_block`).
   - an HDR10+ payload without the selected peak (`dovi_tool` unwraps it).
 - `RpuBuilder::new` refuses every value that a later write would refuse, as `Error::OutOfRange`:
-  more than 8 trim targets (`MAX_TRIM_TARGETS`), an L5 offset above 8191, an L6 field above 10 000
+  more than 8 trim targets with distinct PQ codes (`MAX_TRIM_TARGETS`; the crate merges targets
+  that share a code), an L5 offset above 8191, an L6 field above 10 000
   (`Level6::MAX_VALUE`), L9 `source_primary_index` 255, L11 `content_type` above 15, and an 8.1
   source range above 4095. It also refuses an empty or inverted 8.1 source range, which the crate
   would write. The limits are the crate writer's own `validate` checks, run in `new`; `new` then

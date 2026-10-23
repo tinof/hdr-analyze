@@ -69,7 +69,8 @@ impl Default for CmV40Config {
 /// Trim targets mkvdovi writes by default (`--trim-targets`), in nits.
 pub const DEFAULT_TRIM_TARGETS_NITS: [u32; 3] = [100, 600, 1000];
 
-/// The most L2 blocks, and so trim targets, an RPU carries (`CmV29DmData::validate`).
+/// The most L2 blocks an RPU carries (`CmV29DmData::validate`): trim targets with distinct PQ
+/// codes, since the crate merges targets that share one (`CmV29DmData::replace_level2_block`).
 pub const MAX_TRIM_TARGETS: usize = 8;
 
 /// A block the `dolby_vision` writer would refuse (its `validate`, run on every write) as
@@ -418,12 +419,6 @@ impl RpuParams {
         else {
             return Ok(Vec::new());
         };
-        if trim_targets_nits.len() > MAX_TRIM_TARGETS {
-            return Err(Error::OutOfRange(format!(
-                "{} L2 trim targets, at most {MAX_TRIM_TARGETS}",
-                trim_targets_nits.len()
-            )));
-        }
         let mut blocks = Vec::with_capacity(trim_targets_nits.len() + 2);
         for &target in trim_targets_nits {
             let target_max_pq = u16::try_from(nits_to_pq_code(target))
@@ -437,8 +432,22 @@ impl RpuParams {
                 trim_saturation_gain: NEUTRAL_TRIM,
                 ms_weight: NEUTRAL_TRIM as i16,
             };
-            writable("L2", level2.validate())?;
             blocks.push(ExtMetadataBlock::Level2(level2));
+        }
+        let mut codes: Vec<u16> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ExtMetadataBlock::Level2(level2) => Some(level2.target_max_pq),
+                _ => None,
+            })
+            .collect();
+        codes.sort_unstable();
+        codes.dedup();
+        if codes.len() > MAX_TRIM_TARGETS {
+            return Err(Error::OutOfRange(format!(
+                "{} L2 trim targets with distinct PQ codes, at most {MAX_TRIM_TARGETS}",
+                codes.len()
+            )));
         }
         let level9 = ExtMetadataBlockLevel9 {
             length: 1,
