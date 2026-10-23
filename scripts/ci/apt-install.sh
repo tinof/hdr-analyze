@@ -28,11 +28,13 @@ mirrors=/etc/apt/apt-mirrors.txt
 opts=(-y --no-install-recommends -o "Dir::Cache::Archives=$archives")
 mkdir -p "$archives/partial"
 
-# The download phase of one attempt. $1 is extra `apt-get update` options.
+# The download phase of one attempt. $1 is extra `apt-get update` options. A healthy mirror
+# delivers the largest set (68.6 MB) in 1-4 s; the limits still allow about 1 MB/s. A stall that
+# ran into the old 240 s limit cost a job 4 minutes before the retry, which then took 6 s.
 fetch() {
     # shellcheck disable=SC2086 # $1 is a word list on purpose
-    sudo timeout -k 10 120 apt-get update $1 \
-        && sudo timeout -k 10 240 apt-get install --download-only "${opts[@]}" "${@:2}"
+    sudo timeout -k 5 60 apt-get update $1 \
+        && sudo timeout -k 5 90 apt-get install --download-only "${opts[@]}" "${@:2}"
 }
 
 ok=0
