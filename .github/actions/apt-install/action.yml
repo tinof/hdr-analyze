@@ -1,0 +1,59 @@
+name: Install apt packages (cached, mirror-safe)
+description: >
+  Install apt packages on a GitHub-hosted Ubuntu runner through scripts/ci/apt-install.sh, with the
+  downloaded .deb files kept in the Actions cache. The script bounds the mirror calls in time and
+  retries on another mirror (actions/runner-images#14823, #15040); dpkg still runs every
+  maintainer script, so a cache hit installs exactly what a cold run does. The cache is keyed by
+  image and package list and saved only outside pull requests (push to main, dispatch), so pull
+  requests read main's cache and never add their own.
+
+inputs:
+  packages:
+    description: Space-separated package names.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Cache key
+      id: key
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        # ImageOS and ImageVersion are set by the runner image; the version changes weekly.
+        hash=$(tr ' ' '\n' <<< "$PACKAGES" | sed '/^$/d' | sort -u | sha256sum | cut -c1-16)
+        prefix="apt-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-$hash-"
+        {
+          echo "key=$prefix${ImageVersion:-unknown}"
+          echo "prefix=$prefix"
+          echo "dir=$RUNNER_TEMP/apt-archives-$hash"
+        } >> "$GITHUB_OUTPUT"
+        echo "image ${ImageOS:-unknown} ${ImageVersion:-unknown}, packages: $PACKAGES"
+
+    - name: Restore the .deb cache
+      id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+
+    - name: Install
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        ARCHIVES: ${{ steps.key.outputs.dir }}
+        HIT: ${{ steps.restore.outputs.cache-hit }}
+        MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+      run: |
+        echo "::notice::apt cache: ${MATCHED:-miss}$([[ $HIT == true ]] && echo ' (exact)')"
+        # shellcheck disable=SC2086 # one argument per package
+        "$GITHUB_WORKSPACE/scripts/ci/apt-install.sh" "$ARCHIVES" $PACKAGES
+
+    - name: Save the .deb cache
+      if: github.event_name != 'pull_request' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}

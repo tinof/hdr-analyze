@@ -9,6 +9,11 @@ inputs:
   windows-ffmpeg-asset:
     description: BtbN release asset (in the rolling `latest` release) used on Windows.
     default: ffmpeg-n9.0-latest-win64-lgpl-shared-9.0
+  extra-packages:
+    description: >
+      More apt packages to install with the dev libs on Linux (one cached download), for example
+      `ffmpeg` for the CLI or `clang` for the ARM64 linker.
+    default: ''
 
 outputs:
   bin-dir:
@@ -20,12 +25,14 @@ runs:
   steps:
     - name: Install FFmpeg dev libs (Linux)
       if: runner.os == 'Linux'
+      uses: ./.github/actions/apt-install
+      with:
+        packages: libclang-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev ${{ inputs.extra-packages }}
+
+    - name: Point bindgen at the system headers (Linux)
+      if: runner.os == 'Linux'
       shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          libclang-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
-        echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> "$GITHUB_ENV"
+      run: echo "BINDGEN_EXTRA_CLANG_ARGS=-I/usr/include/$(gcc -dumpmachine)" >> "$GITHUB_ENV"
 
     - name: Install FFmpeg (macOS)
       if: runner.os == 'macOS'

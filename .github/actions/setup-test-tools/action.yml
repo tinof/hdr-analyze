@@ -4,12 +4,18 @@ description: >
   (with libx265), mkvtoolnix, mediainfo, and pinned, checksum-verified dovi_tool and
   hdr10plus_tool builds. Without them the HLG, open-GOP, HDR10+ and clip-based tests print a
   `Skipping` line and pass. ci.yml and release.yml both use this action, so the pins cannot
-  drift between the PR gate and the release gate. Run setup-ffmpeg first (it runs apt-get update).
+  drift between the PR gate and the release gate. The apt packages go through the apt-install
+  action (cached, mirror-safe).
 
 runs:
   using: composite
   steps:
-    - name: Install the tools the integration tests need
+    - name: Install ffmpeg, mkvtoolnix and mediainfo
+      uses: ./.github/actions/apt-install
+      with:
+        packages: ffmpeg mkvtoolnix mediainfo
+
+    - name: Install pinned dovi_tool and hdr10plus_tool
       shell: bash
       env:
         # dovi_tool for the mkvdovi integration tests; bump both together. dovi_rpu_builder pins the
@@ -23,7 +29,6 @@ runs:
         HDR10PLUS_TOOL_VERSION: 1.7.2
         HDR10PLUS_TOOL_SHA256: 06385f37a639d61ba21d4be3150c863846933bc3b58110e094d8fc8f1c2249f2
       run: |
-        sudo apt-get install -y --no-install-recommends ffmpeg mkvtoolnix mediainfo
         archive="$RUNNER_TEMP/dovi_tool.tar.gz"
         curl -fsSL -o "$archive" \
           "https://github.com/quietvoid/dovi_tool/releases/download/${DOVI_TOOL_VERSION}/dovi_tool-${DOVI_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz"
