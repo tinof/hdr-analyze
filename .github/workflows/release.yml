@@ -19,6 +19,8 @@ on:
       - .github/workflows/release.yml
       - .github/actions/setup-ffmpeg/**
       - .github/actions/setup-test-tools/**
+      - .github/actions/apt-install/**
+      - scripts/ci/apt-install.sh
       - scripts/ci/release-*.sh
       - scripts/ci/check-test-skips.sh
       - scripts/ci/bundle-windows-ffmpeg.sh
@@ -93,7 +95,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      # Only main saves (a dry run dispatched on main); tag runs restore main's caches.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-ffmpeg
       - name: cargo fmt (check)
         run: cargo fmt --all -- --check
@@ -157,13 +162,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # .cargo/config.toml links aarch64 Linux through clang, installed here with the FFmpeg dev
+      # libs. The empty RUSTFLAGS drops its `-fuse-ld=lld`, so the default linker is used.
       - id: ffmpeg
         uses: ./.github/actions/setup-ffmpeg
-      # .cargo/config.toml links aarch64 Linux through clang. The empty RUSTFLAGS drops its
-      # `-fuse-ld=lld`, so the default linker is used.
-      - name: Install clang (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get install -y --no-install-recommends clang
+        with:
+          extra-packages: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'clang' || '' }}
 
       - name: Build all binaries
         run: cargo build --locked --verbose --release --workspace --target ${{ matrix.target }}

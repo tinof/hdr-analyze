@@ -19,6 +19,14 @@ This document provides a historical record of completed milestones, feature impl
   gives each error a stable number for JNI, and `Level6::clamped` caps L6 values taken from SEI
   messages.
 
+### Changed
+
+- CI is faster and no longer hangs on a slow Ubuntu mirror. Apt downloads run under a time limit,
+  with a retry on another mirror, and the `.deb` files are cached. Before, one job could spend up
+  to 9 minutes downloading 70 MB. A pull request that changes only Markdown, `docs/` or `LICENSE`
+  skips the Rust jobs. The cross-platform build no longer waits for the test job. `cargo audit`
+  and `cargo deny` run on pull requests that change dependencies, on main and weekly.
+
 ## [0.7.0] - 2026-10-18
 
 ### Upgrade notes

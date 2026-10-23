@@ -52,8 +52,9 @@ else
     bad "Cargo.lock needs an update (cargo metadata --locked failed)"
 fi
 
-ci=$(gh run list --workflow ci.yml --commit "$head" --json status,conclusion \
-    --jq '[.[] | select(.status == "completed")][0].conclusion // "none"' 2>/dev/null || echo "unknown")
+# Only a push or dispatch run covers every job: the weekly scheduled run is advisories only.
+ci=$(gh run list --workflow ci.yml --commit "$head" --json status,conclusion,event \
+    --jq '[.[] | select(.status == "completed" and (.event == "push" or .event == "workflow_dispatch"))][0].conclusion // "none"' 2>/dev/null || echo "unknown")
 if [[ $ci == success ]]; then
     ok "CI passed on ${head:0:7}"
 else
