@@ -17,8 +17,10 @@
 //! No function here does file I/O or starts a process, and caller input never panics: every
 //! refusal is an [`Error`], including the inputs on which the `dolby_vision` crate would panic
 //! (composer shapes it cannot write, metadata blocks of the wrong CM version, an HDR10+ payload
-//! without the selected peak). The crate never parses an RPU from outside. Design and byte
-//! contract: `docs/RPU_BUILDER.md`.
+//! without the selected peak). [`RpuBuilder::new`] refuses every value a later write would, so a
+//! builder that exists writes every shot. The workspace's `panic = "abort"` covers only its own
+//! binaries: a consumer's profile decides, and an FFI caller still uses `catch_unwind`. The
+//! crate never parses an RPU from outside. Design and byte contract: `docs/RPU_BUILDER.md`.
 
 mod builder;
 mod composer;
@@ -35,6 +37,6 @@ pub use params::{
     nits_to_pq_code, source_range_81, source_range_84, CmMetadata, CmV40Config, CmVersion,
     ExtraShot, ExtraShots, Level5, Level6, Profile, RpuParams, DEFAULT_MAX_CLL_NITS,
     DEFAULT_MAX_DML_NITS, DEFAULT_MAX_FALL_NITS, DEFAULT_MIN_DML_NITS, DEFAULT_TRIM_TARGETS_NITS,
-    MASTERING_MIN_NITS, MASTERING_PEAK_NITS,
+    MASTERING_MIN_NITS, MASTERING_PEAK_NITS, MAX_TRIM_TARGETS,
 };
 pub use static_l1::{static_84_params, STATIC_84_L1, STATIC_84_L1_AVG_CM_VERSION};
