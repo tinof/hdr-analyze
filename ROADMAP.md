@@ -96,6 +96,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-23 | E16.2: `RpuBuilder::new` refuses every value a later write would (L2 count, L5, L6, L9, L11, 8.1 source range; plus an empty or inverted range) as `Error::OutOfRange`, with a backstop write; `Error::code`, `Level6::clamped`; docs on `panic = "abort"`, L3/L254 and HDR10+ seeks (NuvioTV fork review); RPU bytes unchanged; E16 closed. | E16 | [#68](https://github.com/tinof/hdr-analyze/pull/68) |
 | 2026-10-22 | E16.1: `dovi_rpu_builder`, in-process RPU builders for the NuvioTV fork (DV2.1): 8.1 and 8.4 (preset, bt2100, canary), HDR10+ → L1, static 8.4 (avg 1283, owner); `mkvdovi` RPUs identical to 0.7.0 on all nine baselines; builders = `dovi_tool` 2.3.4 on every fixture and 64/64 HDR10+ corpus runs; E16 closed. | E16 | [#67](https://github.com/tinof/hdr-analyze/pull/67) |
 | 2026-10-22 | WS6.3 slope ladder built and handed off (2026-10-18); WS6.4 viewed on the C9 (2026-10-21): shape followed up to slope 20.46, neutral moves with gain, outcome "anything else". Neutral-finder probe WS6.8/WS6.9 added; WS6.9 may answer the `code / 1023` question (owner). | WS6 | [#66](https://github.com/tinof/hdr-analyze/pull/66) |
 | 2026-10-20 | AetherEngine's FEL playback read against FEL_PLAN: FEL_PLAN gains prior art and an EL siting table; E15 (abort-safe RPU parsing) added. | FEL, E15 | [#65](https://github.com/tinof/hdr-analyze/pull/65) |
@@ -183,11 +184,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    item (WS4: blinded A/B on a device; WS1.2–WS1.4 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E16, P3, P5, WS0, WS6): the remaining
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, P3, P5, WS0, WS6): the remaining
     E13 PRs (E13.6–E13.10), the E14 test audit, CUDA release binaries (E12.1, after v0.7.0), CI and
-    corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), the RPU builder's input checks
-    (E16.2), debug options, provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6,
-    E11, P5). Ranked below 1–10; added
+    corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options, provenance,
+    open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
@@ -1020,25 +1020,6 @@ The detailed gap table and validation method live in
   unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
   too) gets an error from each of the three functions where the parent panics; a multi-file run
   continues with the next file; the existing mkvdovi tests pass unchanged.
-
-### E16: in-process RPU builders
-
-- **Status:** Open. E16.1 shipped `dovi_rpu_builder` (#67). A review from the NuvioTV fork (its
-  `ROADMAP_LOG.md`, 2026-10-23) found that `RpuBuilder::new`
-  (`dovi_rpu_builder/src/builder.rs:93`) accepts parameters that every later `ShotRpu::write`
-  refuses as the generic `Error::Rpu`: L6 above 10 000, L5 offsets above 8191, L9
-  `source_primary_index` 255, L11 `content_type` above 15, more than 8 trim targets, an 8.1 source
-  range above 4095. An empty or inverted 8.1 source range is written without complaint. The docs
-  overstate `panic = "abort"` (it covers this workspace only), omit the L3 and L254 that every CM
-  v4.0 RPU carries, and tell callers to reset the HDR10+ scene hold after a seek, which is the
-  caller's policy.
-- [E16.2][desk] Validate in `RpuBuilder::new`: refuse those values (and an empty or inverted 8.1
-  source range) as `Error::OutOfRange`, with a backstop write of the base so a builder that exists
-  writes every shot; add `Level6::clamped` for SEI values and `Error::code` for JNI; correct the
-  three doc points. No delivered RPU, `extra.json` or mkvdovi output changes. Gate: unit tests at
-  10001, 8192, 9 targets, L9 255, L11 16 and a 4096, empty and inverted source range fail on the
-  parent and get `Error::OutOfRange` from `new`; values at the limits write; the fixture tests and
-  the live `dovi_tool` test stay byte-identical; the repo gate and `tool:rpu_builder_check` pass.
 
 ## Explicit non-goals
 

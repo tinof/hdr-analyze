@@ -6,6 +6,50 @@ status, the open work and a one-line log; the detail is here, newest first.
 
 ## Progress log
 
+### 2026-10-23: E16.2 RPU builder input checks (PR #68)
+
+Step: [E16.2][desk] Validate in `RpuBuilder::new`: refuse those values (and an empty or inverted 8.1
+  source range) as `Error::OutOfRange`, with a backstop write of the base so a builder that exists
+  writes every shot; add `Level6::clamped` for SEI values and `Error::code` for JNI; correct the
+  three doc points. No delivered RPU, `extra.json` or mkvdovi output changes. Gate: unit tests at
+  10001, 8192, 9 targets, L9 255, L11 16 and a 4096, empty and inverted source range fail on the
+  parent and get `Error::OutOfRange` from `new`; values at the limits write; the fixture tests and
+  the live `dovi_tool` test stay byte-identical; the repo gate and `tool:rpu_builder_check` pass.
+
+Why: E16.1 shipped `dovi_rpu_builder` (#67). A review from the NuvioTV fork (its
+  `ROADMAP_LOG.md`, 2026-10-23) found that `RpuBuilder::new`
+  (`dovi_rpu_builder/src/builder.rs:93`) accepts parameters that every later `ShotRpu::write`
+  refuses as the generic `Error::Rpu`: L6 above 10 000, L5 offsets above 8191, L9
+  `source_primary_index` 255, L11 `content_type` above 15, more than 8 trim targets, an 8.1 source
+  range above 4095. An empty or inverted 8.1 source range is written without complaint. The docs
+  overstate `panic = "abort"` (it covers this workspace only), omit the L3 and L254 that every CM
+  v4.0 RPU carries, and tell callers to reset the HDR10+ scene hold after a seek, which is the
+  caller's policy.
+
+Resolution: closes E16.2 and the item E16. `RpuBuilder::new` builds the L5, L6, L9 and L11 blocks
+and runs the `dolby_vision` writer's own `validate` on each, counts trim targets by distinct PQ
+code (the crate merges L2 blocks that share a `target_max_pq`, so 9 targets with 8 codes still
+write; `MAX_TRIM_TARGETS` 8), refuses an 8.1 source range above 4095 or with min >= max, and
+returns `Error::OutOfRange` for all of them. A backstop write of the base at the end of `new`
+proves every later write, so `Error::Rpu` is now an internal failure only. On the parent the L2,
+L5, L6, L9, L11 and 4096 cases passed `new` and failed at `write` with `Error::Rpu`; the empty and
+inverted source ranges wrote without error, so refusing them is this crate's rule, not the
+`dolby_vision` crate's (`source_range_81` never produces one). New API: `Error::code` (1 to 7; 7 is
+`Rpu`), `Level6::clamped` and `Level6::MAX_VALUE`, `MAX_TRIM_TARGETS`. Docs
+([`RPU_BUILDER.md`](RPU_BUILDER.md)): `panic = "abort"` covers this workspace only, an FFI caller
+still uses `catch_unwind`; every CM v4.0 RPU, the static 8.4 one included, carries the neutral L3
+and the L254 of `CmV40DmData::default_safe()`; `Hdr10PlusHold::reset` leaves seeks to the caller's
+policy (the fork's default, mkvdovi parity, has no refresh mid-shot). No delivered RPU,
+`extra.json` or mkvdovi output changed.
+
+Evidence: `new_refuses_values_the_rpu_cannot_carry` (red on the parent) and
+`values_at_the_limits_are_written` in `dovi_rpu_builder/src/builder.rs`,
+`level6_clamped_caps_each_field_at_10000` and `codes_are_fixed`; the fixture tests and the live
+`dovi_tool` 2.3.4 test unchanged and passing; the repo gate (fmt, workspace clippy,
+`scripts/ci/test-gate.sh`) and `tool:rpu_builder_check` passed; `cargo check --target
+aarch64-linux-android` passed; CI on PR #68. Cross-review: Codex (gpt-6.1-sol, high) and Gemini
+(3.8 Flash) LGTM; the pre-PR panel confirmed nothing (one Fable P2 refuted).
+
 ### 2026-10-22: E16.1 In-process RPU builder library (PR #67)
 
 Step: [E16.1][gpu][corpus] A new workspace crate with the RPU builders: one complete RPU NAL per access
