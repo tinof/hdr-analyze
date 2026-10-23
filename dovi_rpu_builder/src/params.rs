@@ -4,9 +4,10 @@
 //!
 //! [`RpuBuilder`]: crate::RpuBuilder
 
+use dolby_vision::rpu::extension_metadata::blocks::level6::MAX_PQ_LUMINANCE;
 use dolby_vision::rpu::extension_metadata::blocks::{
     ExtMetadataBlock, ExtMetadataBlockLevel11, ExtMetadataBlockLevel2, ExtMetadataBlockLevel5,
-    ExtMetadataBlockLevel6, ExtMetadataBlockLevel9,
+    ExtMetadataBlockLevel6, ExtMetadataBlockLevel9, MAX_12_BIT_VALUE,
 };
 use dolby_vision::rpu::generate::{GenerateConfig, GenerateProfile};
 use dolby_vision::rpu::profiles::{profile84::Profile84, DoviProfile};
@@ -68,6 +69,16 @@ impl Default for CmV40Config {
 /// Trim targets mkvdovi writes by default (`--trim-targets`), in nits.
 pub const DEFAULT_TRIM_TARGETS_NITS: [u32; 3] = [100, 600, 1000];
 
+/// The most L2 blocks an RPU carries (`CmV29DmData::validate`): trim targets with distinct PQ
+/// codes, since the crate merges targets that share one (`CmV29DmData::replace_level2_block`).
+pub const MAX_TRIM_TARGETS: usize = 8;
+
+/// A block the `dolby_vision` writer would refuse (its `validate`, run on every write) as
+/// `Error::OutOfRange`, so that `RpuBuilder::new` refuses what every later write would.
+fn writable(level: &str, check: anyhow::Result<()>) -> Result<()> {
+    check.map_err(|error| Error::OutOfRange(format!("{level}: {error:#}")))
+}
+
 /// The CM version and, under CM v4.0, the default blocks mkvdovi writes for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CmMetadata {
@@ -116,6 +127,10 @@ pub struct Level6 {
 }
 
 impl Level6 {
+    /// The most an L6 field can state (`ExtMetadataBlockLevel6::validate`): 10 000 nits, or 1 nit
+    /// for the mastering minimum in 0.0001-nit units.
+    pub const MAX_VALUE: u32 = MAX_PQ_LUMINANCE as u32;
+
     /// From values in nits, truncated toward zero as mkvdovi always has (`as u32`).
     pub fn from_nits(min_dml: f64, max_dml: f64, max_cll: f64, max_fall: f64) -> Self {
         Self {
@@ -136,11 +151,25 @@ impl Level6 {
         )
     }
 
+    /// Every field capped at [`MAX_VALUE`](Self::MAX_VALUE), for values taken from a stream's
+    /// SEI messages; a larger value makes `RpuBuilder::new` fail. MaxCLL 65535 is common there and
+    /// often means "not measured": capping only makes it writable (10 000 nits). A caller that
+    /// reads it as unknown passes the defaults (`DEFAULT_*_NITS`) instead.
+    pub fn clamped(self) -> Self {
+        let cap = |value: u32| value.min(Self::MAX_VALUE);
+        Self {
+            max_display_mastering_luminance: cap(self.max_display_mastering_luminance),
+            min_display_mastering_luminance: cap(self.min_display_mastering_luminance),
+            max_content_light_level: cap(self.max_content_light_level),
+            max_frame_average_light_level: cap(self.max_frame_average_light_level),
+        }
+    }
+
     fn to_block(self) -> Result<ExtMetadataBlockLevel6> {
         let field = |name: &str, value: u32| {
             u16::try_from(value).map_err(|_| Error::OutOfRange(format!("L6 {name} {value}")))
         };
-        Ok(ExtMetadataBlockLevel6 {
+        let block = ExtMetadataBlockLevel6 {
             max_display_mastering_luminance: field(
                 "max_display_mastering_luminance",
                 self.max_display_mastering_luminance,
@@ -157,7 +186,9 @@ impl Level6 {
                 "max_frame_average_light_level",
                 self.max_frame_average_light_level,
             )?,
-        })
+        };
+        writable("L6", block.validate())?;
+        Ok(block)
     }
 }
 
@@ -392,7 +423,7 @@ impl RpuParams {
         for &target in trim_targets_nits {
             let target_max_pq = u16::try_from(nits_to_pq_code(target))
                 .map_err(|_| Error::OutOfRange(format!("L2 target {target} nits")))?;
-            blocks.push(ExtMetadataBlock::Level2(ExtMetadataBlockLevel2 {
+            let level2 = ExtMetadataBlockLevel2 {
                 target_max_pq,
                 trim_slope: NEUTRAL_TRIM,
                 trim_offset: NEUTRAL_TRIM,
@@ -400,30 +431,61 @@ impl RpuParams {
                 trim_chroma_weight: NEUTRAL_TRIM,
                 trim_saturation_gain: NEUTRAL_TRIM,
                 ms_weight: NEUTRAL_TRIM as i16,
-            }));
+            };
+            blocks.push(ExtMetadataBlock::Level2(level2));
         }
-        blocks.push(ExtMetadataBlock::Level9(ExtMetadataBlockLevel9 {
+        let mut codes: Vec<u16> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ExtMetadataBlock::Level2(level2) => Some(level2.target_max_pq),
+                _ => None,
+            })
+            .collect();
+        codes.sort_unstable();
+        codes.dedup();
+        if codes.len() > MAX_TRIM_TARGETS {
+            return Err(Error::OutOfRange(format!(
+                "{} L2 trim targets with distinct PQ codes, at most {MAX_TRIM_TARGETS}",
+                codes.len()
+            )));
+        }
+        let level9 = ExtMetadataBlockLevel9 {
             length: 1,
             source_primary_index: config.source_primary_index,
             ..Default::default()
-        }));
-        blocks.push(ExtMetadataBlock::Level11(ExtMetadataBlockLevel11 {
+        };
+        writable("L9", level9.validate())?;
+        blocks.push(ExtMetadataBlock::Level9(level9));
+        let level11 = ExtMetadataBlockLevel11 {
             content_type: config.content_type,
             whitepoint: 0,
             reference_mode_flag: config.reference_mode,
             reserved_byte2: 0,
             reserved_byte3: 0,
-        }));
+        };
+        writable("L11", level11.validate())?;
+        blocks.push(ExtMetadataBlock::Level11(level11));
         Ok(blocks)
     }
 
     /// The `GenerateConfig` `dovi_tool generate` reads from [`extra_json`](Self::extra_json)
-    /// without shots, after its defaulting of `l1_avg_pq_cm_version`; `length` 1.
+    /// without shots, after its defaulting of `l1_avg_pq_cm_version`; `length` 1. Refuses, as
+    /// `Error::OutOfRange`, every value the RPU writer would refuse, and an empty or inverted 8.1
+    /// source range.
     pub(crate) fn generate_config(&self) -> Result<GenerateConfig> {
         let (profile, source_range) = match self.profile {
             Profile::P81 { source_range } => (GenerateProfile::Profile81, source_range),
             Profile::P84 { .. } => (GenerateProfile::Profile84, None),
         };
+        // The writer refuses a value above 12 bits. It writes an empty or inverted range, but no
+        // mastering display has one, and `source_range_81` never returns one.
+        if let Some((min, max)) = source_range {
+            if max > MAX_12_BIT_VALUE || min >= max {
+                return Err(Error::OutOfRange(format!(
+                    "8.1 source range {min}..{max}: needs min < max <= {MAX_12_BIT_VALUE}"
+                )));
+            }
+        }
         let level5 = self
             .level5
             .map(|offsets| ExtMetadataBlockLevel5 {
@@ -433,6 +495,7 @@ impl RpuParams {
                 active_area_bottom_offset: offsets.bottom,
             })
             .unwrap_or_default();
+        writable("L5", level5.validate())?;
         Ok(GenerateConfig {
             cm_version: self.cm_version().to_crate(),
             profile,
@@ -531,6 +594,29 @@ mod tests {
             Level6::mkvdovi_default().min_display_mastering_luminance,
             50
         );
+    }
+
+    #[test]
+    fn level6_clamped_caps_each_field_at_10000() {
+        let sei = Level6 {
+            max_display_mastering_luminance: 10_001,
+            min_display_mastering_luminance: 50,
+            max_content_light_level: 65_535,
+            max_frame_average_light_level: 10_000,
+        };
+        assert_eq!(
+            sei.clamped(),
+            Level6 {
+                max_display_mastering_luminance: 10_000,
+                min_display_mastering_luminance: 50,
+                max_content_light_level: 10_000,
+                max_frame_average_light_level: 10_000,
+            }
+        );
+        assert!(sei.to_block().is_err());
+        assert!(sei.clamped().to_block().is_ok());
+        let default = Level6::mkvdovi_default();
+        assert_eq!(default.clamped(), default);
     }
 
     #[test]

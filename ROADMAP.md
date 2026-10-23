@@ -96,6 +96,7 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 
 | Date | Step | Items | Where |
 |------|------|-------|-------|
+| 2026-10-23 | E16.2: `RpuBuilder::new` refuses every value a later write would (L2 count, L5, L6, L9, L11, 8.1 source range; plus an empty or inverted range) as `Error::OutOfRange`, with a backstop write; `Error::code`, `Level6::clamped`; docs on `panic = "abort"`, L3/L254 and HDR10+ seeks (NuvioTV fork review); RPU bytes unchanged; E16 closed. | E16 | [#68](https://github.com/tinof/hdr-analyze/pull/68) |
 | 2026-10-22 | E16.1: `dovi_rpu_builder`, in-process RPU builders for the NuvioTV fork (DV2.1): 8.1 and 8.4 (preset, bt2100, canary), HDR10+ → L1, static 8.4 (avg 1283, owner); `mkvdovi` RPUs identical to 0.7.0 on all nine baselines; builders = `dovi_tool` 2.3.4 on every fixture and 64/64 HDR10+ corpus runs; E16 closed. | E16 | [#67](https://github.com/tinof/hdr-analyze/pull/67) |
 | 2026-10-22 | WS6.3 slope ladder built and handed off (2026-10-18); WS6.4 viewed on the C9 (2026-10-21): shape followed up to slope 20.46, neutral moves with gain, outcome "anything else". Neutral-finder probe WS6.8/WS6.9 added; WS6.9 may answer the `code / 1023` question (owner). | WS6 | [#66](https://github.com/tinof/hdr-analyze/pull/66) |
 | 2026-10-20 | AetherEngine's FEL playback read against FEL_PLAN: FEL_PLAN gains prior art and an EL siting table; E15 (abort-safe RPU parsing) added. | FEL, E15 | [#65](https://github.com/tinof/hdr-analyze/pull/65) |

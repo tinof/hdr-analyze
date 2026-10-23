@@ -117,6 +117,10 @@ impl RpuBuilder {
             .as_mut()
             .ok_or_else(|| Error::Rpu("the Profile 8 RPU has no DM data".into()))?;
         dm.set_scene_cut(false);
+        // The checks above refuse bad input as a typed error. This write is the backstop: it
+        // proves every later `ShotRpu::write` succeeds (a shot only adds a clamped, writable L1),
+        // and a failure here is an internal one, `Error::Rpu`.
+        base.write_hevc_unspec62_nalu().map_err(Error::rpu)?;
         Ok(Self {
             base,
             l1_avg_pq_cm_version: params.l1_avg_pq_cm_version,
@@ -175,7 +179,7 @@ pub fn build(params: &RpuParams, l1: L1, scene_refresh: bool) -> Result<Vec<u8>>
 mod tests {
     use super::*;
     use crate::composer::HlgComposer;
-    use crate::params::{CmMetadata, Level6};
+    use crate::params::{CmMetadata, CmV40Config, Level5, Level6};
     use dolby_vision::rpu::extension_metadata::blocks::{
         ExtMetadataBlockLevel2, ExtMetadataBlockLevel9, ReservedExtMetadataBlock,
     };
@@ -315,5 +319,133 @@ mod tests {
         };
         // nits_to_pq_code caps at 10 000 nits, so even this target fits.
         assert!(RpuBuilder::new(&far_target).is_ok());
+    }
+
+    fn with_level6(edit: impl Fn(&mut Level6)) -> RpuParams {
+        let mut params = p81();
+        edit(&mut params.level6);
+        params
+    }
+
+    fn with_level5(offset: u16) -> RpuParams {
+        let mut params = p81();
+        params.level5 = Some(Level5 {
+            left: offset,
+            right: offset,
+            top: offset,
+            bottom: offset,
+        });
+        params
+    }
+
+    fn with_v40(source_primary_index: u8, content_type: u8, targets: usize) -> RpuParams {
+        let mut params = p81();
+        params.cm = CmMetadata::V40 {
+            config: CmV40Config {
+                source_primary_index,
+                content_type,
+                reference_mode: false,
+            },
+            trim_targets_nits: (0..targets as u32).map(|i| 100 + 100 * i).collect(),
+        };
+        params
+    }
+
+    fn with_source_range(min: u16, max: u16) -> RpuParams {
+        let mut params = p81();
+        params.profile = Profile::P81 {
+            source_range: Some((min, max)),
+        };
+        params
+    }
+
+    // The limits are the `dolby_vision` 3.4 writer's: `ExtMetadataBlockLevel6::validate` (10 000),
+    // `ExtMetadataBlockLevel5::validate` (8191), `ExtMetadataBlockLevel9::validate` (index 255
+    // only with custom primaries), `ExtMetadataBlockLevel11::validate` (15), `CmV29DmData::validate`
+    // (8 L2) and the 12-bit source range fields. NuvioTV fork review (2026-10-23): before E16.2
+    // `new` accepted every refused case below, and every later `write` failed with `Error::Rpu`.
+    #[test]
+    fn new_refuses_values_the_rpu_cannot_carry() {
+        let refused = [
+            (
+                "L6 max_dml 10001",
+                with_level6(|l6| l6.max_display_mastering_luminance = 10_001),
+            ),
+            (
+                "L6 min_dml 10001",
+                with_level6(|l6| l6.min_display_mastering_luminance = 10_001),
+            ),
+            (
+                "L6 MaxCLL 10001",
+                with_level6(|l6| l6.max_content_light_level = 10_001),
+            ),
+            (
+                "L6 MaxFALL 10001",
+                with_level6(|l6| l6.max_frame_average_light_level = 10_001),
+            ),
+            (
+                "L6 MaxCLL 65535",
+                with_level6(|l6| l6.max_content_light_level = 65_535),
+            ),
+            ("L5 8192", with_level5(8192)),
+            ("L9 index 255", with_v40(255, 1, 3)),
+            ("L11 content type 16", with_v40(2, 16, 3)),
+            ("9 trim targets", with_v40(2, 1, 9)),
+            ("source max 4096", with_source_range(7, 4096)),
+            ("inverted source range", with_source_range(3079, 62)),
+            ("empty source range", with_source_range(3000, 3000)),
+        ];
+        for (case, params) in refused {
+            let result = RpuBuilder::new(&params).map(|_| ());
+            assert!(
+                matches!(result, Err(Error::OutOfRange(_))),
+                "{case}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn values_at_the_limits_are_written() {
+        let accepted = [
+            (
+                "L6 at 10000",
+                with_level6(|l6| {
+                    *l6 = Level6 {
+                        max_display_mastering_luminance: 10_000,
+                        min_display_mastering_luminance: 10_000,
+                        max_content_light_level: 10_000,
+                        max_frame_average_light_level: 10_000,
+                    }
+                }),
+            ),
+            ("L5 8191", with_level5(8191)),
+            (
+                "L9 index 0, L11 content type 15, 8 trim targets",
+                with_v40(0, 15, 8),
+            ),
+            ("source range 0..4095", with_source_range(0, 4095)),
+            ("9 trim targets, 8 PQ codes", {
+                let mut params = with_v40(2, 1, 8);
+                let CmMetadata::V40 {
+                    trim_targets_nits, ..
+                } = &mut params.cm
+                else {
+                    unreachable!()
+                };
+                trim_targets_nits.push(100);
+                params
+            }),
+            ("source range 3078..3079", with_source_range(3078, 3079)),
+        ];
+        for (case, params) in accepted {
+            let builder = RpuBuilder::new(&params).unwrap_or_else(|e| panic!("{case}: {e}"));
+            let mut shot = builder.shot(L1::new(0, 1500, 3000)).unwrap();
+            for scene_refresh in [true, false] {
+                let nal = shot
+                    .write(scene_refresh)
+                    .unwrap_or_else(|e| panic!("{case}: {e}"));
+                assert_eq!(nal[..2], RPU_NAL_HEADER, "{case}");
+            }
+        }
     }
 }

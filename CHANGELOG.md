@@ -14,6 +14,10 @@ This document provides a historical record of completed milestones, feature impl
   and P8 canary composers. It was made for the NuvioTV fork's on-device conversion and builds for
   `aarch64-linux-android` ([`docs/RPU_BUILDER.md`](docs/RPU_BUILDER.md)). mkvdovi output is
   unchanged: mkvdovi takes its `extra.json` from the crate and still runs `dovi_tool generate`.
+  `RpuBuilder::new` refuses every value the RPU cannot carry (L2 count, L5, L6, L9, L11, the 8.1
+  source range) as `Error::OutOfRange`, so a builder that exists writes every shot; `Error::code`
+  gives each error a stable number for JNI, and `Level6::clamped` caps L6 values taken from SEI
+  messages.
 
 ## [0.7.0] - 2026-10-18
 

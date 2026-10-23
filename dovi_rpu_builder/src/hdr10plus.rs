@@ -234,8 +234,7 @@ impl Hdr10PlusHold {
         }
     }
 
-    /// The next frame in presentation order: `(L1, scene_refresh)`. Call [`reset`](Self::reset)
-    /// after a seek, so the next frame starts a scene.
+    /// The next frame in presentation order: `(L1, scene_refresh)`.
     pub fn next(&mut self, frame: &Hdr10PlusFrame) -> Result<(L1, bool)> {
         let key = frame.scene_key();
         if let Some((held_key, l1)) = &self.held {
@@ -248,6 +247,9 @@ impl Hdr10PlusHold {
         Ok((l1, true))
     }
 
+    /// Makes the next frame start a scene, whatever its key. Whether a seek (or anything else)
+    /// starts a scene is the caller's policy; `dovi_tool` has no seek, so matching it (the fork's
+    /// default, mkvdovi parity) means no refresh in the middle of a shot.
     pub fn reset(&mut self) {
         self.held = None;
     }

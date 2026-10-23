@@ -14,8 +14,10 @@ step: E16.1.
 - Pure Rust: no FFmpeg, no CUDA, no process calls and no file I/O in the API. It builds for
   `aarch64-linux-android` (CI job `rpu-builder`: `cargo check --target aarch64-linux-android -p
   dovi_rpu_builder`; a check needs the target's std only, not the NDK).
-- Nothing panics on caller input. The workspace release profile has `panic = "abort"`, so a panic
-  would end the player. Every refusal is an `Error`. That includes the inputs on which the
+- Nothing panics on caller input. This workspace's release profile has `panic = "abort"`, but that
+  covers only its own binaries: a consumer's profile decides what a panic does, and an FFI caller
+  (the fork's JNI layer) still wraps every call in `std::panic::catch_unwind`, which catches a panic
+  under `panic = "unwind"`. Every refusal is an `Error`. That includes the inputs on which the
   `dolby_vision` 3.4 crate itself panics:
   - a composer the crate's writer cannot write. `dovi84_composer::check_mapping_writable` checks
     every index the writer touches, and the polynomial piece with `poly_order_minus1 == 0` and
@@ -24,6 +26,16 @@ step: E16.1.
   - a metadata block of a level the RPU's CM version cannot carry (the crate's `unreachable!` in
     `VdrDmData::replace_metadata_block`).
   - an HDR10+ payload without the selected peak (`dovi_tool` unwraps it).
+- `RpuBuilder::new` refuses every value that a later write would refuse, as `Error::OutOfRange`:
+  more than 8 trim targets with distinct PQ codes (`MAX_TRIM_TARGETS`; the crate merges targets
+  that share a code), an L5 offset above 8191, an L6 field above 10 000
+  (`Level6::MAX_VALUE`), L9 `source_primary_index` 255, L11 `content_type` above 15, and an 8.1
+  source range above 4095. It also refuses an empty or inverted 8.1 source range, which the crate
+  would write. The limits are the crate writer's own `validate` checks, run in `new`; `new` then
+  writes the base RPU once as a backstop. So a builder that exists writes every shot, and
+  `Error::Rpu` from any call is an internal failure, not bad input. `Error::code` gives each variant
+  a stable number for JNI (1 to 7; 7 is `Rpu`). Before E16.2, `new` accepted these values and every
+  `write` failed with `Error::Rpu` (NuvioTV fork review, 2026-10-23).
 - The builders never parse an RPU from outside. A later entry point that rewrites a source RPU
   (the fork's DV7.3, `scene_refresh_flag` cleared on a borrowed RPU) needs the E15.1 pre-scan
   first and belongs next to the builder, not inside it.
@@ -36,7 +48,7 @@ step: E16.1.
 |---|---|
 | `RpuParams` | Everything but L1: `Profile::P81 { source_range }` or `Profile::P84 { composer }`, `CmMetadata` (`V29`, or `V40` with the L9/L11 config and the trim targets), `Level6`, optional `Level5`, `l1_avg_pq_cm_version` |
 | `RpuParams::extra_json(shots)` | The `extra.json` mkvdovi writes (one definition with the builder) |
-| `RpuBuilder::new(&params)` | The base RPU, once per params (`DoviRpu::profile81_config` / `profile84_config`, then the composer for 8.4) |
+| `RpuBuilder::new(&params)` | The base RPU, once per params (`DoviRpu::profile81_config` / `profile84_config`, then the composer for 8.4); refuses values the RPU cannot carry (`Error::OutOfRange`) |
 | `RpuBuilder::shot(L1)` → `ShotRpu` | The base with one shot's L1, clamped as `dovi_tool` clamps it, once per shot |
 | `ShotRpu::write(scene_refresh)` | One NAL unit, once per AU |
 | `build(&params, L1, scene_refresh)` | All three in one call |
@@ -47,6 +59,8 @@ step: E16.1.
 | `hdr10plus_l1(payload, peak, cm)` | `parse` then `l1` |
 | `STATIC_84_L1`, `STATIC_84_L1_AVG_CM_VERSION`, `static_84_params(composer)` | A static HLG → 8.4 RPU |
 | `source_range_81`, `source_range_84`, `nits_to_pq_code`, `Level6::from_nits`, `DEFAULT_*` | The pieces of mkvdovi's configuration, shared |
+| `Level6::clamped()`, `Level6::MAX_VALUE`, `MAX_TRIM_TARGETS` | Caps every L6 field at 10 000, for values from a stream's SEI messages (MaxCLL 65535 is common there and often means "not measured"; a caller that reads it as unknown passes the defaults instead); the trim target limit |
+| `Error`, `Error::code()` | Every refusal; a stable integer per variant for JNI |
 
 ### Byte contract
 
@@ -81,6 +95,7 @@ shot's L1 for the rest of it, is the caller's job.
 | CM version | V40 (`CmMetadata::mkvdovi_default`); V29 under `--cm-version v29` (no default blocks) |
 | L2 | One neutral trim (all 2048) per `--trim-targets` value, default 100, 600, 1000 nits |
 | L9 / L11 | `CmV40Config::default()`: BT.2020 primaries (2), content type movies (1), reference mode off |
+| L3 / L254 | Under CM v4.0 only, not in `extra.json`: `VdrDmData::from_generate_config` starts from `CmV40DmData::default_safe()`, which adds a neutral L3 (offsets 2048) and L254 (`cmv402_default`: DM mode 0, version index 2); the default blocks replace its L9 and L11 only. `dovi_tool generate` writes the same |
 | L6 | From the source; when it states none, 1000 / 0.005 nits mastering, MaxCLL 1000, MaxFALL 400 (`Level6::mkvdovi_default`) |
 | 8.1 source range | `source_range_81` of the mastering display; `None` (the generator's L6 lookup) when implausible |
 | 8.4 source range | Always the preset's 62..3079 |
@@ -118,6 +133,9 @@ presentation order (`compute_scene_information`). `SceneKey` holds exactly the c
 - Otherwise hold the L1 and write `false` (`Hdr10PlusHold`).
 - A scene can start with the same L1 as the previous one: a Bezier-only change, or values that
   round or clamp to equal codes. The scene refresh still goes out.
+- `Hdr10PlusHold::reset` makes the next frame start a scene. Whether a seek starts one is the
+  caller's policy. `dovi_tool` sees no seeks, so its behaviour (the fork's default, mkvdovi
+  parity) is no scene refresh in the middle of a shot.
 - `hdr10plus_tool` compares the Bezier curve only when every frame of the file is profile B. This
   key compares it whenever the frame is, so the two differ only for a stream that mixes profiles.
 
@@ -158,8 +176,10 @@ A new policy, not a port: mkvdovi refuses HLG without L1 measured through the se
   above both floors (819 and 1229), so the choice changes no value.
 
 `static_84_params(composer)` gives the rest: CM v4.0 with mkvdovi's default blocks, the default L6
-an HLG source gets, and no L5. The fork's DV3.2 gate (the canary turns green through the app's own
-conversion) uses `static_84_params(HlgComposer::canary())` with `STATIC_84_L1`.
+an HLG source gets, and no L5. As in every CM v4.0 RPU (see Defaults), the static 8.4 RPU also
+carries the neutral L3 and the L254 that `CmV40DmData::default_safe()` adds. The fork's DV3.2 gate
+(the canary turns green through the app's own conversion) uses
+`static_84_params(HlgComposer::canary())` with `STATIC_84_L1`.
 
 ## Composers
 
