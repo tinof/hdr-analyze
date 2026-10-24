@@ -68,6 +68,7 @@ AGENTS.md
 !.claude/agents/
 !.claude/workflows/
 !.claude/workflow.md
+!.claude/review-eval/
 .codex/
 
 # Local scratch/checkouts
