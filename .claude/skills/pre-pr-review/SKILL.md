@@ -212,6 +212,7 @@ that list and step 3's list. Do the same after every later fix round, and run th
 | `l1-regression` | `scripts/ci/l1-regression-gate.sh` (check mode) |
 | `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml` |
 | `gemini-harness` | `.claude/workflows/tests/pre-pr-gemini-test.sh` (fake agy; about 1 minute) |
+| `pre-pr-record` | `.claude/skills/pre-pr-review/tests/clear-record-test.sh` (a throwaway repo; seconds) |
 
 The `test` gate is `scripts/ci/test-gate.sh`, the same script the `gate` of `.claude/workflow.md`
 runs. It builds the current analyzer next to the debug mkvdovi the integration tests run, writes the
