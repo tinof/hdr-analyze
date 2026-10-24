@@ -40,8 +40,10 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
    them. In self-check mode, `/ship` step 1 has already done this.
    Scope = `git diff --name-only origin/<base>...HEAD`.
    Then remove any record for this HEAD (step 8), so a run that stops early cannot leave an
-   older, reusable one behind:
-   `D=$(git rev-parse --path-format=absolute --git-common-dir)/pre-pr-review; S=$(git rev-parse HEAD); rm -f "$D/$S.json" "$D/$S.md" "$D/$S.scope.md"`
+   older, reusable one behind: `.claude/skills/pre-pr-review/clear-record.sh` (it resolves the
+   paths itself; an inline `rm` with command substitutions is refused by the command safety
+   check). A non-zero exit stops the review here: a record it could not remove would be reused.
+   Its test: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`.
 3. Item ID: the argument, else from the branch name or the commit messages, else ask once. In
    self-check mode `/ship` passes the step ID; with `/ship --step none` it passes its spec file
    (`<scratch>/ship-spec.md`) instead: use that paragraph as the item and the acceptance gate, and
@@ -121,6 +123,12 @@ bypass or auto mode each call, its resume and each `gatesOnly` recompute ask for
 
 Keep these args: step 4 resumes with them.
 
+**Where the result is.** The workflow runs in the background. Its return value arrives in the
+completion notification, in the `<result>` element, as JSON: read it there. The task output file
+is a transcript, not that JSON, so do not parse it. If the result is missing, empty or
+unexpected, read the `{"type":"result",…}` lines of `journal.jsonl` in the transcript directory
+the launch result names. Each line is one agent's actual return value.
+
 It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Fable runs only on
 high-risk paths), `findings` (each verified by an independent Opus skeptic), `refuted` (claims a
 skeptic refuted; they go into the step 8 record), `unverified` and
@@ -162,7 +170,8 @@ Fable. The gates and the item's acceptance checks (`rpu-baseline compare
 
 ## 4. Verify and fix
 
-1. If the workflow returns `complete: false` (a Claude reviewer failed), **resume** it once:
+1. Read the result as step 3 says (the notification's `<result>`, else `journal.jsonl`).
+   If the workflow returns `complete: false` (a Claude reviewer failed), **resume** it once:
    `Workflow({scriptPath, resumeFromRunId, args})` with the script path and run ID from step 3's
    tool result and the identical args. Reviewers that finished come back from the cache; the
    failed reviewer and every skeptic run again (verified 2026-10-07: 2 of 3 Opus lenses cached). If it is still incomplete, report the missing lenses as a blocker.
