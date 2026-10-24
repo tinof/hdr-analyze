@@ -91,8 +91,8 @@ default
 - Test both sides of every decision, and take expected values from an independent source, never from the
   function under test.
 - Analyzer numerics (`analysis/`, `kernels.cu`) are guarded by `scripts/cuda-parity.sh` and the L1
-  regression gate. A change that moves L1 on purpose runs `scripts/ci/l1-regression-gate.sh --update` and
-  shows the reference diff in the PR body.
+  regression gate. A change that moves L1 on purpose commits the references refreshed by
+  `scripts/ci/l1-regression-gate.sh --update` in the same PR, and the PR body says why L1 moved.
 - CI has no GPU. The CUDA path is only tested by `scripts/cuda-parity.sh` on the CUDA host; a finding that
   only it can settle is NEEDS-HUMAN off that host.
 - Full rules: `docs/TESTING.md`; skips per test: CLAUDE.md "Testing quirks".

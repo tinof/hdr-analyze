@@ -69,9 +69,11 @@ and `-o <prefix>.md`):
 ```
 
 Write `<scratchpad>/prepr-review-rules.md` first: the `## Code Review Rules` section of
-`git show origin/<base>:AGENTS.md`. Take it from the base, never from the working tree, so a diff
-cannot rewrite the rules it is reviewed against. When the base has no such section (a branch that
-adds it), use the branch's copy and say so in the report. The same section steers Codex's GitHub
+`git show origin/<base>:AGENTS.md`. The prompt's rules come from the base, so the reviewer is told
+the rules as they stood before the diff. Codex also loads the working-tree `AGENTS.md` on its own,
+so a branch that edits the rules still reaches the reviewer; read any diff to that section
+yourself. When the base has no such section (a branch that adds it), use the branch's copy and say
+so in the report. The same section steers Codex's GitHub
 review, which reads AGENTS.md natively.
 
 The review text is in `<scratchpad>/prepr-codex.md`. `--json` prints no header, so report
