@@ -156,6 +156,11 @@ none
 near the top, `highRisk` below it). Keep the two in sync: a path added on one side goes to the other in the
 same PR. `/pre-pr-review` standalone still computes its gates from the workflow; `/ship` reads them here.
 
+The `## Code Review Rules` section of `AGENTS.md` is the one source of repo review rules for Codex: its
+GitHub review reads it natively, and the `/pre-pr-review` Codex pass takes it from the base. The `contracts`
+lens in `.claude/workflows/pre-pr-panel.js` covers the same contracts for the Claude panel and stays as it
+is until the review eval decides (plan 2026-10-24). When a rule changes, check the lens in the same PR.
+
 `gate` runs on every PR that is not docs-only (`gate-skip`). The workflow ran fmt, clippy and the tests only
 when a workspace Rust or Cargo path changed, so a PR that touches only scripts or `.claude/` now runs the
 full cargo gate too. `scripts/ci/test-gate.sh` is the `test` block of `/pre-pr-review` step 5 with the skip
