@@ -65,8 +65,16 @@ background Codex runs (it kills a silent run after 8 minutes, retries once, and 
 and `-o <prefix>.md`):
 
 ```
-~/.claude/skills/ship/scripts/codex-watch.sh <scratchpad>/prepr-codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: cross-binary contracts (L1 sidecar version and fields on both sides, the +cuda version probe, luminance_mapping names, --help option probes such as --hlg-composer), CPU/CUDA bit-identity rules, resume_settings for new artifact-affecting flags, the L1 regression references, 'never re-encode' and 'no silent clamp'. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none."
+~/.claude/skills/ship/scripts/codex-watch.sh <scratchpad>/prepr-codex exec --sandbox read-only "Read CLAUDE.md, then <scratchpad>/prepr-scope.md, and review exactly that scope (the diff origin/<base>...HEAD). Focus on what generic review misses in this repo: the rules in <scratchpad>/prepr-review-rules.md. Report only real defects: [P0-P3], file:line, failure scenario, suggested fix. Say plainly if you find none."
 ```
+
+Write `<scratchpad>/prepr-review-rules.md` first: the `## Code Review Rules` section of
+`git show origin/<base>:AGENTS.md`. The prompt's rules come from the base, so the reviewer is told
+the rules as they stood before the diff. Codex also loads the working-tree `AGENTS.md` on its own,
+so a branch that edits the rules still reaches the reviewer; read any diff to that section
+yourself. When the base has no such section (a branch that adds it), use the branch's copy and say
+so in the report. The same section steers Codex's GitHub
+review, which reads AGENTS.md natively.
 
 The review text is in `<scratchpad>/prepr-codex.md`. `--json` prints no header, so report
 `model`, `effort`, `outcome` and `attempts` from `<scratchpad>/prepr-codex.result.json`. A result

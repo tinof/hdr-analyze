@@ -91,8 +91,8 @@ default
 - Test both sides of every decision, and take expected values from an independent source, never from the
   function under test.
 - Analyzer numerics (`analysis/`, `kernels.cu`) are guarded by `scripts/cuda-parity.sh` and the L1
-  regression gate. A change that moves L1 on purpose runs `scripts/ci/l1-regression-gate.sh --update` and
-  shows the reference diff in the PR body.
+  regression gate. A change that moves L1 on purpose commits the references refreshed by
+  `scripts/ci/l1-regression-gate.sh --update` in the same PR, and the PR body says why L1 moved.
 - CI has no GPU. The CUDA path is only tested by `scripts/cuda-parity.sh` on the CUDA host; a finding that
   only it can settle is NEEDS-HUMAN off that host.
 - Full rules: `docs/TESTING.md`; skips per test: CLAUDE.md "Testing quirks".
@@ -155,6 +155,11 @@ none
 `## Gates` and `## Tier 2 paths` copy the path rules of `.claude/workflows/pre-pr-panel.js` (the gate set
 near the top, `highRisk` below it). Keep the two in sync: a path added on one side goes to the other in the
 same PR. `/pre-pr-review` standalone still computes its gates from the workflow; `/ship` reads them here.
+
+The `## Code Review Rules` section of `AGENTS.md` is the one source of repo review rules for Codex: its
+GitHub review reads it natively, and the `/pre-pr-review` Codex pass takes it from the base. The `contracts`
+lens in `.claude/workflows/pre-pr-panel.js` covers the same contracts for the Claude panel and stays as it
+is until the review eval decides (plan 2026-10-24). When a rule changes, check the lens in the same PR.
 
 `gate` runs on every PR that is not docs-only (`gate-skip`). The workflow ran fmt, clippy and the tests only
 when a workspace Rust or Cargo path changed, so a PR that touches only scripts or `.claude/` now runs the
