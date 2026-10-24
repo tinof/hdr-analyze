@@ -76,7 +76,12 @@ fork delivers. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.
 
 ## Routing
 
-default
+| Built by | Tier 1 (default) | Tier 2 (high risk) |
+|---|---|---|
+| claude | codex | codex |
+| gemini | codex | codex + claude |
+| codex | claude | claude |
+| human | codex | codex + claude |
 
 ## Testing rules
 
@@ -151,6 +156,14 @@ default
 none
 
 ## Notes
+
+`## Routing` is the plugin's default table without Gemini (owner decision 2026-10-24). Gemini (agy) had one
+confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the model that might change that,
+Gemini 4 Archon, is not available on this account yet. Gemini stays parked until it is; then the default
+rows come back. Tier 2 of a Claude-built change therefore has one reviewer, Codex: `/ship` runs it as Tier 1
+and says so in the record. Only the reviewer count changes: a diff that touches this file still shows the
+owner its diff before the merge, because that check keys on the file, not the tier. The standalone
+`/pre-pr-review` Gemini pass and its `gemini-harness` gate are not part of `/ship` and stay as they are.
 
 `## Gates` and `## Tier 2 paths` copy the path rules of `.claude/workflows/pre-pr-panel.js` (the gate set
 near the top, `highRisk` below it). Keep the two in sync: a path added on one side goes to the other in the
