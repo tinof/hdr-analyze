@@ -163,7 +163,8 @@ Gemini 4 Archon, is not available on this account yet. Gemini stays parked until
 rows come back. Tier 2 of a Claude-built change therefore has one reviewer, Codex: `/ship` runs it as Tier 1
 and says so in the record. Only the reviewer count changes: a diff that touches this file still shows the
 owner its diff before the merge, because that check keys on the file, not the tier. The standalone
-`/pre-pr-review` Gemini pass and its `gemini-harness` gate are not part of `/ship` and stay as they are.
+`/pre-pr-review` Gemini pass is not part of `/ship` and stays as it is; so does the `gemini-harness` entry
+in `## Gates`, which `/ship` still runs when its paths change.
 
 `## Gates` and `## Tier 2 paths` copy the path rules of `.claude/workflows/pre-pr-panel.js` (the gate set
 near the top, `highRisk` below it). Keep the two in sync: a path added on one side goes to the other in the
