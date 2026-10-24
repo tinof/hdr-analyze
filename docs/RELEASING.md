@@ -84,12 +84,14 @@ steps 4 to 6 for `vX.Y.Z`: the final-version commit needs its own dry run. A fix
   section that repeats no heading (`scripts/ci/release-version-check.sh`).
 - **test**: every cargo call here and in **build** passes `--locked`, so a `Cargo.lock` that does
   not match the manifests fails before any build. fmt, clippy (also with `--features cuda`), then the full test suite with ffmpeg,
-  mkvtoolnix, mediainfo and a pinned `dovi_tool` installed. Any `Skipping` line outside an
+  mkvtoolnix, mediainfo and a pinned, checksummed `dovi_tool` and `hdr10plus_tool` installed
+  (`.github/actions/setup-test-tools`, the same action PR CI uses). Any `Skipping` line outside an
   allow-list fails the job (`scripts/ci/check-test-skips.sh`), so the HLG and open-GOP tests cannot
   pass by skipping.
-- **build**: Windows x64, macOS Intel and Apple Silicon, Linux x64 and ARM64. Each archive's
-  binaries must start and report the tagged version.
-- **publish**: writes `SHA256SUMS`, attests build provenance (`actions/attest`), creates the
+- **build**: Windows x64, macOS Intel and Apple Silicon, Linux x64 and ARM64 (on
+  `ubuntu-24.04-arm`). Each archive's binaries must start and report the tagged version. Release
+  binaries are CPU-only (no `cuda` feature) until ROADMAP E12.
+- **publish**: writes `SHA256SUMS`, attests build provenance (`actions/attest`, pinned by SHA), creates the
   release as a draft with every asset, then publishes it. The notes are a fixed header plus the
   CHANGELOG section (`scripts/ci/release-notes.sh`).
 

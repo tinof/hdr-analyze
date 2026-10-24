@@ -1,6 +1,6 @@
 # Testing
 
-How tests are written, reviewed and gated in this repository. The rules are written for agents and humans alike. Test commands, skips and gates per path are in `CLAUDE.md` ("Testing quirks", "CI behavior that affects edits"). The audit that produced this file is roadmap item E14.
+How tests are written, reviewed and gated in this repository. The rules are written for agents and humans alike. Test commands and gates per path are in `CLAUDE.md` ("Testing quirks", "CI behavior that affects edits") and [CI.md](CI.md); the skip conditions per test are in section 6. The audit that produced this file is roadmap item E14.
 
 ## 1. Principles
 
@@ -84,3 +84,22 @@ A reviewer that did not write the tests looks for:
 - [ ] For changed logic in mkvdovi, verifier or dovi84_composer: a `cargo mutants --in-diff` run, with every survivor triaged.
 
 Deferred: a PreToolUse hook that blocks test edits during implementation. It matters only if test authoring moves to a separate session; revisit after the P13 pilot (E14).
+
+## 6. Environment-dependent tests
+
+These tests print `Skipping` and return when their tools or media are missing. Do not assume all workspace tests are hermetic on a clean machine. CI installs the tools (`.github/actions/setup-test-tools`) and fails on any skip outside the allow-list of `scripts/ci/check-test-skips.sh`.
+
+- `mkvdovi` integration tests skip when `dovi_tool` is not in `PATH`, and when the sample media file is absent (`../tests/hdr-media/...mkv`).
+- `mkvdovi/tests/hlg_profile84.rs` skips unless ffmpeg (with libx265), ffprobe, mkvmerge and dovi_tool are available, plus (except the colour-refusal tests) an `hdr_analyzer_mvp` built next to mkvdovi whose `--help` no longer lists the removed `--hlg-peak-nits` and contains every `Composer::luminance_mapping()` name.
+- `mkvdovi/tests/hdr10plus_hybrid.rs` skips without ffmpeg with libx265, ffprobe, mkvmerge, dovi_tool, hdr10plus_tool or a sibling analyzer. MediaInfo classifying its clip as anything but HDR10+ is a failure, not a skip.
+- `mkvdovi/tests/open_gop_start.rs` skips on the same tools, without a sibling analyzer, or when that analyzer writes a pre-v5 sidecar.
+- The clip-based unit tests in `mkvdovi/src/metadata/tests.rs` (format detection, static metadata; `missing_clip_tools`) skip without ffmpeg with libx265 or, per test, mediainfo/ffprobe, mkvmerge and dovi_tool (Profile 8.1). `hdr10plus_clip_is_hdr10plus` also skips when libx265 writes no HDR10+ SEI (a build without HDR10_PLUS, for example Ubuntu's). `corpus_cuts_are_classified_like_their_manifests` runs only with `MKVDOVI_CORPUS_DIR` set.
+- `hdr_analyzer_mvp/tests/real_content_consistency.rs` skips without its media, and its reference-bias check without `HDR_ANALYZE_REFERENCE_CSV`/`HDR_ANALYZE_SHOTLIST`.
+- `hdr_analyzer_mvp/tests/cuda_parity.rs` skips without `HDR_ANALYZE_CUDA_PARITY_REQUIRED` and the clips that `scripts/cuda-parity.sh` generates. The script compares CPU and CUDA `.bin` bytes and the sidecar crop/scenes/frames, and asserts `gpu: true`. The HLG clip runs once per composer in `HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS` (the script sets `preset,bt2100`; unset = all), each asserting its `luminance_mapping`, and the PQ clip also runs with `--hlg-composer bt2100`, which must not change its `.bin`. For old-vs-new build comparisons the manual check in `docs/CUDA_PIPELINE.md` still applies.
+- Tests and CLI integration use `assert_cmd` + `predicates`.
+
+## 7. Regression baselines and the real-content corpus
+
+- **L1 regression gate** (CI job `l1-regression`): `scripts/ci/l1-regression-gate.sh` scores the analyzer on the synthetic clip from `tools/l1_diff/corpus/make_corpus.py` against the committed `*.reference.csv` / `*.scenes.txt` with `l1_diff --max-*` limits. A change that moves L1 on purpose needs `--update` and the reference diff in the PR.
+- `scripts/rpu-baseline.sh capture|compare` does the equivalent for the final RPU of real media. Baselines live outside the repo, for example `~/mkvdovi-work/rpu-baseline/<version>/`.
+- **Real-content corpus** (local only, never in the repository): 45 development cuts under `~/mkvdovi-work/corpus/dev` (HDR10, HDR10+, HLG, Profile 7 MEL / 8.1 with retail L1, synthetic grain and highlight pairs) and 29 unanalyzed holdout cuts under `~/mkvdovi-work/corpus/qual/holdout`. Each development cut has `input.mkv`, `manifest.json`, `truth/` (retail L1, RPU, HDR10+ JSON, shot list; `truth/rejected/` holds metadata found not to describe the picture) and an accepted `baseline/`. The scoring script, its docs and all results live on the local-only branch `feat/dev-corpus` (`docs/VALIDATION.md` §10 there). A `.git/hooks/pre-push` guard refuses that branch and any push that adds the script's name, so do not name the script in files on `main`. Media files and their file names stay local; titles may be named. Dolby tool output only scores, never tunes; holdout cuts are not analyzed during development ([PROVENANCE.md](PROVENANCE.md)). Inventory and findings: [ROADMAP_LOG.md](ROADMAP_LOG.md) (2026-10-05).

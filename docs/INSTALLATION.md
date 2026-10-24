@@ -230,6 +230,36 @@ rebuilds `hdr_analyzer_mvp` with `--features cuda`, so the CUDA analyzer is not 
 prints the version of each binary at the end. Without an NVIDIA GPU it is the same as
 `cargo build --release --workspace`.
 
+### Development hosts
+
+The maintainers' dev hosts are an Oracle ARM/Ampere box and an x86_64 WSL2 box with an RTX 4070
+(the CUDA host). On both, `~/.local/bin/{mkvdovi,hdr_analyzer_mvp,verifier}` are symlinks into
+`target/release/`, so the system-wide commands always run the latest build. Before and after a
+refresh, check that `ls -la ~/.local/bin | grep -E 'mkvdovi|hdr_analyzer|verifier'` still shows
+`-> …/target/release/` symlinks and not copies.
+
+- **A host that does not push still needs a refresh after merges made elsewhere.** The Oracle ARM
+  host mostly runs the tools. Comparing `mkvdovi --version` with the *local* workspace version is
+  not enough: on 2026-10-13 the checkout there was 30 commits behind, so a refresh built 0.5.1
+  while `origin` was at 0.6.0-rc.1, and a 0.4.0 build had stayed installed before that.
+- **Oracle ARM: run the fat-LTO build as a transient user unit**, because it outlives a tool call:
+  `systemd-run --user --unit=hdr-dev-refresh --collect --setenv=PATH="$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin" --working-directory="$PWD" bash -c './scripts/dev-refresh.sh > <log> 2>&1'`,
+  then poll `systemctl --user is-active hdr-dev-refresh` and the log.
+- **An OS FFmpeg upgrade leaves a stale build cache.** `ffmpeg-sys-next`/`ffmpeg-next` detect the
+  FFmpeg version in their build scripts, which do not rerun when the system headers change. After
+  the Oracle host moved from FFmpeg 6 to 8 (2026-10-13), the cached `ffmpeg_6_1` cfg made
+  `ffmpeg-next` call `avcodec_close` (removed in FFmpeg 8): `hdr_analyzer_mvp` failed to link with
+  `undefined symbol: avcodec_close`, and the old binary failed to start (`libavutil.so.58` not
+  found). Fix: `cargo clean --release -p ffmpeg-sys-next -p ffmpeg-next` (and the same without
+  `--release` for test builds), then rebuild. Check with
+  `grep 'rustc-cfg=feature="ffmpeg_' target/release/build/ffmpeg-next-*/output`.
+- **On the Oracle ARM host only root can run `cc`/`gcc`.** The `ffmpeg-sys-next` build script
+  compiles a version probe with the `cc` crate, so it needs `CC=clang` there (otherwise `build.rs`
+  panics with `PermissionDenied`). The build script reruns whenever `CC` changes, so set it the
+  same way for every cargo run on that host: `~/.cargo/config.toml` there has `[env] CC = "clang"`
+  (since 2026-10-13), which covers shells, hooks and systemd units. Do not move that into the
+  repo's `.cargo/config.toml`: CI and the Windows build must keep their own compiler.
+
 ## Checking the install
 
 ```bash
