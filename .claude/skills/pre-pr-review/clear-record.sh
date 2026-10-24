@@ -4,8 +4,9 @@
 # which every worktree shares: pre-pr-review/<full sha>.json, .md and .scope.md.
 #
 # Usage: .claude/skills/pre-pr-review/clear-record.sh [<commit>]   (default HEAD)
-# Prints each file it removed. Exit 0 also when there was nothing to remove; 2 when <commit> does
-# not name a commit or the directory is not a git repository.
+# Prints each file it removed. Exit 0 also when there was nothing to remove; 1 when a record file is
+# still there after the removal (the review must stop: a stale record would be reused); 2 when
+# <commit> does not name a commit or the directory is not a git repository.
 #
 # Why a script: the inline `rm -f "$D/$S.json" …` with command substitutions was refused by
 # Claude Code's command safety check in six review runs; a fixed script path with resolved paths
@@ -20,9 +21,14 @@ sha=$(git rev-parse --verify --quiet "$rev^{commit}") || {
 common=$(git rev-parse --path-format=absolute --git-common-dir) || exit 2
 dir="$common/pre-pr-review"
 
+failed=0
 for f in "$dir/$sha.json" "$dir/$sha.md" "$dir/$sha.scope.md"; do
     if [ -e "$f" ]; then
         rm -f -- "$f" && echo "removed $f"
+        if [ -e "$f" ]; then
+            echo "clear-record: could not remove $f" >&2
+            failed=1
+        fi
     fi
 done
-exit 0
+exit "$failed"

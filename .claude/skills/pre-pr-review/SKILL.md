@@ -42,7 +42,8 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
    Then remove any record for this HEAD (step 8), so a run that stops early cannot leave an
    older, reusable one behind: `.claude/skills/pre-pr-review/clear-record.sh` (it resolves the
    paths itself; an inline `rm` with command substitutions is refused by the command safety
-   check). Its test: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`.
+   check). A non-zero exit stops the review here: a record it could not remove would be reused.
+   Its test: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`.
 3. Item ID: the argument, else from the branch name or the commit messages, else ask once. In
    self-check mode `/ship` passes the step ID; with `/ship --step none` it passes its spec file
    (`<scratch>/ship-spec.md`) instead: use that paragraph as the item and the acceptance gate, and
