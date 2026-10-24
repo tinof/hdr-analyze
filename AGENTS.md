@@ -21,8 +21,12 @@ in its prompt. CLAUDE.md does not repeat it.
   Either miss is P1. Safe path: change both sides in the same commit and run
   `scripts/cuda-parity.sh` on the CUDA host (CI has no GPU).
 - **mkvdovi copies the video stream bit-exactly and never re-encodes; out-of-range metadata gets
-  a visible warning or a refusal, never a silent clamp.** A change that moves L1 on purpose
-  commits the references refreshed by `scripts/ci/l1-regression-gate.sh --update` in the same PR,
-  and the PR says why L1 moved. Missing either is P1.
+  a visible warning or a refusal, never a silent clamp.** Every ffmpeg call on the video stream
+  keeps `-c:v copy`; unsupported inputs are refused before any temp work, as
+  `metadata::check_pq_range_contract`, `metadata::check_hlg_colour_contract` and
+  `FEL_UNSUPPORTED_MESSAGE` do. A change that moves L1 on purpose commits the references
+  refreshed by `scripts/ci/l1-regression-gate.sh --update` in the same PR, and the PR says why L1
+  moved. An encoder, a clamp without a warning, or an unexplained L1 move is P1. Safe path: refuse
+  or warn, never alter the picture or the measurement silently.
 - CI already checks formatting, clippy, unexpected test skips and the L1 regression gate. Do not
   report those.
