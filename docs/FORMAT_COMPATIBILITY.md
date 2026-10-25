@@ -59,6 +59,8 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   compatibility ID 4 (HLG).
 - Profile 7 MEL: the enhancement layer carries no picture data. It is discarded and the RPU is
   converted to Profile 8.1 with `dovi_tool`; the authored metadata is kept unless `--mdfix` is given.
+  FFmpeg 9's `dovi_split`/`dovi_rpu` filters cannot do this conversion, and what it changes on a
+  single-layer player such as the Nvidia Shield is in [FFMPEG9_DOVI_EVALUATION.md](FFMPEG9_DOVI_EVALUATION.md).
 - Profile 7 FEL: refused, with or without `--mdfix`. The file fails with an error before any
   temporary work, the source is kept, and a multi-file run continues with the next file. The BL+EL
   compositor and its re-encode were removed: the compositor did not match the Dolby Vision
