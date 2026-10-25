@@ -8,7 +8,7 @@ turns that part off. A diff that touches this file is always Tier 2.
 ## Settings
 
 ```
-contract:       1
+contract:       1.1
 repo:           tinof/hdr-analyze
 base:           main
 merge:          squash
@@ -26,6 +26,7 @@ ci:             pr-checks
 logic:          '*.rs' '*.cu' 'Cargo.toml' '*/Cargo.toml' '*.sh' '*.js' '*.py'
 tests:          '*/tests/**' '*/tests.rs' '*_tests.rs'
 self-check:     skill:pre-pr-review
+review-surfaces: exec github
 ```
 
 - With `merge: squash` the PR body becomes the commit body: keep it plain prose.
@@ -40,6 +41,7 @@ self-check:     skill:pre-pr-review
 - `tool:l1_diff`: `cargo fmt --manifest-path tools/l1_diff/Cargo.toml -- --check && cargo clippy --manifest-path tools/l1_diff/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/l1_diff/Cargo.toml`; paths `'tools/l1_diff/*.rs'` `'tools/l1_diff/*Cargo.toml'` `'tools/l1_diff/*Cargo.lock'`; where `local`.
 - `tool:rpu_builder_check`: `cargo fmt --manifest-path tools/rpu_builder_check/Cargo.toml -- --check && cargo clippy --manifest-path tools/rpu_builder_check/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/rpu_builder_check/Cargo.toml`; paths `'tools/rpu_builder_check/*.rs'` `'tools/rpu_builder_check/*Cargo.toml'` `'tools/rpu_builder_check/*Cargo.lock'` `'dovi_rpu_builder/'`; where `local`.
 - `gemini-harness`: `.claude/workflows/tests/pre-pr-gemini-test.sh`; paths `'.claude/workflows/pre-pr-gemini.*'` `'.claude/workflows/tests/'` `'.agents/agents/pre-pr-reviewer.md'`; where `local`.
+- `pre-pr-record`: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`; paths `'.claude/skills/pre-pr-review/clear-record.sh'` `'.claude/skills/pre-pr-review/tests/'`; where `local`.
 
 ## Tier 2 paths
 
@@ -160,11 +162,19 @@ none
 `## Routing` is the plugin's default table without Gemini (owner decision 2026-10-24). Gemini (agy) had one
 confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the model that might change that,
 Gemini 4 Archon, is not available on this account yet. Gemini stays parked until it is; then the default
-rows come back. Tier 2 of a Claude-built change therefore has one reviewer, Codex: `/ship` runs it as Tier 1
-and says so in the record. Only the reviewer count changes: a diff that touches this file still shows the
-owner its diff before the merge, because that check keys on the file, not the tier. The standalone
+rows come back. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
+the round stays Tier 2 as `tier2Mode: single-family`, and both surfaces must complete. A diff that touches
+this file is reviewed under the base's routing and surfaces, and still shows the owner its diff before
+the merge. The standalone
 `/pre-pr-review` Gemini pass is not part of `/ship` and stays as it is; so does the `gemini-harness` entry
 in `## Gates`, which `/ship` still runs when its paths change.
+
+`review-surfaces: exec github` (contract 1.1, ship plugin 1.3.0): the `codex` reviewer is the local cold
+`codex exec` pass and Codex's GitHub review (`chatgpt-codex-connector[bot]`, connected for this repo at
+chatgpt.com/settings/code-review on 2026-10-24). Automatic review did not fire on #70 or #71, so `/ship`
+waits a minute and then posts one `@codex review` per reviewed head. The GitHub review is not cold: it
+reads the PR text and `AGENTS.md`. It needs a check suite on the head for its push time; the CI
+`changes` job gives every PR one. A fix diff (step 9) is re-reviewed on exec only.
 
 `## Gates` and `## Tier 2 paths` copy the path rules of `.claude/workflows/pre-pr-panel.js` (the gate set
 near the top, `highRisk` below it). Keep the two in sync: a path added on one side goes to the other in the
@@ -173,7 +183,10 @@ same PR. `/pre-pr-review` standalone still computes its gates from the workflow;
 The `## Code Review Rules` section of `AGENTS.md` is the one source of repo review rules for Codex: its
 GitHub review reads it natively, and the `/pre-pr-review` Codex pass takes it from the base. The `contracts`
 lens in `.claude/workflows/pre-pr-panel.js` covers the same contracts for the Claude panel and stays as it
-is until the review eval decides (plan 2026-10-24). When a rule changes, check the lens in the same PR.
+is. The review eval that was to decide whether `/ship`'s exec prompt also carries these rules
+(`.claude/review-eval/cases.json`) was stopped at 13 of 56 runs on 2026-10-25 to save Codex quota, so
+the exec prompt stays without them (`--no-rules`); the status and how to resume are in
+`~/mkvdovi-work/review-eval/2026-10-24/STATUS.md`. When a rule changes, check the lens in the same PR.
 
 `gate` runs on every PR that is not docs-only (`gate-skip`). The workflow ran fmt, clippy and the tests only
 when a workspace Rust or Cargo path changed, so a PR that touches only scripts or `.claude/` now runs the
@@ -184,6 +197,7 @@ check of `scripts/ci/check-test-skips.sh`.
 `review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff` and
 `gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push. In CI the
 Rust jobs skip on a PR that changes only `gate-skip` paths, and `gemini-harness` runs only when its paths change.
+`pre-pr-record` (the test of `/pre-pr-review`'s record cleanup) runs only locally, not in CI.
 
 `gate-focused` runs `scripts/ci/test-gate.sh` with a test filter: it builds the analyzer next to mkvdovi and
 applies the same skip check, so a focused test that prints `Skipping` fails instead of passing silently. Do not

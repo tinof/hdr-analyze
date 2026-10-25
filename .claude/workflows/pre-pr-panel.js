@@ -47,8 +47,10 @@ for (const f of files) {
 if (any(/^dovi_rpu_builder\//)) gates.add('tool:rpu_builder_check')
 // The Gemini pass and its fake-agy harness (no network, no model).
 if (any(/^\.claude\/workflows\/(pre-pr-gemini\.|tests\/)|^\.agents\/agents\/pre-pr-reviewer\.md$/)) gates.add('gemini-harness')
+// The record cleanup of /pre-pr-review step 1.2 and its test.
+if (any(/^\.claude\/skills\/pre-pr-review\/(clear-record\.sh$|tests\/)/)) gates.add('pre-pr-record')
 const requiredGates = [...gates]
-log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis or Gemini-pass paths touched)'))
+log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass or record-cleanup paths touched)'))
 // Gate list only, no reviewers: lets the skills recompute gates for a file list that grew after
 // fixes, without a second copy of the path rules.
 if (a.gatesOnly) return { gatesOnly: true, requiredGates }
