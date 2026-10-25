@@ -257,6 +257,33 @@ What it does not prove:
 - `--sample-rate` above 1, the forced download path (`HDR_ANALYZER_CUDA_HOST_FRAMES`) and CUDA
   failures are not exercised.
 
+## Code map and fallbacks
+
+- Code: `analysis/gpu/` (`mod.rs`; the `cuda`-gated `backend.rs`) and the NVRTC-compiled
+  `analysis/kernels.cu`; NVDEC setup in `ffmpeg_io.rs`. Decoder and analyzer share device 0's
+  primary context.
+- `pipeline/analyze.rs` downloads a frame (`host_view`) only for fallback crop detection,
+  scene-cut crop sampling or CPU analysis. Scene cuts download a frame only when crop monitoring is
+  on (never with `--no-crop`).
+- Frames also take the download path when the surface is not P010 (8/12-bit sources then fall back
+  to CPU through the `gpu_failed` transition) or comes from another CUDA context (`hevc_cuvid`). A
+  frame rejected before any CUDA work switches the run to the download path. Any failed CUDA call
+  sets `GpuAnalyzer::context_faulted` and, with NVDEC frames, **stops the run**: the decoder shares
+  the context, and FFmpeg's CUDA download can report success after a failed copy, so a download is
+  no health check.
+- The kernel analyzes full-resolution frames with a sampling stride (`--downscale` = stride, no
+  swscale), so its crop rect lives in full-resolution coordinates. `pipeline/crop_space.rs` scales
+  rects between spaces (`scale_rect`/`shrink_rect`).
+- `--peak-estimator robust` runs in the kernel: it fills the cross-quad diff histogram only when
+  that estimator is selected (`grain_stats`), and the host applies the same `frame/peak.rs`
+  functions. With other estimators the GPU `FramePeakStats` report neutral sigma/n_eff.
+- The CPU computes the PQ max-RGB mix and the per-pixel PQ bin (`pixel_pq_bin`) in the kernel's f32
+  arithmetic, and the kernel uses `_rn` intrinsics there, so histograms and maxima are
+  bit-identical. Cross-thread reductions use integer counts, u64 fixed-point sums and the max of
+  non-negative f32 bits.
+- `HDR_ANALYZER_DUMP_MAX_RGB=<dir>` writes every analyzed pixel's HLG max-RGB value per frame (both
+  backends; on CUDA only at `--downscale 1`) for the P8 gate.
+
 ## Rules for future changes
 
 - Keep the result-buffer layout (`SUMS_WORD` and the counts before it) and the `dovi_params` layout

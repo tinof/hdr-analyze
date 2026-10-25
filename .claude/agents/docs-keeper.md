@@ -32,13 +32,27 @@ entry for the step.
 | User-visible behavior, flags, defaults, refusals | `CHANGELOG.md` `[Unreleased]`, in the section style already used there. |
 | A CLI flag or its help text | `docs/CLI_REFERENCE.md`; compare with `target/debug/<bin> --help` when it is built. |
 | What inputs are accepted, refused or converted | `docs/FORMAT_COMPATIBILITY.md`. |
-| Cross-binary contracts, invariants, test skips, gates, commands | `CLAUDE.md`, the section that already covers the topic. Edit the sentence that is now wrong; do not append a second, contradicting one. |
-| Topic internals | the topic doc: `docs/CUDA_PIPELINE.md`, `docs/HLG_COMPOSER.md`, `docs/CM_ANALYZE_PARITY.md`, `docs/VALIDATION.md`, `docs/TECHNICAL_REFERENCE.md`, `docs/FEL_PLAN.md`. |
+| A new or changed rule: a cross-binary contract, an invariant ("never", "must", "keep X ahead of Y"), a gate, a command | `CLAUDE.md`, the section that already covers the topic, as one sentence plus a pointer to the doc that explains it. Edit the sentence that is now wrong; do not append a second, contradicting one. |
+| mkvdovi internals: the reason for a rule, code paths, resume, measurements reuse, `--verify`, RPU generation | `docs/MKVDOVI_PIPELINE.md`. |
+| L1 sidecar fields or version | `docs/FORMAT_COMPATIBILITY.md` "L1 measurement sidecar" (schema per version) and `docs/MKVDOVI_PIPELINE.md` "L1 sidecar contract" (code on each side). |
+| Per-test skip conditions, corpus, baselines | `docs/TESTING.md` §6 and §7. |
+| CI jobs, apt and caches, pre-commit, the Stop hook | `docs/CI.md`. |
+| Dev-host build traps, the dev install | `docs/INSTALLATION.md` "Development hosts". |
+| Analyzer and CUDA internals | `docs/TECHNICAL_REFERENCE.md` §1, `docs/CUDA_PIPELINE.md`. |
+| Other topic internals | the topic doc: `docs/HLG_COMPOSER.md`, `docs/CM_ANALYZE_PARITY.md`, `docs/VALIDATION.md`, `docs/FEL_PLAN.md`, `docs/RPU_BUILDER.md`, `docs/RELEASING.md`. |
 | "Waiting for the owner" in `ROADMAP.md` | Remove an entry only when the diff or the caller shows it is settled. |
 | "Next up" and "Checked" bullets in `ROADMAP.md` (the roadmap memory `/ship:roadmap-next` keeps) | Leave Next up alone. Delete or correct an item's Checked bullet when this change makes it wrong; do not add new ones (that is `/ship:roadmap-next`'s job). |
 
 ## Rules
 
+- **`CLAUDE.md` is sent on every turn of every session; keep it small.** It holds rules and
+  pointers, not explanations. A fact goes there only when not knowing it before an edit breaks
+  something; its reason, its code path, the numbers and the history ("since P8", what an incident
+  showed) go to the topic doc in the table above. Never add a version-by-version history to
+  `CLAUDE.md`. Budget: `wc -c CLAUDE.md` at most 24,000 bytes. If your edit would pass it, move
+  detail out of the section you touch into its topic doc, and report the size before and after.
+- Keep the `CLAUDE.md` headings that other files cite by name: "Testing quirks", "CI behavior that
+  affects edits", "Module size", "Lint/style policy".
 - **Acceptance gate.** Never mark a step done. Report whether the caller named the
   acceptance-gate evidence and where (PR body, a doc section); `/ship` step 10 closes the step
   only with it.

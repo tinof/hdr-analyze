@@ -77,6 +77,42 @@ Unlike wrapper tools that parse text logs from external binaries, HDR-Analyze in
 pixel data directly in application memory. This avoids inter-process overhead and enables precise,
 per-pixel luminance operations that text-based analysis cannot express.
 
+### 1.5. Code map, transfer detection and the HLG decode
+
+- `hdr_analyzer_mvp/src/main.rs` parses and validates the CLI and orchestrates through
+  `pipeline::run`. Core analysis lives in `analysis/` (frame, histogram, scene, hlg, gpu) plus
+  `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `l1_sidecar.rs` and `writer.rs`. The CUDA backend is in
+  [CUDA_PIPELINE.md](CUDA_PIPELINE.md).
+- **Transfer detection.** The first frame is always decoded, and a PQ/HLG tag on it overrides the
+  stream tag; otherwise the stream tag is used (`ffmpeg_io::resolve_transfer`). That picks up HLG
+  signalled through the alternative-transfer SEI (VUI says BT.2020) or only in the MKV Colour
+  element. `--transfer auto|pq|hlg` overrides detection.
+- **Input contract.** Only PQ/HLG transfers are analyzed (`TransferFunction::Unsupported` covers
+  tagged SDR curves, including BT2020_10/12). Samples are assumed limited-range BT.2020 NCL, with
+  warnings for other range/matrix tags (BT.2020 CL included). mkvdovi refuses such inputs before
+  analysis instead ([MKVDOVI_PIPELINE.md](MKVDOVI_PIPELINE.md)).
+- **HLG is mapped to PQ through the Dolby Vision Profile 8.4 decode** of the composer that
+  `--hlg-composer` selects (`analysis/hlg.rs`; ignored for PQ). `bt2100` is fitted to the
+  BT.2100/BT.2408 1000-nit conversion and is the default since 2026-10-03 (design:
+  [HLG_COMPOSER.md](HLG_COMPOSER.md)); `preset` is the `dolby_vision` crate's `Profile84` preset that
+  `dovi_tool` writes.
+  - Luma goes through the 8.4 luma reshaping curve: one 1024-entry LUT per composer, shared by CPU
+    and GPU.
+  - Max-RGB (`Dovi84Decoder`, the HLG default like PQ) reconstructs the full decode per pixel (luma
+    curve + the two order-3 chroma MMR curves + the RPU `ycc_to_rgb` matrix/offsets), then takes
+    max(R′,G′,B′).
+  - Since P8 (2026-10-06) the max-RGB decode follows the 4:2:0 structure of ETSI GS CCM 001
+    §5.4.2.3.3: the chroma MMR runs once per chroma sample on luma down-sampled with [1 2 1] across
+    two rows, in `code / 1023` f32 arithmetic (the `spec-float` variant, not the spec's
+    `code / 1024` fixed point), and the composed chroma is upsampled bilinearly at the stream's
+    chroma location: left (also when unspecified) or top-left; other locations warn and use left.
+    On CUDA a second kernel, `compose_chroma`, does the chroma pass before `analyze_frame`.
+  - Both decodes are clamped to the RPU's source_min/max_pq [62, 3079] on purpose, so L1 stays in
+    the declared range.
+  - Under the preset, neutral HLG reads about 2% higher in max-RGB than in luma (its chroma MMR
+    tints neutrals slightly blue); bt2100 keeps neutrals neutral and holds neutral superwhite at
+    1000 nits.
+
 ---
 
 # Background and research notes
