@@ -1447,6 +1447,203 @@ gate's first CI run exposed a lossy test-clip encode on newer FFmpeg; fixed.
 
 Where: [#17](https://github.com/tinof/hdr-analyze/pull/17)
 
+## Item history moved from ROADMAP.md on 2026-10-26
+
+Closed history that sat inside `ROADMAP.md` until the ship 1.4.0 hot-file rule (the roadmap holds
+open work only): the one-line progress-log table, the Done and Fixed notes of each item, and
+"Checked and kept". Verbatim, apart from relative links rewritten for this directory.
+
+### Progress log
+
+
+Newest first. One line per step that changed the state of a roadmap item. The full text is in
+[`docs/ROADMAP_LOG.md`](ROADMAP_LOG.md); details are in the pull request and in
+[`CHANGELOG.md`](../CHANGELOG.md).
+
+| Date | Step | Items | Where |
+|------|------|-------|-------|
+| 2026-10-23 | E16.2: `RpuBuilder::new` refuses every value a later write would (L2 count, L5, L6, L9, L11, 8.1 source range; plus an empty or inverted range) as `Error::OutOfRange`, with a backstop write; `Error::code`, `Level6::clamped`; docs on `panic = "abort"`, L3/L254 and HDR10+ seeks (NuvioTV fork review); RPU bytes unchanged; E16 closed. | E16 | [#68](https://github.com/tinof/hdr-analyze/pull/68) |
+| 2026-10-22 | E16.1: `dovi_rpu_builder`, in-process RPU builders for the NuvioTV fork (DV2.1): 8.1 and 8.4 (preset, bt2100, canary), HDR10+ → L1, static 8.4 (avg 1283, owner); `mkvdovi` RPUs identical to 0.7.0 on all nine baselines; builders = `dovi_tool` 2.3.4 on every fixture and 64/64 HDR10+ corpus runs; E16 closed. | E16 | [#67](https://github.com/tinof/hdr-analyze/pull/67) |
+| 2026-10-22 | WS6.3 slope ladder built and handed off (2026-10-18); WS6.4 viewed on the C9 (2026-10-21): shape followed up to slope 20.46, neutral moves with gain, outcome "anything else". Neutral-finder probe WS6.8/WS6.9 added; WS6.9 may answer the `code / 1023` question (owner). | WS6 | [#66](https://github.com/tinof/hdr-analyze/pull/66) |
+| 2026-10-20 | AetherEngine's FEL playback read against FEL_PLAN: FEL_PLAN gains prior art and an EL siting table; E15 (abort-safe RPU parsing) added. | FEL, E15 | [#65](https://github.com/tinof/hdr-analyze/pull/65) |
+| 2026-10-18 | v0.7.0 released (#63): P7, P9, P11, P13; no rc. CUDA parity PASS and all nine RPUs byte-identical to 0.6.0 before the tag (only the P11 notice lines differ in the `--mdfix` logs). P12.1 moves to the next patch; P9.3 and E12.1 can start. | P7, P9, P11, P13 | [v0.7.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.7.0) |
+| 2026-10-17 | C9 viewings: P10 step 4 closed (blind A/B, no difference, `ms_weight` 2048 kept); first WS6 `code / 1023` canary no verdict (uniform green, slope ladder next); WS6 (2) playback procedure written ([`docs/PLAYBACK.md`](PLAYBACK.md)) and corrected. | P10, WS6 | `docs/owner-decisions-2026-10-17` |
+| 2026-10-17 | P9 holdout scoring: the pre-registered rule passes on the four holdout cuts (average clamped MAE 276.6 → 33.8 above the floor, 315.9 → 25.2 over all frames; max equal; min 5.98 → 4.91); the owner flips the default after v0.7.0. P6 check list drafted, five picked; WS6 canary and P10 `ms_weight` A/B built and handed off. | P9, P6, WS6, P10 | `docs/owner-decisions-2026-10-17` |
+| 2026-10-17 | Owner decisions: P9 holdout rule pre-registered, P13 keeps v29 without L2 (closed), E14 step 2 dropped, no second P8 device, E12 bundles NVRTC, P10 waits for WS7, gates stated for every `TODO(owner)` step. | P3–P6, P8–P10, P13, WS0–WS8, FEL, E1–E7, E10–E12, E14 | `docs/owner-decisions-2026-10-17` |
+| 2026-10-17 | E13 step 5: analyzer split, `frame.rs`, `gpu.rs` and `pipeline.rs` into module directories by pure move; 12 optimizer-enabled CPU and CUDA runs byte-identical to main@941489d, CUDA parity PASS. | E13 | [#59](https://github.com/tinof/hdr-analyze/pull/59) |
+| 2026-10-15 | E14 step 5, first PR: tests for the 19 high-risk survivor groups (composer, `--verify`, sidecar/RPU/HLG probes, pipeline delivery steps); 0 of the targeted mutants missed. Steps 1, 2 and 3–4 (partial) recorded. | E14 | `test/e14-high-risk` |
+| 2026-10-15 | P13: `--cm-version v29` writes a CM v2.9 RPU (L1, L5, L6) and `--verify` checks the requested CM version; CM v4.0 RPUs identical to 0.6.0. | P13 | `fix-p13-cm-v29` |
+| 2026-10-15 | P11 notice: `--mdfix` names the authored levels it replaces or drops, from the sampled source RPU windows; r4/r5 `--mdfix` RPUs identical to 0.6.0; two defects found (P12, P13). | P11, P12, P13 | `feat/p11-mdfix-notice` |
+| 2026-10-14 | P9 peak parity: under `histogram99`, `max-scl` and `max-scl-luminance` the hybrid max equals `dovi_tool`'s on every non-fallback frame of six cuts (0 mismatches), fallbacks carry the analyzer scene's max, `--boost` equals `histogram99`. | P9 | `docs/p9-peak-parity` |
+| 2026-10-14 | P9 hybrid flag: opt-in `--hdr10plus-l1 hybrid` (union pieces, HDR10+ peak, measured average and minimum); default RPUs byte-identical to 0.6.0, Alita pooled clamped MAE 37.58 / 18.91 as pre-registered. | P9 | `feat/p9-hdr10plus-hybrid` |
+| 2026-10-14 | P7: mkvdovi refuses PQ input tagged full range before any temp work (HDR10, HDR10+, `--mdfix`), including a full-range stream the container overrides as limited; 9/9 RPU baselines byte-identical to 0.6.0. | P7 | `fix-p7-full-range-pq` |
+| 2026-10-13 | E13 step 4: `convert_file` split by phase into `pipeline/{temp_dir,measure,config,deliver}.rs`, `mod.rs` 1037 to 409 lines, 27 new unit tests; all 9 RPU baselines byte-identical to 0.6.0. | E13 | [log](ROADMAP_LOG.md) |
+| 2026-10-13 | P9 scene list for the pixel average: pixel average 19 codes from retail L1 (Alita, pooled, clamped) against 338 for today's HDR10+ average; HDR10+ scenes, analyzer cuts and their union within about 1.5 codes; the union carries it by the pre-registered rule. | P9 | [log](ROADMAP_LOG.md) |
+| 2026-10-13 | v0.6.0 released (#46): #41 and #43 on top of rc.1; CUDA parity and all ten RPU baselines identical before the tag. | P6, E7, P8 | [v0.6.0](https://github.com/tinof/hdr-analyze/releases/tag/v0.6.0) |
+| 2026-10-13 | P8 playback test: on an LG OLED C9 (Plex on the TV and on a Shield) a green canary composer renders green and the preset's grey tint is visible, bt2100 neutral; bt2100 stays the default. | P8, WS6 | [log](ROADMAP_LOG.md) |
+| 2026-10-11 | L6 fixes: MaxCLL/MaxFALL read from the stream behind a container 0, `Details.txt` thousands separators, `--verify` warns on L6 0 in a passed-through MEL RPU; r4 MEL default baseline captured. | P6, E7, E13 | `fix-l6-zero-light-levels` |
+| 2026-10-08 | P9 step 0: HDR10+ scene starts line up with the picture (offset 0 on six cuts, v5 runs, mkvdovi extraction path); 24% of frames in HDR10+ scenes holding several shots. | P9 | [log](ROADMAP_LOG.md) |
+| 2026-10-07 | E13 step 3: pure-move split of mkvdovi `metadata.rs` and `pipeline.rs` into submodules, tests in `tests.rs`; all 8 RPU baselines identical. | E13 | `feat/e13-mkvdovi-split` |
+| 2026-10-07 | E13 safety net: 34 characterization tests for mkvdovi (metadata, pipeline, HLG source deletion), CUDA gate on module dirs, final-RPU baselines at main@e6d63ed; no production code changed. | E13 | this branch |
+| 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | [#31](https://github.com/tinof/hdr-analyze/pull/31) |
+| 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | this file |
+| 2026-10-06 | `l1_diff` lines references up with open-GOP cuts by `leading_skipped_frames`; exports are labelled in stream frames. | E11 | [#30](https://github.com/tinof/hdr-analyze/pull/30) |
+| 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | [#29](https://github.com/tinof/hdr-analyze/pull/29) |
+| 2026-10-06 | Spec fixed-point arithmetic measured: `bt2100` is not neutral at `code / 1024` (spread 5.9 codes); the decode change targets the spec structure in `code / 1023` (`spec-float`). | P8, WS6 | [log](ROADMAP_LOG.md) |
+| 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](ROADMAP_LOG.md) |
+| 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](ROADMAP_LOG.md) |
+| 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
+| 2026-10-04 | L1 lines up with the picture in open-GOP cuts (RASL leading pictures); sidecar v5. | E7 | [#26](https://github.com/tinof/hdr-analyze/pull/26) |
+| 2026-10-04 | 8.1 source range from the mastering display; `--verify` compares delivered with measured L1. | P10, E10 | [#25](https://github.com/tinof/hdr-analyze/pull/25) |
+| 2026-10-03 | FEL compositor and re-encode removed; FEL inputs refused. | FEL | [FEL_PLAN](FEL_PLAN.md) |
+| 2026-10-03 | Review of all conversion paths; priorities reordered; new items. | P8–P11, E8–E10, WS7, WS8 | this file |
+| 2026-10-02 | Robust peak estimator reads the shape of the histogram top. | WS1, WS2 | [#22](https://github.com/tinof/hdr-analyze/pull/22) |
+| 2026-10-02 | `--peak-estimator robust` in the CUDA kernel, identical to CPU. | WS1 | [#21](https://github.com/tinof/hdr-analyze/pull/21) |
+| 2026-10-02 | Scene cuts chosen after analysis; 142 of 168 authored cuts matched. | WS2, E1 | [#20](https://github.com/tinof/hdr-analyze/pull/20) |
+| 2026-10-01 | Grain-robust peak measurement study started. | WS1, WS2 | in progress |
+| 2026-10-01 | Unfiltered scene averages (sidecar v4); stale RPU regenerated on resume. | WS2 | [#18](https://github.com/tinof/hdr-analyze/pull/18) |
+| 2026-10-01 | Final RPU checked against the sidecar; 0.5.1 RPU baselines captured. | P0, WS6 | [#17](https://github.com/tinof/hdr-analyze/pull/17) |
+| 2026-10-01 | `l1_diff` limits, L1 gate in CI, CUDA parity check, RPU baseline script. | E1, WS0 | [#17](https://github.com/tinof/hdr-analyze/pull/17) |
+
+### P1: CPU analysis default
+
+- **Done 2026-10-06** (former open items 2–4; evidence: unit tests `coarser_sampling`,
+  `rejects_coarser_sidecar`, `analysis_quality_notice`, `gpu_analysis_missing` in
+  `mkvdovi/src/pipeline/tests.rs`, e2e test `accurate_reanalyzes_coarser_measurements` in
+  `mkvdovi/tests/hlg_profile84.rs`): mkvdovi warns on an explicit `balanced`/`fast` with GPU
+  analysis; under `accurate` it re-analyzes a coarser sidecar instead of reusing it; it warns when a
+  run that expected GPU analysis comes back with `analysis.gpu: false`.
+
+### P6: source consistency warnings
+
+- Step 1 (the check list) done 2026-10-17 (list in [log](ROADMAP_LOG.md) 2026-10-17).
+- Fixed 2026-10-11: a container MaxCLL/MaxFALL of 0 no longer hides the stream's value
+  (`track_light_level` reads `MaxCLL_Original`/`MaxFALL_Original`; a non-zero container value
+  still wins), and `Details.txt` thousands separators are read (`parse_details_number`).
+
+### P8: HLG → Profile 8.4 composer
+
+- **Done 2026-10-13: playback test.** An LG OLED C9 (Plex on the TV, and Plex on an Nvidia Shield TV Pro) shows a
+  canary composer (bt2100 with both chroma MMR constants shifted, `fit_hlg_composer canary-rpu`)
+  fully green, with the Dolby Vision badge, on a byte-identical HLG base layer: the display applies
+  the composer in the RPU. The preset's tint is visible on greys (the owner saw yellow), bt2100 is
+  neutral. bt2100 stays the default. Not covered: devices other than the C9, and the WS6
+  `code / 1023` question. Evidence: [log](ROADMAP_LOG.md) 2026-10-13.
+- **Done 2026-10-06: spec 4:2:0 decode in the analyzer** (both composers;
+  [#29](https://github.com/tinof/hdr-analyze/pull/29)). Max-RGB runs the chroma MMR at chroma resolution on down-sampled
+  luma in `code / 1023` f32 (`spec-float`; `code / 1024` leaves `bt2100` 5.9 codes off neutral) and
+  upsamples the composed chroma bilinearly at the stream's chroma location; CPU and CUDA identical.
+  New sidecar names `dovi84-v3` / `dovi84-bt2100-v1-spec420`; older sidecars are re-analyzed, and
+  mkvdovi refuses an analyzer whose `--help` does not name the mapping. Gate
+  (`scripts/validate_hlg_chroma_siting.sh --gate`): 0.000 codes on the synthetic patterns and the
+  five cuts. Scene L1 max moves by up to 19 codes on the two cuts compared. Evidence: [log](ROADMAP_LOG.md) 2026-10-06.
+
+### P9: HDR10+ → Profile 8.1 L1
+
+- **Done 2026-10-17: step 1, holdout scoring.** The pre-registered rule passes on every clause
+  (four holdout cuts, 0 fallbacks, all eight runs `--verify` passed). The minimum passes only
+  pooled: hybrid is worse on Alita (retail 0) and better on The Shining (retail 12). Evidence:
+  `~/mkvdovi-work/p9-holdout-2026-10-17/` ([log](ROADMAP_LOG.md) 2026-10-17).
+- **Done 2026-10-08: step 0, HDR10+ scene boundaries against the picture.** HDR10+ frame n is
+  picture frame n: offset 0 on all six multi-scene HDR10+ cuts (five by the scan, one by
+  corroboration), no confirmed off-by-one (Alien 298 ambiguous), v5 runs and mkvdovi's extraction path
+  ([log](ROADMAP_LOG.md) 2026-10-08). The scene list is not a shot
+  list: 24% of the frames sit in HDR10+ scenes holding more than one shot (Alita, The Shining), and
+  some HDR10+ starts split a shot (Alien).
+- **Done 2026-10-13: which scene list carries the pixel average.** The union of HDR10+ starts and
+  the analyzer's cuts, by the pre-registered rule; the HDR10+ scenes, the analyzer's cuts and the
+  union score within about 1.5 codes of each other (pooled clamped MAE above the floor 38.3 / 36.8 /
+  37.6), and the analyzer's cuts are the numerical best. The gain is the measured average itself:
+  pooled clamped MAE over all frames 18.9 codes against 338.4 for today's HDR10+ path, which writes
+  1229 where retail sits at the 819 floor. The 18.9 holds after the generator's 819 floor; raw, the
+  measured average is 147.6 codes off over all frames (about 259 below on floor frames). Two cuts from one title; peak and minimum not
+  evaluated ([log](ROADMAP_LOG.md) 2026-10-13).
+- **Done 2026-10-14: the hybrid flag.** `--hdr10plus-l1 hybrid` (opt-in, default unchanged):
+  union pieces, HDR10+ peak (`--peak-source`, whole nits like `dovi_tool`) with a reported fallback
+  to the analyzer scene peak, measured average and minimum. Default path 9/9 RPUs byte-identical to
+  0.6.0; the four HDR10+-only cuts (h1, h5) convert with `--verify` passing and 0 fallbacks. On
+  DV-free remuxes of the Alita and The Shining cuts (`accurate`): 0 L1 mismatches against the
+  pre-registered rule, max equal to `dovi_tool`'s HDR10+ path on every frame, Alita pooled clamped
+  MAE of the average 37.58 above floor / 18.91 all frames (pre-registered 37.6 / 18.9). Evidence:
+  `~/mkvdovi-work/p9-hybrid-2026-10-14/` ([log](ROADMAP_LOG.md) 2026-10-14).
+- **Done 2026-10-14: peak parity for the other `--peak-source` values.** `histogram99`, `max-scl`
+  and `max-scl-luminance`: the hybrid max equals `dovi_tool`'s on every non-fallback frame of six
+  cuts; fallbacks (all Profile A pieces under `max-scl*`) carry the analyzer scene's max; `--boost`
+  equals `histogram99`. Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/`
+  ([log](ROADMAP_LOG.md) 2026-10-14). The unit test `hdr10plus_peak_sources_follow_dovi_tool`
+  pins the mirror, not parity: re-run that evidence's `run.sh` after a `dovi_tool` bump.
+
+### P10: measured against delivered
+
+- **Done:**
+  - (1) Profile 8.1 RPUs carry `source_min_pq` / `source_max_pq` converted from the mastering
+    display, instead of the generator's L6 lookup. Implausible mastering values (peak outside
+    100–10000 nits, minimum above 1 nit) keep the lookup, with a warning.
+  - (2) `--verify` checks the source range and the clamped measured L1 on every frame of a
+    generated RPU, and reports per field how many scenes the generator's limits changed.
+- **Done 2026-10-17: step 4, `ms_weight` A/B.** Blind on the C9 (Plex on the Shield, Dolby
+  Vision Cinema Home, DV badge on all four files): no difference on either Fury Road cut, so
+  generated L2 keeps `ms_weight` 2048. Retail RPUs in the development corpus carry 512, 0 and 2048
+  (three titles each). Evidence: `~/mkvdovi-work/p10-ms-weight-2026-10-17/`
+  ([log](ROADMAP_LOG.md) 2026-10-17).
+
+### WS6: final-RPU corpus and playback procedure
+
+- **Done 2026-10-17: (2) the written playback procedure,** [`docs/PLAYBACK.md`](PLAYBACK.md),
+  used for the WS6 and P10 viewings and corrected afterwards with what they showed (owner asked
+  Claude to make the corrections).
+
+### WS8: test material
+
+- **Done 2026-10-05 (former item 5):** real material per format. The development tier holds 45
+  entries (it lives outside the repository, see CLAUDE.md "Testing quirks"); 29 further cuts are
+  held out, unanalyzed, for a `cm_analyze` qualification run. Added on 2026-10-04 and 2026-10-05,
+  no Profile 7 FEL:
+  - **HDR10+:** Deadloch (Amazon WEB-DL, Profile B), The Shining (disc, DV MEL + HDR10+),
+    Alien (disc, Profile A) and Alita: Battle Angel (disc, DV MEL + HDR10+ Profile A on the same
+    master, so its retail L1 is an authored reference for exactly the frames the HDR10+
+    metadata describes).
+  - **HLG:** Wimbledon 2024 and Glastonbury 2025 (iPlayer), The Green Planet (iPlayer, nature),
+    a Champions League broadcast capture (50p, starts at an open-GOP CRA).
+  - **HDR10 and Profile 7 MEL / 8.1:** Joker: Folie à Deux (MEL, 1000 nits, starts at a CRA),
+    Skyfall (MEL, per-shot L1), Exodus: Gods and Kings (1100-nit master), Star Trek (2009, no
+    MaxCLL), Inside Out 2 (Disney+ 8.1, animation; its L1 is static and is not used as a
+    reference) and The Revenant (bright snow; an injected hybrid, its metadata is not used).
+  Measurements and what was rejected as a reference: [`docs/ROADMAP_LOG.md`](ROADMAP_LOG.md).
+
+### E7: completeness
+
+- Fixed 2026-10-11: `--verify` warns, not fails, on L6 MaxCLL/MaxFALL 0 in a passed-through
+  Profile 7 MEL RPU (`delivery` is `None`); generated RPUs, missing or malformed fields and MaxDML 0
+  still fail.
+
+### E13: module size refactor
+
+- **Done 2026-10-17: step 5, analyzer split** (pure move, 7 commits). `analysis/frame.rs` →
+  `frame/{mod,peak}.rs` (peak estimators and grain statistics in `peak.rs`), `analysis/gpu.rs` →
+  `gpu/{mod,backend}.rs` (the `cuda`-gated backend; `include_str!("../kernels.cu")`), `pipeline.rs`
+  → `pipeline/{mod,analyze,crop_space,scenes}.rs`; test modules in files under their old names.
+  Gates: `verify_move.py` PURE MOVE OK per commit, the fmt commit reproduced, 125 analyzer test names
+  identical, fmt/clippy (also `cuda`)/tests pass (only allowed skips), the L1 gate without
+  `--update`, CUDA parity PASS, and 12 optimizer-enabled runs (synthetic PQ/HLG, d1, g3 bt2100 and
+  preset, r1; CPU and CUDA, `gpu: true`) byte-identical `.bin` and sidecar to main@941489d
+  ([log](ROADMAP_LOG.md) 2026-10-17).
+
+### Checked and kept (2026-10-03)
+
+
+The review re-examined these decisions and found no evidence to change them:
+
+- **Max-RGB as the L1 domain** and **the L1 average as the mean of PQ max-RGB**, unfiltered.
+- **The 819 average floor** (CM v2.9): retail averages sit at exactly 819 on 24 of 32 and 25 of 35
+  shots of two retail cuts.
+- **Shot-constant L1**: all nine retail RPUs change L1 only at shot starts.
+- **Neutral L2 for analysis output.**
+- **Nearest-neighbour chroma** for max-RGB: within about 10 codes of native 4:2:0 ingest
+  ([VALIDATION.md §7](VALIDATION.md)). A correctly sited reconstruction has not been compared
+  on saturated edges; reopen only with such a measurement.
+- **Stream copy for MEL and HLG.** With the FEL compositor gone, no path encodes video.
+
 ## Item detail as of 2026-10-03
 
 The full roadmap rows before they were shortened on 2026-10-04, verbatim.
