@@ -33,7 +33,8 @@ steps from before the step format are cited in the log as "<item> step <n>", not
 
 **How to update.** Format: `~/.claude/skills/ship/reference/roadmap-format.md`; project rules:
 [`.claude/workflow.md`](.claude/workflow.md).
-- This file holds open work only. Closed steps, Done notes and measurements are in
+- This file holds open work and the context its steps cite. Closed steps, Done notes and
+  measurements are in
   [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) (the progress-log table and the Done notes moved there
   on 2026-10-26).
 - When a step ships, `/ship` removes its line, updates the item's status, and adds the step's full

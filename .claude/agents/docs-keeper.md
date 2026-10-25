@@ -20,14 +20,14 @@ no gate results. Read the diff first. Everything you write must follow from the 
 inputs.
 
 You never close a roadmap step. `/ship` step 10 does that after the review: it removes the step
-line, updates the item's Status, adds the progress-log row and writes the `docs/ROADMAP_LOG.md`
-entry for the step.
+line, updates the item's Status, writes the `docs/ROADMAP_LOG.md` entry for the step and hands off
+the Next up block (promotes it, or writes a Reassess line).
 
 ## Where each fact belongs
 
 | Change in the code | Doc to update |
 |--------------------|---------------|
-| Any step of a roadmap item | Nothing: `/ship` step 10 closes the step. Fix only text in `ROADMAP.md` that the diff makes wrong (a path, a flag, a line reference), not the step line, Status or progress log. |
+| Any step of a roadmap item | Nothing: `/ship` step 10 closes the step. Fix only text in `ROADMAP.md` that the diff makes wrong (a path, a flag, a line reference), not the step line, Status or Next up. |
 | The step's full story, measurements, numbers | Nothing in `docs/ROADMAP_LOG.md`: `/ship` step 10 writes the step's entry. Name the evidence in your output so the caller can put it in the PR body. |
 | User-visible behavior, flags, defaults, refusals | `CHANGELOG.md` `[Unreleased]`, in the section style already used there. |
 | A CLI flag or its help text | `docs/CLI_REFERENCE.md`; compare with `target/debug/<bin> --help` when it is built. |

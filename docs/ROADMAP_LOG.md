@@ -1,8 +1,8 @@
 # Roadmap log
 
-History for [`ROADMAP.md`](../ROADMAP.md): the full text of each progress-log step and the
-measurement detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the current
-status, the open work and a one-line log; the detail is here, newest first.
+History for [`ROADMAP.md`](../ROADMAP.md): the full text of each closed step and the measurement
+detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open work (since
+2026-10-26 without a one-line log); the detail is here, newest first.
 
 ## Progress log
 
@@ -1451,13 +1451,13 @@ Where: [#17](https://github.com/tinof/hdr-analyze/pull/17)
 
 Closed history that sat inside `ROADMAP.md` until the ship 1.4.0 hot-file rule (the roadmap holds
 open work only): the one-line progress-log table, the Done and Fixed notes of each item, and
-"Checked and kept". Verbatim, apart from relative links rewritten for this directory.
+"Checked and kept". Verbatim, apart from relative links rewritten for this directory and "this file"
+in three table rows, which now links `ROADMAP.md`.
 
-### Progress log
-
+### Progress-log table (from ROADMAP.md)
 
 Newest first. One line per step that changed the state of a roadmap item. The full text is in
-[`docs/ROADMAP_LOG.md`](ROADMAP_LOG.md); details are in the pull request and in
+this log; details are in the pull request and in
 [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Date | Step | Items | Where |
@@ -1486,17 +1486,17 @@ Newest first. One line per step that changed the state of a roadmap item. The fu
 | 2026-10-07 | E13 step 3: pure-move split of mkvdovi `metadata.rs` and `pipeline.rs` into submodules, tests in `tests.rs`; all 8 RPU baselines identical. | E13 | `feat/e13-mkvdovi-split` |
 | 2026-10-07 | E13 safety net: 34 characterization tests for mkvdovi (metadata, pipeline, HLG source deletion), CUDA gate on module dirs, final-RPU baselines at main@e6d63ed; no production code changed. | E13 | this branch |
 | 2026-10-06 | CUDA as main pipeline: warn on `balanced`/`fast` with GPU, re-analyze coarser sidecars under `accurate`, warn on CPU-analyzed CUDA run; CI lints `cuda`. | P1, E1 | [#31](https://github.com/tinof/hdr-analyze/pull/31) |
-| 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | this file |
+| 2026-10-06 | Review with CUDA as the main pipeline: `accurate` is the only parity-checked preset; release binaries and hosted CI never build the `cuda` feature; P1, E1, E2 amended, E12 opened. | P1, E1, E2, E12 | [`ROADMAP.md`](../ROADMAP.md) |
 | 2026-10-06 | `l1_diff` lines references up with open-GOP cuts by `leading_skipped_frames`; exports are labelled in stream frames. | E11 | [#30](https://github.com/tinof/hdr-analyze/pull/30) |
 | 2026-10-06 | Analyzer measures HLG max-RGB through the spec 4:2:0 decode (`spec-float`); gate passed at 0.000 codes, CPU = CUDA; new sidecar names, older sidecars re-analyzed. | P8 | [#29](https://github.com/tinof/hdr-analyze/pull/29) |
 | 2026-10-06 | Spec fixed-point arithmetic measured: `bt2100` is not neutral at `code / 1024` (spread 5.9 codes); the decode change targets the spec structure in `code / 1023` (`spec-float`). | P8, WS6 | [log](ROADMAP_LOG.md) |
 | 2026-10-05 | 4:2:0 chroma of the HLG decode measured against the spec composer and libplacebo: the analyzer differs from the spec by up to 18 codes of L1 max per scene; spec decode step opened. | P8 | [log](ROADMAP_LOG.md) |
 | 2026-10-05 | Real material per format added: four HDR10+ titles (one same-master DV MEL + HDR10+ pair), four HLG cuts, six HDR10/MEL titles; 29 holdout cuts. | WS8, P9, P8, WS1 | [log](ROADMAP_LOG.md) |
-| 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | this file |
+| 2026-10-05 | Coverage of real material per format reviewed; HDR10+ and HLG material comes before P9 and P8 work. | WS8, P9, P8 | [`ROADMAP.md`](../ROADMAP.md) |
 | 2026-10-04 | L1 lines up with the picture in open-GOP cuts (RASL leading pictures); sidecar v5. | E7 | [#26](https://github.com/tinof/hdr-analyze/pull/26) |
 | 2026-10-04 | 8.1 source range from the mastering display; `--verify` compares delivered with measured L1. | P10, E10 | [#25](https://github.com/tinof/hdr-analyze/pull/25) |
 | 2026-10-03 | FEL compositor and re-encode removed; FEL inputs refused. | FEL | [FEL_PLAN](FEL_PLAN.md) |
-| 2026-10-03 | Review of all conversion paths; priorities reordered; new items. | P8–P11, E8–E10, WS7, WS8 | this file |
+| 2026-10-03 | Review of all conversion paths; priorities reordered; new items. | P8–P11, E8–E10, WS7, WS8 | [`ROADMAP.md`](../ROADMAP.md) |
 | 2026-10-02 | Robust peak estimator reads the shape of the histogram top. | WS1, WS2 | [#22](https://github.com/tinof/hdr-analyze/pull/22) |
 | 2026-10-02 | `--peak-estimator robust` in the CUDA kernel, identical to CPU. | WS1 | [#21](https://github.com/tinof/hdr-analyze/pull/21) |
 | 2026-10-02 | Scene cuts chosen after analysis; 142 of 168 authored cuts matched. | WS2, E1 | [#20](https://github.com/tinof/hdr-analyze/pull/20) |
