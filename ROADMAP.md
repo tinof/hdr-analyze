@@ -43,18 +43,18 @@ steps from before the step format are cited in the log as "<item> step <n>", not
 `/ship:roadmap-next` keeps **Next up** current and adds a **Checked** bullet (date, commit,
 `file:line`) to each item it examined, so a later run re-checks only what changed since that commit.
 
-### Next up (checked 2026-10-18 at main@affb04c)
-<!-- roadmap-next: rev=2 scope=all config=66799c514044 probes=gpu:ok,corpus:ok -->
+### Next up (checked 2026-10-25 at main@3c0c913)
+<!-- roadmap-next: rev=2 scope=all config=d3831e416f18 probes=gpu:ok,corpus:ok -->
 
-1. **WS6.3 Build the slope ladder** (priority 1). Gate: the ladder checked in libplacebo and handed
-   off for the C9 with a `VIEWING_GUIDE.txt`. Why: priority 1's only startable step; it opens
-   WS6.4 → WS6.6, which the 1.0.0 row needs. Branch `feat/ws6-3-slope-ladder`. Release: none
+1. **WS6.8 Build the neutral-finder probe** (priority 1). Gate: the probe checked in libplacebo and
+   handed off with a `VIEWING_GUIDE.txt` (plus the measurement script when metered). Why: priority
+   1's only startable step; WS6.9 may answer the `code / 1023` question for the 1.0.0 row. Branch
+   `feat/ws6-8-neutral-finder-probe`. Release: none
 2. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
-   the v0.7.0 condition is met; it ships in v0.8.0 with E12.1 (owner). Branch
-   `feat/p9-3-hybrid-default`, own branch (moves HDR10+ L1). Release: minor
-3. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate (CUDA parity, L1 gate without
-   `--update`). Why: exact fallback peak and a recorded `--peak-source`; Codex ranks it before
-   P9.3. Branch `feat/p9-2-sidecar-v6`. Release: minor
+   v0.7.0 is out; ships in v0.8.0 with E12.1 (Release plan). Own branch `feat/p9-3-hybrid-default`
+   (moves HDR10+ L1). Release: minor
+3. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: exact fallback peak and a recorded
+   `--peak-source`; Codex ranks it before P9.3. Branch `feat/p9-2-sidecar-v6`. Release: minor
 
 ### Waiting for the owner
 
@@ -74,6 +74,8 @@ hardware after a startable step has prepared it, a gate not stated, and steps ti
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
+- **E15.1: not in the Priorities list.** It has a gate and is startable, but no priority names it
+  (priority 10 only says it is not held); the owner places it (found 2026-10-25).
 
 ### Release plan (2026-10-14)
 
@@ -391,14 +393,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   equals `histogram99`. Evidence: `~/mkvdovi-work/p9-peak-parity-2026-10-14/`
   ([log](docs/ROADMAP_LOG.md) 2026-10-14). The unit test `hdr10plus_peak_sources_follow_dovi_tool`
   pins the mirror, not parity: re-run that evidence's `run.sh` after a `dovi_tool` bump.
-- **Checked 2026-10-18 @affb04c:** for P9.3, `measure.rs:184` branches on `args.hdr10plus_l1`
-  apart from `hybrid_sampling_refusal` (`pipeline/mod.rs:60`), and `resume_settings`
-  (`pipeline/mod.rs:370`) takes the hybrid flag: resolve one effective mode for all three; extend
-  `tests/hdr10plus_hybrid.rs:340` ("no flag, nothing measured") to the named old path. The holdout
-  ran `accurate` on CUDA; CPU `auto` is `balanced`. `check_measurements` (`hybrid.rs:121`) still
-  admits a hand-made percentile sidecar; a fallback takes the holding analyzer scene's max
-  (`hybrid.rs:293`), never below the piece's own (P9.2). Earlier `@f5d4ccc` notes: `--boost`
-  remaps to `histogram99` (`main.rs:167`); MaxSCL 0 on every Alita/Alien frame.
+- **Checked 2026-10-25 @3c0c913:** P9.3: `hdr10plus_l1` is a bare enum with a default
+  (`cli.rs:47`), so the explicit-only conflict and refusal need the flag's origin; resolve one mode
+  for `hybrid_sampling_refusal` (`pipeline/mod.rs:60`), `measure.rs:171,184` and `resume_settings`
+  (`:370`); the recovery hint "Convert without --hdr10plus-l1 hybrid" (`pipeline/config.rs:161`)
+  must name `--hdr10plus-l1 hdr10plus`. The holdout had 0 fallbacks: test the fallback path on dev
+  material. P9.2: `max_rgb_pq` exists per frame (`l1_sidecar.rs:52`) but is not serialized.
 
 ### P10: measured against delivered
 
@@ -585,11 +585,12 @@ The detailed gap table and validation method live in
   answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped).
 - [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
   on the LG OLED C9, answer recorded. Needs: WS6.5.
-- **Checked 2026-10-18 @affb04c:** `canary_mapping` (`tools/fit_hlg_composer/src/canary.rs:43`)
-  only offsets the two chroma constants, so the ladder needs a slope parameter (new generator or
-  subcommand). The 2026-10-17 build (`~/mkvdovi-work/ws6-normalization-2026-10-17/`: `make_pattern.py`,
-  `design.txt`, `run.sh`) is the base; pin the libplacebo render settings (`docs/PLAYBACK.md`) and
-  keep a normal-range control. forplex `TESTS_PENDING.txt` lists nothing pending.
+- **Checked 2026-10-25 @3c0c913:** `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
+  (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
+  evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there
+  keeps the PR docs-only (touching `dovi84_composer/src/` adds CUDA parity and the L1 gate).
+  Pre-register the fit's residual limit and an inconclusive outcome (the intercepts differ by one
+  code); fix the picture mode (ladder Cinema, canaries Cinema Home; log 2026-10-22). No `spotread` in WSL.
 - **Done 2026-10-17: (2) the written playback procedure,** [`docs/PLAYBACK.md`](docs/PLAYBACK.md),
   used for the WS6 and P10 viewings and corrected afterwards with what they showed (owner asked
   Claude to make the corrections).
