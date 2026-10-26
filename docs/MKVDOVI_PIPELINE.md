@@ -26,6 +26,10 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   fix. 2.3.4+ lets mkvdovi pass the MKV directly to remove/convert/demux
   (`--dovi-input auto|raw|mkv`; auto = on when `dovi_tool --version` reports 2.3.4+), with an
   automatic per-step fallback to ffmpeg extraction. Direct attempts log to `*_mkv.log` in the temp dir.
+- FFmpeg 9's `dovi_split`/`dovi_rpu` filters do not replace `dovi_tool`: they have no profile
+  conversion, injection or generation; `dovi_split=mode=bl` is slower than `remove` on the
+  direct-MKV path and changes the bytes; `dovi_rpu=strip` misses RPUs before EOS. Evaluation and
+  measurements: [FFMPEG9_DOVI_EVALUATION.md](FFMPEG9_DOVI_EVALUATION.md) (2026-10-13).
 - `dovi_tool` 2.3.4 parses Level 253 ext-metadata blocks, but the `dolby_vision` crate 3.4.0 used
   in-process (inspect sampling, MEL/FEL classification) does not yet. Bump the crate again when it
   releases L253 support.
