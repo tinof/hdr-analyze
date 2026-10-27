@@ -13,8 +13,10 @@ result.
 
 - Display: LG OLED C9. It is the only Dolby Vision display available (owner, 2026-10-17).
 - Paths used so far: Plex on the Nvidia Shield TV Pro (HDMI into the C9; P8, WS6, P10) and the
-  Plex app on the C9 (P8). Jellyfin also scans the hand-off folder. Picture mode used: Dolby
-  Vision Cinema Home (WS6, P10).
+  Plex app on the C9 (P8). Jellyfin also scans the hand-off folder. Picture modes used: Dolby
+  Vision Cinema Home (WS6 canaries, P10), Dolby Vision Cinema (WS6.4 ladder; fixed for the
+  WS6.9 probe, owner 2026-10-27).
+- Meter: the owner's X-Rite i1Display Pro, read from this PC (see "Metered tests").
 - Record these for every test: player app and version, device software version, TV firmware
   version (C9: Settings > All Settings > General > About This TV), TV picture mode, HDMI path
   (input number, AVR or soundbar in between, eARC) and room light. P8, WS6 and P10 all missed the
@@ -104,6 +106,35 @@ options, in the same order, and no option or description hints at the expected a
 answer outside the options goes in as typed. If the answers fit no row of the table, Claude asks
 what the picture looks like (for example uniform or graded across the patches) before drawing a
 conclusion. The interpretation and any blinding key are shown only after all answers are in.
+
+## Metered tests
+
+Written 2026-10-27 from the WS6.8 build (neutral-finder probe). A test whose answer is a
+position (where grey sits, to a fraction of a code) is read with the owner's X-Rite i1Display
+Pro rather than by eye.
+
+- **Meter path.** ArgyllCMS 3.5.0 `spotread.exe` on the Windows side (installed 2026-10-27 next
+  to DisplayCAL's 2.3.1, under `%APPDATA%\DisplayCAL\dl\Argyll_V3.5.0`), called from WSL with
+  `-O` (one reading per call) and the WOLED spectral correction
+  `LG OLED 6-Series (i1 Pro 2, ColorMunki Photo).ccss`. Use 3.0.0 or later: 2.3.1 lacks the i1d3
+  Rev B low-light fix for OLED. 3.2.0 and later also accept piped stdin on Windows, which a
+  persistent `spotread` session (faster than one call per reading) would need.
+- **Time the meter first.** The guide's first step takes a few readings and reports the
+  cadence. Holds are sized from it (at least 2 whole readings inside each hold, 1 s clear of
+  its edges).
+- **Not blinded.** The meter reads the files, so they are named by role. The canary is a file
+  whose composer ignores the BL chroma: it must read the same at every code.
+- **Segment by the timeline, not by luminance.** Steep composers move a patch's luminance far
+  from its neighbours (WS6.8 design: at gain 10 a hold reached 4.8× the neutral hold). A
+  bright MARK before any test content anchors the timeline; a second MARK and dim gaps check it.
+- **Ratios, not absolute colour.** The analysis compares ln(R/G) and ln(B/G) against a gain-0
+  reference played at the start, middle and end; ratios do not move with the C9's
+  static-image dimming, and the reference is interpolated in time for white-point drift.
+- **Shuffle and scramble.** Holds play in a fixed shuffled order inside each file and the files
+  in a scrambled order, so drift does not line up with the code or the gain.
+- **Self-test before hand-off.** The analysis runs on synthetic devices with known answers
+  (each hypothesis, drift, curvature, noise, an output offset) and on libplacebo renders of the
+  delivered files; every case must give its pre-set outcome, and none may give a false answer.
 
 ## How results are logged
 

@@ -435,6 +435,12 @@ The detailed gap table and validation method live in
   +12 at gain 10), independent of the constant and the term size. A follow-up probe that
   measures this shift comes before any `code / 1023` canary ([log](docs/ROADMAP_LOG.md)
   2026-10-21). The probe is WS6.8 (build) and WS6.9 (viewing or measurement), owner 2026-10-22.
+  WS6.8 was built and handed off on 2026-10-27: metered with the owner's i1Display Pro (owner
+  decision), 13 files (gain-0 reference; arm A centre 912 at gains 0.25–10; arm B centre 160 at
+  gains 0.25–2.5; control), 15 runs in about 40 minutes, picture mode Dolby Vision Cinema. The
+  pre-registered analysis passed nine synthetic devices and the libplacebo check (every crossing
+  within 0.005 code of `code / 1023`). Design and checks: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`
+  (`PREREG.md`, `run.sh`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests".
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -465,8 +471,9 @@ The detailed gap table and validation method live in
 - [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9. Gate: the apparent
   neutral BL chroma code per gain recorded in the log (to about ±0.5 code by eye, ±0.25 metered),
   with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
-  (943.5 under `code / 1023`, 944.5 under `code / 1024` for u0 half-way), the slope the
-  gain-dependent shift. Needs: WS6.8.
+  (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
+  tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
+  rules (`PREREG.md` draft 2). Needs: WS6.8.
 - [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
   no slope limit) and within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
