@@ -52,14 +52,15 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-10-25 at main@3c0c913)
-<!-- roadmap-next: rev=2 scope=all config=d3831e416f18 probes=gpu:ok,corpus:ok ready=8ecfe5bcd17c -->
+### Next up (checked 2026-10-27 at main@b86b447)
+<!-- roadmap-next: rev=3 scope=all config=d3831e416f18 probes=gpu:ok,corpus:ok ready=ca56f22be0c9 -->
 
-1. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
-   v0.7.0 is out; ships in v0.8.0 with E12.1 (Release plan). Own branch `feat/p9-3-hybrid-default`
-   (moves HDR10+ L1). Release: minor
-2. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: exact fallback peak and a recorded
-   `--peak-source`; Codex ranks it before P9.3. Branch `feat/p9-2-sidecar-v6`. Release: minor
+1. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: the hybrid fallback peak is the
+   whole analyzer scene's max (`hybrid.rs:340`); fix it before the flip, while "default RPU
+   baselines byte-identical" still means the old path. Branch `feat/p9-2-sidecar-v6`. Release: minor
+2. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
+   after P9.2, so the default ships the exact fallback peak; v0.8.0 with E12.1 and P9.2. Own
+   branch `feat/p9-3-hybrid-default` (moves HDR10+ L1). Release: minor
 
 **Reassess:** needs-changed (WS6.8, PR #78): WS6.9's gate now gives the intercepts for arm A
 centre 912 (911.6 / 912.4 / 912.2) and follows `PREREG.md` draft 2; priority 1 has no desk step
@@ -95,8 +96,8 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 |---|---|---|
 | none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.10, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
-| a later minor | E8.1 and E9.1 (they move the default `.bin`); P9.2 sidecar v6 (cross-binary contract); both unblocked by E13.5 (#59) | MINOR |
+| v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
+| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3)); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Priorities
@@ -143,10 +144,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    item (WS4: blinded A/B on a device; WS1.2–WS1.4 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, P3, P5, WS0, WS6): the remaining
-    E13 PRs (E13.6–E13.10), the E14 test audit, CUDA release binaries (E12.1, after v0.7.0), CI and
-    corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options, provenance,
-    open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5). Ranked below 1–10; added
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, P3, P5, WS0, WS6): the
+    remaining E13 PRs (E13.6–E13.10), the E14 test audit, CUDA release binaries (E12.1, after
+    v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
+    provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5), `--verify`
+    checks for authored CM v4.0 blocks (E17). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
@@ -294,12 +296,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`).
 - Peak against retail is not scored: hybrid takes the same HDR10+ peak as `dovi_tool`, about 104
   codes below retail on the holdout cuts.
-- **Checked 2026-10-25 @3c0c913:** P9.3: `hdr10plus_l1` is a bare enum with a default
-  (`cli.rs:47`), so the explicit-only conflict and refusal need the flag's origin; resolve one mode
-  for `hybrid_sampling_refusal` (`pipeline/mod.rs:60`), `measure.rs:171,184` and `resume_settings`
-  (`:370`); the recovery hint "Convert without --hdr10plus-l1 hybrid" (`pipeline/config.rs:161`)
-  must name `--hdr10plus-l1 hdr10plus`. The holdout had 0 fallbacks: test the fallback path on dev
-  material. P9.2: `max_rgb_pq` exists per frame (`l1_sidecar.rs:52`) but is not serialized.
+- **Checked 2026-10-27 @b86b447:** P9.2 first: a fallback piece takes the whole analyzer scene's
+  max (`hybrid.rs:340`), not the piece's; `max_rgb_pq` per frame (`l1_sidecar.rs:52`) is not
+  serialized; decide when hybrid refuses a v5 sidecar (`hybrid.rs:115`). P9.3: `hdr10plus_l1` is a
+  bare enum with a default (`cli.rs:47`); resolve one mode for `pipeline/mod.rs:127`,
+  `measure.rs:184` and `resume_settings`; the hint at `pipeline/config.rs:161` must name
+  `--hdr10plus-l1 hdr10plus`. Holdout had 0 fallbacks: test fallbacks on dev material.
 
 ### P10: measured against delivered
 
@@ -628,6 +630,18 @@ The detailed gap table and validation method live in
   signal.
 - [E4.2][gpu][corpus] Then a motion-compensated residual. Gate: the item gate, scored for this signal.
   Needs: E4.1.
+- Prior art for E4.3 and E4.4 (2026-10-26): the CB1 engine of CroqueMr/libreelec-x86-DV
+  (`CB1/src/cb1_hdr10_temporal.c:49, 81` at commit 5e63e16) uses both in its live cut detector. It
+  is GPL-3.0: the method only, no code copied. Either changes cuts and so L1: the L1 regression
+  gate needs `--update` with the reference diff in the PR.
+- [E4.3][gpu][corpus] Exposure veto: fit one least-squares gain per channel between the
+  downscaled frames on either side of a candidate cut; a gain inside (0.25, 4) with a small
+  residual marks a fade or exposure change, not a cut. Targets the flash and exposure sensitivity
+  named in the status. Gate: the item gate, scored for this veto.
+- [E4.4][gpu][corpus] Shape statistic: the mean-removed frame difference on the downscaled frames
+  as a second cut channel next to the chi² histogram score; it catches cuts whose histograms look
+  alike (one cut: 7 analyzer scenes against 32 authored shots, `docs/FEL_PLAN.md` section 8). Can
+  share E4.1's thumbnail. Gate: the item gate, scored for this signal.
 
 ### E5: hardware decode contexts
 
@@ -884,6 +898,22 @@ The detailed gap table and validation method live in
   unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
   too) gets an error from each of the three functions where the parent panics; a multi-file run
   continues with the next file; the existing mkvdovi tests pass unchanged.
+
+### E17: `--verify` checks for authored CM v4.0 blocks
+
+- **Status:** Open. `--verify` checks that the generated levels exist (L6, L9, L11, L254;
+  `verify.rs` `assert_rpu_invariants`), not whether CM v4.0 blocks are consistent. RPUs that
+  mkvdovi generates do not trigger these checks. Authored L8 and L10 blocks carried over from Dolby
+  Vision inputs can. Prior art: the metadata rules of the CB1 engine of
+  CroqueMr/libreelec-x86-DV (`CB1/docs/ALGORITHMS.md:68-72`, `CB1/src/dvbridge_creative.c:177,
+  184` at commit 5e63e16; GPL-3.0, the rules only, no code copied).
+- **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
+  RPU passes; the existing `--verify` tests and the RPU baselines are unchanged.
+- [E17.1][desk] Hard-fail `--verify` on duplicate L8 `target_display_index` values, duplicate L10
+  target indices, an L8 target that resolves to neither a preset nor an L10 block of the same
+  frame, and optional L8 fields whose presence disagrees with the block length. First check what
+  the `dolby_vision` crate (3.4.0) already rejects at parse time, and drop the checks it covers.
+  Gate: the item gate.
 
 ## Explicit non-goals
 
