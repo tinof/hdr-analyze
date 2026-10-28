@@ -6,6 +6,42 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-10-28: WS6.8 Build the neutral-finder probe (PR #78)
+
+Step: [WS6.8][desk] Build the neutral-finder probe (owner, 2026-10-22): composers neutral at the same
+  BL chroma code u0 with gains about 1 (bt2100-like), 1.5, 2.5 and 5, each over a fine sweep of
+  BL chroma codes covering the shift WS6.4 found (about 938–962), so the code where the C9 shows
+  grey can be read per gain. If the owner's X-Rite i1Display Pro can be read from a script
+  (ArgyllCMS `spotread -O`), the probe is a timed sequence of full-field codes per file, measured
+  automatically; otherwise patch rows read by eye. Gate: the probe checked in libplacebo and handed
+  off with a `VIEWING_GUIDE.txt` (plus the measurement script when metered).
+
+Resolution: closes WS6.8; WS6.9 (the metered session on the C9) is next and needs the owner. The
+probe is metered (owner decision 2026-10-27): ArgyllCMS 3.5.0 `spotread` reads the i1Display Pro
+from this PC, picture mode Dolby Vision Cinema, 15 runs in about 40 minutes. 13 files: a gain-0
+reference (played at the start, middle and end), arm A centred at code 912 with gains 0.25, 0.5,
+1, 1.5, 2.5, 5 and 10, arm B centred at code 160 with gains 0.25, 0.5, 1 and 2.5, and a control
+whose composer ignores the BL chroma. Arm A sits at 912, not 944, so every sweep stays at or below
+code 960. Holds play in a shuffled order inside each file and the files in a scrambled order. The
+analysis compares ln(R/G) and ln(B/G) with the interpolated reference and fits neutral code
+against gain; its outcome rules are pre-registered (`PREREG.md` draft 2; draft 1 was checked by an
+Opus skeptic and Codex). Arm A intercepts at gain 0: 911.6 under `code / 1023`, 912.4 under
+`code / 1024`, 912.2 under a 12-bit `4·code / 4095` tunnel. The method is in
+[`PLAYBACK.md`](PLAYBACK.md) "Metered tests".
+
+Evidence: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/` (local). `run.log:70`: the libplacebo
+gate passed with outcome H1023, decision "code/1023 holds". `render/analysis.txt`: every Cb and Cr
+crossing within 0.03 code of `code / 1023` (worst A10 Cb, 911.527 against 911.555) against the
+0.1-code gate, arm intercepts 911.558 and 159.925 (expected 911.555 and 159.922). `selftest.txt`:
+nine synthetic devices (each hypothesis, drift, a curved shift, a noisy slow meter, an output
+offset) give their pre-set outcomes, none a false "code/1023 holds". `build_checks.txt`: each
+file's extracted RPU is byte-identical to the written one, and the base layers match the built
+ones. The measurement script is `probe_meter.py` (`check`, `run`, `analyze`). Hand-off: forplex
+`WS6-neutral-probe-2026-10-27` (13 `.DV.mkv` files and `VIEWING_GUIDE.txt`), listed in
+`TESTS_PENDING.txt`. Cross-review: Codex exec (gpt-6.1-sol, high) and Codex's GitHub review
+LGTM; the pre-PR panel's two doc findings (the libplacebo tolerance, an unsourced luminance
+ratio) were fixed before the review.
+
 ### 2026-10-23: E16.2 RPU builder input checks (PR #68)
 
 Step: [E16.2][desk] Validate in `RpuBuilder::new`: refuse those values (and an empty or inverted 8.1

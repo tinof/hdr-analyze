@@ -53,17 +53,17 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-10-25 at main@3c0c913)
-<!-- roadmap-next: rev=2 scope=all config=d3831e416f18 probes=gpu:ok,corpus:ok -->
+<!-- roadmap-next: rev=2 scope=all config=d3831e416f18 probes=gpu:ok,corpus:ok ready=8ecfe5bcd17c -->
 
-1. **WS6.8 Build the neutral-finder probe** (priority 1). Gate: the probe checked in libplacebo and
-   handed off with a `VIEWING_GUIDE.txt` (plus the measurement script when metered). Why: priority
-   1's only startable step; WS6.9 may answer the `code / 1023` question for the 1.0.0 row. Branch
-   `feat/ws6-8-neutral-finder-probe`. Release: none
-2. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
+1. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
    v0.7.0 is out; ships in v0.8.0 with E12.1 (Release plan). Own branch `feat/p9-3-hybrid-default`
    (moves HDR10+ L1). Release: minor
-3. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: exact fallback peak and a recorded
+2. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: exact fallback peak and a recorded
    `--peak-source`; Codex ranks it before P9.3. Branch `feat/p9-2-sidecar-v6`. Release: minor
+
+**Reassess:** needs-changed (WS6.8, PR #78): WS6.9's gate now gives the intercepts for arm A
+centre 912 (911.6 / 912.4 / 912.2) and follows `PREREG.md` draft 2; priority 1 has no desk step
+left until WS6.9 is measured.
 
 ### Waiting for the owner
 
@@ -75,10 +75,10 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.9, then WS6.6: view or measure the neutral-finder probe, then the redesigned canary,** on
-  the LG OLED C9, once Claude has built each (WS6.8, WS6.5). The slope ladder (WS6.4) was viewed
-  on 2026-10-21 with outcome "anything else"; the owner confirmed the probe on 2026-10-22 and
-  offered an X-Rite i1Display Pro for measured readings.
+- **WS6.9, then WS6.6: measure the neutral-finder probe, then view the redesigned canary,** on
+  the LG OLED C9. The probe was built and handed off on 2026-10-27 (WS6.8, PR #78), metered with
+  the owner's X-Rite i1Display Pro: forplex `WS6-neutral-probe-2026-10-27`, about 40 minutes.
+  WS6.6 waits for WS6.5, which Claude builds from the WS6.9 result.
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
@@ -107,7 +107,7 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
-1. **HLG → Profile 8.4 composer** (P8, WS6.8, WS6.9, WS6.5, WS6.6). `--hlg-composer bt2100` and the input refusal landed
+1. **HLG → Profile 8.4 composer** (P8, WS6.9, WS6.5, WS6.6). `--hlg-composer bt2100` and the input refusal landed
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
@@ -427,14 +427,23 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open. WS6.3 and WS6.4 closed (PR #66). The slope ladder was built and handed off on
-  2026-10-18 (8 files; the [log](docs/ROADMAP_LOG.md) has the design and checks). Viewed on the C9 on 2026-10-21 (WS6.4):
+- **Status:** Open. WS6.3 and WS6.4 closed (PR #66), WS6.8 closed (PR #78). The slope ladder was
+  built and handed off on 2026-10-18 (8 files; the [log](docs/ROADMAP_LOG.md) has the design and
+  checks). Viewed on the C9 on 2026-10-21 (WS6.4):
   outcome "anything else" in the pre-registered table, so WS6.5 as written cannot start. The C9
   follows the curve's shape at every slope up to 20.46, but the neutral moves to higher BL
   chroma codes as the slope grows (about +2.5 codes at gain 2.5, +5–6.5 at gain 5, more than
   +12 at gain 10), independent of the constant and the term size. A follow-up probe that
   measures this shift comes before any `code / 1023` canary ([log](docs/ROADMAP_LOG.md)
   2026-10-21). The probe is WS6.8 (build) and WS6.9 (viewing or measurement), owner 2026-10-22.
+  WS6.8 was built and handed off on 2026-10-27 ([log](docs/ROADMAP_LOG.md)): metered with the
+  owner's i1Display Pro (owner decision), 13 files (gain-0 reference; arm A centre 912 at gains 0.25–10; arm B centre 160 at
+  gains 0.25–2.5; control), 15 runs in about 40 minutes, picture mode Dolby Vision Cinema. The
+  pre-registered analysis passed nine synthetic devices and the libplacebo check (outcome H1023:
+  every Cb and Cr crossing within 0.03 code of `code / 1023` against a 0.1-code gate; both arm
+  intercepts within 0.003 code). Design and checks: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`
+  (`PREREG.md`, `run.sh`, `render/analysis.txt`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md)
+  "Metered tests".
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -455,18 +464,12 @@ The detailed gap table and validation method live in
   the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
   showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
   neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
-- [WS6.8][desk] Build the neutral-finder probe (owner, 2026-10-22): composers neutral at the same
-  BL chroma code u0 with gains about 1 (bt2100-like), 1.5, 2.5 and 5, each over a fine sweep of
-  BL chroma codes covering the shift WS6.4 found (about 938–962), so the code where the C9 shows
-  grey can be read per gain. If the owner's X-Rite i1Display Pro can be read from a script
-  (ArgyllCMS `spotread -O`), the probe is a timed sequence of full-field codes per file, measured
-  automatically; otherwise patch rows read by eye. Gate: the probe checked in libplacebo and handed
-  off with a `VIEWING_GUIDE.txt` (plus the measurement script when metered).
 - [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9. Gate: the apparent
   neutral BL chroma code per gain recorded in the log (to about ±0.5 code by eye, ±0.25 metered),
   with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
-  (943.5 under `code / 1023`, 944.5 under `code / 1024` for u0 half-way), the slope the
-  gain-dependent shift. Needs: WS6.8.
+  (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
+  tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
+  rules (`PREREG.md` draft 2). Needs: WS6.8.
 - [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
   no slope limit) and within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
