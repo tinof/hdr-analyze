@@ -125,7 +125,8 @@ Pro rather than by eye.
 - **Not blinded.** The meter reads the files, so they are named by role. The canary is a file
   whose composer ignores the BL chroma: it must read the same at every code.
 - **Segment by the timeline, not by luminance.** Steep composers move a patch's luminance far
-  from its neighbours (WS6.8 design: at gain 10 a hold reached 4.8× the neutral hold). A
+  from its neighbours (in the libplacebo render of the WS6.8 gain-10 file the brightest hold
+  reached about 17× the neutral hold, 2019 against 117 cd/m², and over 5× the MARK). A
   bright MARK before any test content anchors the timeline; a second MARK and dim gaps check it.
 - **Ratios, not absolute colour.** The analysis compares ln(R/G) and ln(B/G) against a gain-0
   reference played at the start, middle and end; ratios do not move with the C9's

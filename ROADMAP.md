@@ -438,9 +438,10 @@ The detailed gap table and validation method live in
   WS6.8 was built and handed off on 2026-10-27: metered with the owner's i1Display Pro (owner
   decision), 13 files (gain-0 reference; arm A centre 912 at gains 0.25–10; arm B centre 160 at
   gains 0.25–2.5; control), 15 runs in about 40 minutes, picture mode Dolby Vision Cinema. The
-  pre-registered analysis passed nine synthetic devices and the libplacebo check (every crossing
-  within 0.005 code of `code / 1023`). Design and checks: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`
-  (`PREREG.md`, `run.sh`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests".
+  pre-registered analysis passed nine synthetic devices and the libplacebo check (outcome H1023:
+  every Cb and Cr crossing within 0.03 code of `code / 1023` against a 0.1-code gate; both arm
+  intercepts within 0.003 code). Design and checks: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`
+  (`PREREG.md`, `run.sh`, `render/analysis.txt`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests".
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
