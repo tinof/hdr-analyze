@@ -129,6 +129,7 @@ fn collect_default_inputs() -> anyhow::Result<Vec<String>> {
     Ok(files)
 }
 
+#[expect(clippy::too_many_lines, reason = "E13.16: split by phase")]
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 

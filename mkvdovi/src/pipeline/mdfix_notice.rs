@@ -40,6 +40,7 @@ pub(super) fn print_mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args,
 /// The notice lines: a header, then one line per authored level the rebuild does not keep.
 /// `None`: the source RPU could not be sampled; the header lists what `--mdfix` always does.
 /// `resolved_primaries`: the L9 index a CM v4.0 rebuild writes; `None` when it is not known.
+#[expect(clippy::too_many_lines, reason = "E13.17: split by phase")]
 pub(super) fn mdfix_notice(
     authored: Option<&AuthoredLevels>,
     args: &Args,

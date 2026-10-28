@@ -104,6 +104,10 @@ fork delivers. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.
   only it can settle is NEEDS-HUMAN off that host.
 - Full rules: `docs/TESTING.md`; skips per test: CLAUDE.md "Testing quirks".
 
+## Size limits
+
+- `rust`: files '*.rs'; exclude 'build.rs' '*/build.rs'; file 800; function 150 by `clippy::too_many_lines`; item E13.
+
 ## Probes
 
 - `gpu: nvidia-smi -L || /usr/lib/wsl/lib/nvidia-smi -L` passes when the CUDA host's GPU is visible (the

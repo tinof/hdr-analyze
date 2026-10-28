@@ -41,6 +41,7 @@ fn effective_downscale(requested: u32) -> u32 {
 }
 
 /// This function orchestrates the complete HDR analysis pipeline using native FFmpeg
+#[expect(clippy::too_many_lines, reason = "E13.9: split by phase")]
 pub fn run(
     cli: &Cli,
     video_info: &VideoInfo,

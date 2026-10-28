@@ -482,6 +482,7 @@ impl GpuAnalyzer {
     }
 
     /// The CUDA part of an analysis: launch, download, synchronize, then parse on the host.
+    #[expect(clippy::too_many_lines, reason = "E13.10: split by phase")]
     fn launch_and_collect(
         &mut self,
         planes: &Planes,

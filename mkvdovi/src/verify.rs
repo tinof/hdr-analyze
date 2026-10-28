@@ -47,6 +47,7 @@ pub struct DeliveryExpectation<'a> {
 /// Full verification with optional expected CM version for RPU content assertions.
 /// `hlg_composer` is `Some` for HLG input: the sidecar must then load and name that Dolby Vision
 /// 8.4 composer, and every RPU frame must carry the composer the sidecar names.
+#[expect(clippy::too_many_lines, reason = "E13.13: split by phase")]
 pub fn verify_post_mux_with_options(
     input_file: &str,
     output_file: &Path,

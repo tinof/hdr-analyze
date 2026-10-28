@@ -131,6 +131,7 @@ pub(super) fn total_steps_for(hdr_type: HdrFormat) -> u8 {
 
 /// Extracts HDR10+ metadata, rebuilds a Dolby Vision base layer under `--mdfix`, and reuses or
 /// generates measurements. `None`: the phase printed why; `convert_file` returns `Ok(false)`.
+#[expect(clippy::too_many_lines, reason = "E13.14: split by phase")]
 pub(super) fn acquire_measurements(
     input_file: &str,
     temp_dir: &Path,

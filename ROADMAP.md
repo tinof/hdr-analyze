@@ -94,7 +94,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.10, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
+| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
@@ -145,7 +145,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, P3, P5, WS0, WS6): the
-    remaining E13 PRs (E13.6–E13.10), the E14 test audit, CUDA release binaries (E12.1, after
+    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
     v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5), `--verify`
     checks for authored CM v4.0 blocks (E17). Ranked below 1–10; added
@@ -154,7 +154,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
-  remaining steps E13.6–E13.10 are behaviour-neutral PRs, not moves.
+  remaining steps E13.6–E13.21 are behaviour-neutral PRs, not moves.
 - **Conditional** (R2, WS5): Profile 5 through an established encoder, only if matched playback
   tests justify it.
 - **Landed before this order:** dependable HDR10/HDR10+ → Profile 8.1 with source-derived L1, L5,
@@ -756,8 +756,10 @@ The detailed gap table and validation method live in
   (`convert_file` by phase) done 2026-10-13, evidence in
   `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 (analyzer split) done 2026-10-17
   (#59, efbb948), evidence in `~/mkvdovi-work/rpu-baseline/e13-step5/`. No
-  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; E13.6–E13.10
-  open.
+  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; E13.6–E13.21
+  open. Since E13.11 the limits are in `.claude/workflow.md` "## Size limits" (ship plugin 1.5.0):
+  `clippy::too_many_lines` at 150 fails the gate, and each function over it carries an
+  `#[expect(…, reason = "E13.<n>: split by phase")]` naming its step below.
 - **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
   directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
   for the untested high-risk mkvdovi paths (source deletion, format detection, static L6, the whole
@@ -799,6 +801,40 @@ The detailed gap table and validation method live in
 - [E13.9][gpu][corpus] Split `run` (281 lines, `pipeline/mod.rs`) by phase. Gate: as E13.6.
 - [E13.10][gpu][corpus] Split `launch_and_collect` (243 lines, `analysis/gpu/backend.rs`) by phase.
   Gate: as E13.6.
+- [E13.11][gpu] Function-length lint and the size contract: `too_many_lines = "warn"` in
+  `Cargo.toml`, an `#[expect]` naming its step on each of the 10 functions over 150 code lines,
+  `clippy.toml` cut to its live key (no `msrv`, so clippy reads `dovi_rpu_builder`'s 1.88),
+  `## Size limits` in `.claude/workflow.md`, and the size note moved from `rust-check.sh` to the ship
+  plugin's global hook. Gate: fmt, clippy (also `--features cuda`), tests; the L1 gate without
+  `--update`; `scripts/cuda-parity.sh` (the markers sit in its paths); a 160-statement probe
+  function fails clippy.
+- Code lines below are clippy's count (blank and comment lines skipped), 2026-10-28 @dc4882d. The
+  mkvdovi gate: fmt, clippy, tests, and `scripts/rpu-baseline.sh compare --require-identical-l1`
+  against `~/mkvdovi-work/rpu-baseline/e13-step5/`.
+- [E13.12][corpus] Split `convert_file` (`mkvdovi/src/pipeline/mod.rs`) by phase; step 4 left it at
+  281 lines. Gate: the mkvdovi gate.
+- [E13.13][corpus] Split `verify_post_mux_with_options` (`mkvdovi/src/verify.rs`, 256 lines) by
+  phase. Gate: the mkvdovi gate.
+- [E13.14][corpus] Split `acquire_measurements` (`mkvdovi/src/pipeline/measure.rs`, 221 lines) by
+  phase. Gate: the mkvdovi gate.
+- [E13.15][corpus] Split `prepare_configuration` (`mkvdovi/src/pipeline/config.rs`, 211 lines) by
+  phase. Gate: the mkvdovi gate.
+- [E13.16][corpus] Split mkvdovi's `main` (`mkvdovi/src/main.rs`, 188 lines) by phase. Gate: the
+  mkvdovi gate.
+- [E13.17][corpus] Split `mdfix_notice` (`mkvdovi/src/pipeline/mdfix_notice.rs`, 160 lines) by
+  phase. Gate: the mkvdovi gate.
+- [E13.18][desk] Split `tools/fit_hlg_composer/src/siting.rs` (803 lines, limit 800) as a pure move.
+  Gate: `tool:fit_hlg_composer`, and a diff that shows only moved blocks.
+- [E13.19][desk] Split `tools/l1_diff/src/main.rs` (948 lines, limit 800) as a pure move, after the
+  local `feat/dev-corpus` branch that depends on it has landed. Gate: `tool:l1_diff` and the L1
+  regression gate without `--update`, and a diff that shows only moved blocks.
+- [E13.20][desk] Function lint in the excluded `tools/` crates: `[lints.clippy] too_many_lines =
+  "warn"` in each `Cargo.toml` (the root `clippy.toml` threshold applies), with step-named markers;
+  `l1_diff` (its `main` is 312 lines) after `feat/dev-corpus` has landed. Gate: the `tool:*` gates.
+- [E13.21][gpu] Turn on clippy's `style`, `complexity` and `perf` groups (warn) and fix what they
+  report: about 30 warnings at @dc4882d (doc list indentation, empty format literals, a regex
+  compiled in a loop, one function with 11 arguments). Gate: fmt, clippy (also `--features cuda`),
+  tests; the L1 gate without `--update`; `scripts/cuda-parity.sh` when analysis code changes.
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
