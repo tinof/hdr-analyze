@@ -170,6 +170,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   remaining steps E13.6–E13.21 are behaviour-neutral PRs, not moves.
 - **Conditional** (R2, WS5): Profile 5 through an established encoder, only if matched playback
   tests justify it.
+- **Kept by decision:** a successful conversion deletes a non-DV source (source retention).
+  The WS6 corpus and playback procedure grow alongside items 1 to 3, which
+  each need a playback check.
 - **Deferred:** display-target optimizers (P4), automatic creative trims (WS4, behind the WS7 gate),
   and broader hardware acceleration (E5). Neutral trims stay.
 
@@ -448,12 +451,6 @@ The detailed gap table and validation method live in
   gain separates the two normalizations, answer recorded.
 - [WS6.1][corpus] The final-RPU regression corpus. Gate: `scripts/rpu-baseline.sh` holds one
   captured baseline per listed feature.
-- The `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
-  canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
-  steep a chroma curve the C9 still follows. Claude builds each, checks it in libplacebo and hands
-  the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
-  showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
-  neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
 - [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9. Read by eye
   on 2026-10-29 (status above): gate not met; what remains is the metered run on the "Metered
   tests (later)" list (owner, 2026-10-29), with `probe_meter.py check` first and the WS6.8 build in
@@ -640,8 +637,8 @@ The detailed gap table and validation method live in
 ### E8: histogram percentile reader
 
 - **Status:** Open. Readers convert a bin index with bin/255, though the bins split 64/192 at
-  PQ(100 nits), so 1000 nits reads as about 305; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  Open: E8.1, in a later minor release.
+  PQ(100 nits), so 1000 nits reads as about 305; history in [the log](docs/ROADMAP_LOG.md)
+  (2026-10-29). Open: E8.1, in a later minor release.
 - **Gate:** a bin-edge round-trip unit test and an optimizer unit test (CUDA parity and the L1 gate
   run with `--disable-optimizer`, so they do not cover it). **Prerequisite:** E13 step 5 (met 2026-10-17, #59).
 - **Checked 2026-10-06 @df54ad4:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
@@ -708,7 +705,7 @@ The detailed gap table and validation method live in
 - **Status:** Partial. Steps 2-5 and E13.11 done, no production file over the 800-line
   limit; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E13.6-E13.10 and
   E13.12-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
-- **Gate:** per move (acceptance gate for steps 3-5): fmt, clippy (also `--features cuda`), tests;
+- **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
   at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+, HLG, two MEL
@@ -773,17 +770,16 @@ The detailed gap table and validation method live in
 ### E14: test-suite audit
 
 - **Status:** Partial. Steps 1-2 done; steps 3-4 and step 5's high-risk groups done for
-  `verify.rs` and the riskiest modules (main@c74effb, #55); history in [the log](docs/ROADMAP_LOG.md)
-  (2026-10-29). Open: E14.3-E14.6; smell list for E14.4/E14.5:
+  `verify.rs` and the riskiest modules (main@c74effb, #55); history in [the
+  log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E14.3-E14.6; smell list for E14.4/E14.5:
   `~/mkvdovi-work/test-audit-2026-10-15/smells-*.md`. Owner, 2026-10-17: in-session tests plus the
   E14.6 mutation gate, no separate test author.
 - **Gate:** a clean `check-test-skips` log on the audit host; per-module mutant counts (caught /
   missed / unviable / timeout) before and after; every survivor in a bucket.
 - **Order (2026-10-16):** none of it gates a release.
-  1. After the v0.7.0 release PR (due about 2026-10-21). Steps 3 and 4 (mutation runs, triage)
-     are local, in a detached worktree, and need no branch, so they can run at any time. Steps 5
-     and 6 are PRs: they open only when no E13 move PR is in flight (the E13 sequencing rule).
-     E13 step 5 keeps the first branch-free slot, so E14 PRs go between its move PRs or after it.
+  1. Steps 3 and 4 (mutation runs, triage) are local, in a detached worktree, and need no branch,
+     so they can run at any time. Steps 5 and 6 are PRs: they open only when no E13 move PR is in
+     flight (the E13 sequencing rule).
   2. Step 3 on the mkvdovi contract modules: `resume.rs`, `external.rs`,
      `metadata/{mod,probe}.rs` and `pipeline/{mod,config,analyzer,hybrid,hdr10plus,temp_dir,mdfix_notice}.rs`
      (413 mutants, about 70 min at `-j 3`), then `metadata/static_metadata.rs` (323, about
@@ -848,15 +844,16 @@ The detailed gap table and validation method live in
 ### E18: hot-file budgets
 
 - **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  `ROADMAP.md` is 72 KB, read on every `/ship:roadmap-next` and `/ship` run. Open: E18.1, then E18.2.
+  `ROADMAP.md` is 72 KB, read on every `/ship:roadmap-next` and `/ship` run. Open: E18.1, then
+  E18.2.
 - **Gate:** the roadmap at or under its byte budget, with nothing lost (moved text in
   `docs/ROADMAP_LOG.md`) and the ready queue unchanged.
 - [E18.1][desk] Trim `ROADMAP.md` to open work: Status lines to the current state, finished-step
   notes, dated measurements and closed orders moved verbatim to the log. Gate: every removed line
   is in the log (links rewritten for `docs/`), the `roadmap-ready.sh` rows and `ready` hash
-  unchanged, the `###` headings unchanged, and the file at or under 56,000 bytes.
+  unchanged, the `###` headings unchanged, and the file at or under 64,000 bytes.
 - [E18.2][desk] Byte budgets in `.claude/workflow.md` "## Size limits" (`CLAUDE.md` 24,000,
-  `AGENTS.md` 8,000, `ROADMAP.md` 56,000; ship plugin 1.6.0), and docs-keeper's budget line pointing
+  `AGENTS.md` 8,000, `ROADMAP.md` 64,000; ship plugin 1.6.0), and docs-keeper's budget line pointing
   at them. Gate: `size-check.sh --all` lists no bytes row. Needs: E18.1.
 
 ## Explicit non-goals

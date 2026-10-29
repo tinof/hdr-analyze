@@ -1674,6 +1674,12 @@ Verbatim, apart from relative links rewritten for this directory. Each item's ne
   Pre-registered decision: `code / 1023` holds, the bt2100 fit stays; gate (3) is met for the C9.
   Evidence: `~/mkvdovi-work/ws6-canary-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers.json`,
   `score.txt`, `render/check.txt`).
+- The `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
+  canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
+  steep a chroma curve the C9 still follows. Claude builds each, checks it in libplacebo and hands
+  the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
+  showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
+  neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
 - **First canary (2026-10-17): no verdict.** On the C9 (Plex on the Shield, Dolby Vision Cinema
   Home, DV badge on all three files) both steep canaries (chroma coefficients 3.73 on u, u², u³
   and a constant of about −9.3) showed the same uniform green on all seven patches, where either
@@ -1823,6 +1829,10 @@ Verbatim, apart from relative links rewritten for this directory. Each item's ne
   2. P13 pilot: Codex writes the P13 acceptance tests from a behaviour-only spec in a worktree
      without the diagnosis; record whether they assert something an in-session test would not,
      and the cost. Done; dropped as a rule by the owner (2026-10-17).
+
+- E14 order, entry 1, as it read until 2026-10-29: "After the v0.7.0 release PR (due about
+  2026-10-21). … E13 step 5 keeps the first branch-free slot, so E14 PRs go between its move PRs
+  or after it." v0.7.0 shipped 2026-10-18 and E13 step 5 merged in #59.
 
 ### E15: abort-safe RPU parsing (from ROADMAP.md)
 
