@@ -76,8 +76,6 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.6: view the redesigned canary** on the LG OLED C9, by eye, once Claude has built it
-  (WS6.5, from the WS6.9 by-eye result of 2026-10-29).
 - **WS6.10: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
@@ -93,8 +91,8 @@ roadmap reaches them; by-eye tests come first (owner, 2026-10-29). `/ship:roadma
 these as waiting for the owner.
 
 - **WS6.10: meter the neutral-finder probe** (the WS6.8 files, 15 runs, about 40 minutes;
-  ArgyllCMS 3.5.0 on the PC). Not needed for WS6.5/WS6.6; it can settle the
-  half-code question (`Hhalf` against `H1024`) that the eye cannot.
+  ArgyllCMS 3.5.0 on the PC). Optional since 2026-10-29: the WS6.6 canary answered the
+  `code / 1023` question by eye; the meter would confirm it with an instrument.
 
 ### Release plan (2026-10-14)
 
@@ -107,7 +105,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
-| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3)); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
+| 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Priorities
 
@@ -121,8 +119,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
-   available, so other devices stay untested (owner, 2026-10-17). Open: the WS6 `code / 1023`
-   question (WS6.3–WS6.9).
+   available, so other devices stay untested (owner, 2026-10-17). The WS6 `code / 1023` question
+   is answered for the C9: `code / 1023`, so the bt2100 fit stays (WS6.6 canary, 2026-10-29).
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
    opt-in flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and the default flips
@@ -463,6 +461,13 @@ The detailed gap table and validation method live in
   pass-2 fine readings repeat the same patch positions across gains and arms after a guide hint,
   so they are logged but carry no sub-code conclusion. Evidence:
   `~/mkvdovi-work/ws6-neutral-eye-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers_pass*.json`).
+  WS6.5 and WS6.6 (2026-10-29): a blind forced-choice canary at code 912 (v2; an Opus skeptic
+  replaced v1 before any viewing), seven pages at gains 5, 10 and −10 with real-RPU-range
+  coefficients, mirrored pages, a gain-0 page and a texture catch. Every decisive answer (24 of
+  24) fell on the `code / 1023` side and matched libplacebo, with no side or tint bias.
+  Pre-registered decision: `code / 1023` holds, the bt2100 fit stays; gate (3) is met for the C9.
+  Evidence: `~/mkvdovi-work/ws6-canary-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers.json`,
+  `score.txt`, `render/check.txt`).
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -499,9 +504,10 @@ The detailed gap table and validation method live in
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
   handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
   showed a gain-dependent neutral shift larger than the normalization difference; if WS6.9
-  answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped).
+  answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped). Built and handed off
+  2026-10-29 (Plex show "WS6 canary"; libplacebo picks the `code / 1023` side on every row).
 - [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
-  on the LG OLED C9, answer recorded. Needs: WS6.5.
+  on the LG OLED C9, answer recorded. Needs: WS6.5. Viewed 2026-10-29: `code / 1023` (status above).
 - [WS6.10][owner] Meter the WS6.8 probe on the LG OLED C9 (metered list, later; owner
   2026-10-29). Gate: the outcome of `PREREG.md` draft 2 recorded in the log, from readings taken
   with the i1Display Pro (`probe_meter.py check` first). Files: the WS6.8 build in
