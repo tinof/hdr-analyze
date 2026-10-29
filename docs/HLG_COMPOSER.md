@@ -324,7 +324,9 @@ left. CUDA does the chroma pass in a second kernel, `compose_chroma`
 ([CUDA_PIPELINE.md](CUDA_PIPELINE.md)). The luma path is unchanged. `spec-fixed` (the spec's
 `code / 1024` fixed point) was not adopted: under it `bt2100` is not neutral (R′G′B′ spread 5.9
 codes, luma error 3.57 codes; [ROADMAP_LOG.md](ROADMAP_LOG.md), 2026-10-06), and libplacebo
-evaluates at `code / 1023` as well. Which convention devices use is a WS6 open question.
+evaluates at `code / 1023` as well. On the LG OLED C9 the WS6.6
+forced-choice canary (2026-10-29) answered `code / 1023`, so the bt2100 fit stays; other devices are
+untested.
 `scripts/validate_hlg_chroma_siting.sh --gate` checks the analyzer against the tool's `spec-float`
 at the stream's own location: within 0.5 code per frame on the synthetic clips and the five cuts,
 bit for bit per pixel on the synthetic clips, CPU equal to CUDA. Result (2026-10-06): 0.000 codes
