@@ -66,6 +66,10 @@ Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 centre 912 (911.6 / 912.4 / 912.2) and follows `PREREG.md` draft 2; priority 1 has no desk step
 left until WS6.9 is measured.
 
+**Reassess:** plan-changed (WS6.6, PR #80): the forced-choice canary answered the WS6
+`code / 1023` question for the C9 (`code / 1023`, the bt2100 fit stays), so priority 1 and the
+1.0.0 row no longer wait on WS6; WS6.9 stays open as a metered run on the later list.
+
 ### Waiting for the owner
 
 Steps that need a decision, material or a test only the owner can provide. Other steps of the
@@ -439,7 +443,8 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open. WS6.3 and WS6.4 closed (PR #66), WS6.8 closed (PR #78). The slope ladder was
+- **Status:** Open. WS6.3 and WS6.4 closed (PR #66), WS6.8 closed (PR #78), WS6.5 and WS6.6 closed
+  (PR #80; the `code / 1023` question is answered for the C9). The slope ladder was
   built and handed off on 2026-10-18 (8 files; the [log](docs/ROADMAP_LOG.md) has the design and
   checks). Viewed on the C9 on 2026-10-21 (WS6.4):
   outcome "anything else" in the pre-registered table, so WS6.5 as written cannot start. The C9
@@ -501,20 +506,7 @@ The detailed gap table and validation method live in
   with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
   (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
   tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
-  rules (`PREREG.md` draft 2). Needs: WS6.8.
-- [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
-  no slope limit) and within the coefficient range real RPUs use. After WS6.9 (2026-10-29): a
-  blind forced-choice canary at the code 912 region, away from the shift near 944: side-by-side
-  patches neutral under `code / 1023` and under `code / 1024`, "which one is grey?", read by eye,
-  at gains 5, 10 and −10 (a leftover shift and a tint preference each show as a disagreement),
-  the decisive pair replicated with balanced sides. Gate: a discriminating canary, a composer that is
-  neutral under one normalization and visibly coloured under the other, checked in libplacebo and
-  handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
-  showed a gain-dependent neutral shift larger than the normalization difference; if WS6.9
-  answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped). Built and handed off
-  2026-10-29 (Plex show "WS6 canary"; libplacebo picks the `code / 1023` side on every row).
-- [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
-  on the LG OLED C9, answer recorded. Needs: WS6.5. Viewed 2026-10-29: `code / 1023` (status above).
+  rules (`PREREG.md` draft 2). Needs: WS6.8. Landed: PR #80; gate pending.
 - **Checked 2026-10-25 @3c0c913:** `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
   (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
   evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there

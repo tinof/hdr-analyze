@@ -6,6 +6,56 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-10-29: WS6.6 View the redesigned canary on the LG OLED C9 (PR #80)
+
+Step: [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
+  on the LG OLED C9, answer recorded. Needs: WS6.5.
+
+Resolution: closes WS6.6 and meets WS6 gate (3) for the C9: the LG OLED C9 evaluates the Profile
+8.4 chroma composer at `code / 1023`, so the bt2100 fit stays and no refit follows. Viewed by the
+owner on 2026-10-29 through Plex on the Nvidia Shield TV Pro, Dolby Vision Cinema, Dolby Vision
+badge on all seven pages; section 0 by the owner's default ("same devices as all previous tests").
+
+Evidence: `~/mkvdovi-work/ws6-canary-2026-10-29/` (local). `answers.json` holds the answers
+verbatim; `score.txt` scores them by the pre-registered rules of `PREREG.md` v2. Every decisive
+answer fell on the `code / 1023` side: P1 (911.5 against 912.5) six of six for each composer (RR5,
+RR10, RRm10) and Q (911.25 against 912.25) two of two for each. The REF page read "same" on every
+row; the texture catch read "same" on 4 of 6 pages and the dithered patch on 2 (the pre-registered
+limit). The answers followed the code on mirrored pages (no side bias) and agreed at gain −10 (no
+tint preference) and gain 5 (no shift growing with the gain at 912). They match libplacebo's
+`code / 1023` answers row for row (`render/answers_libplacebo.json`). Q also separates
+`code / 1023` from `(code + 0.5) / 1024`. Scope: one device and one picture mode; the neutral
+shift near code 944 (WS6.4, WS6.9) is a device behaviour this result does not explain.
+
+### 2026-10-29: WS6.5 Build the redesigned canary (PR #80)
+
+Step: [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
+  no slope limit) and within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
+  neutral under one normalization and visibly coloured under the other, checked in libplacebo and
+  handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
+  showed a gain-dependent neutral shift larger than the normalization difference; if WS6.9
+  answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped).
+
+Resolution: closes WS6.5; WS6.6 viewed it the same day. A blind forced-choice canary at BL chroma
+code 912, away from the shift near 944 (WS6.9). v1 (one gain-10 page per composer) was checked by
+an Opus skeptic before any viewing and replaced: a leftover shift and a scale difference were not
+separable at one gain, a tint preference was not controlled, the key had an error, and "same"
+answers were trusted beyond the eye's resolution. v2: composers RR5, RR10 (gains 5 and 10,
+constant −1.25) and RRm10 (gain −10, constant 1.125), all inside the real-RPU envelope (constant
+[−1.253, 1.137], coefficients ±18), each on a page and its mirror, plus a gain-0 REF page; five
+rows of touching patches per page (P1 three times with balanced sides, Q, and a flat-against-dither
+texture catch); delivered as the Plex show "WS6 canary" with a guide that gives no hint of the
+expected side.
+
+Evidence: `~/mkvdovi-work/ws6-canary-2026-10-29/` (local). `design.txt`: every composer inside
+the envelope, slope at U0 equal to its gain, neutral code 911.555 under `code / 1023`. `run.log`
+and `build_checks.txt`: 7 of 7 pages decode to their planned frames, base layers identical, each
+page's RPU differs from REF's only in the mapping. `render/check.txt`: libplacebo picks the
+`code / 1023` side on every P1 and Q row, reads every T and REF row as equal, and puts the crossing
+of each page at 911.555. `score.py` gives the pre-set decision for synthetic observers of each
+hypothesis, flags a tint-preferring and an always-left observer, and returns "code/1023 holds" on
+libplacebo's own answers.
+
 ### 2026-10-29: E13.11 Function-length lint and the size contract (PR #79)
 
 Step: [E13.11][gpu] Function-length lint and the size contract: `too_many_lines = "warn"` in
