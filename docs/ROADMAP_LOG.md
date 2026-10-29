@@ -6,6 +6,29 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-10-29: E18.1 Trim the roadmap to open work (PR #81)
+
+Step: - [E18.1][desk] Trim `ROADMAP.md` to open work: Status lines to the current state, finished-step
+  notes, dated measurements and closed orders moved verbatim to the log. Gate: every removed line
+  is in the log (links rewritten for `docs/`), the `roadmap-ready.sh` rows and `ready` hash
+  unchanged, the `###` headings unchanged, and the file at or under 64,000 bytes.
+
+Resolution: closes E18.1. `ROADMAP.md` went from 74,462 bytes on main to under 64,000; each
+Status line gives the current state, and the old Status text, finished-step notes, dated
+measurements and closed orders are under "Item history moved from ROADMAP.md on 2026-10-29"
+below. The branch was rebased across PR #80; the WS6 and P8 Status lines take its answer.
+
+Evidence: checked in the PR #81 session against main `6182649`. Every line removed from
+`ROADMAP.md` is in this log, links rewritten for `docs/` (0 missing). The `roadmap-ready.sh` rows
+and `ready` hash equal those of the trim's parent, the commit that adds E18; against main they
+differ only by E18's own rows and the `### E18` heading (review finding F1, left to the owner).
+The `###` headings are otherwise unchanged, and the file was 63,827 bytes before this close.
+
+E18 Status before this close:
+- **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  `ROADMAP.md` is 74 KB, read on every `/ship:roadmap-next` and `/ship` run. Open: E18.1, then
+  E18.2.
+
 ### 2026-10-29: WS6.6 View the redesigned canary on the LG OLED C9 (PR #80)
 
 Step: [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
