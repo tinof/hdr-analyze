@@ -820,7 +820,8 @@ The detailed gap table and validation method live in
 ### E15: abort-safe RPU parsing
 
 - **Status:** Open. Defect found, not fixed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  Open: E15.1: `dolby_vision` 3.4.0's `unimplemented!` on an order-0 linear-interp piece aborts
+  Open: E15.1: `dolby_vision` 3.4.0's `unimplemented!` on a polynomial piece with
+  `poly_order_minus1 == 0` and `linear_interp_flag` set (`src/rpu/rpu_data_mapping.rs:415`) aborts
   `classify_rpu_format`, `analyze_rpu_file` and `sample_rpu_windows` under `panic = "abort"`.
 - [E15.1][desk] Pre-scan each source RPU's data mapping for that piece before `parse_rpu_file` in the
   three functions, and return an error instead; re-check the scan when the crate is bumped. Gate: a
