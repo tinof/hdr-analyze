@@ -19,9 +19,12 @@ result.
 - Meter: the owner's X-Rite i1Display Pro, read from this PC (see "Metered tests").
 - Record these for every test: player app and version, device software version, TV firmware
   version (C9: Settings > All Settings > General > About This TV), TV picture mode, HDMI path
-  (input number, AVR or soundbar in between, eARC) and room light. P8, WS6 and P10 all missed the
-  firmware, so Claude asks for these fields first, before the per-file questions. A result
-  without them is logged with the missing fields as "not recorded".
+  (input number, AVR or soundbar in between, eARC) and room light. Since 2026-10-29 the owner's
+  default is "same devices as all previous tests" (Plex on the Shield into the C9, Dolby Vision
+  Cinema): Claude logs that and asks again only for the Dolby Vision badge per file; versions,
+  HDMI input and room light stay "not recorded" unless the owner reports a change.
+- **By eye first.** The owner reads tests by eye through Plex on the Shield; a test that needs
+  the meter goes on the roadmap's "Metered tests (later)" list (owner, 2026-10-29).
 - Play every file of a test through the same path. A second path is a separate result.
 
 ## Building the files
@@ -44,7 +47,10 @@ result.
 - **A canary first.** A test that depends on the device applying the RPU includes a file whose
   RPU makes the picture obviously wrong if it is applied, for example the green canary of P8.
 - **Do not assume the device's neutral is the model's.** The device's arithmetic is not the
-  model's. In WS6 a steep chroma composer (coefficients 3.73 on u, u², u³, constant about −9.3)
+  model's. (WS6.9, 2026-10-29: the shift below appears near BL chroma code 944, where it grows with
+  the gain. At 912 and 160 there was no large shift: grey within about ±2 codes at gain 10, where
+  the WS6.4 law predicts +12; at 912 the WS6.6 canary also found no gain dependence at sub-code
+  level, gain 5 agreeing with gain 10.) In WS6 a steep chroma composer (coefficients 3.73 on u, u², u³, constant about −9.3)
   came out the same uniform green on every patch, where the model predicted a green-to-magenta
   row. The slope ladder (WS6.4, 2026-10-21) showed why: the C9 follows the curve's shape at every
   slope up to 20.46, but the apparent neutral moves to higher BL chroma codes as the gain grows
@@ -54,6 +60,16 @@ result.
   spacing with the steepness: the WS6.3 ladder uses rows 1, 2 and 4 codes apart, because at 4
   codes the steep rungs pushed even the middle patches past what the display can show (600
   nits, P3).
+- **Fractional codes.** A patch at code c + 0.5 is a checkerboard of c and c + 1 on the chroma
+  samples (c + 0.25: one sample in four at c + 1); libplacebo renders it as the mean (WS6.9 probe,
+  within 0.05 code). The owner did not report seeing a 1-code dither; a 2-code checkerboard (911
+  and 913) was picked against a flat 912 on 2 of 6 pages of the WS6.6 texture catch, so put the same
+  kind of dither on both sides of a compared pair. "Find the greyest" rows of 4-, 1- and half-code
+  steps reached only about ±2 codes unhinted (WS6.9 pass 1); the forced choice below gave the
+  decisive reading.
+- **End answers are bounds.** When the greyest patch of a row is its first or last, grey lies at or
+  beyond that end; the reading uses a finer row or rebuilds the file centred on the coarse answer
+  (a second pass), never the end patch's code.
 - **A row for every observation.** The interpretation table includes "all patches look the same"
   and "nothing looks as predicted", so a result outside the hypotheses is still logged as an
   outcome, not argued into one.
@@ -71,10 +87,12 @@ result.
 
 ## Naming and hand-off
 
-- Folder: `<test>-<YYYY-MM-DD>` in the owner's hand-off folder (`forplex`, scanned by the media
-  servers). It holds the files, `VIEWING_GUIDE.txt` (from
-  [`VIEWING_GUIDE.template.txt`](VIEWING_GUIDE.template.txt)) and
-  `reference-renders/`.
+- Folder: Plex scans the hand-off folder (`forplex`) as a TV library, so a test is a show and
+  each pass a season, with the files as episodes in play order (owner, 2026-10-29):
+  `forplex/<Test name>/Season 0N/<Test name> - S0NE01 - <role>.mkv`, plus `VIEWING_GUIDE.txt`
+  (from [`VIEWING_GUIDE.template.txt`](VIEWING_GUIDE.template.txt)). The owner reports by
+  episode number; the work directory keeps the episode-to-file mapping. A name that matches a
+  real series can make Plex fetch its metadata: "Fix Match" to none keeps the file names.
 - Copy with `command cp` and `cmp` every file after copying (the 9P mount).
 - Add one line to `TESTS_PENDING.txt` in the hand-off folder when the files are delivered. Move
   it to DONE with a one-line result when the owner reports. Delete a finished test's folder only
@@ -84,13 +102,22 @@ result.
 
 ## Blinding
 
-- File names carry no answer: `<TEST>_1`, `<TEST>_2`, ... in an order that does not follow the
-  hypothesis. The control may be named, because it is not compared for preference.
+- File names carry no answer: episode titles such as `Page 1`, `Page 2`, ... (in the Plex
+  layout of "Naming and hand-off") in an order that does not follow the hypothesis. The control
+  may be named, because it is not compared for preference.
 - The guide has the questions and the report form first. The key and the interpretation table
   come last, under "read after you have written down your answers". Reference renders sit in a
   subfolder the guide asks the owner not to open before answering.
 - For preference tests (P10), the key stays in the work directory and is revealed only after
   the report.
+- The guide never says where the answer is expected ("grey should sit near the middle"): the
+  WS6.9 pass-2 guide did, and its answers then repeated the same patch positions across gains
+  and arms, although a code was a 4× larger colour step at the high gain. Answers that do not
+  move with the colour step follow the position; such a pass carries no sub-code reading.
+- **Forced choice beats "find the greyest".** Two touching patches, "which is greyer?", with the
+  decisive pair repeated on balanced sides, mirrored pages, a gain-0 page, a catch pair of
+  identical means (one flat, one dithered), and opposite-sign gains so a preference for one tint
+  shows as a disagreement (WS6.5 design, 2026-10-29).
 
 ## What the owner reports
 

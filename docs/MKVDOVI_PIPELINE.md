@@ -178,7 +178,8 @@ This section covers the code on each side.
   from the analyzer's 8.4-decode measurement through the selected composer. There is no HLG→PQ
   encode path any more. `--mdfix` on an 8.4 input is refused.
 - `--hlg-composer bt2100` is the default, switched by owner decision before the playback test. The
-  P8 playback test of 2026-10-13 (part of WS6, whose `code / 1023` question stays open) showed that
+  P8 playback test of 2026-10-13 (part of WS6, whose `code / 1023` question the
+  WS6.6 canary answered for the C9 on 2026-10-29: `code / 1023`) showed that
   an LG OLED C9, through the TV's own player and through a Shield, applies the RPU composer: a
   deliberately green canary composer rendered green, and the preset's tint was visible next to a
   neutral bt2100. `preset` keeps the RPU exactly as `dovi_tool generate` writes it and is the

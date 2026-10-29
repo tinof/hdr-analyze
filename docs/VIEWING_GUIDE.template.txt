@@ -20,13 +20,15 @@ Why: <one or two sentences: what the result decides, e.g. a default change or a 
 
 1. WHAT TO PLAY
 
-   <TEST>_1.DV.mkv     <neutral description, no hint of the expected answer>
-   <TEST>_2.DV.mkv     ...
-   <TEST>_control.DV.mkv   <optional: the normal mkvdovi output>
+   In Plex: TV show "<Test name>", Season <N>, episodes in this order
+   (files: forplex/<Test name>/Season 0N/<Test name> - S0NE01 - Page 1.mkv, ...):
+   E01  Page 1     <neutral description, no hint of the expected answer>
+   E02  Page 2     ...
+   E0n  control    <optional: the normal mkvdovi output>
 
    <What is on screen: duration, pages/patches, how to number them, where to look.>
 
-   Do not open reference-renders/ before you have written down your answers in section 2.
+   Reference renders stay in the work directory; Claude shows them only after section 2 is in.
 
 
 2. WHAT TO REPORT, PER FILE
