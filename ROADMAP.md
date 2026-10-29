@@ -803,7 +803,8 @@ The detailed gap table and validation method live in
   Gate: as E13.6.
 - [E13.11][gpu] Function-length lint and the size contract: `too_many_lines = "warn"` in
   `Cargo.toml`, an `#[expect]` naming its step on each of the 10 functions over 150 code lines,
-  `clippy.toml` cut to its live key (no `msrv`, so clippy reads `dovi_rpu_builder`'s 1.88),
+  `clippy.toml` cut to its live key (no `msrv`: clippy reads `dovi_rpu_builder`'s 1.88; the
+  `tools/` crates set none and lint at the toolchain's MSRV),
   `## Size limits` in `.claude/workflow.md`, and the size note moved from `rust-check.sh` to the ship
   plugin's global hook. Gate: fmt, clippy (also `--features cuda`), tests; the L1 gate without
   `--update`; `scripts/cuda-parity.sh` (the markers sit in its paths); a 160-statement probe

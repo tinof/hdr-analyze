@@ -101,7 +101,7 @@ Each rule is one line; the reasons and code paths are in [`docs/MKVDOVI_PIPELINE
 ## Lint/style policy in this repo (non-default)
 
 - Workspace lints in root `Cargo.toml`: clippy `all` allowed but `correctness` denied; `dbg_macro` denied; `too_many_lines` warns (threshold 150 in `clippy.toml`); rustc `rust_2018_idioms` and `unused_qualifications` warn — all fail under `-D warnings` in CI. `unwrap`/`expect`/`print` are allowed everywhere.
-- `unsafe_op_in_unsafe_fn = "deny"`, but `unsafe_code` is **allowed**. A `clippy.toml` key acts only when its lint is enabled in `Cargo.toml`; add the two together. No `msrv` key: clippy reads each crate's `rust-version`.
+- `unsafe_op_in_unsafe_fn = "deny"`, but `unsafe_code` is **allowed**. A `clippy.toml` key acts only when its lint is enabled in `Cargo.toml`; add the two together. No `msrv` key: clippy reads a crate's `rust-version` (only `dovi_rpu_builder` sets one; `tools/` crates lint at the toolchain's MSRV).
 - `kernels.cu` is only compiled by NVRTC at runtime. The Stop hook's `nvcc -ptx` catches syntax and type errors, but nvcc is not the NVRTC the binary loads, so a `--hwaccel cuda` run (`scripts/cuda-parity.sh`) is the real check.
 - Imports: std → third-party → `crate::`, grouped with braces, absolute `crate::` paths internally. `anyhow::Result` + `.context()` at app level; `thiserror` for library error types.
 
