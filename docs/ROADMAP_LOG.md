@@ -1802,6 +1802,9 @@ Verbatim, apart from relative links rewritten for this directory. Each item's ne
   into one step per PR: E13.6 keeps the number; the chore PR, the function that waits for E8.1 and
   the other two functions took the next free numbers (2026-10-17, step format).
 - **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
+- E13 Gate, first line as it read until 2026-10-29 (steps 3-5 are done; the rest of the Gate is
+  unchanged in `ROADMAP.md`):
+- **Gate:** per move (acceptance gate for steps 3-5): fmt, clippy (also `--features cuda`), tests;
 
 ### E14: test-suite audit (from ROADMAP.md)
 
@@ -1830,9 +1833,12 @@ Verbatim, apart from relative links rewritten for this directory. Each item's ne
      without the diagnosis; record whether they assert something an in-session test would not,
      and the cost. Done; dropped as a rule by the owner (2026-10-17).
 
-- E14 order, entry 1, as it read until 2026-10-29: "After the v0.7.0 release PR (due about
-  2026-10-21). … E13 step 5 keeps the first branch-free slot, so E14 PRs go between its move PRs
-  or after it." v0.7.0 shipped 2026-10-18 and E13 step 5 merged in #59.
+- E14 order, entry 1, as it read until 2026-10-29 (v0.7.0 shipped 2026-10-18 and E13 step 5
+  merged in #59):
+  1. After the v0.7.0 release PR (due about 2026-10-21). Steps 3 and 4 (mutation runs, triage)
+     are local, in a detached worktree, and need no branch, so they can run at any time. Steps 5
+     and 6 are PRs: they open only when no E13 move PR is in flight (the E13 sequencing rule).
+     E13 step 5 keeps the first branch-free slot, so E14 PRs go between its move PRs or after it.
 
 ### E15: abort-safe RPU parsing (from ROADMAP.md)
 

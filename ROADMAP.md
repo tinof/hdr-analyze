@@ -120,7 +120,7 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
-1. **HLG → Profile 8.4 composer** (P8, WS6.9, WS6.5, WS6.6). `--hlg-composer bt2100` and the input refusal landed
+1. **HLG → Profile 8.4 composer** (P8, WS6.9). `--hlg-composer bt2100` and the input refusal landed
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
@@ -247,8 +247,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 ### P8: HLG → Profile 8.4 composer
 
 - **Status:** Core complete. Default bt2100, playback confirmed on an LG OLED C9 (2026-10-13);
-  history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: the WS6 `code / 1023` question
-  (WS6.3–WS6.9).
+  history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). The WS6 `code / 1023` question is
+  answered for the C9 (below).
 - **Gate:** the WS6 playback test shows that devices apply a mapping that is not the preset
   (priority 1); met for the LG OLED C9 (2026-10-13). Step 1: the same canary test on a second
   device shows that the display applies the RPU composer: dropped 2026-10-17, no second device is
@@ -844,7 +844,7 @@ The detailed gap table and validation method live in
 ### E18: hot-file budgets
 
 - **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  `ROADMAP.md` is 72 KB, read on every `/ship:roadmap-next` and `/ship` run. Open: E18.1, then
+  `ROADMAP.md` is 74 KB, read on every `/ship:roadmap-next` and `/ship` run. Open: E18.1, then
   E18.2.
 - **Gate:** the roadmap at or under its byte budget, with nothing lost (moved text in
   `docs/ROADMAP_LOG.md`) and the ready queue unchanged.
