@@ -76,7 +76,7 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.10: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
+- **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
@@ -87,12 +87,13 @@ hardware after a startable step has prepared it, a gate not stated, and steps ti
 ### Metered tests (later)
 
 Tests that need the owner's X-Rite i1Display Pro on the Windows PC. The owner runs them when the
-roadmap reaches them; by-eye tests come first (owner, 2026-10-29). `/ship:roadmap-next` treats
-these as waiting for the owner.
+roadmap reaches them; by-eye tests come first (owner, 2026-10-29). Each one also has an entry
+under "Waiting for the owner", which is the list `/ship:roadmap-next` reads.
 
-- **WS6.10: meter the neutral-finder probe** (the WS6.8 files, 15 runs, about 40 minutes;
-  ArgyllCMS 3.5.0 on the PC). Optional since 2026-10-29: the WS6.6 canary answered the
-  `code / 1023` question by eye; the meter would confirm it with an instrument.
+- **WS6.9: meter the neutral-finder probe** (the WS6.8 files, 15 runs, about 40 minutes;
+  ArgyllCMS 3.5.0 on the PC). The by-eye reading of 2026-10-29 did not meet its gate; the
+  `code / 1023` question no longer depends on it (WS6.6 answered it), so it measures the
+  per-gain neutral with an instrument.
 
 ### Release plan (2026-10-14)
 
@@ -121,6 +122,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
    available, so other devices stay untested (owner, 2026-10-17). The WS6 `code / 1023` question
    is answered for the C9: `code / 1023`, so the bt2100 fit stays (WS6.6 canary, 2026-10-29).
+   WS6.9 (the metered per-gain reading) stays on the metered list.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
    opt-in flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and the default flips
@@ -254,8 +256,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   (priority 1); met for the LG OLED C9 (2026-10-13). Step 1: the same canary test on a second
   device shows that the display applies the RPU composer: dropped 2026-10-17, no second device is
   available (owner); the C9 result stands alone.
-- Open follow-up: the WS6 `code / 1023` question, tracked as WS6.3–WS6.9 (build and viewing alternate), no step of its own here. A
-  second device stays a non-blocking note: test one if it becomes available.
+- The WS6 `code / 1023` question (WS6.3–WS6.6) is answered for the C9: `code / 1023`, so the
+  bt2100 fit stays (WS6.6 canary, 2026-10-29). A second device stays a non-blocking note: test one
+  if it becomes available.
 
 ### P9: HDR10+ → Profile 8.1 L1
 
@@ -453,13 +456,15 @@ The detailed gap table and validation method live in
   intercepts within 0.003 code). Design and checks: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`
   (`PREREG.md`, `run.sh`, `render/analysis.txt`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md)
   "Metered tests". The owner then chose to read WS6.9 by eye (2026-10-29); every metered test
-  moved to a separate later list (WS6.10). Viewed by eye on 2026-10-29 in two passes (Plex on the
+  moved to a separate later list. Viewed by eye on 2026-10-29 in two passes (Plex on the
   Shield, Dolby Vision Cinema, badge on every file): no large shift at codes 912 and 160 (pass 1,
   without hints: at gain 10 grey within about ±2 codes of the centre, where the WS6.4 law
   predicts +12), so the WS6.4 shift belongs to the codes near 944 (at 944, gain 5 puts grey at
-  ≥ 950.5 and gain 10 shows no grey in 928–960). Pre-registered decision: undecided by eye. The
-  pass-2 fine readings repeat the same patch positions across gains and arms after a guide hint,
-  so they are logged but carry no sub-code conclusion. Evidence:
+  ≥ 950.5 and gain 10 shows no grey in 928–960). Pre-registered decision on pass 1 alone:
+  undecided by eye, and WS6.9's gate (±0.5 code per gain) is not met (pass 1 reaches ±0.5 only at
+  gains 1 and 2.5 on arm A, ±2 elsewhere). The pass-2 fine readings repeat the same patch
+  positions across gains and arms after a guide hint, so they carry no sub-code conclusion.
+  WS6.9 stays open as the metered run. Evidence:
   `~/mkvdovi-work/ws6-neutral-eye-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers_pass*.json`).
   WS6.5 and WS6.6 (2026-10-29): a blind forced-choice canary at code 912 (v2; an Opus skeptic
   replaced v1 before any viewing), seven pages at gains 5, 10 and −10 with real-RPU-range
@@ -488,8 +493,10 @@ The detailed gap table and validation method live in
   the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
   showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
   neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
-- [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9 (read by eye,
-  owner 2026-10-29; viewed 2026-10-29, `RESULT.md` above). Gate: the apparent
+- [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9. Read by eye
+  on 2026-10-29 (status above): gate not met; what remains is the metered run on the "Metered
+  tests (later)" list (owner, 2026-10-29), with `probe_meter.py check` first and the WS6.8 build in
+  `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/build/`, re-delivered as a Plex show. Gate: the apparent
   neutral BL chroma code per gain recorded in the log (to about ±0.5 code by eye, ±0.25 metered),
   with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
   (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
@@ -508,10 +515,6 @@ The detailed gap table and validation method live in
   2026-10-29 (Plex show "WS6 canary"; libplacebo picks the `code / 1023` side on every row).
 - [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
   on the LG OLED C9, answer recorded. Needs: WS6.5. Viewed 2026-10-29: `code / 1023` (status above).
-- [WS6.10][owner] Meter the WS6.8 probe on the LG OLED C9 (metered list, later; owner
-  2026-10-29). Gate: the outcome of `PREREG.md` draft 2 recorded in the log, from readings taken
-  with the i1Display Pro (`probe_meter.py check` first). Files: the WS6.8 build in
-  `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/build/`, re-delivered as a Plex show when run.
 - **Checked 2026-10-25 @3c0c913:** `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
   (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
   evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there

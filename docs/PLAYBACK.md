@@ -47,8 +47,10 @@ result.
 - **A canary first.** A test that depends on the device applying the RPU includes a file whose
   RPU makes the picture obviously wrong if it is applied, for example the green canary of P8.
 - **Do not assume the device's neutral is the model's.** The device's arithmetic is not the
-  model's. (WS6.9, 2026-10-29: the shift below belongs to the BL chroma codes near 944, not to the
-  gain; at 912 and 160 the C9 showed none from gain 2.5 to 10.) In WS6 a steep chroma composer (coefficients 3.73 on u, u², u³, constant about −9.3)
+  model's. (WS6.9, 2026-10-29: the shift below appears near BL chroma code 944, where it grows with
+  the gain. At 912 and 160 there was no large shift: grey within about ±2 codes at gain 10, where
+  the WS6.4 law predicts +12; at 912 the WS6.6 canary also found no gain dependence at sub-code
+  level, gain 5 agreeing with gain 10.) In WS6 a steep chroma composer (coefficients 3.73 on u, u², u³, constant about −9.3)
   came out the same uniform green on every patch, where the model predicted a green-to-magenta
   row. The slope ladder (WS6.4, 2026-10-21) showed why: the C9 follows the curve's shape at every
   slope up to 20.46, but the apparent neutral moves to higher BL chroma codes as the gain grows
@@ -58,10 +60,13 @@ result.
   spacing with the steepness: the WS6.3 ladder uses rows 1, 2 and 4 codes apart, because at 4
   codes the steep rungs pushed even the middle patches past what the display can show (600
   nits, P3).
-- **Half codes by eye.** A patch at code c + 0.5 is a checkerboard of c and c + 1 on the chroma
-  samples: too fine to see, and libplacebo renders it as the mean of the two (WS6.9 probe, within
-  0.05 code). Rows of 4-, 1- and half-code steps let one page catch a crossing far from the
-  prediction and still read it to ±0.25 code.
+- **Fractional codes.** A patch at code c + 0.5 is a checkerboard of c and c + 1 on the chroma
+  samples (c + 0.25: one sample in four at c + 1); libplacebo renders it as the mean (WS6.9 probe,
+  within 0.05 code). The owner did not report seeing a 1-code dither; a 2-code checkerboard (911
+  and 913) was picked against a flat 912 on 2 of 6 pages of the WS6.6 texture catch, so put the same
+  kind of dither on both sides of a compared pair. "Find the greyest" rows of 4-, 1- and half-code
+  steps reached only about ±2 codes unhinted (WS6.9 pass 1); the forced choice below gave the
+  decisive reading.
 - **End answers are bounds.** When the greyest patch of a row is its first or last, grey lies at or
   beyond that end; the reading uses a finer row or rebuilds the file centred on the coarse answer
   (a second pass), never the end patch's code.
@@ -97,8 +102,9 @@ result.
 
 ## Blinding
 
-- File names carry no answer: `<TEST>_1`, `<TEST>_2`, ... in an order that does not follow the
-  hypothesis. The control may be named, because it is not compared for preference.
+- File names carry no answer: episode titles such as `Page 1`, `Page 2`, ... (in the Plex
+  layout of "Naming and hand-off") in an order that does not follow the hypothesis. The control
+  may be named, because it is not compared for preference.
 - The guide has the questions and the report form first. The key and the interpretation table
   come last, under "read after you have written down your answers". Reference renders sit in a
   subfolder the guide asks the owner not to open before answering.
