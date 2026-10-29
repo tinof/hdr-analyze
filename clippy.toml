@@ -1,11 +1,14 @@
 # Clippy configuration: https://doc.rust-lang.org/clippy/configuration.html
 #
 # A key here acts only when its lint is enabled. Root Cargo.toml [workspace.lints.clippy] allows
-# every lint except `correctness`, `dbg_macro` and `too_many_lines`, so only the keys below are
-# live. Add a key together with the lint that reads it.
+# every lint except `correctness`, `dbg_macro` and `too_many_lines`, so for the workspace crates
+# only the keys below are live. Add a key together with the lint that reads it.
 #
-# No `msrv` key: clippy then takes each crate's `rust-version` (dovi_rpu_builder: 1.88) instead
-# of one value for the whole workspace.
+# The crates under tools/ are outside the workspace: they read this file too, but keep clippy's
+# default lint levels.
+#
+# No `msrv` key: clippy then takes each crate's `rust-version` (dovi_rpu_builder: 1.88). A crate
+# without one, as every tools/ crate is, gets the MSRV-gated lints of the toolchain in use.
 
 # clippy::too_many_lines (code lines; blank and comment lines are not counted). Default 100.
 # Size rules: CLAUDE.md "Module size", .claude/workflow.md "## Size limits".
