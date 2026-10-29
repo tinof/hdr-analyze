@@ -120,7 +120,7 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
-1. **HLG → Profile 8.4 composer** (P8, WS6.9, WS6.5, WS6.6). `--hlg-composer bt2100` and the input refusal landed
+1. **HLG → Profile 8.4 composer** (P8, WS6.9). `--hlg-composer bt2100` and the input refusal landed
    2026-10-03; bt2100 is the default by owner decision. Gate: the WS6 playback test shows that
    devices apply a mapping that is not the preset; `--hlg-composer preset` is the fallback. Met for
    one device, an LG OLED C9, on 2026-10-13 ([log](docs/ROADMAP_LOG.md)); no second device is
@@ -157,11 +157,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    item (WS4: blinded A/B on a device; WS1.2–WS1.4 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, P3, P5, WS0, WS6): the
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, P5, WS0, WS6): the
     remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
     v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5), `--verify`
-    checks for authored CM v4.0 blocks (E17). Ranked below 1–10; added
+    checks for authored CM v4.0 blocks (E17), hot-file byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
@@ -170,12 +170,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   remaining steps E13.6–E13.21 are behaviour-neutral PRs, not moves.
 - **Conditional** (R2, WS5): Profile 5 through an established encoder, only if matched playback
   tests justify it.
-- **Landed before this order:** dependable HDR10/HDR10+ → Profile 8.1 with source-derived L1, L5,
-  provenance, completeness checks and the input contract (P0, P1, P3, P7, E6, E7; code 2026-09-15;
-  source retention reviewed and the default, delete a non-DV source after success, **kept by
-  decision**); regression gates (E1, WS0; 2026-10-01); unbiased scene averages (WS2; 2026-10-01).
-  The final-RPU regression corpus and the written Shield/TV playback procedure (WS6) grow alongside
-  items 1 to 3, which each need a playback check.
+- **Kept by decision:** a successful conversion deletes a non-DV source (source retention).
+  The WS6 corpus and playback procedure grow alongside items 1 to 3, which
+  each need a playback check.
 - **Deferred:** display-target optimizers (P4), automatic creative trims (WS4, behind the WS7 gate),
   and broader hardware acceleration (E5). Neutral trims stay.
 
@@ -183,11 +180,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P1: CPU analysis default
 
-- **Status:** Partial. Source-honest generation is the default. CUDA is the main pipeline;
-  `accurate` (downscale 1, sample-rate 1) is the only parity-checked measurement. On CUDA,
-  `balanced`/`fast` sample with a stride and the CPU resizes, so those presets differ by backend and
-  no gate covers them ([`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md)). They also save no time on
-  CUDA, where the run is NVDEC-bound, and they lose the measured MaxCLL (`fast` also MaxFALL).
+- **Status:** Partial. Source-honest generation is the default; `accurate` is the only
+  parity-checked preset; on CUDA `balanced`/`fast` differ by backend, no gate covers them, and they
+  lose the measured MaxCLL. History in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P1.1.
 - **Gate:** the CPU cost of `accurate` and the effect of `FAST_BILINEAR` on L1 max and MaxCLL are
   measured (priority 4: measure the CPU default first); then CPU `auto` flips to `accurate` or
   `balanced` stays with a visible note.
@@ -207,8 +202,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P3: L5 from the crop
 
-- **Status:** Core complete. L5 offsets come from the committed full-resolution crop (sidecar v2);
-  sampled source L5 keeps precedence for Dolby Vision inputs.
+- **Status:** Core complete. L5 comes from the full-resolution crop; sampled source L5 keeps
+  precedence for Dolby Vision inputs; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  Open: P3.1.
 - **Gate:** the E2 (1) gate; per-scene L5 offsets come from the per-scene crop (owner,
   2026-10-17).
 - [P3.1][gpu][corpus] Changing aspect ratios need per-scene L5 offsets; done together with E2.1,
@@ -250,12 +246,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P8: HLG → Profile 8.4 composer
 
-- **Status:** Core complete; default bt2100; playback confirmed on an LG OLED C9 (2026-10-13).
-- `--hlg-composer bt2100` (2026-10-03) is fitted to the BT.2100 / BT.2408 1000-nit HLG-to-PQ
-  conversion and keeps neutrals neutral; the HLG colour input contract is enforced. Design and
-  measurements: [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md). The preset it replaces tints
-  neutrals (75% grey ΔE_ITP 6.8, up to 10.3 near black) and decodes nominal white to about
-  1150 nits.
+- **Status:** Core complete. Default bt2100, playback confirmed on an LG OLED C9 (2026-10-13);
+  history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). The WS6 `code / 1023` question is
+  answered for the C9 (below).
 - **Gate:** the WS6 playback test shows that devices apply a mapping that is not the preset
   (priority 1); met for the LG OLED C9 (2026-10-13). Step 1: the same canary test on a second
   device shows that the display applies the RPU composer: dropped 2026-10-17, no second device is
@@ -266,14 +259,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Partial; step 0 (frame alignment) done 2026-10-08; scene list chosen 2026-10-13; the
-  hybrid flag done 2026-10-14 (opt-in); peak parity done 2026-10-14.
-- `dovi_tool generate --hdr10plus-json` takes L1 from the first frame of each HDR10+ scene
-  (minimum 0, average rounded to whole nits, no measured crop). On the HDR10+ test cut the average
-  reads 156 to 505 codes above the analyzer's mean; the cause is not separated.
-- **Prerequisite met (2026-10-05):** four HDR10+ titles from two studios and one streamer
-  (WS8 item 5). Alita: Battle Angel carries Dolby Vision MEL and HDR10+ on the same disc, so its
-  retail L1 can score an HDR10+-derived L1 frame by frame.
+- **Status:** Partial. Step 0, scene list, opt-in hybrid flag and peak parity done by
+  2026-10-14; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P9.2, then P9.3
+  (owner, 2026-10-17: flip the default after v0.7.0).
 - **Finding for the fallback:** both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL 0 on every
   frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on Alita) and
   the average are present. A peak taken from MaxSCL is unusable on such sources, so the pixel
@@ -319,7 +307,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P10: measured against delivered
 
-- **Status:** Partial. Steps 1 and 2 landed 2026-10-04.
+- **Status:** Partial. Steps 1 and 2 (2026-10-04) and step 4 (2026-10-17) done; history in
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P10.3, which waits for WS7.1 (owner,
+  2026-10-17: WS7 first, no playback test).
 - `dovi_tool generate` clamps L1 (minimum ≤ 12, maximum ≥ 2081, average ≥ 819). Numbers:
   [`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md).
 - **Gate:** the P10.3 gate (priority 3). Step 4's gate, done 2026-10-17: a blinded A/B on the LG
@@ -331,7 +321,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P12: `--mdfix` ignores the source RPU's L6
 
-- **Status:** Open; defect found 2026-10-15, not fixed.
+- **Status:** Open. Defect found 2026-10-15, not fixed; history in
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P12.1, for the next patch release.
 - Under `--mdfix` the mastering min/max come from the container or the defaults
   (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:42-43`),
   never from the source RPU's L6. On r5 Inside Out 2 (P8.1, no ST 2086 in the container) the RPU's
@@ -358,11 +349,9 @@ The detailed gap table and validation method live in
 
 ### WS0: L1 scoring tools
 
-- **Status:** Core complete. `tools/l1_diff`, synthetic ground-truth tests, embedded-L1
-  comparison and licensed `cm_analyze` scoring have shipped. `l1_diff` takes limits
-  (`--max-peak-bias`, `--max-peak-error` and the same for minimum and max-RGB average) and exits
-  nonzero on a breach; CI runs it on a generated six-shot PQ and HLG clip against committed
-  references.
+- **Status:** Core complete. `tools/l1_diff`, ground-truth tests and the CI L1 gate on a six-shot
+  PQ and HLG clip shipped; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: WS0.1,
+  which needs WS8.1.
 - **Gate:** the CI L1 gate covers the WS8 synthetic cases (grain on highlights, a flash, a fade, an
   aspect-ratio change), each with committed references (owner, 2026-10-17).
 - [WS0.1][desk] Grow the corpus: the WS8 synthetic cases in the CI L1 gate (this step also covers
@@ -403,10 +392,9 @@ The detailed gap table and validation method live in
 
 ### WS2: shots and scene averages
 
-- **Status:** Partial. The shot maximum is the maximum of its frame peaks. Scene averages are
-  unbiased since sidecar v4 ([VALIDATION.md §9](docs/VALIDATION.md)); the `cm_analyze` v2 average
-  comparison has not been repeated for v4. Cuts are chosen after analysis (2026-10-02). Retail RPUs
-  change L1 only at shot starts, so shot-constant L1 is kept.
+- **Status:** Partial. Shot-constant L1 and unbiased scene averages (sidecar v4) are in place;
+  the `cm_analyze` v2 average comparison is not repeated for v4; history in
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: WS2.1, WS2.2, WS2.4; step 3 (L4) deferred.
 - **Gate:** step 1: precision and recall against authored shot lists, no loss on the other cuts
   (priority 8). Step 2: on WS8 transition material, per-frame L1 inside detected dissolves and
   fades is closer to the truth than shot-constant L1, and the WS7 simulator shows no added
@@ -437,47 +425,18 @@ The detailed gap table and validation method live in
 
 ### WS5: CM metadata XML export
 
-- **Status:** Deferred; conditional. Worthwhile only if the external Profile 5 authoring route (R2)
-  is chosen.
+- **Status:** Deferred. Nothing built; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  Worthwhile only if the external Profile 5 authoring route (R2) is chosen.
 - **Gate:** only if R2 is reopened; R2's gate covers it (owner, 2026-10-17).
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open. WS6.3 and WS6.4 closed (PR #66), WS6.8 closed (PR #78), WS6.5 and WS6.6 closed
-  (PR #80; the `code / 1023` question is answered for the C9). The slope ladder was
-  built and handed off on 2026-10-18 (8 files; the [log](docs/ROADMAP_LOG.md) has the design and
-  checks). Viewed on the C9 on 2026-10-21 (WS6.4):
-  outcome "anything else" in the pre-registered table, so WS6.5 as written cannot start. The C9
-  follows the curve's shape at every slope up to 20.46, but the neutral moves to higher BL
-  chroma codes as the slope grows (about +2.5 codes at gain 2.5, +5–6.5 at gain 5, more than
-  +12 at gain 10), independent of the constant and the term size. A follow-up probe that
-  measures this shift comes before any `code / 1023` canary ([log](docs/ROADMAP_LOG.md)
-  2026-10-21). The probe is WS6.8 (build) and WS6.9 (viewing or measurement), owner 2026-10-22.
-  WS6.8 was built and handed off on 2026-10-27 ([log](docs/ROADMAP_LOG.md)): metered with the
-  owner's i1Display Pro (owner decision), 13 files (gain-0 reference; arm A centre 912 at gains 0.25–10; arm B centre 160 at
-  gains 0.25–2.5; control), 15 runs in about 40 minutes, picture mode Dolby Vision Cinema. The
-  pre-registered analysis passed nine synthetic devices and the libplacebo check (outcome H1023:
-  every Cb and Cr crossing within 0.03 code of `code / 1023` against a 0.1-code gate; both arm
-  intercepts within 0.003 code). Design and checks: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`
-  (`PREREG.md`, `run.sh`, `render/analysis.txt`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md)
-  "Metered tests". The owner then chose to read WS6.9 by eye (2026-10-29); every metered test
-  moved to a separate later list. Viewed by eye on 2026-10-29 in two passes (Plex on the
-  Shield, Dolby Vision Cinema, badge on every file): no large shift at codes 912 and 160 (pass 1,
-  without hints: at gain 10 grey within about ±2 codes of the centre, where the WS6.4 law
-  predicts +12), so the WS6.4 shift belongs to the codes near 944 (at 944, gain 5 puts grey at
-  ≥ 950.5 and gain 10 shows no grey in 928–960). Pre-registered decision on pass 1 alone:
-  undecided by eye, and WS6.9's gate (±0.5 code per gain) is not met (pass 1 reaches ±0.5 only at
-  gains 1 and 2.5 on arm A, ±2 elsewhere). The pass-2 fine readings repeat the same patch
-  positions across gains and arms after a guide hint, so they carry no sub-code conclusion.
-  WS6.9 stays open as the metered run. Evidence:
-  `~/mkvdovi-work/ws6-neutral-eye-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers_pass*.json`).
-  WS6.5 and WS6.6 (2026-10-29): a blind forced-choice canary at code 912 (v2; an Opus skeptic
-  replaced v1 before any viewing), seven pages at gains 5, 10 and −10 with real-RPU-range
-  coefficients, mirrored pages, a gain-0 page and a texture catch. Every decisive answer (24 of
-  24) fell on the `code / 1023` side and matched libplacebo, with no side or tint bias.
-  Pre-registered decision: `code / 1023` holds, the bt2100 fit stays; gate (3) is met for the C9.
-  Evidence: `~/mkvdovi-work/ws6-canary-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers.json`,
-  `score.txt`, `render/check.txt`).
+- **Status:** Open. WS6.3, WS6.4 (PR #66), WS6.8 (PR #78), WS6.5 and WS6.6 (PR #80) closed; the
+  `code / 1023` question is answered for the C9 (`code / 1023`, the bt2100 fit stays). History in
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: WS6.9, metered with the i1Display Pro in Dolby
+  Vision Cinema on the "Metered tests (later)" list (owner decision;
+  `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`; method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md)
+  "Metered tests"); WS6.1.
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -492,12 +451,6 @@ The detailed gap table and validation method live in
   gain separates the two normalizations, answer recorded.
 - [WS6.1][corpus] The final-RPU regression corpus. Gate: `scripts/rpu-baseline.sh` holds one
   captured baseline per listed feature.
-- The `code / 1023` question below: the first canary gave no verdict (2026-10-17, below); next, a
-  canary within the coefficient range real RPUs use, preceded by a slope ladder that shows how
-  steep a chroma curve the C9 still follows. Claude builds each, checks it in libplacebo and hands
-  the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
-  showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
-  neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
 - [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9. Read by eye
   on 2026-10-29 (status above): gate not met; what remains is the metered run on the "Metered
   tests (later)" list (owner, 2026-10-29), with `probe_meter.py check` first and the WS6.8 build in
@@ -518,22 +471,11 @@ The detailed gap table and validation method live in
   5.9 codes off neutral, probably too little to see on a neutral ramp, so the test needs a pattern
   that separates the two. A `code / 1024` answer means a refit (new composer and RPU). The P8
   canary test (2026-10-13) does not answer it.
-- **First canary (2026-10-17): no verdict.** On the C9 (Plex on the Shield, Dolby Vision Cinema
-  Home, DV badge on all three files) both steep canaries (chroma coefficients 3.73 on u, u², u³
-  and a constant of about −9.3) showed the same uniform green on all seven patches, where either
-  normalization predicts a green-to-magenta row with one grey patch; the bt2100 control showed
-  the predicted purple. So the TV applies these composers but does not follow the steep curve:
-  its composed chroma comes out flat and low, as if clamped. This is the guide's "anything else"
-  row. Not recorded: TV firmware, room light. Reread 2026-10-21 (WS6.4): not a slope limit; the
-  C9 follows steep curves, but its neutral moves with the gain.
-- **P8 result (2026-10-13):** an LG OLED C9 applies the 8.4 composer in the RPU (canary method in
-  [log](docs/ROADMAP_LOG.md)). Not recorded for that test: firmware, picture mode, HDMI path. The
-  preset's grey tint looked yellow on the C9, where the libplacebo SDR render predicted lavender
-  (mid greys) and olive (dark greys).
 
 ### WS7: evaluation in displayed-picture units
 
-- **Status:** Open.
+- **Status:** Open. Nothing has shipped; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  Open: WS7.1, then WS7.2.
 - **Plan:** (1) a histogram-domain display-mapping simulator in a tool crate outside the workspace:
   per-frame PQ histograms and an L1 stream through libplacebo's spline, the SMPTE ST 2094-10 curve
   and the ITU-R BT.2390 EETF for 100-, 600- and 1000-nit panels, comparing candidate with reference
@@ -574,9 +516,10 @@ The detailed gap table and validation method live in
 
 ### FEL: Profile 7 FEL
 
-- **Status:** Deferred; placeholder, on hold by the owner (2026-10-13). The BL+EL compositor and
-  its re-encode were removed on 2026-10-03 because the composed picture did not match ETSI GS CCM
-  001. `mkvdovi` refuses Profile 7 FEL inputs, keeps the source and continues with the next file.
+- **Status:** Deferred; on hold by the owner (2026-10-13). The compositor was removed and Profile 7
+  FEL inputs are refused; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). No step until the
+  hold is lifted; a fixed-pixel 8.1 chroma canary then needs new code (`canary-rpu` takes only
+  bt2100 8.4).
 - The only FEL work of interest keeps the base layer bit-exact and carries FEL information, as far
   as possible, in the Profile 8.1 RPU: [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md). This item replaces
   F1, F2 and R1. Profile 7 MEL conversion is unchanged.
@@ -584,11 +527,6 @@ The detailed gap table and validation method live in
   `FEL_ROADMAP.md` applies (owner, 2026-10-17).
 - Not held: E15.1 keeps a malformed source RPU (Profile 7, or one found by the RPU sniff) from
   aborting `mkvdovi` before the FEL refusal.
-- FEL_PLAN gate 3 (does the player apply a non-identity 8.1 mapping) is partly answered on the
-  local F2 track: clip 1 (2026-10-07, Plex on the Shield → C9) showed a non-identity 8.1 luma
-  mapping applied. The chroma MMR and L1 clips (F2 clips 3 and 4) stay held with the rest of FEL.
-  A fixed-pixel 8.1 chroma canary like the P8 one needs new code: `tools/fit_hlg_composer
-  canary-rpu` accepts only `bt2100` Profile 8.4 RPUs.
 
 ### R2: Profile 5
 
@@ -603,19 +541,14 @@ The detailed gap table and validation method live in
 
 ### E1: regression gates
 
-- **Status:** Core complete. `tools/l1_diff` runs in CI (`scripts/ci/l1-regression-gate.sh`,
-  references in `tools/l1_diff/corpus`); `scripts/cuda-parity.sh` checks CPU against CUDA on a GPU
-  host; `scripts/rpu-baseline.sh` captures and compares final RPUs. Synthetic accuracy runs in
-  workspace CI. Since 2026-10-06 the CI lint job runs clippy on the analyzer with `--features cuda`
-  (no GPU or toolkit; first hosted run passed on #31).
+- **Status:** Core complete. CI runs the L1 regression gate, the `--features cuda` clippy and
+  synthetic accuracy; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E1.2, E1.3.
 - **Gate:** (owner, 2026-10-17) (1) the WS0 gate (step 1 merged into WS0.1). (2) A self-hosted runner on the RTX 4070 WSL2
   host runs `scripts/cuda-parity.sh` for pushes to `main`/`fix-*` and for PRs from branches of
   this repository, never for fork PRs (a self-hosted runner on a public repository would otherwise
   run outside code), and blocks on failure; it runs only while the host is on. (3) A CI job
   compiles `kernels.cu` with NVRTC from the pip `nvidia-cuda-nvrtc` wheel, without a GPU, and is
   red on a deliberately broken kernel.
-- Step 1, expand the corpus (feeds WS6), is the same work with the same gate as WS0.1 and is
-  tracked there.
 - [E1.2][gpu] A self-hosted GPU runner for `scripts/cuda-parity.sh`, now a prerequisite because the
   main analysis path is untested in hosted CI. Gate: the item's gate (2).
 - [E1.3][desk] Spike: an NVRTC compile-only check of `kernels.cu` without a GPU. Gate: the item's
@@ -623,9 +556,8 @@ The detailed gap table and validation method live in
 
 ### E2: crop detection
 
-- **Status:** Partial. Seven-position crop probing, low-signal rejection, modal voting and
-  variable-AR union shipped in PR [#4](https://github.com/tinof/hdr-analyze/pull/4), closing issue
-  [#3](https://github.com/tinof/hdr-analyze/issues/3).
+- **Status:** Partial. Seven-position crop probing, modal voting and variable-AR union shipped
+  (PR #4); history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E2.1 (with P3.1) and E2.2.
 - **Gate:** (owner, 2026-10-17) (1) together with P3: on clips whose aspect ratio changes (WS8),
   each scene's crop and L5 match the visible picture area within 2 px; constant-ratio RPU
   baselines byte-identical; CPU = CUDA. (2) The probe's share of wall time on CUDA is measured on a
@@ -640,7 +572,8 @@ The detailed gap table and validation method live in
 
 ### E3: `mkvdovi` debug options
 
-- **Status:** Open.
+- **Status:** Open. Nothing has shipped; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  Open: E3.1.
 - **Gate:** integration tests: `--dry-run` writes nothing and lists the planned steps;
   `--keep-temp` and `--keep-logs` leave their files after a successful run; without the flags the
   behaviour is unchanged (owner, 2026-10-17).
@@ -648,9 +581,9 @@ The detailed gap table and validation method live in
 
 ### E4: second scene signal
 
-- **Status:** Open. `--scene-metric hybrid` is a histogram-only placeholder. Missed cuts on
-  whole-picture motion (WS2) need a signal that explains motion; both candidates are sensitive to
-  flashes, exposure changes and low texture. Full optical-flow fusion stays deferred.
+- **Status:** Open. `--scene-metric hybrid` is still a histogram-only placeholder; history in
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E4.1 to E4.4; both residuals are
+  sensitive to flashes, exposure changes and low texture. Full optical-flow fusion stays deferred.
 - **Gate:** precision and recall on held-out authored shot lists, no loss on the other cuts
   (priority 8).
 - [E4.1][gpu][corpus] Compare a spatial-thumbnail residual. Gate: the item gate, scored for this
@@ -672,8 +605,8 @@ The detailed gap table and validation method live in
 
 ### E5: hardware decode contexts
 
-- **Status:** Deferred. Add proper VAAPI and VideoToolbox decode device contexts and hardware-frame
-  transfer.
+- **Status:** Deferred. Nothing built; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  It would add VAAPI and VideoToolbox decode device contexts and hardware-frame transfer.
 - **Gate:** reopen on a user request; then `.bin` and sidecar byte-identical to software decode on
   the PQ and HLG clips (owner, 2026-10-17).
 
@@ -690,12 +623,8 @@ The detailed gap table and validation method live in
 
 ### E7: completeness
 
-- **Status:** Partial. `--verify` fails when the RPU frame count differs from the muxed video track
-  or the L1 sidecar, and warns when output and input frame counts differ.
-- Since 2026-10-04 the analyzer accounts for every picture of the stream, so measured L1 lines up
-  with the picture. It counts the undecodable RASL pictures at the start of an open-GOP cut, and
-  any other loss is an error. A measured RPU whose length differs from the video is refused at
-  inject.
+- **Status:** Partial. `--verify` checks the RPU frame count against the muxed track and the
+  sidecar; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E7.1, E7.2.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
@@ -707,12 +636,9 @@ The detailed gap table and validation method live in
 
 ### E8: histogram percentile reader
 
-- **Status:** Open. The 256-bin luma histogram is split into 64 bins below PQ(100 nits) and 192
-  above, but `compute_histogram_percentile_pq` and `find_highlight_knee_nits`
-  (`hdr_analyzer_mvp/src/analysis/histogram.rs`) convert a bin index back with bin/255, so a
-  1000-nit value reads as about 305 nits. It reaches the output only with
-  `--peak-source histogram99/histogram999` or `--peak-domain luma` with a non-conservative
-  optimizer profile.
+- **Status:** Open. Readers convert a bin index with bin/255, though the bins split 64/192 at
+  PQ(100 nits), so 1000 nits reads as about 305; history in [the log](docs/ROADMAP_LOG.md)
+  (2026-10-29). Open: E8.1, in a later minor release.
 - **Gate:** a bin-edge round-trip unit test and an optimizer unit test (CUDA parity and the L1 gate
   run with `--disable-optimizer`, so they do not cover it). **Prerequisite:** E13 step 5 (met 2026-10-17, #59).
 - **Checked 2026-10-06 @df54ad4:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
@@ -727,9 +653,8 @@ The detailed gap table and validation method live in
 
 ### E9: `--pre-denoise` values
 
-- **Status:** Open. `--pre-denoise` accepts any string and its help text names `nlmeans`, but only
-  `median3` is implemented; every other value silently does nothing and is still written into the
-  sidecar provenance.
+- **Status:** Open. Only `median3` works, other values do nothing; history in
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E9.1.
 - **Gate:** a unit test for the option (priority 4). **Prerequisite:** E13 step 5 (met 2026-10-17, #59).
 - [E9.1][gpu] Restrict the values to `off` and `median3`. Gate: the item gate.
 
@@ -746,11 +671,9 @@ The detailed gap table and validation method live in
 
 ### E11: `l1_diff` and open-GOP cuts
 
-- **Status:** Core complete 2026-10-06 (`CHANGELOG.md` `[0.6.0]`). `tools/l1_diff` shifts our
-  frames by `source.leading_skipped_frames` (sidecar v5) when the reference covers the stream
-  frames, re-bases `--per-shot` and `--scenes`, and labels `--export-reference` rows with stream
-  frames. Any other count difference is still refused; no measurements are invented for the skipped
-  pictures. Evidence: [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) (2026-10-06).
+- **Status:** Core complete. `tools/l1_diff` re-bases open-GOP cuts on the sidecar v5 skip
+  count (2026-10-06); history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E11.1, the v5
+  re-analysis of Joker and the Champions League cut.
 - **Gate:** Joker and the Champions League cut re-analyzed with a v5 analyzer, and their per-frame
   `l1_diff` scores in the log (owner, 2026-10-17).
 - [E11.1][corpus] Supporting, not the original gate: Joker and the Champions League cut (G4) have
@@ -759,8 +682,9 @@ The detailed gap table and validation method live in
 
 ### E12: CUDA release binaries
 
-- **Status:** Open. `release.yml` builds without `--features cuda`, so release users never get GPU
-  analysis, and `auto` resolves to CPU `balanced` even on an NVIDIA host.
+- **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  `release.yml` builds without `--features cuda`, so `auto` resolves to CPU `balanced` for
+  release users. Open: E12.1, for v0.8.0.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. NVIDIA's
@@ -778,27 +702,10 @@ The detailed gap table and validation method live in
 
 ### E13: module size refactor
 
-- **Status:** Partial; step 2 (safety net) done 2026-10-07; step 3 (mkvdovi split) done 2026-10-07,
-  evidence in the PR body and `~/mkvdovi-work/rpu-baseline/e13-step3-281b927/proof/`; step 4
-  (`convert_file` by phase) done 2026-10-13, evidence in
-  `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 (analyzer split) done 2026-10-17
-  (#59, efbb948), evidence in `~/mkvdovi-work/rpu-baseline/e13-step5/`. No
-  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; E13.11 done
-  2026-10-29 (PR #79); E13.6–E13.10 and E13.12–E13.21 open. Since E13.11 the limits are in `.claude/workflow.md` "## Size limits" (ship plugin 1.5.0):
-  `clippy::too_many_lines` at 150 fails the gate, and each function over it carries an
-  `#[expect(…, reason = "E13.<n>: split by phase")]` naming its step below.
-- **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
-  directories, the module-size rule and Stop-hook note, final-RPU baselines, characterization tests
-  for the untested high-risk mkvdovi paths (source deletion, format detection, static L6, the whole
-  `extra.json`); (3) mkvdovi: inline tests to `tests.rs`, then pure-move splits of `metadata.rs`
-  and `pipeline.rs`, before P9 step 0, which works in both files; (4) split `convert_file` by
-  phase, before the P9 hybrid flag; (5) analyzer: inline tests to `tests.rs`, pure-move splits of
-  `pipeline.rs`, `analysis/gpu.rs` and `analysis/frame.rs` (the peak estimators and grain
-  statistics are the candidate submodule; `pixel_pq_bin` and the max-RGB mix mirror `kernels.cu`
-  operation for operation and move unchanged), before E8 + E9, because E8 moves the default `.bin`,
-  edits `frame.rs` itself, and a pure move can only be proved byte-identical before it. `tools/l1_diff` stays as it is while the
-  local `feat/dev-corpus` branch depends on it.
-- **Gate:** per move (acceptance gate for steps 3-5): fmt, clippy (also `--features cuda`), tests;
+- **Status:** Partial. Steps 2-5 and E13.11 done, no production file over the 800-line
+  limit; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E13.6-E13.10 and
+  E13.12-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
+- **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
   at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+, HLG, two MEL
@@ -810,9 +717,6 @@ The detailed gap table and validation method live in
   only fmt, clippy and test (plus the CUDA gates) for mkvdovi paths. An automatic rpu-baseline gate
   would need a baseline-path convention and an update mode for PRs that change the RPU on purpose;
   it is not planned.
-- Step 6 (split the long functions by phase, each a behaviour-neutral PR, not a move) is split
-  into one step per PR: E13.6 keeps the number; the chore PR, the function that waits for E8.1 and
-  the other two functions took the next free numbers (2026-10-17, step format).
 - [E13.6][gpu][corpus] Split `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`) by
   phase. Gate: fmt, clippy (also `--features cuda`), tests; the L1 regression gate without
   `--update`; `scripts/cuda-parity.sh` PASS; optimizer-enabled CPU and CUDA `.bin` and sidecar
@@ -858,7 +762,6 @@ The detailed gap table and validation method live in
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
-- **Found by the step 2 tests:** two L6 defects under P6 (priority 4), fixed 2026-10-11.
 - **Checked 2026-10-17 @941489d:** before the split the Stop hook's count (`.claude/hooks/rust-check.sh`)
   gave `pipeline.rs` 1348, `analysis/frame.rs` 1026 and `analysis/gpu.rs` 951 lines; both gates pass
   `--disable-optimizer`, so the step diffed optimizer-enabled `.bin` files. Baselines from
@@ -866,22 +769,17 @@ The detailed gap table and validation method live in
 
 ### E14: test-suite audit
 
-- **Status:** Partial. Rules: [`docs/TESTING.md`](docs/TESTING.md). Step 1 done (#54, CI run
-  38753171952, only allowed skips). Step 2 done: 3 of the pilot's tests red on main, nothing new
-  found, pipeline wiring missed; the owner dropped a separate test author (2026-10-17): in-session
-  tests plus the E14.6 mutation gate stay the rule. Steps 3 and 4 done on main@c74effb for `verify.rs` and the riskiest
-  modules only (owner choice): 336 survivors, 0 actual bugs; missing tests in 19 high-risk groups
-  (57 mutants), 17 medium (115) and 14 low (43); 121 print-only or equivalent. Step 5: high-risk
-  groups done (#55, 0 missed after); medium and low groups open. Step 3 not yet run on 15 mkvdovi
-  files (878 mutants) and the analyzer contract files (273; counts from `cargo mutants --list` at
-  main@6f92306).
+- **Status:** Partial. Steps 1-2 done; steps 3-4 and step 5's high-risk groups done for
+  `verify.rs` and the riskiest modules (main@c74effb, #55); history in [the
+  log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E14.3-E14.6; smell list for E14.4/E14.5:
+  `~/mkvdovi-work/test-audit-2026-10-15/smells-*.md`. Owner, 2026-10-17: in-session tests plus the
+  E14.6 mutation gate, no separate test author.
 - **Gate:** a clean `check-test-skips` log on the audit host; per-module mutant counts (caught /
   missed / unviable / timeout) before and after; every survivor in a bucket.
 - **Order (2026-10-16):** none of it gates a release.
-  1. After the v0.7.0 release PR (due about 2026-10-21). Steps 3 and 4 (mutation runs, triage)
-     are local, in a detached worktree, and need no branch, so they can run at any time. Steps 5
-     and 6 are PRs: they open only when no E13 move PR is in flight (the E13 sequencing rule).
-     E13 step 5 keeps the first branch-free slot, so E14 PRs go between its move PRs or after it.
+  1. Steps 3 and 4 (mutation runs, triage) are local, in a detached worktree, and need no branch,
+     so they can run at any time. Steps 5 and 6 are PRs: they open only when no E13 move PR is in
+     flight (the E13 sequencing rule).
   2. Step 3 on the mkvdovi contract modules: `resume.rs`, `external.rs`,
      `metadata/{mod,probe}.rs` and `pipeline/{mod,config,analyzer,hybrid,hdr10plus,temp_dir,mdfix_notice}.rs`
      (413 mutants, about 70 min at `-j 3`), then `metadata/static_metadata.rs` (323, about
@@ -896,21 +794,6 @@ The detailed gap table and validation method live in
      code a PR changes. `main.rs`, `progress.rs` and `cli.rs` (142 mutants, mostly output text)
      run last, if at all.
   6. Analyzer numerics after E13 step 5, with E8 as the validation case.
-- **Why:** a test that has never been red has not been shown to test anything. Until 2026-10-15
-  the PR CI test job installed none of the integration-test tools, so the HLG 8.4, open-GOP, P7
-  full-range refusal (`pq_input_contract`), HDR10+ hybrid, synthetic-accuracy and clip tests
-  passed as skips (0.00 s on main run 38715765973); only `release.yml` ran them. Mutation testing ran once (E13 step 2: 69 of 75
-  `metadata.rs` mutants caught) and was never repeated. A read-only sweep on 2026-10-15
-  (`~/mkvdovi-work/test-audit-2026-10-15/smells-*.md`, unverified) lists one-sided decisions
-  (`classify_rpu_format`, the `inject_rpu` length refusal, `hlg_bitstream_lacks_transfer`, the
-  verifier's accept path), assertions that only check `is_ok()`, and tests that restate the
-  production formula.
-- **Steps:**
-  1. PR CI installs the tools (`.github/actions/setup-test-tools`, shared with `release.yml`) and
-     fails on unexpected skips.
-  2. P13 pilot: Codex writes the P13 acceptance tests from a behaviour-only spec in a worktree
-     without the diagnosis; record whether they assert something an in-session test would not,
-     and the cost. Done; dropped as a rule by the owner (2026-10-17).
 - [E14.3][desk] Mutation baseline (`cargo-mutants`) on `mkvdovi/src`, `verifier/src`,
   `dovi84_composer/src` and the analyzer contract files (`l1_sidecar.rs`, `leading_pictures.rs`,
   `ffmpeg_io.rs`, `writer.rs`, `cli.rs`), after a clean `check-test-skips` baseline on the host.
@@ -936,19 +819,10 @@ The detailed gap table and validation method live in
 
 ### E15: abort-safe RPU parsing
 
-- **Status:** Open. `mkvdovi` parses source RPUs in-process with the `dolby_vision` crate in
-  `rpu_check::classify_rpu_format` (format detection, before the FEL refusal: the Profile 7 MEL/FEL
-  split, and the RPU sniff for inputs MediaInfo does not report as Dolby Vision; Profile 8 is
-  classified from the MediaInfo text without a parse; also `inspect`), `analyze_rpu_file`
-  (`inspect`) and `sample_rpu_windows` (step 1 of every Dolby Vision conversion, after the FEL
-  refusal: L5 offsets, the unreliable-metadata warning and the `--mdfix` notice). The crate
-  (3.4.0) calls `unimplemented!` on a polynomial piece with `poly_order_minus1 == 0` and
-  `linear_interp_flag` set (`src/rpu/rpu_data_mapping.rs:415`). Under the release profile's
-  `panic = "abort"` that ends the process: no `Result` reaches the caller, a multi-file run stops,
-  and a Profile 7 FEL input that carries such a piece is never refused cleanly. No such RPU was found on the FEL test cuts; a
-  corrupt or unusual stream can carry one ([`docs/FEL_PLAN.md`](docs/FEL_PLAN.md) section 6).
-  `verify.rs` parses only RPUs that mkvdovi generated or rewrote with the same crate, whose writer
-  panics on that piece, so it is outside this step.
+- **Status:** Open. Defect found, not fixed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
+  Open: E15.1: `dolby_vision` 3.4.0's `unimplemented!` on a polynomial piece with
+  `poly_order_minus1 == 0` and `linear_interp_flag` set (`src/rpu/rpu_data_mapping.rs:415`) aborts
+  `classify_rpu_format`, `analyze_rpu_file` and `sample_rpu_windows` under `panic = "abort"`.
 - [E15.1][desk] Pre-scan each source RPU's data mapping for that piece before `parse_rpu_file` in the
   three functions, and return an error instead; re-check the scan when the crate is bumped. Gate: a
   unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
@@ -957,12 +831,9 @@ The detailed gap table and validation method live in
 
 ### E17: `--verify` checks for authored CM v4.0 blocks
 
-- **Status:** Open. `--verify` checks that the generated levels exist (L6, L9, L11, L254;
-  `verify.rs` `assert_rpu_invariants`), not whether CM v4.0 blocks are consistent. RPUs that
-  mkvdovi generates do not trigger these checks. Authored L8 and L10 blocks carried over from Dolby
-  Vision inputs can. Prior art: the metadata rules of the CB1 engine of
-  CroqueMr/libreelec-x86-DV (`CB1/docs/ALGORITHMS.md:68-72`, `CB1/src/dvbridge_creative.c:177,
-  184` at commit 5e63e16; GPL-3.0, the rules only, no code copied).
+- **Status:** Open. `--verify` checks that the generated levels exist (`assert_rpu_invariants`),
+  not whether authored L8 and L10 blocks from Dolby Vision inputs are consistent; prior art in
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E17.1.
 - **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
   RPU passes; the existing `--verify` tests and the RPU baselines are unchanged.
 - [E17.1][desk] Hard-fail `--verify` on duplicate L8 `target_display_index` values, duplicate L10
@@ -970,6 +841,16 @@ The detailed gap table and validation method live in
   frame, and optional L8 fields whose presence disagrees with the block length. First check what
   the `dolby_vision` crate (3.4.0) already rejects at parse time, and drop the checks it covers.
   Gate: the item gate.
+
+### E18: hot-file budgets
+
+- **Status:** Open. E18.1 closed (PR #81): `ROADMAP.md` trimmed from 74 KB to under its
+  64,000-byte budget; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E18.2.
+- **Gate:** the roadmap at or under its byte budget, with nothing lost (moved text in
+  `docs/ROADMAP_LOG.md`) and the ready queue unchanged.
+- [E18.2][desk] Byte budgets in `.claude/workflow.md` "## Size limits" (`CLAUDE.md` 24,000,
+  `AGENTS.md` 8,000, `ROADMAP.md` 64,000; ship plugin 1.6.0), and docs-keeper's budget line pointing
+  at them. Gate: `size-check.sh --all` lists no bytes row. Needs: E18.1.
 
 ## Explicit non-goals
 
