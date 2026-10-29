@@ -756,8 +756,8 @@ The detailed gap table and validation method live in
   (`convert_file` by phase) done 2026-10-13, evidence in
   `~/mkvdovi-work/rpu-baseline/e13-step4-d7c080d/`; step 5 (analyzer split) done 2026-10-17
   (#59, efbb948), evidence in `~/mkvdovi-work/rpu-baseline/e13-step5/`. No
-  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; E13.6–E13.21
-  open. Since E13.11 the limits are in `.claude/workflow.md` "## Size limits" (ship plugin 1.5.0):
+  production file is over the 800-line limit in CLAUDE.md ("Module size") any more; E13.11 done
+  2026-10-29 (PR #79); E13.6–E13.10 and E13.12–E13.21 open. Since E13.11 the limits are in `.claude/workflow.md` "## Size limits" (ship plugin 1.5.0):
   `clippy::too_many_lines` at 150 fails the gate, and each function over it carries an
   `#[expect(…, reason = "E13.<n>: split by phase")]` naming its step below.
 - **Steps, each its own PR:** (1) this item; (2) safety net: CUDA gate paths accept module
@@ -801,14 +801,6 @@ The detailed gap table and validation method live in
 - [E13.9][gpu][corpus] Split `run` (281 lines, `pipeline/mod.rs`) by phase. Gate: as E13.6.
 - [E13.10][gpu][corpus] Split `launch_and_collect` (243 lines, `analysis/gpu/backend.rs`) by phase.
   Gate: as E13.6.
-- [E13.11][gpu] Function-length lint and the size contract: `too_many_lines = "warn"` in
-  `Cargo.toml`, an `#[expect]` naming its step on each of the 10 functions over 150 code lines,
-  `clippy.toml` cut to its live key (no `msrv`: clippy reads `dovi_rpu_builder`'s 1.88; the
-  `tools/` crates set none and lint at the toolchain's MSRV),
-  `## Size limits` in `.claude/workflow.md`, and the size note moved from `rust-check.sh` to the ship
-  plugin's global hook. Gate: fmt, clippy (also `--features cuda`), tests; the L1 gate without
-  `--update`; `scripts/cuda-parity.sh` (the markers sit in its paths); a 160-statement probe
-  function fails clippy.
 - Code lines below are clippy's count (blank and comment lines skipped), 2026-10-28 @dc4882d. The
   mkvdovi gate: fmt, clippy, tests, and `scripts/rpu-baseline.sh compare --require-identical-l1`
   against `~/mkvdovi-work/rpu-baseline/e13-step5/`.
