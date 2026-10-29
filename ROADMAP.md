@@ -76,16 +76,25 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) 2026-10-17). What is left: the owner's eyes or
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
-- **WS6.9, then WS6.6: measure the neutral-finder probe, then view the redesigned canary,** on
-  the LG OLED C9. The probe was built and handed off on 2026-10-27 (WS6.8, PR #78), metered with
-  the owner's X-Rite i1Display Pro: forplex `WS6-neutral-probe-2026-10-27`, about 40 minutes.
-  WS6.6 waits for WS6.5, which Claude builds from the WS6.9 result.
+- **WS6.6: view the redesigned canary** on the LG OLED C9, by eye, once Claude has built it
+  (WS6.5, from the WS6.9 by-eye result of 2026-10-29).
+- **WS6.10: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
 - **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
   roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
 - **E15.1: not in the Priorities list.** It has a gate and is startable, but no priority names it
   (priority 10 only says it is not held); the owner places it (found 2026-10-25).
+
+### Metered tests (later)
+
+Tests that need the owner's X-Rite i1Display Pro on the Windows PC. The owner runs them when the
+roadmap reaches them; by-eye tests come first (owner, 2026-10-29). `/ship:roadmap-next` treats
+these as waiting for the owner.
+
+- **WS6.10: meter the neutral-finder probe** (the WS6.8 files, 15 runs, about 40 minutes;
+  ArgyllCMS 3.5.0 on the PC). Not needed for WS6.5/WS6.6; it can settle the
+  half-code question (`Hhalf` against `H1024`) that the eye cannot.
 
 ### Release plan (2026-10-14)
 
@@ -445,7 +454,15 @@ The detailed gap table and validation method live in
   every Cb and Cr crossing within 0.03 code of `code / 1023` against a 0.1-code gate; both arm
   intercepts within 0.003 code). Design and checks: `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`
   (`PREREG.md`, `run.sh`, `render/analysis.txt`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md)
-  "Metered tests".
+  "Metered tests". The owner then chose to read WS6.9 by eye (2026-10-29); every metered test
+  moved to a separate later list (WS6.10). Viewed by eye on 2026-10-29 in two passes (Plex on the
+  Shield, Dolby Vision Cinema, badge on every file): no gain-dependent shift at codes 912 and 160
+  (grey at 912.0–912.25 and 160.25–161.0 for gains 2.5–10), so the WS6.4 shift belongs to the
+  codes near 944 (at 944, gain 5 puts grey at ≥ 950.5 and gain 10 shows no grey in 928–960).
+  Pre-registered decision: undecided by eye (the arm difference 751.89 ± 0.24 holds the 1023 and
+  1023.75 scales); both arms read about 0.6 code above `code / 1023` at every gain, which leans
+  away from `code / 1023` without meeting the rule. Evidence:
+  `~/mkvdovi-work/ws6-neutral-eye-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers_pass*.json`).
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -466,20 +483,28 @@ The detailed gap table and validation method live in
   the files to the owner (owner decision 2026-10-17); the canary is designed from what the ladder
   showed, so build and viewing alternate (WS6.3 to WS6.6). The ladder showed a gain-dependent
   neutral shift, so the neutral-finder probe (WS6.8, WS6.9) comes before the canary.
-- [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9. Gate: the apparent
+- [WS6.9][owner][reassess] View or measure the neutral-finder probe on the LG OLED C9 (read by eye,
+  owner 2026-10-29; viewed 2026-10-29, `RESULT.md` above). Gate: the apparent
   neutral BL chroma code per gain recorded in the log (to about ±0.5 code by eye, ±0.25 metered),
   with the fit of neutral code against gain. Its intercept at gain 0 is the input-side reading
   (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
   tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
   rules (`PREREG.md` draft 2). Needs: WS6.8.
 - [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
-  no slope limit) and within the coefficient range real RPUs use. Gate: a discriminating canary, a composer that is
+  no slope limit) and within the coefficient range real RPUs use. After WS6.9 (2026-10-29): a
+  blind forced-choice canary at the code 912 region and gain 10, away from the shift near 944:
+  side-by-side patches neutral under `code / 1023` and under `code / 1024` (0.9 code apart),
+  "which one is grey?", read by eye. Gate: a discriminating canary, a composer that is
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
   handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
   showed a gain-dependent neutral shift larger than the normalization difference; if WS6.9
   answers the question on its own (gate (3)), WS6.5 and WS6.6 are dropped).
 - [WS6.6][owner] View the redesigned canary on the LG OLED C9. Gate: the item's gate (3): viewed
   on the LG OLED C9, answer recorded. Needs: WS6.5.
+- [WS6.10][owner] Meter the WS6.8 probe on the LG OLED C9 (metered list, later; owner
+  2026-10-29). Gate: the outcome of `PREREG.md` draft 2 recorded in the log, from readings taken
+  with the i1Display Pro (`probe_meter.py check` first). Files: the WS6.8 build in
+  `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/build/`, re-delivered as a Plex show when run.
 - **Checked 2026-10-25 @3c0c913:** `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
   (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
   evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there
