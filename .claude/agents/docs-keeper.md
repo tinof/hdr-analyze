@@ -49,8 +49,11 @@ the Next up block (promotes it, or writes a Reassess line).
   pointers, not explanations. A fact goes there only when not knowing it before an edit breaks
   something; its reason, its code path, the numbers and the history ("since P8", what an incident
   showed) go to the topic doc in the table above. Never add a version-by-version history to
-  `CLAUDE.md`. Budget: `wc -c CLAUDE.md` at most 24,000 bytes. If your edit would pass it, move
-  detail out of the section you touch into its topic doc, and report the size before and after.
+  `CLAUDE.md`. Budgets: the `claude-md`, `agents-md` and `roadmap` bullets of `.claude/workflow.md`
+  "## Size limits" (`wc -c`; `CLAUDE.md` 24,000 bytes now). If your edit would take a file past its
+  budget, move detail out of the section you touch into its topic doc (for `ROADMAP.md`, the log),
+  and report the size before and after. A file already over budget before your edit is not yours to
+  trim: report it; `/ship` adds a Trim step under E18.
 - Keep the `CLAUDE.md` headings that other files cite by name: "Testing quirks", "CI behavior that
   affects edits", "Module size", "Lint/style policy".
 - **Acceptance gate.** Never mark a step done. Report whether the caller named the

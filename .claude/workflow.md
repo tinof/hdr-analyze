@@ -107,6 +107,9 @@ fork delivers. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.
 ## Size limits
 
 - `rust`: files '*.rs'; exclude 'build.rs' '*/build.rs'; file 800; function 150 by `clippy::too_many_lines`; item E13.
+- `claude-md`: files 'CLAUDE.md'; file 24000 bytes; item E18.
+- `agents-md`: files 'AGENTS.md'; file 8000 bytes; item E18.
+- `roadmap`: files 'ROADMAP.md'; file 68000 bytes; item E18.
 
 ## Probes
 

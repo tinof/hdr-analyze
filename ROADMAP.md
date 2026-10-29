@@ -849,8 +849,8 @@ The detailed gap table and validation method live in
 - **Gate:** the roadmap at or under its byte budget, with nothing lost (moved text in
   `docs/ROADMAP_LOG.md`) and the ready queue unchanged.
 - [E18.2][desk] Byte budgets in `.claude/workflow.md` "## Size limits" (`CLAUDE.md` 24,000,
-  `AGENTS.md` 8,000, `ROADMAP.md` 64,000; ship plugin 1.6.0), and docs-keeper's budget line pointing
-  at them. Gate: `size-check.sh --all` lists no bytes row. Needs: E18.1.
+  `AGENTS.md` 8,000, `ROADMAP.md` 68,000, owner 2026-10-30: 64,000 left about 560 bytes; ship
+  plugin 1.6.0), and docs-keeper's budget line pointing at them. Gate: `size-check.sh --all` lists no bytes row. Needs: E18.1.
 
 ## Explicit non-goals
 
