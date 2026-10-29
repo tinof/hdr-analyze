@@ -157,11 +157,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    item (WS4: blinded A/B on a device; WS1.2–WS1.4 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, P3, P5, WS0, WS6): the
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, P5, WS0, WS6): the
     remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
     v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5), `--verify`
-    checks for authored CM v4.0 blocks (E17). Ranked below 1–10; added
+    checks for authored CM v4.0 blocks (E17), hot-file byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
@@ -970,6 +970,20 @@ The detailed gap table and validation method live in
   frame, and optional L8 fields whose presence disagrees with the block length. First check what
   the `dolby_vision` crate (3.4.0) already rejects at parse time, and drop the checks it covers.
   Gate: the item gate.
+
+### E18: hot-file budgets
+
+- **Status:** Open. `ROADMAP.md` is 72 KB, read on every `/ship:roadmap-next` and `/ship` run;
+  `CLAUDE.md` is sent on every turn.
+- **Gate:** the roadmap at or under its byte budget, with nothing lost (moved text in
+  `docs/ROADMAP_LOG.md`) and the ready queue unchanged.
+- [E18.1][desk] Trim `ROADMAP.md` to open work: Status lines to the current state, finished-step
+  notes, dated measurements and closed orders moved verbatim to the log. Gate: every removed line
+  is in the log (links rewritten for `docs/`), the `roadmap-ready.sh` rows and `ready` hash
+  unchanged, the `###` headings unchanged, and the file at or under 56,000 bytes.
+- [E18.2][desk] Byte budgets in `.claude/workflow.md` "## Size limits" (`CLAUDE.md` 24,000,
+  `AGENTS.md` 8,000, `ROADMAP.md` 56,000; ship plugin 1.6.0), and docs-keeper's budget line pointing
+  at them. Gate: `size-check.sh --all` lists no bytes row. Needs: E18.1.
 
 ## Explicit non-goals
 
