@@ -67,6 +67,7 @@ fn hybrid_sampling_refusal(args: &Args) -> Option<String> {
     })
 }
 
+#[expect(clippy::too_many_lines, reason = "E13.12: split by phase")]
 pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     let input_path = Path::new(input_file);
     if !input_path.exists() {

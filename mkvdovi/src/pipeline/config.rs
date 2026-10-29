@@ -26,6 +26,7 @@ pub(super) struct Configured {
 
 /// Writes `extra.json` for `dovi_tool generate`. Settles which L1 sidecar the RPU carries
 /// (`measured.l1_sidecar`). `None`: the phase printed why; `convert_file` returns `Ok(false)`.
+#[expect(clippy::too_many_lines, reason = "E13.15: split by phase")]
 pub(super) fn prepare_configuration(
     input_file: &str,
     temp_dir: &Path,

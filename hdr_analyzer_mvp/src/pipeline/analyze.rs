@@ -132,6 +132,7 @@ fn write_max_rgb_dump(
     std::fs::write(&path, bytes).with_context(|| format!("Failed to write {}", path.display()))
 }
 
+#[expect(clippy::too_many_lines, reason = "E13.6: split by phase")]
 pub(super) fn run_native_analysis_pipeline(
     cli: &Cli,
     video_info: &VideoInfo,

@@ -38,7 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Claude Code feedback loop (committed in `.claude/`)
 
-- Per edit, rust-analyzer pushes diagnostics incl. `cargo check` results (needs `rustup component add rust-analyzer`). At end of turn `.claude/hooks/rust-check.sh` rustfmts touched files and runs clippy (plus `nvcc -ptx` for a touched `.cu`); it feeds back errors anywhere and warnings in touched files, never runs tests, and does not lint `cuda`-gated code. Details: [`docs/CI.md`](docs/CI.md).
+- Per edit, rust-analyzer pushes diagnostics incl. `cargo check` results (needs `rustup component add rust-analyzer`). At end of turn `.claude/hooks/rust-check.sh` rustfmts touched files and runs clippy (plus `nvcc -ptx` for a touched `.cu`); it feeds back errors anywhere and warnings in touched files, never runs tests, and does not lint `cuda`-gated code. The file-size note is the ship plugin's global hook, not this one. Details: [`docs/CI.md`](docs/CI.md).
 
 ## Roadmap workflow (committed in `.claude/`)
 
@@ -100,14 +100,15 @@ Each rule is one line; the reasons and code paths are in [`docs/MKVDOVI_PIPELINE
 
 ## Lint/style policy in this repo (non-default)
 
-- Workspace lints in root `Cargo.toml`: clippy `all` allowed but `correctness` denied; `dbg_macro` denied; rustc `rust_2018_idioms` and `unused_qualifications` warn — all fail under `-D warnings` in CI. `unwrap`/`expect`/`print` are allowed everywhere (the `allow-*-in-tests` keys in `clippy.toml` have no effect).
-- `unsafe_op_in_unsafe_fn = "deny"`, but `unsafe_code` is **allowed**. `clippy.toml` raises the complexity thresholds.
+- Workspace lints in root `Cargo.toml`: clippy `all` allowed but `correctness` denied; `dbg_macro` denied; `too_many_lines` warns (threshold 150 in `clippy.toml`); rustc `rust_2018_idioms` and `unused_qualifications` warn — all fail under `-D warnings` in CI. `unwrap`/`expect`/`print` are allowed everywhere.
+- `unsafe_op_in_unsafe_fn = "deny"`, but `unsafe_code` is **allowed**. A `clippy.toml` key acts only when its lint is enabled in `Cargo.toml`; add the two together. No `msrv` key: clippy reads a crate's `rust-version` (only `dovi_rpu_builder` sets one; `tools/` crates lint at the toolchain's MSRV).
 - `kernels.cu` is only compiled by NVRTC at runtime. The Stop hook's `nvcc -ptx` catches syntax and type errors, but nvcc is not the NVRTC the binary loads, so a `--hwaccel cuda` run (`scripts/cuda-parity.sh`) is the real check.
 - Imports: std → third-party → `crate::`, grouped with braces, absolute `crate::` paths internally. `anyhow::Result` + `.context()` at app level; `thiserror` for library error types.
 
 ## Module size
 
-- A Rust source file stays at or under about 800 code lines; inline `#[cfg(test)] mod` blocks do not count. The Stop hook notes a touched file over the limit once per session. Long functions matter as much: split a function by phase before it passes a few hundred lines.
+- A Rust source file stays at or under about 800 code lines; inline `#[cfg(test)] mod` blocks do not count. The limits live in `.claude/workflow.md` "## Size limits"; the ship plugin's global hook notes a touched file over the limit once per session, and `/ship` adds a split step to E13 for a file a PR pushes over.
+- A function stays at or under 150 code lines: `clippy::too_many_lines` fails the gate. Split a new long function by phase. The existing ones carry `#[expect(clippy::too_many_lines, reason = "E13.<n>: split by phase")]`; a new marker needs its own roadmap step, and the step that splits the function removes the marker (`#[expect]` fails once the function is short).
 - Over the limit, split in its own commit (a pure move), never in the same commit as a behavior change: (1) move the inline test module to `<module>/tests.rs` (`#[cfg(test)] mod tests;`, `use super::*` still reaches private items); (2) turn `foo.rs` into `foo/mod.rs` plus a few cohesive submodules of the same crate, never a new crate (LTO and the CPU/CUDA bit-identity rely on intra-crate inlining); (3) keep every existing path valid with `pub use` re-exports in the parent, because code, this file, `docs/` and `.claude/` name items as `module::item`; widen visibility only to `pub(super)`; (4) simplify in a later commit.
 - Proof for a pure move: `git diff --color-moved=dimmed-zebra` shows only moved blocks; the gates of the touched paths pass (`.claude/workflows/pre-pr-panel.js` treats `foo.rs` and `foo/` alike); the L1 gate passes without `--update`; for mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the E13 baselines in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` is clean.
 - Moves that break silently: `include_str!` paths are file-relative (`gpu/backend.rs` includes `../kernels.cu`); `#[cfg(feature = "cuda")]` items must move with their gating; f32 operation order that mirrors `kernels.cu`; the `resume_settings` string, which fingerprints users' temp directories; line-number references in `ROADMAP.md` and `docs/`.

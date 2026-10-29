@@ -591,7 +591,7 @@ fn parse(args: &[String]) -> Result<(String, Options)> {
     let width: usize = args.get(1).context(USAGE)?.parse()?;
     let height: usize = args.get(2).context(USAGE)?.parse()?;
     ensure!(
-        width > 0 && height > 0 && width % 2 == 0 && height % 2 == 0,
+        width > 0 && height > 0 && width.is_multiple_of(2) && height.is_multiple_of(2),
         "width and height must be even and non-zero"
     );
     let mut options = Options {
@@ -748,7 +748,7 @@ pub fn run(args: &[String]) -> Result<()> {
             Some(reader) => read_companion(reader, &mut mask_buffer, "--mask", index)?,
             None => false,
         };
-        if index % options.every == 0 {
+        if index.is_multiple_of(options.every) {
             let y = codes(&buffer[..luma_bytes]);
             let cb = codes(&buffer[luma_bytes..luma_bytes + chroma_bytes]);
             let cr = codes(&buffer[luma_bytes + chroma_bytes..]);

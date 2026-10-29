@@ -254,6 +254,7 @@ fn apply_median3_denoise(y_data: &[u8], stride: usize, crop_rect: &CropRect) -> 
     output
 }
 
+#[expect(clippy::too_many_lines, reason = "E13.8: split by phase")]
 pub fn analyze_native_frame_cropped(
     frame: &frame::Video,
     crop_rect: &CropRect,

@@ -31,6 +31,9 @@ unused_qualifications = "warn"
 all = { level = "allow", priority = -2 }
 correctness = { level = "deny", priority = 1 }
 dbg_macro = "deny"
+# Function length, threshold in clippy.toml. A function over it carries
+# #[expect(clippy::too_many_lines, reason = "<roadmap step>")] until that step splits it.
+too_many_lines = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"

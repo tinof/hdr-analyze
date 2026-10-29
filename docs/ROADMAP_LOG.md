@@ -6,6 +6,33 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-10-29: E13.11 Function-length lint and the size contract (PR #79)
+
+Step: [E13.11][gpu] Function-length lint and the size contract: `too_many_lines = "warn"` in
+  `Cargo.toml`, an `#[expect]` naming its step on each of the 10 functions over 150 code lines,
+  `clippy.toml` cut to its live key (no `msrv`: clippy reads `dovi_rpu_builder`'s 1.88; the
+  `tools/` crates set none and lint at the toolchain's MSRV),
+  `## Size limits` in `.claude/workflow.md`, and the size note moved from `rust-check.sh` to the ship
+  plugin's global hook. Gate: fmt, clippy (also `--features cuda`), tests; the L1 gate without
+  `--update`; `scripts/cuda-parity.sh` (the markers sit in its paths); a 160-statement probe
+  function fails clippy.
+
+Resolution: closes E13.11. `clippy::too_many_lines` now fails the gate above 150 code lines. The
+10 functions over it carry `#[expect(…, reason = "E13.<n>: split by phase")]` naming E13.6,
+E13.8–E13.10 and the new E13.12–E13.17; E13.18–E13.21 hold the two `tools/` files over 800 lines
+and the lint follow-ups. Without `msrv`, the `tools/` crates (no `rust-version`, default lint
+levels) lint at the toolchain MSRV, so `manual_is_multiple_of` failed the `tool:fit_hlg_composer`
+gate (found by the pre-PR panel); the three checks in `tools/fit_hlg_composer/src/siting.rs` use
+`is_multiple_of` now. `tools/compare_baseline` already failed clippy on main
+(`unnecessary_map_or`, `src/main.rs:56`); it is untouched here.
+
+Evidence: on the CUDA host at the reviewed head, the repo gate (fmt, workspace clippy,
+`scripts/ci/test-gate.sh`), `clippy-cuda`, the L1 regression gate without `--update` (5/5 cuts),
+`scripts/cuda-parity.sh` PASS and the `tool:fit_hlg_composer` gate passed; a 161-line probe
+function in `dovi_rpu_builder` failed clippy with "this function has too many lines (161/150)";
+CI on PR #79. Cross-review: Codex (gpt-6.1-sol, high) exec and Codex's GitHub review LGTM; the
+pre-PR panel's one finding (the `tools/` MSRV lint) fixed.
+
 ### 2026-10-28: WS6.8 Build the neutral-finder probe (PR #78)
 
 Step: [WS6.8][desk] Build the neutral-finder probe (owner, 2026-10-22): composers neutral at the same

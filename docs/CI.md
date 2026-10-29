@@ -71,11 +71,14 @@ hooks run only where pre-commit is installed
   `--manifest-path tools/<crate>/Cargo.toml` for a touched tool crate). It feeds back only errors
   from any file and warnings in touched files. A touched `.cu` kernel is also compiled with
   `nvcc -ptx` (from PATH or `/usr/local/cuda/bin`; skipped when there is no toolkit), and its errors
-  and warnings are fed back. A touched `.rs` file over 800 code lines gets a one-time note per
-  session that never blocks. Turns without Rust or `.cu` edits never start cargo. After 3 feedback
+  and warnings are fed back. Turns without Rust or `.cu` edits never start cargo. After 3 feedback
   rounds it tells the user and stays quiet until the next Rust or `.cu` edit. State lives in
   `${TMPDIR:-/tmp}/claude-rust-check/<session_id>/`. An incremental run takes about 2–4 s on the
   `/mnt/c` checkout. Tests do not run here; they run in the pre-push hook (where installed), the
   pre-PR test gate and CI.
+- **Size note:** the global ship plugin hook (`~/.claude/skills/ship/scripts/size-check.sh`,
+  wired in `~/.claude/settings.json`) reads `.claude/workflow.md` "## Size limits" and notes a
+  touched `.rs` file over 800 code lines once per session; it never blocks. It is not part of this
+  repo: a host without the synced plugin gets no note, and `/ship` still runs the same check.
 - The hook does not lint the `cuda`-gated Rust code; CI's lint job does
   (`cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings`).
