@@ -105,7 +105,13 @@ result.
 - For preference tests (P10), the key stays in the work directory and is revealed only after
   the report.
 - The guide never says where the answer is expected ("grey should sit near the middle"): the
-  WS6.9 pass-2 guide did, and its readings are logged with that caveat.
+  WS6.9 pass-2 guide did, and its answers then repeated the same patch positions across gains
+  and arms, although a code was a 4× larger colour step at the high gain. Answers that do not
+  move with the colour step follow the position; such a pass carries no sub-code reading.
+- **Forced choice beats "find the greyest".** Two touching patches, "which is greyer?", with the
+  decisive pair repeated on balanced sides, mirrored pages, a gain-0 page, a catch pair of
+  identical means (one flat, one dithered), and opposite-sign gains so a preference for one tint
+  shows as a disagreement (WS6.5 design, 2026-10-29).
 
 ## What the owner reports
 

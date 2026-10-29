@@ -456,12 +456,12 @@ The detailed gap table and validation method live in
   (`PREREG.md`, `run.sh`, `render/analysis.txt`); method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md)
   "Metered tests". The owner then chose to read WS6.9 by eye (2026-10-29); every metered test
   moved to a separate later list (WS6.10). Viewed by eye on 2026-10-29 in two passes (Plex on the
-  Shield, Dolby Vision Cinema, badge on every file): no gain-dependent shift at codes 912 and 160
-  (grey at 912.0–912.25 and 160.25–161.0 for gains 2.5–10), so the WS6.4 shift belongs to the
-  codes near 944 (at 944, gain 5 puts grey at ≥ 950.5 and gain 10 shows no grey in 928–960).
-  Pre-registered decision: undecided by eye (the arm difference 751.89 ± 0.24 holds the 1023 and
-  1023.75 scales); both arms read about 0.6 code above `code / 1023` at every gain, which leans
-  away from `code / 1023` without meeting the rule. Evidence:
+  Shield, Dolby Vision Cinema, badge on every file): no large shift at codes 912 and 160 (pass 1,
+  without hints: at gain 10 grey within about ±2 codes of the centre, where the WS6.4 law
+  predicts +12), so the WS6.4 shift belongs to the codes near 944 (at 944, gain 5 puts grey at
+  ≥ 950.5 and gain 10 shows no grey in 928–960). Pre-registered decision: undecided by eye. The
+  pass-2 fine readings repeat the same patch positions across gains and arms after a guide hint,
+  so they are logged but carry no sub-code conclusion. Evidence:
   `~/mkvdovi-work/ws6-neutral-eye-2026-10-29/` (`RESULT.md`, `PREREG.md`, `answers_pass*.json`).
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
@@ -492,9 +492,10 @@ The detailed gap table and validation method live in
   rules (`PREREG.md` draft 2). Needs: WS6.8.
 - [WS6.5][desk] Build the redesigned canary around the neutral shift WS6.9 measures (WS6.4 found
   no slope limit) and within the coefficient range real RPUs use. After WS6.9 (2026-10-29): a
-  blind forced-choice canary at the code 912 region and gain 10, away from the shift near 944:
-  side-by-side patches neutral under `code / 1023` and under `code / 1024` (0.9 code apart),
-  "which one is grey?", read by eye. Gate: a discriminating canary, a composer that is
+  blind forced-choice canary at the code 912 region, away from the shift near 944: side-by-side
+  patches neutral under `code / 1023` and under `code / 1024`, "which one is grey?", read by eye,
+  at gains 5, 10 and −10 (a leftover shift and a tint preference each show as a disagreement),
+  the decisive pair replicated with balanced sides. Gate: a discriminating canary, a composer that is
   neutral under one normalization and visibly coloured under the other, checked in libplacebo and
   handed off for the C9 with a `VIEWING_GUIDE.txt`. Needs: WS6.9 (the WS6.4 outcome, 2026-10-21,
   showed a gain-dependent neutral shift larger than the normalization difference; if WS6.9
