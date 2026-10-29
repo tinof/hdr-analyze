@@ -1576,6 +1576,18 @@ Verbatim, apart from relative links rewritten for this directory. Each item's ne
   The final-RPU regression corpus and the written Shield/TV playback procedure (WS6) grow alongside
   items 1 to 3, which each need a playback check.
 
+- Priority openings as they read until 2026-10-29 (priority 1 then named the closed WS6.5 and
+  WS6.6; priority 11 had no E18). Priority 1, first line:
+1. **HLG → Profile 8.4 composer** (P8, WS6.9, WS6.5, WS6.6). `--hlg-composer bt2100` and the input refusal landed
+
+  Priority 11:
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, P3, P5, WS0, WS6): the
+    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
+    v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
+    provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5), `--verify`
+    checks for authored CM v4.0 blocks (E17). Ranked below 1–10; added
+    2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
+
 ### P1: CPU analysis default (from ROADMAP.md)
 
 - **Status:** Partial. Source-honest generation is the default. CUDA is the main pipeline;
