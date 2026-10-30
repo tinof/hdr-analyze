@@ -78,7 +78,8 @@ hooks run only where pre-commit is installed
   pre-PR test gate and CI.
 - **Size note:** the global ship plugin hook (`~/.claude/skills/ship/scripts/size-check.sh`,
   wired in `~/.claude/settings.json`) reads `.claude/workflow.md` "## Size limits" and notes a
-  touched `.rs` file over 800 code lines once per session; it never blocks. It is not part of this
+  touched `.rs` file over 800 code lines, or `CLAUDE.md`, `AGENTS.md` or `ROADMAP.md` over its byte
+  budget, once per session; it never blocks. It is not part of this
   repo: a host without the synced plugin gets no note, and `/ship` still runs the same check.
 - The hook does not lint the `cuda`-gated Rust code; CI's lint job does
   (`cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings`).
