@@ -844,13 +844,11 @@ The detailed gap table and validation method live in
 
 ### E18: hot-file budgets
 
-- **Status:** Open. E18.1 closed (PR #81): `ROADMAP.md` trimmed from 74 KB to under its
-  64,000-byte budget; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E18.2.
+- **Status:** Core complete; no step open. The budgets are in `.claude/workflow.md` "## Size limits"
+  (history: [the log](docs/ROADMAP_LOG.md), 2026-10-30). E18 stays as the `item` of those bullets,
+  which collects Trim steps.
 - **Gate:** the roadmap at or under its byte budget, with nothing lost (moved text in
   `docs/ROADMAP_LOG.md`) and the ready queue unchanged.
-- [E18.2][desk] Byte budgets in `.claude/workflow.md` "## Size limits" (`CLAUDE.md` 24,000,
-  `AGENTS.md` 8,000, `ROADMAP.md` 68,000, owner 2026-10-30: 64,000 left about 560 bytes; ship
-  plugin 1.6.0), and docs-keeper's budget line pointing at them. Gate: `size-check.sh --all` lists no bytes row. Needs: E18.1.
 
 ## Explicit non-goals
 

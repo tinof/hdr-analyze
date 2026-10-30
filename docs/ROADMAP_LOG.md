@@ -6,6 +6,23 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-10-30: E18.2 Byte budgets in the contract (PR #82)
+
+Step: - [E18.2][desk] Byte budgets in `.claude/workflow.md` "## Size limits" (`CLAUDE.md` 24,000,
+  `AGENTS.md` 8,000, `ROADMAP.md` 68,000, owner 2026-10-30: 64,000 left about 560 bytes; ship
+  plugin 1.6.0), and docs-keeper's budget line pointing at them. Gate: `size-check.sh --all` lists no bytes row. Needs: E18.1.
+
+Gate evidence: on the PR head, `size-check.sh --all` lists no bytes row (`CLAUDE.md` 23,813,
+`AGENTS.md` 2,353, `ROADMAP.md` 63,488 bytes), `--diff origin/main` prints nothing, and
+`roadmap-ready.sh` gives no size warning with the ready hash unchanged (9dca7a7a0737). In a scratch
+clone the hook notes a padded `CLAUDE.md` once and stays silent on the second stop.
+
+Resolution: closes E18.2. The contract carries the three budgets under item E18, and docs-keeper's
+rule points at it. The roadmap budget is 68,000, not the 64,000 the step first named (owner,
+2026-10-30): 64,000 left about 560 bytes, the E18.1 dated pass found nothing more that could safely
+move, and recent step PRs added 2-5 KB of new steps each. E18 stays in the roadmap because the
+contract names it as the `item` of the budget bullets.
+
 ### 2026-10-29: E18.1 Trim the roadmap to open work (PR #81)
 
 Step: - [E18.1][desk] Trim `ROADMAP.md` to open work: Status lines to the current state, finished-step
