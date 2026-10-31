@@ -472,6 +472,12 @@ pub fn run_command_inherit_stderr(cmd: &mut Command, log_path: &Path) -> Result<
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_analyzer_that_cannot_be_started_lists_no_option() {
+        let missing = Path::new("/nonexistent/hdr_analyzer_mvp");
+        assert!(!analyzer_lists_option(missing, "l1-sidecar-frame-peak"));
+    }
+
     use super::*;
 
     /// A child that writes far more than a pipe buffer to both streams. Before the fix,

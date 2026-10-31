@@ -99,10 +99,10 @@ shot's L1 for the rest of it, is the caller's job.
 | L6 | From the source; when it states none, 1000 / 0.005 nits mastering, MaxCLL 1000, MaxFALL 400 (`Level6::mkvdovi_default`) |
 | 8.1 source range | `source_range_81` of the mastering display; `None` (the generator's L6 lookup) when implausible |
 | 8.4 source range | Always the preset's 62..3079 |
-| `l1_avg_pq_cm_version` | V29 with measured L1 (an analyzer sidecar, 8.1 and 8.4), the CM version otherwise (HDR10+) |
+| `l1_avg_pq_cm_version` | V29 with measured L1 (an analyzer sidecar, 8.1 and 8.4), the CM version otherwise (HDR10+ under `--hdr10plus-l1 hdr10plus`) |
 
 `extra_json` writes `l1_avg_pq_cm_version` with shots (as mkvdovi always has) or when it differs
-from the CM version. That keeps the HDR10+ `extra.json`, which never stated it, byte-identical.
+from the CM version. That keeps the `extra.json` of `--hdr10plus-l1 hdr10plus`, which never stated it, byte-identical.
 
 ## HDR10+ → L1
 
@@ -145,7 +145,7 @@ cannot always know whether that AU starts a scene: with B-frames the previous fr
 presentation order may not have been read yet. Without buffering to presentation order, the L1 of
 each scene still matches `dovi_tool`, but the AU that carries the scene refresh can differ. An AU without a payload gets no L1 from this crate. `hdr10plus_tool` (like
 FFmpeg) gives it the previous payload in decode order, before reordering, and that is what
-`dovi_tool` sees. Not covered: `--hdr10plus-l1 hybrid` (the analyzer's cuts and averages), HDR10+
+`dovi_tool` sees. Not covered: `--hdr10plus-l1 hybrid`, mkvdovi's HDR10+ default (the analyzer's cuts and averages), HDR10+
 together with a reused measurement sidecar, and multi-window payloads.
 
 ## Static Profile 8.4

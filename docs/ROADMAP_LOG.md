@@ -6,6 +6,43 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-01: P9.3 Flip the default (PR #84)
+
+Step: - [P9.3][corpus] Flip the default, after the v0.7.0 release PR (Release plan: v0.8.0). Gate:
+  `--hdr10plus-l1` defaults to `hybrid` and the old path stays selectable by name; HDR10+ RPU
+  baselines are re-captured and every other baseline stays byte-identical; CHANGELOG entry under
+  Changed. The checks that today fire on the flag value alone, whatever the input, must not turn
+  on for every user, each with a test on both sides: `--legacy-madvr-l1` without `--hdr10plus-l1`
+  still runs, and only an explicit `--hdr10plus-l1 hybrid` conflicts with it (`Args::flag_conflict`,
+  `mkvdovi/src/cli.rs`; the existing test
+  `hdr10plus_l1_defaults_to_hdr10plus_and_hybrid_excludes_legacy_madvr_l1` is extended, not
+  flipped); a non-HDR10+ input prints no "applies only to HDR10+ inputs; ignored" line under the
+  default (`convert_file`, `pipeline/mod.rs`); an HDR10+ input under `--analysis-quality fast`
+  without an explicit flag still converts, through the `hdr10plus` path with a visible notice,
+  and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`); the same holds
+  for a missing or older analyzer, unusable HDR10+ metadata and a failed analysis, each on both
+  sides, and a run that changes path inside one fingerprint withdraws the old RPU.
+
+Gate evidence: on the PR head, `gate` passes; CI on PR #84. Tests: the extended
+`hdr10plus_l1_defaults_to_hdr10plus_and_hybrid_excludes_legacy_madvr_l1`,
+`hdr10plus_mode_defaults_to_hybrid_and_only_an_explicit_hybrid_refuses`,
+`the_ignored_hybrid_line_needs_the_flag_and_another_input`, and in `mkvdovi/tests/hdr10plus_hybrid.rs`
+`without_the_flag_a_file_that_cannot_take_the_hybrid_converts_from_the_metadata`,
+`the_default_is_the_hybrid_with_the_fresh_analysis_of_an_explicit_one` and
+`the_fingerprint_follows_the_path_the_file_takes_not_the_flag`. In
+`~/mkvdovi-work/p9-3-hybrid-default-2026-10-31/README.md`: the 8 non-HDR10+ baselines and the old
+path by name pass `compare --require-identical-l1` against 0.7.0 with equal `RPU.bin` sha256; 8
+HDR10+ cuts with no flag have the `RPU.bin` of explicit hybrid. The re-captured HDR10+ baselines are
+in `~/mkvdovi-work/rpu-baseline/p9-3-hybrid-default/default/`. Seven mutations of the fallback
+paths were caught. CHANGELOG entry under Changed.
+
+Resolution: closes P9.3. Only an explicit `--hdr10plus-l1 hybrid` refuses; without the flag a file
+that cannot take the hybrid warns and uses the HDR10+ metadata. `extra.json` is replaced after the
+stale RPU is withdrawn, because one fingerprint can cover both paths. `scripts/rpu-baseline.sh`
+now records a symlink's real size, so manifests captured through a symlink before this need a new
+capture. Codex exec and the GitHub review found nothing. Accepted: a stale analyzer beside a
+reusable v6 sidecar takes the metadata path without the flag.
+
 ### 2026-10-31: P9.2 Sidecar v6 (PR #83)
 
 Step: - [P9.2][gpu][corpus] Sidecar v6 with a per-frame max for an exact fallback peak, also recording

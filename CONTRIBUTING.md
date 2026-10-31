@@ -57,7 +57,7 @@ We welcome several types of contributions:
 
 - Rust stable with `clippy` and `rustfmt`. `rust-toolchain.toml` selects it when you install through [rustup](https://rustup.rs/).
 - FFmpeg development libraries plus `clang`/`libclang` for the `ffmpeg-next` bindings.
-- Runtime tools for `mkvdovi`: `ffmpeg`, `mkvmerge`, `dovi_tool` 2.3.2 or later, `mediainfo` or `ffprobe`, and `hdr10plus_tool` for HDR10+ inputs.
+- Runtime tools for `mkvdovi`: `ffmpeg`, `mkvmerge`, `dovi_tool` 2.3.2 or later, `mediainfo` or `ffprobe`, and `hdr10plus_tool` for HDR10+ inputs (which also run the sibling `hdr_analyzer_mvp`).
 
 [docs/INSTALLATION.md](docs/INSTALLATION.md) has the per-OS package commands, the source build and the CUDA build.
 

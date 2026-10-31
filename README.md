@@ -47,6 +47,8 @@ Install these tools separately and put them on `PATH`. `mkvdovi` checks for all 
 | `mediainfo` (recommended) or `ffprobe` | stream inspection. MediaInfo supplies the L6 and L9 source values; with `ffprobe` alone they fall back to defaults. |
 | [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) | HDR10+ input. An HDR10+ file fails if the tool is missing. |
 
+HDR10+ conversions also run `hdr_analyzer_mvp`, which ships with `mkvdovi`. Without a current analyzer they take L1 from the HDR10+ metadata alone, with a warning.
+
 To build from source instead, run `cargo build --release --workspace`. For GPU analysis on an NVIDIA host, add `cargo build --release -p hdr_analyzer_mvp --features cuda` (needs the NVIDIA driver and NVRTC, no `nvcc`). FFmpeg dev libraries, clang and per-OS notes are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
 ## Compatibility
@@ -54,7 +56,7 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 | Input | Output | Picture re-encoded | Maturity |
 |---|---|---|---|
 | HDR10 | Profile 8.1, CM v4.0 metadata | No | Measurement comparisons published; playback unvalidated |
-| HDR10+ | Profile 8.1, L1 taken from HDR10+ | No | Measurement comparisons published; playback unvalidated |
+| HDR10+ | Profile 8.1, L1 scenes from HDR10+ and the analyzer, peak from HDR10+, average and minimum measured (`--hdr10plus-l1 hdr10plus` for HDR10+ metadata alone) | No | Measurement comparisons published; playback unvalidated |
 | HLG | Profile 8.4 (HLG base layer kept bit-exact), L1 measured through the 8.4 decode (luma and chroma curves); composer fitted to BT.2100 by default (`--hlg-composer preset` for the `dovi_tool` preset) | No | Decode validated against libplacebo; composer applied on an LG OLED C9 |
 | Dolby Vision Profile 7 MEL | Profile 8.1 | No | Works |
 | Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](docs/FEL_PLAN.md)) |
@@ -66,7 +68,7 @@ Flag-level detail is in [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY
 
 On an RTX 4070, CUDA analysis of 4K sources runs at about 325 fps (HDR10) and 490 fps (HLG), counted as frames ÷ wall time of the whole analyzer run, with L1 output identical to earlier builds. [docs/PERFORMANCE.md](docs/PERFORMANCE.md) records the test conditions and gives a reproduction recipe, and [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md) explains how the GPU path reaches these rates.
 
-On synthetic patterns, measured peaks land within 0.25 of one 12-bit PQ code. On an asset with Dolby-generated reference metadata, max-RGB peaks read 12.8 codes high on average. HDR10+-derived L1 matched Dolby's v4 analyzer with a per-shot median error of 1 code (max 17), and scene detection matched 13 of 14 authored cuts while emitting 24 cuts in total.
+On synthetic patterns, measured peaks land within 0.25 of one 12-bit PQ code. On an asset with Dolby-generated reference metadata, max-RGB peaks read 12.8 codes high on average. L1 derived from HDR10+ metadata alone (`--hdr10plus-l1 hdr10plus`) matched Dolby's v4 analyzer with a per-shot median error of 1 code (max 17), and scene detection matched 13 of 14 authored cuts while emitting 24 cuts in total.
 
 The weak spot is grain. With the default `max` estimator, two grainy real-content assets read +74 and +93 codes hot against the reference. An opt-in grain-rejecting estimator (`--peak-estimator`, see the CLI reference) narrows this but does not close it.
 

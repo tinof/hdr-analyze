@@ -2,7 +2,7 @@ use super::analyzer::{
     analysis_quality_notice, analysis_sampling, coarser_sampling, gpu_analysis_missing,
     rejects_coarser_sidecar,
 };
-use super::config::withdraw_stale_rpu;
+use super::config::{commit_config, withdraw_stale_rpu};
 use super::deliver::{extract_base_layer, inject_rpu, mux_output};
 use super::dovi_steps::{
     convert_mel_fast_path, convert_mel_to_profile81, extract_clean_base_layer,
@@ -10,7 +10,8 @@ use super::dovi_steps::{
 };
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
 use super::measure::{
-    abort_unsupported, acquire_measurements, find_reusable_measurements, total_steps_for, Measured,
+    abort_unsupported, acquire_measurements, find_reusable_measurements, hybrid_refusal,
+    total_steps_for, Measured,
 };
 use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 use super::*;
@@ -269,12 +270,117 @@ fn resume_settings_carry_only_a_non_preset_hlg_composer() {
 fn resume_settings_carry_the_hdr10plus_hybrid_only_for_an_hdr10plus_input() {
     let default = resume_settings(&Args::try_parse_from(["mkvdovi"]).unwrap(), None, false);
     let hybrid = Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hybrid"]).unwrap();
-    // `convert_file` passes true only for an HDR10+ input under the flag.
+    // `convert_file` passes true only for an HDR10+ input resolved to the hybrid.
     assert_eq!(resume_settings(&hybrid, None, false), default);
     assert_eq!(
         resume_settings(&hybrid, None, true),
         format!("{default} hdr10plus_l1=hybrid")
     );
+}
+
+#[test]
+fn resume_settings_follow_the_resolved_mode_not_the_flag() {
+    let settings = |flags: &[&str], capable: bool| {
+        let args = Args::try_parse_from(["mkvdovi"].iter().chain(flags)).expect("flags must parse");
+        let (mode, _) = resolve_hdr10plus_mode(&args, || capable).unwrap();
+        resume_settings(&args, None, mode.is_hybrid())
+    };
+    const TOKEN: &str = " hdr10plus_l1=hybrid";
+    let default = settings(&[], true);
+    assert!(default.ends_with(TOKEN), "{default}");
+    assert_eq!(settings(&["--hdr10plus-l1", "hybrid"], true), default);
+    // A file that fell back holds metadata artifacts: it must not share the hybrid's fingerprint.
+    assert!(!settings(&[], false).contains(TOKEN));
+    assert!(!settings(&["--hdr10plus-l1", "hdr10plus"], true).contains(TOKEN));
+}
+
+#[test]
+fn hdr10plus_mode_defaults_to_hybrid_and_only_an_explicit_hybrid_refuses() {
+    let args = |flags: &[&str]| {
+        Args::try_parse_from(["mkvdovi"].iter().chain(flags)).expect("flags must parse")
+    };
+    let no_probe = || -> bool { panic!("the analyzer is probed only when the choice needs it") };
+    let notice = |flags: &[&str], capable: bool| {
+        let (mode, notice) = resolve_hdr10plus_mode(&args(flags), || capable).unwrap();
+        assert_eq!(mode, Hdr10PlusMode::Metadata, "{flags:?}");
+        notice.expect("a fallback is visible")
+    };
+
+    let default = resolve_hdr10plus_mode(&args(&[]), || true).unwrap();
+    assert_eq!(default, (Hdr10PlusMode::ImplicitHybrid, None));
+
+    // The default takes the metadata path with a notice for each obstacle.
+    let stale = notice(&[], false);
+    assert!(
+        stale.contains("hdr_analyzer_mvp is missing or does not record"),
+        "{stale}"
+    );
+    let fast = notice(&["--analysis-quality", "fast"], true);
+    assert!(fast.contains("--analysis-quality fast"), "{fast}");
+    let legacy = notice(&["--legacy-madvr-l1"], true);
+    assert!(legacy.contains("--legacy-madvr-l1"), "{legacy}");
+    assert_eq!(
+        resolve_hdr10plus_mode(&args(&["--analysis-quality", "fast"]), no_probe)
+            .unwrap()
+            .0,
+        Hdr10PlusMode::Metadata
+    );
+    assert_eq!(
+        resolve_hdr10plus_mode(&args(&["--legacy-madvr-l1"]), no_probe)
+            .unwrap()
+            .0,
+        Hdr10PlusMode::Metadata
+    );
+
+    // The names keep their meaning and say nothing more.
+    let named = resolve_hdr10plus_mode(
+        &args(&["--hdr10plus-l1", "hdr10plus", "--analysis-quality", "fast"]),
+        no_probe,
+    );
+    assert_eq!(named.unwrap(), (Hdr10PlusMode::Metadata, None));
+    let named = resolve_hdr10plus_mode(&args(&["--hdr10plus-l1", "hybrid"]), no_probe);
+    assert_eq!(named.unwrap(), (Hdr10PlusMode::ExplicitHybrid, None));
+
+    let refused = resolve_hdr10plus_mode(
+        &args(&["--hdr10plus-l1", "hybrid", "--analysis-quality", "fast"]),
+        no_probe,
+    )
+    .unwrap_err();
+    assert!(
+        refused.contains("fast analyzes one frame in 3"),
+        "{refused}"
+    );
+    assert!(refused.contains("--hdr10plus-l1 hdr10plus"), "{refused}");
+}
+
+#[test]
+fn hdr10plus_mode_after_a_failure_falls_back_or_refuses() {
+    assert_eq!(
+        Hdr10PlusMode::ImplicitHybrid.after_failure("reason"),
+        Some(Hdr10PlusMode::Metadata)
+    );
+    assert_eq!(Hdr10PlusMode::ExplicitHybrid.after_failure("reason"), None);
+    let refusal = hybrid_refusal("the analysis failed");
+    assert!(refusal.contains("the analysis failed"), "{refusal}");
+    assert!(refusal.contains("--hdr10plus-l1 hdr10plus"), "{refusal}");
+}
+
+#[test]
+fn the_ignored_hybrid_line_needs_the_flag_and_another_input() {
+    let default = Args::try_parse_from(["mkvdovi"]).unwrap();
+    let named = Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hdr10plus"]).unwrap();
+    let hybrid = Args::try_parse_from(["mkvdovi", "--hdr10plus-l1", "hybrid"]).unwrap();
+    for format in [
+        HdrFormat::Hdr10Unsupported,
+        HdrFormat::Hlg,
+        HdrFormat::DolbyVisionP8,
+    ] {
+        assert!(!hybrid_flag_ignored(&default, format), "{format:?}");
+        assert!(!hybrid_flag_ignored(&named, format), "{format:?}");
+        assert!(hybrid_flag_ignored(&hybrid, format), "{format:?}");
+    }
+    assert!(!hybrid_flag_ignored(&hybrid, HdrFormat::Hdr10Plus));
+    assert!(!hybrid_flag_ignored(&default, HdrFormat::Hdr10Plus));
 }
 
 #[test]
@@ -781,12 +887,23 @@ fn run_acquire_measurements(
     format: HdrFormat,
     setup: impl FnOnce(&Path),
 ) -> (Result<Option<Measured>>, u8, u8) {
+    run_acquire_measurements_in(Hdr10PlusMode::Metadata, flags, format, setup)
+}
+
+/// [`run_acquire_measurements`] in an HDR10+ `mode`. `setup` sees the input directory, with
+/// the temp directory `mkvdovi_temp_in` already there.
+fn run_acquire_measurements_in(
+    mode: Hdr10PlusMode,
+    flags: &[&str],
+    format: HdrFormat,
+    setup: impl FnOnce(&Path),
+) -> (Result<Option<Measured>>, u8, u8) {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("in.mkv");
     fs::write(&input, b"src").unwrap();
-    setup(dir.path());
     let temp = dir.path().join("mkvdovi_temp_in");
     fs::create_dir(&temp).unwrap();
+    setup(dir.path());
     let mut argv = vec!["mkvdovi"];
     argv.extend_from_slice(flags);
     let args = Args::try_parse_from(argv).unwrap();
@@ -799,6 +916,8 @@ fn run_acquire_measurements(
         true,
         hlg_composer,
         format,
+        mode,
+        None,
         None,
         &mut total,
         &mut current,
@@ -819,6 +938,139 @@ fn acquire_measurements_stops_on_profile8_without_mdfix() {
     let (result, total, current) = run_acquire_measurements(&[], HdrFormat::DolbyVisionP8, |_| {});
     assert!(result.unwrap().is_none());
     assert_eq!((total, current), (7, 1));
+}
+
+/// Seals the extracted stream and, with `metadata`, the extracted HDR10+ metadata, so that
+/// `extract_hdr10plus_metadata` reuses them.
+fn seal_hdr10plus(dir: &Path, metadata: Option<&serde_json::Value>) {
+    let temp = dir.join("mkvdovi_temp_in");
+    fs::write(temp.join("video.hevc"), b"not a stream").unwrap();
+    resume::mark_done(&temp.join("video.hevc")).unwrap();
+    if let Some(metadata) = metadata {
+        let path = temp.join("hdr10plus_metadata.json");
+        fs::write(&path, metadata.to_string()).unwrap();
+        resume::mark_done(&path).unwrap();
+    }
+}
+
+/// HDR10+ metadata for the 4 frames of [`hybrid_sidecar`], in one scene.
+fn hdr10plus_for_four_frames() -> serde_json::Value {
+    json!({
+        "SceneInfo": [{}, {}, {}, {}],
+        "SceneInfoSummary": {"SceneFirstFrameIndex": [0], "SceneFrameNumbers": [4]},
+    })
+}
+
+fn measurements_for_four_frames(dir: &Path) {
+    let measurements = dir.join("in_measurements.bin");
+    fs::write(&measurements, b"bin").unwrap();
+    fs::write(
+        metadata::l1_sidecar_path(&measurements),
+        hybrid_sidecar(6, 1).to_string(),
+    )
+    .unwrap();
+}
+
+const ACCURATE: [&str; 2] = ["--analysis-quality", "accurate"];
+
+#[test]
+fn a_good_hdr10plus_structure_reaches_the_hybrid_on_reused_measurements() {
+    let (result, _, _) = run_acquire_measurements_in(
+        Hdr10PlusMode::ImplicitHybrid,
+        &ACCURATE,
+        HdrFormat::Hdr10Plus,
+        |dir| {
+            seal_hdr10plus(dir, Some(&hdr10plus_for_four_frames()));
+            measurements_for_four_frames(dir);
+        },
+    );
+    let measured = result.unwrap().expect("the hybrid runs");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ImplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    assert!(measured.l1_sidecar.is_some());
+}
+
+#[test]
+fn a_bad_hdr10plus_structure_falls_back_before_any_analysis_or_refuses_an_explicit_hybrid() {
+    let bad = json!({"SceneInfo": [{}, {}, {}, {}],
+                     "SceneInfoSummary": {"SceneFirstFrameIndex": [2]}});
+    let setup = |dir: &Path| {
+        seal_hdr10plus(dir, Some(&bad));
+        measurements_for_four_frames(dir);
+    };
+    let (result, total, _) = run_acquire_measurements_in(
+        Hdr10PlusMode::ImplicitHybrid,
+        &ACCURATE,
+        HdrFormat::Hdr10Plus,
+        setup,
+    );
+    let measured = result.unwrap().expect("the default still converts");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+    assert!(measured.hdr10plus_json.is_some());
+    assert!(measured.measurements_file.is_none());
+    assert!(measured.l1_sidecar.is_none());
+    assert_eq!(
+        total,
+        total_steps_for(HdrFormat::Hdr10Plus),
+        "no analysis step"
+    );
+
+    let (result, _, _) = run_acquire_measurements_in(
+        Hdr10PlusMode::ExplicitHybrid,
+        &ACCURATE,
+        HdrFormat::Hdr10Plus,
+        setup,
+    );
+    assert!(result.unwrap().is_none());
+}
+
+#[test]
+fn an_analysis_that_cannot_start_falls_back_only_for_the_default() {
+    // A directory in place of the analyzer log makes `run_hdr_analyzer` return an error.
+    let setup = |dir: &Path| {
+        seal_hdr10plus(dir, Some(&hdr10plus_for_four_frames()));
+        fs::create_dir(dir.join("mkvdovi_temp_in/analyzer.log")).unwrap();
+    };
+    let (result, _, _) = run_acquire_measurements_in(
+        Hdr10PlusMode::ImplicitHybrid,
+        &ACCURATE,
+        HdrFormat::Hdr10Plus,
+        setup,
+    );
+    let measured = result.unwrap().expect("the default still converts");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+    assert!(measured.measurements_file.is_none());
+
+    let (result, _, _) = run_acquire_measurements_in(
+        Hdr10PlusMode::ExplicitHybrid,
+        &ACCURATE,
+        HdrFormat::Hdr10Plus,
+        setup,
+    );
+    assert!(!matches!(result, Ok(Some(_))), "an explicit hybrid stops");
+}
+
+#[test]
+fn hdr10plus_with_no_dynamic_metadata_leaves_the_hybrid_for_hdr10_analysis() {
+    if crate::external::find_tool("hdr10plus_tool").is_none() {
+        eprintln!("Skipping no-dynamic-metadata test: hdr10plus_tool not found in PATH");
+        return;
+    }
+    for mode in [Hdr10PlusMode::ImplicitHybrid, Hdr10PlusMode::ExplicitHybrid] {
+        let (result, _, _) =
+            run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+                seal_hdr10plus(dir, None);
+                measurements_for_four_frames(dir);
+            });
+        let measured = result.unwrap().expect("HDR10 analysis takes over");
+        // A hybrid mode here would send the configuration to the metadata path with no metadata.
+        assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata, "{mode:?}");
+        assert_eq!(measured.hdr_type, HdrFormat::Hdr10Unsupported, "{mode:?}");
+        assert!(measured.hdr10plus_json.is_none(), "{mode:?}");
+        assert!(measured.l1_sidecar.is_some(), "{mode:?}");
+    }
 }
 
 #[test]
@@ -977,6 +1229,38 @@ fn withdraw_stale_rpu_withdraws_rpu_and_mux_when_the_config_changed() {
         temp.path().join("RPU.bin").exists(),
         "only sentinels are withdrawn"
     );
+}
+
+#[test]
+fn an_interrupted_withdrawal_leaves_the_old_config_so_the_next_run_withdraws_again() {
+    let temp = interrupted_run(b"{\"old\": 1}");
+    let extra = temp.path().join("extra.json");
+    let next = temp.path().join("extra.json.next");
+    fs::write(&next, b"{\"new\": 1}").unwrap();
+    // A directory in place of the sentinel makes the withdrawal fail where a kill could stop it.
+    let sentinel = temp.path().join("RPU.bin.done");
+    fs::remove_file(&sentinel).unwrap();
+    fs::create_dir(&sentinel).unwrap();
+    assert!(commit_config(temp.path(), &next, &extra, true).is_err());
+    assert_eq!(fs::read(&extra).unwrap(), b"{\"old\": 1}");
+
+    fs::remove_dir(&sentinel).unwrap();
+    resume::mark_done(&temp.path().join("RPU.bin")).unwrap();
+    commit_config(temp.path(), &next, &extra, true).unwrap();
+    assert_eq!(sealed(temp.path()), [false, false, false]);
+    assert_eq!(fs::read(&extra).unwrap(), b"{\"new\": 1}");
+    assert!(!next.exists());
+}
+
+#[test]
+fn commit_config_without_resume_only_replaces_the_config() {
+    let temp = interrupted_run(b"{\"old\": 1}");
+    let extra = temp.path().join("extra.json");
+    let next = temp.path().join("extra.json.next");
+    fs::write(&next, b"{\"new\": 1}").unwrap();
+    commit_config(temp.path(), &next, &extra, false).unwrap();
+    assert_eq!(sealed(temp.path()), [true, true, true]);
+    assert_eq!(fs::read(&extra).unwrap(), b"{\"new\": 1}");
 }
 
 #[test]

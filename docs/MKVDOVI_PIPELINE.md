@@ -21,7 +21,7 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 
 - `external::check_dependencies` checks the tools at runtime: `ffmpeg`, `mkvmerge`, `dovi_tool`, and
   either `mediainfo` or `ffprobe`. HDR10+ processing also runs `hdr10plus_tool`; keep it in `PATH`
-  for HDR10+ inputs. `inspect` dispatches before the dependency checks.
+  for HDR10+ inputs. It runs `hdr_analyzer_mvp` too, unless `--hdr10plus-l1 hdr10plus` is given. `inspect` dispatches before the dependency checks.
 - `dovi_tool` 2.3.2 is the floor: the existing orchestration relies on its `inject-rpu` padding
   fix. 2.3.4+ lets mkvdovi pass the MKV directly to remove/convert/demux
   (`--dovi-input auto|raw|mkv`; auto = on when `dovi_tool --version` reports 2.3.4+), with an
@@ -77,9 +77,13 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
     where it is discarded.
   - A non-preset HLG composer adds ` hlg_composer=<luminance_mapping>` to the settings string (only
     then, so default fingerprints are unchanged); likewise ` hdr10plus_l1=hybrid` only for an
-    HDR10+ input under that flag. **Add any new artifact-affecting flag to `resume_settings`.**
+    HDR10+ input that `measure::resolve_hdr10plus_mode` sets to the hybrid, by default or by the
+    flag. That resolution runs before the fingerprint. A fallback after it (HDR10+ structure, a
+    failed analysis, the sidecar, the frame count) keeps the token and relies on the `extra.json`
+    comparison below. **Add any new artifact-affecting flag to `resume_settings`.**
   - The fingerprint does not cover the measurements. `config::withdraw_stale_rpu` (called from
-    `prepare_configuration`) compares the regenerated `extra.json` with the one in the temp dir and,
+    `prepare_configuration`) compares the regenerated `extra.json` (written beside it as `extra.json.next`, renamed only after the
+    comparison, so an interruption cannot hide a change) with the one in the temp dir and,
     when they differ, withdraws the `RPU.bin`/`BL_RPU.hevc` sentinels (`resume::invalidate`) and the
     `mux.done` marker, so a re-analysis is never paired with a stale RPU.
 - `--no-resume` forces a clean run. Run long conversions under `tmux`/`nohup`.
@@ -121,10 +125,12 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   `Composer::luminance_mapping()` name, for every composer including preset
   (`mkvdovi/src/pipeline/measure.rs` `run_fresh_analysis`, `external::analyzer_lists_option`), and
   then always passes `--hlg-composer`. An analyzer that does not name it (pre-P8) is refused before
-  any analysis. The analyzer's help text is therefore a cross-binary contract too. Under
-  `--hdr10plus-l1 hybrid` a fresh analysis needs the analyzer's `--help` to contain the capability
+  any analysis. The analyzer's help text is therefore a cross-binary contract too. A hybrid
+  needs the analyzer's `--help` to contain the capability
   `l1-sidecar-frame-peak` (`ANALYZER_FRAME_PEAK_CAPABILITY`, printed in `hdr_analyzer_mvp/src/cli.rs`):
-  an analyzer that writes sidecars older than v6 is refused before it runs, so it cannot replace
+  without the flag, an analyzer without it takes the file to the metadata path with a warning;
+  under an explicit `--hdr10plus-l1 hybrid`, a fresh analysis
+  by an analyzer that writes sidecars older than v6 is refused before it runs, so it cannot replace
   existing measurements. The name is a capability, not a version, and stays for later sidecars.
 
 ## L1 sidecar contract
@@ -150,7 +156,7 @@ This section covers the code on each side.
 - **Frame peak (v6):** `frames.max_pq_12bit` is `MadVRFrame::peak_pq_2020` after `select_peak_pq`, the
   value each scene's `max_pq_12bit` folds, and `peak_source` is the source that pass applied
   (`pipeline::scenes::applied_peak_source_for`). `hybrid::check_measurements` needs v6 and `max`, so
-  older measurements are re-analyzed under `--hdr10plus-l1 hybrid` and reused otherwise. The sidecar's
+  older measurements are re-analyzed for the hybrid and reused otherwise. The sidecar's
   `peak_source` is the analyzer's flag, not mkvdovi's `--peak-source`, which selects an HDR10+ statistic.
 - **Stream frames (v5):** an open-GOP cut at a CRA starts with RASL pictures that no decoder
   outputs, but `dovi_tool inject-rpu` maps RPU `n` to presentation picture `n`, and those pictures
@@ -172,10 +178,16 @@ This section covers the code on each side.
 
 ## HDR10+
 
-- L1 comes from the source HDR10+ metadata. Under the opt-in `--hdr10plus-l1 hybrid` the analyzer
-  also runs and L1 comes from union pieces (HDR10+ starts ∪ analyzer cuts; HDR10+ peak with a
-  reported fallback to the measured peak of the piece's own frames; measured average and minimum;
-  `pipeline/hybrid.rs`).
+- By default the analyzer runs and L1 comes from union pieces (HDR10+ starts ∪ analyzer cuts;
+  HDR10+ peak with a reported fallback to the measured peak of the piece's own frames; measured
+  average and minimum; `pipeline/hybrid.rs`). Under `--hdr10plus-l1 hdr10plus` L1 comes from the
+  source HDR10+ metadata alone.
+- `measure::Hdr10PlusMode` keeps three states, because only a hybrid the user named may refuse: an
+  HDR10+ file that converted before the default changed must still convert without the flag. It
+  falls back with a warning, through `Hdr10PlusMode::after_failure` and
+  `config::fall_back_to_hdr10plus`, at every point the hybrid can fail. The frame count is checked
+  late on purpose: only the analyzer's demuxed count is reliable. A proof against baselines
+  captured before this default (E13) passes `-- --hdr10plus-l1 hdr10plus` for an HDR10+ input.
 - The panel peak is **not** passed as a `--trim-targets` override.
 - HDR10+ scene peaks above 3× the mastering-display peak produce advisory warnings only. **Never
   add a silent clamp.**
@@ -217,7 +229,7 @@ This section covers the code on each side.
   or whose L1 differs from the sidecar scene's L1 after the generator's clamp
   (`ExtMetadataBlockLevel1::from_stats_cm_version(.., V29)`). The clamps themselves are only
   reported.
-- The pipeline passes no sidecar for HDR10+ without `--hdr10plus-l1 hybrid` and under
+- The pipeline passes no sidecar for HDR10+ on the metadata path and under
   `--legacy-madvr-l1`, because then the RPU's L1 does not come from it.
 
 ## RPU generation

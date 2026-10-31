@@ -53,20 +53,17 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-10-31 at main@2a7bb35)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=4a0584135735 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=e2433aaf9990 -->
 
-1. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
-   after P9.2, so the default ships the exact fallback peak; the order is stated here and in the
-   item, not as a `Needs:`. v0.8.0 with E12.1 and P9.2. Own branch `feat/p9-3-hybrid-default`
-   (moves HDR10+ L1). Release: minor
-2. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
+1. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
    measures this first, and a flip is MINOR, so the answer should exist before v0.8.0 is cut. A
    kept `balanced` needs no code. Branch `fix/p1-1-cpu-default`, only if it flips. Release: none
    (minor if CPU `auto` flips)
 
-- Recheck before P9.3: as the default, hybrid's fallback peak inherits `--downscale 2` (CPU `auto`)
-  and `--pre-denoise median3`, the limits `check_measurements` documents (`hybrid.rs:123`), and
-  every HDR10+ conversion now depends on the analyzer `--help` capability (`measure.rs:210`).
+**Reassess:** needs-changed (P9.3, PR #84): the E13 mkvdovi gates now name the hybrid baselines.
+
+- Recheck before P1.1: CPU `auto` now also sets the HDR10+ measurement, so `--downscale 2` limits
+  the hybrid's fallback peak (`hybrid.rs:123`); measure an HDR10+ cut too.
 
 ### Waiting for the owner
 
@@ -127,8 +124,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    WS6.9 (the metered per-gain reading) stays on the metered list.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
-   opt-in flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and the default flips
-   after v0.7.0 (owner). Gate: the P9.3 gate. **Prerequisite:** E13.5 before the
+   flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and hybrid is the default
+   (PR #84). Gate: met; the owner decides whether this priority ends. **Prerequisite:** E13.5 before the
    sidecar v6 step P9.2 (met 2026-10-17, #59).
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process (P10.3). Gate: the WS7 simulator
@@ -257,9 +254,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Partial. Step 0, scene list, opt-in hybrid flag, peak parity and sidecar v6 done;
-  history in [the log](docs/ROADMAP_LOG.md). Open: P9.3 (owner, 2026-10-17: flip the default after
-  v0.7.0).
+- **Status:** Done: hybrid is the HDR10+ default ([log](docs/ROADMAP_LOG.md), PR #84). No step is
+  open; the item stays because priority 2 names only P9 and the owner decides whether that ends.
 - **Finding for the fallback:** both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL 0 on every
   frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on Alita) and
   the average are present. A peak taken from MaxSCL is unusable on such sources, so the pixel
@@ -269,29 +265,15 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   scored on the development tier before any default change, with a pixel fallback for missing or
   implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
   suspicious scene peaks still only warn.
-- **Gate:** the P9.3 gate (priority 2). Step 1's gate (owner, 2026-10-17), done: score the four
+- **Gate:** met (PR #84). Step 1's gate (owner, 2026-10-17), done: score the four
   holdout cuts with retail DV L1 (`q-alita-01/02`, `q-the-shining-01/02`) against it; Alien and
   Deadloch stay unseen. Pre-registered rule: hybrid becomes the default if the average's pooled
   clamped MAE (above the floor and over all frames) is lower than today's HDR10+ path, and the
   per-frame MAE of L1 max and of L1 min against retail is not higher than today's path; the owner
   confirms the flip. Done 2026-10-17: PASS on every clause, flip confirmed for the minor after
   v0.7.0.
-- [P9.3][corpus] Flip the default, after the v0.7.0 release PR (Release plan: v0.8.0). Gate:
-  `--hdr10plus-l1` defaults to `hybrid` and the old path stays selectable by name; HDR10+ RPU
-  baselines are re-captured and every other baseline stays byte-identical; CHANGELOG entry under
-  Changed. The checks that today fire on the flag value alone, whatever the input, must not turn
-  on for every user, each with a test on both sides: `--legacy-madvr-l1` without `--hdr10plus-l1`
-  still runs, and only an explicit `--hdr10plus-l1 hybrid` conflicts with it (`Args::flag_conflict`,
-  `mkvdovi/src/cli.rs`; the existing test
-  `hdr10plus_l1_defaults_to_hdr10plus_and_hybrid_excludes_legacy_madvr_l1` is extended, not
-  flipped); a non-HDR10+ input prints no "applies only to HDR10+ inputs; ignored" line under the
-  default (`convert_file`, `pipeline/mod.rs`); an HDR10+ input under `--analysis-quality fast`
-  without an explicit flag still converts, through the `hdr10plus` path with a visible notice,
-  and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`).
 - Peak against retail is not scored: hybrid takes the same HDR10+ peak as `dovi_tool`, about 104
   codes below retail on the holdout cuts.
-- **Checked 2026-10-31 @2a7bb35:** P9.3: resolve one mode (`cli.rs:48`, `pipeline/mod.rs:130`,
-  `measure.rs:190`), hint `config.rs:162`, `sha256sum`; holdout had 0 fallbacks.
 
 ### P10: measured against delivered
 
@@ -696,8 +678,8 @@ The detailed gap table and validation method live in
 - **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
-  at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+, HLG, two MEL
-  incl. an open-GOP start; `--mdfix` on MEL and Profile 8; HLG with `--hlg-composer preset`, the
+  at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+ captured with
+  `-- --hdr10plus-l1 hdr10plus`, HLG, two MEL incl. an open-GOP start; `--mdfix` on MEL and Profile 8; HLG with `--hlg-composer preset`, the
   path without the RPU rewrite), and
   `MKVDOVI_CORPUS_DIR=~/mkvdovi-work/corpus/dev cargo test -p mkvdovi corpus_cuts_are_classified_like_their_manifests`,
   the only test that reaches the Profile 7 MEL/FEL branch of `check_hdr_format`, which the step 3
@@ -722,7 +704,8 @@ The detailed gap table and validation method live in
   Gate: as E13.6.
 - Code lines below are clippy's count (blank and comment lines skipped), 2026-10-28 @dc4882d. The
   mkvdovi gate: fmt, clippy, tests, and `scripts/rpu-baseline.sh compare --require-identical-l1`
-  against `~/mkvdovi-work/rpu-baseline/e13-step5/`.
+  against `~/mkvdovi-work/rpu-baseline/e13-step5/`; HDR10+ also against the no-flag captures in
+  `~/mkvdovi-work/rpu-baseline/p9-3-hybrid-default/default/`.
 - [E13.12][corpus] Split `convert_file` (`mkvdovi/src/pipeline/mod.rs`) by phase; step 4 left it at
   281 lines. Gate: the mkvdovi gate.
 - [E13.13][corpus] Split `verify_post_mux_with_options` (`mkvdovi/src/verify.rs`, 256 lines) by

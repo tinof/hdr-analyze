@@ -77,8 +77,8 @@ capture_one() { # capture_one <out-dir> <input> [mkvdovi flags...]
     link="$scratch/$name"
     ln "$input" "$link" 2>/dev/null || cp --reflink=auto "$input" "$link"
 
-    size="$(stat -c %s "$input")"
-    mtime="$(stat -c %Y "$input")"
+    size="$(stat -L -c %s "$input")"
+    mtime="$(stat -L -c %Y "$input")"
     if [ "$size" -gt "$HASH_FULL_LIMIT" ]; then
         method="size+mtime+sha256-of-first-64MiB"
         hash="$(head -c "$HASH_HEAD_BYTES" "$input" | sha256sum | cut -d' ' -f1)"
@@ -99,7 +99,7 @@ capture_one() { # capture_one <out-dir> <input> [mkvdovi flags...]
     case " $* " in *" --mdfix "*) dv="$scratch/$stem.mdfix.DV.mkv" ;; esac
     [ -s "$dv" ] || die 1 "mkvdovi exited 0 but wrote no $dv. Log: $stage/mkvdovi.log"
     [ -e "$link" ] || die 1 "mkvdovi removed its input link; --keep-source was not honoured"
-    [ "$(stat -c '%s %Y' "$input")" = "$size $mtime" ] || die 1 "input changed during capture: $input"
+    [ "$(stat -L -c '%s %Y' "$input")" = "$size $mtime" ] || die 1 "input changed during capture: $input"
 
     # dovi_tool 2.3.4+ reads Matroska directly. Older versions need Annex B HEVC on stdin.
     if ! dovi_tool extract-rpu "$dv" -o "$stage/RPU.bin" >"$scratch/extract.log" 2>&1 ||

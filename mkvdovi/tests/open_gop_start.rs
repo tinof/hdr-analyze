@@ -273,6 +273,7 @@ fn an_open_gop_cut_keeps_its_l1_on_the_displayed_pictures() {
     );
     assert!(conversion.status.success(), "mkvdovi failed:\n{log}");
     assert!(log.contains("3 undecodable leading pictures"), "{log}");
+    assert!(!log.contains("applies only to HDR10+ inputs"), "{log}");
 
     // Display order from the decoder, decode order from the demuxer; MKV gives every picture a
     // distinct pts, so pts maps a displayed frame to its access unit.
@@ -304,6 +305,22 @@ fn an_open_gop_cut_keeps_its_l1_on_the_displayed_pictures() {
             "displayed frame {frame} carries the wrong L1"
         );
     }
+
+    // Named on this HDR10 input, the flag is ignored, and says so.
+    std::fs::remove_file(&output).unwrap();
+    let conversion = mkvdovi_cmd()
+        .current_dir(dir.path())
+        .arg(SOURCE)
+        .args(["--keep-source", "--hwaccel", "none", "--no-resume"])
+        .args(["--hdr10plus-l1", "hybrid"])
+        .output()
+        .unwrap();
+    assert!(conversion.status.success());
+    let log = String::from_utf8_lossy(&conversion.stderr);
+    assert!(
+        log.contains("applies only to HDR10+ inputs; ignored"),
+        "{log}"
+    );
 }
 
 #[test]

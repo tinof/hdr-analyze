@@ -131,6 +131,12 @@ pub(super) fn prepare_configuration(
                     ));
                     return Ok(None);
                 }
+                Err(error) if measured.hdr10plus_mode.is_hybrid() => {
+                    let reason = format!("the analyzer's L1 sidecar is unusable ({error})");
+                    if !fall_back_to_hdr10plus(measured, &reason) {
+                        return Ok(None);
+                    }
+                }
                 Err(error) => {
                     progress::print_error(&format!(
                         "The analyzer's L1 sidecar is unusable ({error}). Refusing to fall back to optimizer-derived L1; pass --legacy-madvr-l1 to force it."
@@ -140,9 +146,9 @@ pub(super) fn prepare_configuration(
             }
         }
     }
-    // --hdr10plus-l1 hybrid: the RPU's scenes become the union of the HDR10+ scenes and the
-    // analyzer's cuts, with the HDR10+ peak and the measured average and minimum.
-    if measured.hdr10plus_hybrid {
+    // HDR10+ hybrid: the RPU's scenes become the union of the HDR10+ scenes and the analyzer's
+    // cuts, with the HDR10+ peak and the measured average and minimum.
+    if measured.hdr10plus_mode.is_hybrid() {
         let combined = match (
             measured.l1_sidecar.take(),
             measured.hdr10plus_json.as_deref(),
@@ -158,10 +164,11 @@ pub(super) fn prepare_configuration(
                 measured.l1_sidecar = Some(sidecar);
             }
             Err(error) => {
-                progress::print_error(&format!(
-                    "--hdr10plus-l1 hybrid cannot combine the HDR10+ metadata with the measurements: {error}. Convert without --hdr10plus-l1 hybrid to use the HDR10+ metadata alone."
-                ));
-                return Ok(None);
+                let reason =
+                    format!("the HDR10+ metadata and the measurements do not combine ({error})");
+                if !fall_back_to_hdr10plus(measured, &reason) {
+                    return Ok(None);
+                }
             }
         }
     }
@@ -219,9 +226,11 @@ pub(super) fn prepare_configuration(
         ));
     }
 
-    let previous_config = fs::read(&extra_json_path).ok();
+    // Withdrawn before `extra.json` changes: an interruption between the two must not leave the
+    // new configuration beside an RPU built from the old one.
+    let next_config = temp_dir.join("extra.json.next");
     metadata::generate_extra_json(
-        &extra_json_path,
+        &next_config,
         dv_profile,
         &static_meta,
         &final_trims,
@@ -229,14 +238,40 @@ pub(super) fn prepare_configuration(
         level5_offsets,
         measured.l1_sidecar.as_ref(),
     )?;
+    commit_config(temp_dir, &next_config, &extra_json_path, resume_enabled)?;
     progress::print_info("Configuration written.");
-    // The resume fingerprint does not cover the measurements. An RPU built from an earlier
-    // configuration (for example before a re-analysis changed L1) must not be reused.
-    if resume_enabled {
-        withdraw_stale_rpu(temp_dir, &extra_json_path, previous_config.as_deref())?;
-    }
 
     Ok(Some(Configured { source_range }))
+}
+
+/// Takes the HDR10+ metadata path after the hybrid failed for `reason`, as if the input had never
+/// been measured: everything that depends on the path is computed after this. False after the
+/// refusal of an explicit hybrid.
+pub(super) fn fall_back_to_hdr10plus(measured: &mut Measured, reason: &str) -> bool {
+    let Some(mode) = measured.hdr10plus_mode.after_failure(reason) else {
+        return false;
+    };
+    measured.hdr10plus_mode = mode;
+    measured.hdr_type = HdrFormat::Hdr10Plus;
+    measured.measurements_file = None;
+    measured.l1_sidecar = None;
+    true
+}
+
+/// Replaces `extra_json` with `next`. The resume fingerprint does not cover the measurements, so
+/// an RPU built from an earlier configuration (for example before a re-analysis changed L1, or
+/// on the other HDR10+ path) must not be reused.
+pub(super) fn commit_config(
+    temp_dir: &Path,
+    next: &Path,
+    extra_json: &Path,
+    resume_enabled: bool,
+) -> io::Result<()> {
+    if resume_enabled {
+        let previous = fs::read(extra_json).ok();
+        withdraw_stale_rpu(temp_dir, next, previous.as_deref())?;
+    }
+    fs::rename(next, extra_json)
 }
 
 /// Withdraws the RPU sentinels and the mux marker when `extra_json` differs from `previous`, the
