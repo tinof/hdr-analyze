@@ -196,7 +196,11 @@ pub(super) fn apply_file(
     hdr10plus_json: &Path,
     peak_source: PeakSource,
 ) -> Result<(L1Sidecar, HybridReport), String> {
-    let metadata: Value = File::open(hdr10plus_json)
+    apply(sidecar, &read_hdr10plus(hdr10plus_json)?, peak_source)
+}
+
+fn read_hdr10plus(hdr10plus_json: &Path) -> Result<Value, String> {
+    File::open(hdr10plus_json)
         .map_err(|error| error.to_string())
         .and_then(|file| serde_json::from_reader(file).map_err(|error| error.to_string()))
         .map_err(|error| {
@@ -204,8 +208,12 @@ pub(super) fn apply_file(
                 "cannot read the HDR10+ metadata '{}': {error}",
                 hdr10plus_json.display()
             )
-        })?;
-    apply(sidecar, &metadata, peak_source)
+        })
+}
+
+/// Reads the extracted HDR10+ metadata and checks its structure, which needs no measurements.
+pub(super) fn check_hdr10plus_file(hdr10plus_json: &Path) -> Result<(), String> {
+    hdr10plus_structure(&read_hdr10plus(hdr10plus_json)?).map(|_| ())
 }
 
 /// [`apply_file`] on parsed HDR10+ metadata.
@@ -215,7 +223,13 @@ pub(super) fn apply(
     peak_source: PeakSource,
 ) -> Result<(L1Sidecar, HybridReport), String> {
     check_measurements(&sidecar)?;
-    let (scene_info, starts) = hdr10plus_scenes(metadata, sidecar.stream_frame_count())?;
+    let (scene_info, starts) = hdr10plus_structure(metadata)?;
+    let (frames, stream_frames) = (scene_info.len() as u64, sidecar.stream_frame_count());
+    if frames != stream_frames {
+        return Err(format!(
+            "the HDR10+ metadata has {frames} frames but the video stream has {stream_frames}"
+        ));
+    }
     let peaks: Vec<Option<f64>> = starts
         .iter()
         .map(|&start| hdr10plus_peak_nits(&scene_info[start as usize], peak_source))
@@ -236,11 +250,9 @@ pub(super) fn apply(
 
 /// The HDR10+ frames and scene starts (stream frames), after the structural checks the hybrid
 /// relies on. `dovi_tool` tolerates a list that starts after frame 0 by shifting it; the hybrid
-/// maps HDR10+ frame `n` to picture `n` and refuses that instead.
-fn hdr10plus_scenes(
-    metadata: &Value,
-    stream_frames: u64,
-) -> Result<(&Vec<Value>, Vec<u64>), String> {
+/// maps HDR10+ frame `n` to picture `n` and refuses that instead. The frame count against the
+/// stream is `apply`'s check: only the analyzer's demuxed count is reliable.
+fn hdr10plus_structure(metadata: &Value) -> Result<(&Vec<Value>, Vec<u64>), String> {
     let scene_info = metadata
         .get("SceneInfo")
         .and_then(Value::as_array)
@@ -292,11 +304,6 @@ fn hdr10plus_scenes(
         if !consistent {
             return Err("HDR10+ SceneFrameNumbers do not match the scene starts".into());
         }
-    }
-    if frames != stream_frames {
-        return Err(format!(
-            "the HDR10+ metadata has {frames} frames but the video stream has {stream_frames}"
-        ));
     }
     Ok((scene_info, starts))
 }
@@ -404,13 +411,20 @@ fn mean_code(codes: &[u16]) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use clap::Parser;
     use serde_json::json;
 
+    use super::super::config::prepare_configuration;
+    use super::super::measure::{Hdr10PlusMode, Measured};
     use super::*;
+    use crate::cli::Args;
     use crate::metadata::{
-        validate_l1_sidecar, L1SidecarAnalysis, L1SidecarCrop, L1SidecarFrames, L1SidecarSource,
-        SidecarExpectation,
+        validate_l1_sidecar, HdrFormat, L1SidecarAnalysis, L1SidecarCrop, L1SidecarFrames,
+        L1SidecarSource, SidecarExpectation,
     };
+    use crate::resume;
 
     fn scene(start: u64, end: u64, max: u16) -> L1SidecarScene {
         L1SidecarScene {
@@ -684,6 +698,220 @@ mod tests {
         .unwrap();
         assert_eq!(maxima(&hybrid.scenes), [2310, 2500, 2600]);
         assert_eq!(report.fallbacks.len(), 3);
+    }
+
+    #[test]
+    fn hdr10plus_structure_needs_no_measurements_and_leaves_the_frame_count_to_apply() {
+        let valid = metadata(&[0, 4], 10, 10_000);
+        assert!(hdr10plus_structure(&valid).is_ok());
+        let mut late = metadata(&[0, 4], 10, 10_000);
+        late["SceneInfoSummary"]["SceneFirstFrameIndex"] = json!([2, 4]);
+        late["SceneInfoSummary"]["SceneFrameNumbers"] = json!([2, 6]);
+        let unordered = metadata(&[0, 4, 4], 10, 10_000);
+        let mut past_the_end = metadata(&[0, 4], 10, 10_000);
+        past_the_end["SceneInfoSummary"]["SceneFirstFrameIndex"] = json!([0, 12]);
+        let mut wrong_lengths = metadata(&[0, 4], 10, 10_000);
+        wrong_lengths["SceneInfoSummary"]["SceneFrameNumbers"] = json!([4, 5]);
+        for (bad, reason) in [
+            (&late, "starts at frame 2"),
+            (&unordered, "not increasing"),
+            (&past_the_end, "past the 10 frames"),
+            (&wrong_lengths, "SceneFrameNumbers"),
+            (&json!({}), "no SceneInfo"),
+        ] {
+            let error = hdr10plus_structure(bad).err().expect(reason);
+            assert!(error.contains(reason), "{error}");
+        }
+        // A structure that is fine alone still has to match the stream.
+        let long = metadata(&[0, 4], 11, 10_000);
+        assert!(hdr10plus_structure(&long).is_ok());
+        let error = apply(fixture_sidecar(0), &long, PeakSource::Histogram)
+            .err()
+            .expect("a frame mismatch is refused");
+        assert!(error.contains("11 frames"), "{error}");
+    }
+
+    #[test]
+    fn check_hdr10plus_file_reports_a_file_it_cannot_read_and_a_bad_structure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hdr10plus.json");
+        assert!(check_hdr10plus_file(&path)
+            .unwrap_err()
+            .contains("cannot read"));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&metadata(&[0, 4], 10, 100)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(check_hdr10plus_file(&path), Ok(()));
+        std::fs::write(&path, b"{}").unwrap();
+        assert!(check_hdr10plus_file(&path)
+            .unwrap_err()
+            .contains("no SceneInfo"));
+    }
+
+    /// One configuration run of an HDR10+ input whose path is settled by `mode`.
+    struct ConfigRun {
+        dir: tempfile::TempDir,
+        temp: PathBuf,
+    }
+
+    impl ConfigRun {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let temp = dir.path().join("mkvdovi_temp_clip");
+            std::fs::create_dir(&temp).unwrap();
+            std::fs::write(dir.path().join("clip.mkv"), b"src").unwrap();
+            Self { dir, temp }
+        }
+
+        fn extra_json(&self) -> Vec<u8> {
+            std::fs::read(self.temp.join("extra.json")).unwrap()
+        }
+
+        /// The artifacts an interrupted run leaves, built from the `extra.json` now in place.
+        fn seal(&self) {
+            for artifact in ["RPU.bin", "BL_RPU.hevc"] {
+                std::fs::write(self.temp.join(artifact), b"payload").unwrap();
+                resume::mark_done(&self.temp.join(artifact)).unwrap();
+            }
+            std::fs::write(self.temp.join("mux.done"), b"").unwrap();
+        }
+
+        fn sealed(&self) -> [bool; 3] {
+            [
+                resume::is_complete(&self.temp.join("RPU.bin")),
+                resume::is_complete(&self.temp.join("BL_RPU.hevc")),
+                self.temp.join("mux.done").exists(),
+            ]
+        }
+
+        /// `sidecar` is `Some` for measurements that loaded; `None` with a hybrid mode points
+        /// at a measurements file with no sidecar, so loading it fails.
+        fn configure(
+            &self,
+            mode: Hdr10PlusMode,
+            sidecar: Option<L1Sidecar>,
+            hdr10plus: &Value,
+        ) -> (bool, Measured) {
+            let json_path = self.dir.path().join("hdr10plus.json");
+            std::fs::write(&json_path, serde_json::to_vec(hdr10plus).unwrap()).unwrap();
+            let input = self.dir.path().join("clip.mkv");
+            let mut measured = Measured {
+                hdr_type: if mode.is_hybrid() {
+                    HdrFormat::Hdr10WithMeasurements
+                } else {
+                    HdrFormat::Hdr10Plus
+                },
+                measurements_file: mode
+                    .is_hybrid()
+                    .then(|| self.dir.path().join("clip_measurements.bin")),
+                hdr10plus_json: Some(json_path),
+                bl_source_file: input.clone(),
+                l1_sidecar: sidecar,
+                hdr10plus_mode: mode,
+            };
+            let args =
+                Args::try_parse_from(["mkvdovi", "--source-primaries", "2"]).expect("flags parse");
+            let configured = prepare_configuration(
+                input.to_str().unwrap(),
+                &self.temp,
+                &args,
+                true,
+                None,
+                &mut measured,
+                None,
+            )
+            .unwrap();
+            (configured.is_some(), measured)
+        }
+    }
+
+    const IMPLICIT: Hdr10PlusMode = Hdr10PlusMode::ImplicitHybrid;
+    const METADATA: Hdr10PlusMode = Hdr10PlusMode::Metadata;
+
+    fn good_hdr10plus() -> Value {
+        metadata(&[0, 4], 10, 10_000)
+    }
+
+    /// Valid alone, but one frame longer than the stream of [`fixture_sidecar`].
+    fn long_hdr10plus() -> Value {
+        metadata(&[0, 4], 11, 10_000)
+    }
+
+    /// `extra.json` of an explicit `hdr10plus` run over `hdr10plus`.
+    fn metadata_config(hdr10plus: &Value) -> Vec<u8> {
+        let run = ConfigRun::new();
+        assert!(run.configure(METADATA, None, hdr10plus).0);
+        run.extra_json()
+    }
+
+    fn assert_on_the_metadata_path(measured: &Measured) {
+        assert_eq!(measured.hdr10plus_mode, METADATA);
+        assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+        assert!(measured.measurements_file.is_none());
+        assert!(measured.l1_sidecar.is_none());
+        assert!(measured.hdr10plus_json.is_some());
+    }
+
+    #[test]
+    fn a_fallback_after_hybrid_artifacts_withdraws_them_and_writes_the_metadata_config() {
+        let run = ConfigRun::new();
+        let (configured, measured) =
+            run.configure(IMPLICIT, Some(fixture_sidecar(0)), &good_hdr10plus());
+        assert!(configured);
+        assert_eq!(measured.hdr10plus_mode, IMPLICIT);
+        assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+        let hybrid_config = run.extra_json();
+        run.seal();
+
+        let (configured, measured) =
+            run.configure(IMPLICIT, Some(fixture_sidecar(0)), &long_hdr10plus());
+        assert!(configured);
+        assert_on_the_metadata_path(&measured);
+        assert_ne!(run.extra_json(), hybrid_config);
+        assert_eq!(run.extra_json(), metadata_config(&long_hdr10plus()));
+        assert_eq!(run.sealed(), [false, false, false]);
+    }
+
+    #[test]
+    fn hybrid_after_fallback_artifacts_withdraws_them() {
+        let run = ConfigRun::new();
+        // The first run fell back: the measurements did not load.
+        let (configured, measured) = run.configure(IMPLICIT, None, &good_hdr10plus());
+        assert!(configured);
+        assert_on_the_metadata_path(&measured);
+        let fallback_config = run.extra_json();
+        assert_eq!(fallback_config, metadata_config(&good_hdr10plus()));
+        run.seal();
+
+        // The next run, with the same fingerprint, reaches the hybrid.
+        let (configured, measured) =
+            run.configure(IMPLICIT, Some(fixture_sidecar(0)), &good_hdr10plus());
+        assert!(configured);
+        assert_eq!(measured.hdr10plus_mode, IMPLICIT);
+        assert_ne!(run.extra_json(), fallback_config);
+        assert_eq!(run.sealed(), [false, false, false]);
+    }
+
+    #[test]
+    fn an_explicit_hybrid_refuses_a_late_failure_and_keeps_the_temp_dir() {
+        let run = ConfigRun::new();
+        let explicit = Hdr10PlusMode::ExplicitHybrid;
+        assert!(
+            run.configure(explicit, Some(fixture_sidecar(0)), &good_hdr10plus())
+                .0
+        );
+        let hybrid_config = run.extra_json();
+        run.seal();
+
+        for sidecar in [Some(fixture_sidecar(0)), None] {
+            let (configured, measured) = run.configure(explicit, sidecar, &long_hdr10plus());
+            assert!(!configured);
+            assert_eq!(measured.hdr10plus_mode, explicit);
+            assert_eq!(run.extra_json(), hybrid_config);
+            assert_eq!(run.sealed(), [true, true, true]);
+        }
     }
 
     #[test]

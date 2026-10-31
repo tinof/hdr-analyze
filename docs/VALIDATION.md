@@ -217,7 +217,7 @@ must therefore use `--analysis-version 2`; v4 output is a mapping-oriented produ
 | Title B ours max-RGB vs cm v2 | **+74.4** | 63.6 | 170.6 | 170.6 |
 | **Title B mkvdovi HDR10+→L1 vs cm v4** | **+5.1** | **1.0** | 17.0 | 17.0 |
 
-The Title B row is the round's cleanest result: **mkvdovi's HDR10+-derived L1 is essentially
+The Title B row is the round's cleanest result (measured on the path now named `--hdr10plus-l1 hdr10plus`): **mkvdovi's HDR10+-derived L1 is essentially
 identical to Dolby's own v4 analyzer per shot** (median 1 code, max 17), including the v4 floor
 behavior.
 

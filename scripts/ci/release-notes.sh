@@ -73,7 +73,7 @@ built it from this repository: \`gh attestation verify <archive> -R $repo\`.
 - **FFmpeg** in PATH (the Windows zip bundles the LGPL FFmpeg libraries the analyzer links
   against; \`mkvdovi\` still calls the \`ffmpeg\` command-line tool).
 - **mkvdovi** also needs \`mkvmerge\`, \`dovi_tool\` 2.3.2 or newer (2.3.4+ recommended), and
-  \`hdr10plus_tool\` for HDR10+ sources.
+  \`hdr10plus_tool\` for HDR10+ sources. HDR10+ sources also run the bundled \`hdr_analyzer_mvp\`.
 - Release binaries analyze on the CPU. GPU analysis needs a build with \`--features cuda\`.
 
 ### Upgrading

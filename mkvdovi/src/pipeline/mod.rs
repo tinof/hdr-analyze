@@ -26,7 +26,10 @@ use self::config::{prepare_configuration, Configured};
 use self::deliver::{extract_base_layer, inject_rpu, mux_output};
 pub use self::dovi_steps::DOVI_TOOL_MKV_INPUT_MIN;
 use self::dovi_steps::{convert_mel_fast_path, generate_rpu};
-use self::measure::{abort_unsupported, acquire_measurements, report_detection, total_steps_for};
+use self::measure::{
+    abort_unsupported, acquire_measurements, analyzer_records_frame_peak, report_detection,
+    resolve_hdr10plus_mode, total_steps_for, Hdr10PlusMode,
+};
 use self::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 
 /// Error for Profile 7 FEL inputs. The BL+EL compositor and its re-encode were removed; FEL is
@@ -61,10 +64,16 @@ fn hybrid_sampling_refusal(args: &Args) -> Option<String> {
     let (_, sample_rate) = analyzer::analysis_sampling(args.analysis_quality);
     (sample_rate != 1).then(|| {
         format!(
-            "--hdr10plus-l1 hybrid needs every frame analyzed, but --analysis-quality {} analyzes one frame in {sample_rate}; use balanced or accurate, or convert without --hdr10plus-l1 hybrid.",
+            "--hdr10plus-l1 hybrid needs every frame analyzed, but --analysis-quality {} analyzes one frame in {sample_rate}; use balanced or accurate, or convert with --hdr10plus-l1 hdr10plus.",
             format!("{:?}", args.analysis_quality).to_lowercase()
         )
     })
+}
+
+/// Whether `--hdr10plus-l1 hybrid` was given for an input it does not apply to. Never true for
+/// the default, which says nothing about other inputs.
+fn hybrid_flag_ignored(args: &Args, hdr_type: HdrFormat) -> bool {
+    args.hdr10plus_l1 == Some(Hdr10PlusL1::Hybrid) && hdr_type != HdrFormat::Hdr10Plus
 }
 
 #[expect(clippy::too_many_lines, reason = "E13.12: split by phase")]
@@ -125,20 +134,24 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             return Ok(false);
         }
     }
-    // The hybrid needs every frame measured; refused per file, so the other files of a batch run.
-    let hdr10plus_hybrid =
-        detected_hdr_type == HdrFormat::Hdr10Plus && args.hdr10plus_l1 == Hdr10PlusL1::Hybrid;
-    if hdr10plus_hybrid {
-        if let Some(refusal) = hybrid_sampling_refusal(args) {
-            progress::print_error(&refusal);
-            return Ok(false);
+    // Settled here, before the fingerprint: a metadata temp dir must not carry the hybrid token.
+    // Refused per file, so the other files of a batch run.
+    let (hdr10plus_mode, hdr10plus_notice) = if detected_hdr_type == HdrFormat::Hdr10Plus {
+        match resolve_hdr10plus_mode(args, analyzer_records_frame_peak) {
+            Ok(resolved) => resolved,
+            Err(refusal) => {
+                progress::print_error(&refusal);
+                return Ok(false);
+            }
         }
-    }
+    } else {
+        (Hdr10PlusMode::Metadata, None)
+    };
     let custom_composer = hlg_composer.filter(|&composer| composer != Composer::Preset);
 
     let fingerprint = resume::Fingerprint::for_input(
         input_path,
-        resume_settings(args, hlg_composer, hdr10plus_hybrid),
+        resume_settings(args, hlg_composer, hdr10plus_mode.is_hybrid()),
     )
     .ok();
     let (temp_dir, resuming) = settle_leftover_temp_dir(
@@ -184,7 +197,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     if abort_unsupported(detected_hdr_type, &temp_dir) {
         return Ok(false);
     }
-    if args.hdr10plus_l1 == Hdr10PlusL1::Hybrid && !hdr10plus_hybrid {
+    if hybrid_flag_ignored(args, detected_hdr_type) {
         progress::print_info("--hdr10plus-l1 hybrid applies only to HDR10+ inputs; ignored.");
     }
 
@@ -212,6 +225,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         resume_enabled,
         hlg_composer,
         detected_hdr_type,
+        hdr10plus_mode,
+        hdr10plus_notice.as_deref(),
         detection.authored.as_ref(),
         &mut total_steps,
         &mut current_step,
@@ -323,8 +338,8 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             hlg_composer,
             Some(crate::verify::DeliveryExpectation {
                 // dovi_tool takes L1 from the HDR10+ metadata when it is given, never the shots.
-                // Under --hdr10plus-l1 hybrid the type is HDR10 with measurements by now, and the
-                // sidecar holds the hybrid pieces.
+                // Under the hybrid the type is HDR10 with measurements by now, and the sidecar
+                // holds the hybrid pieces.
                 l1_sidecar: measured
                     .l1_sidecar
                     .as_ref()
@@ -364,10 +379,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 /// dirs too; preset temp dirs rely on the `extra.json` comparison, which withdraws the RPU when
 /// the re-analyzed L1 differs (the RPU's composer is unchanged).
 ///
-/// `hdr10plus_hybrid` is true for an HDR10+ input under `--hdr10plus-l1 hybrid`; its token is
-/// appended for the same reason, so default fingerprints are unchanged. It changes the
-/// artifacts (an analyzer run, a different `extra.json`), and a temp dir of the other mode is
-/// discarded instead of resumed.
+/// `hdr10plus_hybrid` is true for an HDR10+ input resolved to the hybrid, by default or by the
+/// flag; its token is appended for the same reason, so other inputs keep their fingerprints. It
+/// changes the artifacts (an analyzer run, a different `extra.json`), and a temp dir of the other
+/// mode is discarded instead of resumed. A fallback after this point keeps the token; there the
+/// `extra.json` comparison withdraws the RPU.
 fn resume_settings(args: &Args, hlg_composer: Option<Composer>, hdr10plus_hybrid: bool) -> String {
     let mut settings = format!(
         "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} mdfix={} legacy_madvr_l1={}",

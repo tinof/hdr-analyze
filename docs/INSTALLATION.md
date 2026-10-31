@@ -112,6 +112,8 @@ Notes:
   `mkvdovi` extracts the stream with `ffmpeg` instead.
 - `hdr10plus_tool` is not part of the startup check. If it is missing, an HDR10+ file fails. It
   does not fall back to HDR10 processing.
+- HDR10+ conversions also run `hdr_analyzer_mvp`, which ships with `mkvdovi`. Keep the two at the
+  same version: without a current analyzer, L1 comes from the HDR10+ metadata alone, with a warning.
 - On Windows, the DLLs in the zip cover the analyzer only. `mkvdovi` still needs `ffmpeg.exe` on
   `PATH`.
 - On macOS, `brew install ffmpeg` provides `ffmpeg` and `ffprobe`. For the other tools, follow the

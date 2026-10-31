@@ -287,7 +287,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   flipped); a non-HDR10+ input prints no "applies only to HDR10+ inputs; ignored" line under the
   default (`convert_file`, `pipeline/mod.rs`); an HDR10+ input under `--analysis-quality fast`
   without an explicit flag still converts, through the `hdr10plus` path with a visible notice,
-  and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`).
+  and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`); the same holds
+  for a missing or older analyzer, unusable HDR10+ metadata and a failed analysis, each on both
+  sides, and a run that changes path inside one fingerprint withdraws the old RPU.
 - Peak against retail is not scored: hybrid takes the same HDR10+ peak as `dovi_tool`, about 104
   codes below retail on the holdout cuts.
 - **Checked 2026-10-31 @9c69713:** P9.3: resolve one mode (`cli.rs:48`, `pipeline/mod.rs:130`,

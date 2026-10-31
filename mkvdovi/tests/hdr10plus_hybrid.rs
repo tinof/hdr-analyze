@@ -2,8 +2,9 @@
 //! scenes. Every delivered RPU frame must carry the L1 of its union piece: the HDR10+ peak of
 //! the HDR10+ scene, and the average and minimum of the measured frames of the piece, after the
 //! generator's clamps. With `--peak-source max-scl` (MaxSCL is 0 here, as on HDR10+ Profile A
-//! discs) every piece takes the measured peak of its own frames instead. Without the flag nothing
-//! is measured. An analyzer that cannot record the per-frame peak is refused before it runs.
+//! discs) every piece takes the measured peak of its own frames instead. With `--hdr10plus-l1
+//! hdr10plus` nothing is measured. An explicit hybrid refuses an analyzer that cannot record the
+//! per-frame peak before it runs; without the flag such a file takes the metadata path, visibly.
 //!
 //! Skipped (with a message) when ffmpeg with libx265, ffprobe, mkvmerge, dovi_tool or
 //! hdr10plus_tool is missing, or when no `hdr_analyzer_mvp` is built next to the test's mkvdovi
@@ -218,8 +219,8 @@ fn nal_units(stream: &[u8]) -> Vec<&[u8]> {
         .collect()
 }
 
-/// L1 `(min, max, avg)` of the RPU in each access unit, in decode order.
-fn l1_per_access_unit(mkv: &Path) -> Vec<(u16, u16, u16)> {
+/// The Annex B video stream of `mkv`, RPU NAL units included.
+fn video_stream(mkv: &Path) -> Vec<u8> {
     let annexb = mkv.with_extension("hevc");
     run(Command::new("ffmpeg")
         .args(["-hide_banner", "-loglevel", "error", "-i"])
@@ -234,7 +235,12 @@ fn l1_per_access_unit(mkv: &Path) -> Vec<(u16, u16, u16)> {
         ])
         .args(["-f", "hevc", "-y"])
         .arg(&annexb));
-    let stream = std::fs::read(&annexb).unwrap();
+    std::fs::read(&annexb).unwrap()
+}
+
+/// L1 `(min, max, avg)` of the RPU in each access unit, in decode order.
+fn l1_per_access_unit(mkv: &Path) -> Vec<(u16, u16, u16)> {
+    let stream = video_stream(mkv);
     let mut l1: Vec<Option<(u16, u16, u16)>> = Vec::new();
     for unit in nal_units(&stream) {
         let kind = (unit[0] >> 1) & 0x3f;
@@ -256,7 +262,12 @@ fn l1_per_access_unit(mkv: &Path) -> Vec<(u16, u16, u16)> {
 }
 
 fn convert(dir: &Path, flags: &[&str]) -> String {
-    let conversion = mkvdovi_cmd()
+    convert_with(mkvdovi_cmd(), dir, flags)
+}
+
+/// Runs `mkvdovi` with the options every conversion here shares; the status and the log.
+fn try_convert(mut mkvdovi: Command, dir: &Path, flags: &[&str]) -> (bool, String) {
+    let conversion = mkvdovi
         .current_dir(dir)
         .arg(SOURCE)
         .args([
@@ -274,7 +285,12 @@ fn convert(dir: &Path, flags: &[&str]) -> String {
         String::from_utf8_lossy(&conversion.stdout),
         String::from_utf8_lossy(&conversion.stderr)
     );
-    assert!(conversion.status.success(), "mkvdovi failed:\n{log}");
+    (conversion.status.success(), log)
+}
+
+fn convert_with(mkvdovi: Command, dir: &Path, flags: &[&str]) -> String {
+    let (success, log) = try_convert(mkvdovi, dir, flags);
+    assert!(success, "mkvdovi failed:\n{log}");
     assert!(
         log.contains("HDR10+"),
         "MediaInfo must classify the clip as HDR10+:\n{log}"
@@ -402,6 +418,189 @@ fn hybrid_refuses_an_analyzer_without_the_frame_peak_before_analysis() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn without_the_flag_a_file_that_cannot_take_the_hybrid_converts_from_the_metadata() {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!("Skipping HDR10+ hybrid test: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (stale, stale_analyzed) =
+        mkvdovi_with_fake_analyzer(&dir.path().join("stale"), "Usage: hdr_analyzer_mvp");
+    let (failing, failing_analyzed) = mkvdovi_with_fake_analyzer(
+        &dir.path().join("failing"),
+        "Capabilities: l1-sidecar-frame-peak",
+    );
+    let clip = dir.path().join("clip");
+    std::fs::create_dir(&clip).unwrap();
+    synthesize_hdr10plus_clip(&clip);
+    let output = clip.join(OUTPUT);
+    let measurements = clip.join("clip_measurements.bin");
+
+    convert(&clip, &["--hdr10plus-l1", "hdr10plus"]);
+    let metadata_stream = video_stream(&output);
+    std::fs::remove_file(&output).unwrap();
+
+    // Each of these runs delivers the stream of the explicit metadata path, and says so.
+    let assert_metadata_path = |log: &str, reason: &str| {
+        assert!(log.contains(reason), "{log}");
+        assert!(
+            log.contains("L1 comes from the HDR10+ metadata alone"),
+            "{log}"
+        );
+        assert!(video_stream(&output) == metadata_stream, "{log}");
+        std::fs::remove_file(&output).unwrap();
+    };
+
+    let log = convert_with(Command::new(&stale), &clip, &[]);
+    assert_metadata_path(&log, "does not record the per-frame peak");
+    assert!(!stale_analyzed.exists(), "the analyzer ran:\n{log}");
+
+    let log = convert(&clip, &["--analysis-quality", "fast"]);
+    assert_metadata_path(&log, "analyzes one frame in 3");
+    assert!(!measurements.exists(), "{log}");
+
+    let log = convert(&clip, &["--legacy-madvr-l1"]);
+    assert_metadata_path(&log, "--legacy-madvr-l1");
+    assert!(!measurements.exists(), "{log}");
+
+    let log = convert_with(Command::new(&failing), &clip, &[]);
+    assert_metadata_path(&log, "the analysis failed");
+    assert!(
+        failing_analyzed.exists(),
+        "the analyzer did not run:\n{log}"
+    );
+
+    // The same conditions refuse an explicit hybrid.
+    let hybrid = ["--hdr10plus-l1", "hybrid"];
+    for (mkvdovi, extra, reason) in [
+        (
+            Command::new(&stale),
+            &[][..],
+            "rebuild or update hdr_analyzer_mvp",
+        ),
+        (Command::new(&failing), &[][..], "Failed to process"),
+        (
+            mkvdovi_cmd(),
+            &["--analysis-quality", "fast"][..],
+            "analyzes one frame in 3; use balanced or accurate, or convert with --hdr10plus-l1 hdr10plus",
+        ),
+    ] {
+        let flags: Vec<&str> = hybrid.iter().chain(extra).copied().collect();
+        let (success, log) = try_convert(mkvdovi, &clip, &flags);
+        assert!(!success, "an explicit hybrid must refuse:\n{log}");
+        assert!(!log.contains("panicked"), "{log}");
+        assert!(log.contains(reason), "{log}");
+        assert!(!output.exists(), "{log}");
+    }
+    let (success, log) = try_convert(
+        mkvdovi_cmd(),
+        &clip,
+        &["--hdr10plus-l1", "hybrid", "--legacy-madvr-l1"],
+    );
+    assert!(!success, "{log}");
+    assert!(log.contains("use one or the other"), "{log}");
+}
+
+/// `dovi_tool` that stops every `generate`, which leaves the temp directory of an interrupted
+/// run, and passes anything else on. Returns its directory for the front of `PATH`.
+#[cfg(unix)]
+fn dovi_tool_without_generate(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let real = run(Command::new("sh").args(["-c", "command -v dovi_tool"]));
+    let real = String::from_utf8(real.stdout).unwrap();
+    let shim = dir.join("dovi_tool");
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\ncase \" $* \" in *' generate '*) exit 1 ;; esac\nexec '{}' \"$@\"\n",
+            real.trim()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dir.to_path_buf()
+}
+
+/// The settings fingerprinted by a run that `dovi_tool` stopped. The temp directory goes with it.
+#[cfg(unix)]
+fn fingerprinted_settings(mut mkvdovi: Command, clip: &Path, shim: &Path) -> String {
+    let path = format!(
+        "{}:{}",
+        shim.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let run = mkvdovi
+        .current_dir(clip)
+        .env("PATH", path)
+        .arg(SOURCE)
+        .args(["--keep-source", "--hwaccel", "none"])
+        .output()
+        .unwrap();
+    assert!(
+        !run.status.success(),
+        "dovi_tool generate must stop the run"
+    );
+    let temp = clip.join("mkvdovi_temp_clip");
+    let fingerprint: Value =
+        serde_json::from_slice(&std::fs::read(temp.join("resume.json")).unwrap()).unwrap();
+    std::fs::remove_dir_all(temp).unwrap();
+    fingerprint.to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn the_fingerprint_follows_the_path_the_file_takes_not_the_flag() {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!("Skipping HDR10+ hybrid test: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (stale, _) =
+        mkvdovi_with_fake_analyzer(&dir.path().join("stale"), "Usage: hdr_analyzer_mvp");
+    let shim = dir.path().join("shim");
+    std::fs::create_dir(&shim).unwrap();
+    let shim = dovi_tool_without_generate(&shim);
+    let clip = dir.path().join("clip");
+    std::fs::create_dir(&clip).unwrap();
+    synthesize_hdr10plus_clip(&clip);
+    const TOKEN: &str = "hdr10plus_l1=hybrid";
+
+    let settings = fingerprinted_settings(Command::new(&stale), &clip, &shim);
+    assert!(!settings.contains(TOKEN), "{settings}");
+    let settings = fingerprinted_settings(mkvdovi_cmd(), &clip, &shim);
+    assert!(settings.contains(TOKEN), "{settings}");
+}
+
+#[test]
+fn the_default_is_the_hybrid_with_the_fresh_analysis_of_an_explicit_one() {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!("Skipping HDR10+ hybrid test: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    synthesize_hdr10plus_clip(dir.path());
+    let output = dir.path().join(OUTPUT);
+    let measurements = dir.path().join("clip_measurements.bin");
+    let sidecar = dir.path().join("clip_measurements.bin.l1.json");
+
+    let log = convert(dir.path(), &["--hdr10plus-l1", "hybrid"]);
+    assert!(log.contains("HDR10+ hybrid L1:"), "{log}");
+    let explicit = video_stream(&output);
+    std::fs::remove_file(&output).unwrap();
+    std::fs::remove_file(&measurements).unwrap();
+    std::fs::remove_file(&sidecar).unwrap();
+
+    let log = convert(dir.path(), &[]);
+    assert!(log.contains("HDR10+ hybrid L1:"), "{log}");
+    assert!(log.contains("--hdr10plus-l1 hdr10plus skips this"), "{log}");
+    assert!(!log.contains("metadata alone"), "{log}");
+    assert!(measurements.exists(), "{log}");
+    assert!(video_stream(&output) == explicit, "{log}");
+}
+
 #[test]
 fn hybrid_l1_takes_the_hdr10plus_peak_and_the_measured_average_per_union_piece() {
     if let Some(reason) = missing_prerequisite() {
@@ -414,8 +613,8 @@ fn hybrid_l1_takes_the_hdr10plus_peak_and_the_measured_average_per_union_piece()
     let sidecar_path = dir.path().join("clip_measurements.bin.l1.json");
     let output = dir.path().join(OUTPUT);
 
-    // Without the flag nothing is measured: L1 comes from the HDR10+ metadata.
-    let log = convert(dir.path(), &[]);
+    // Under hdr10plus nothing is measured: L1 comes from the HDR10+ metadata.
+    let log = convert(dir.path(), &["--hdr10plus-l1", "hdr10plus"]);
     assert!(!log.contains("hybrid"), "{log}");
     assert!(!measurements.exists());
     std::fs::remove_file(&output).unwrap();

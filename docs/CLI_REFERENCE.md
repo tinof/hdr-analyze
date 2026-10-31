@@ -211,7 +211,7 @@ cargo run -p hdr_analyzer_mvp --release -- -i "video.mkv" -o "out.bin" --downsca
 
 Orchestrates the full HDR10/HDR10+/Profile 7 MEL → Dolby Vision Profile 8.1 and HLG → Profile 8.4 (CM v4.0) conversion. The video
 stream is always copied; `mkvdovi` never encodes video. Profile 7 FEL input is refused (see [FEL_PLAN.md](FEL_PLAN.md)). Internally
-calls `ffmpeg`, `mkvmerge`, `dovi_tool`, `mediainfo` or `ffprobe`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately
+calls `ffmpeg`, `mkvmerge`, `dovi_tool`, `mediainfo` or `ffprobe`, and (for HDR10+) `hdr10plus_tool`; these must be installed separately. `hdr_analyzer_mvp` ships with it
 (see [README Prerequisites](../README.md#prerequisites)).
 
 ```bash
@@ -242,15 +242,15 @@ mkvdovi "input.mkv"     # process a specific file
 | `--optimizer-profile <conservative\|balanced\|aggressive>` | `conservative` | Optimizer profile passed to the `hdr_analyzer_mvp` pass (affects the madVR `.bin`, not the RPU's L1 unless `--legacy-madvr-l1` is set) |
 | `--legacy-madvr-l1` | off | Compatibility escape: build L1 from the madVR `.bin` with `dovi_tool --use-custom-targets` (optimizer targets as L1 max, placeholder avg) instead of the measured sidecar. Existing measurements are then reused without sidecar validation. Not available for HLG input (the file is refused) |
 | `--hlg-composer <bt2100\|preset>` | `bt2100` | Profile 8.4 composer written into the RPU of HLG inputs, and measured through. `bt2100` (default) is fitted to the BT.2100 / BT.2408 1000-nit conversion: mkvdovi replaces the composer on every RPU frame. `preset` keeps the RPU exactly as `dovi_tool generate` writes it; use it if a display renders bt2100 output wrongly. A playback test on an LG OLED C9 confirmed that the display applies the composer; other devices are untested. When analysis runs, mkvdovi passes the composer to the analyzer, and refuses the file before analysis when the analyzer's `--help` does not name the selected composer's luminance mapping (`dovi84-v3` for `preset`, `dovi84-bt2100-v1-spec420` for `bt2100`); such an analyzer predates the spec 4:2:0 decode and must be updated. Ignored for non-HLG input. See [HLG_COMPOSER.md](HLG_COMPOSER.md) |
-| `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); it selects GPU decode and analysis in the spawned analyzer (HDR10, HLG and `--mdfix`) and nothing else |
+| `--hwaccel <auto\|none\|cuda>` | `auto` | Hardware acceleration: `auto` detects an NVIDIA GPU at startup (CUDA when found, CPU otherwise); it selects GPU decode and analysis in the spawned analyzer (HDR10, HDR10+ unless `--hdr10plus-l1 hdr10plus`, HLG and `--mdfix`) and nothing else |
 | `--dovi-input <auto\|raw\|mkv>` | `auto` | Feed mode to `dovi_tool` for remove/convert/demux: `auto` passes the MKV directly when `dovi_tool` is 2.3.4+ (skipping a full-size HEVC extraction), falling back to extraction on failure; `raw` forces extraction; `mkv` forces direct MKV input |
 
 ### HDR10+ peak mapping
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--peak-source <histogram\|histogram99\|max-scl\|max-scl-luminance>` | `histogram` | Maps to `dovi_tool generate --hdr10plus-peak-source`; also the HDR10+ peak under `--hdr10plus-l1 hybrid` |
-| `--hdr10plus-l1 <hdr10plus\|hybrid>` | `hdr10plus` | L1 for HDR10+ input. `hybrid` (opt-in) also runs the analyzer: scenes = union of HDR10+ starts and analyzer cuts, HDR10+ peak (reported fallback to the measured peak of the piece's own frames), measured average, minimum and L5. Refused with `--analysis-quality fast` (per file) and with `--legacy-madvr-l1` (at startup). When analysis has to run, the file is refused before analysis if the analyzer's `--help` does not name `l1-sidecar-frame-peak`; such an analyzer writes sidecars older than version 6 and must be updated |
+| `--peak-source <histogram\|histogram99\|max-scl\|max-scl-luminance>` | `histogram` | Maps to `dovi_tool generate --hdr10plus-peak-source`; also the HDR10+ peak of the hybrid L1 |
+| `--hdr10plus-l1 <hdr10plus\|hybrid>` | hybrid, with fallback | L1 for HDR10+ input. `hybrid` also runs the analyzer: scenes = union of HDR10+ starts and analyzer cuts, HDR10+ peak (reported fallback to the measured peak of the piece's own frames), measured average, minimum and L5. `hdr10plus` takes L1 from the HDR10+ metadata alone, with no analysis. Without the flag, a file that cannot take the hybrid uses `hdr10plus` with a warning: `--analysis-quality fast`, `--legacy-madvr-l1`, an analyzer that is missing or whose `--help` does not name `l1-sidecar-frame-peak` (it writes sidecars older than version 6), a malformed HDR10+ scene list, a failed analysis, an unusable sidecar, or an HDR10+ frame count other than the stream's. An explicit `--hdr10plus-l1 hybrid` refuses those files instead (`--legacy-madvr-l1` at startup, the others per file); it refuses the analyzer before analysis, and only when analysis has to run |
 | `-b, --boost` | off | Brighter preset; switches another selected `--peak-source` to `histogram99` |
 | `--boost-experimental` | off | Asks `hdr_analyzer_mvp` to use a more aggressive optimizer profile |
 

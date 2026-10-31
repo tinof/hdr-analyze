@@ -12,8 +12,8 @@ This document provides a historical record of completed milestones, feature impl
   one RPU NAL per access unit, byte-identical to `dovi_tool generate` 2.3.4. It covers shot L1,
   HDR10+ payloads (with `dovi_tool`'s scene rule), static 8.1 and 8.4 RPUs, and the preset, bt2100
   and P8 canary composers. It was made for the NuvioTV fork's on-device conversion and builds for
-  `aarch64-linux-android` ([`docs/RPU_BUILDER.md`](docs/RPU_BUILDER.md)). mkvdovi output is
-  unchanged: mkvdovi takes its `extra.json` from the crate and still runs `dovi_tool generate`.
+  `aarch64-linux-android` ([`docs/RPU_BUILDER.md`](docs/RPU_BUILDER.md)). Its HDR10+ output matches
+  `--hdr10plus-l1 hdr10plus`, not the hybrid. mkvdovi output is unchanged: mkvdovi takes its `extra.json` from the crate and still runs `dovi_tool generate`.
   `RpuBuilder::new` refuses every value the RPU cannot carry (L2 count, L5, L6, L9, L11, the 8.1
   source range) as `Error::OutOfRange`, so a builder that exists writes every shot; `Error::code`
   gives each error a stable number for JNI, and `Level6::clamped` caps L6 values taken from SEI
@@ -21,6 +21,18 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed
 
+- **Breaking: HDR10+ inputs use `--hdr10plus-l1 hybrid` by default.** L1 scenes are now the union
+  of the HDR10+ scenes and the analyzer's cuts, with the HDR10+ peak and the measured average and
+  minimum, so HDR10+ RPUs change. Each HDR10+ conversion now runs a full analysis, which can take
+  hours on the CPU, and writes `<stem>_measurements.bin` next to the input, replacing one it cannot
+  reuse. `--optimizer-profile` and `--boost-experimental` now reach the analyzer for these inputs.
+  `--hdr10plus-l1 hdr10plus` gives the old path, byte for byte, with no analysis. Without the flag,
+  a file that cannot take the hybrid still converts from the HDR10+ metadata, with a warning:
+  `--analysis-quality fast`, `--legacy-madvr-l1`, a missing or older analyzer, unusable HDR10+
+  metadata, or a failed analysis. An explicit `--hdr10plus-l1 hybrid` refuses those files as before
+  (an older analyzer only when analysis has to run).
+  Only an explicit hybrid conflicts with `--legacy-madvr-l1`. Interrupted HDR10+ runs from an older
+  build start again. Update `mkvdovi` and `hdr_analyzer_mvp` together.
 - CI is faster and no longer hangs on a slow Ubuntu mirror. Apt downloads run under a time limit,
   with a retry on another mirror, and the `.deb` files are cached. Before, one job could spend up
   to 9 minutes downloading 70 MB. A pull request that changes only Markdown, `docs/` or `LICENSE`
@@ -32,7 +44,7 @@ This document provides a historical record of completed milestones, feature impl
   and the analyzer's applied `peak_source`. Under hybrid, older sidecars and measurements with a
   histogram peak source are re-analyzed with a warning. Other conversions still reuse older
   sidecars, and their RPUs do not change. Update `mkvdovi` and `hdr_analyzer_mvp` together: an
-  older `mkvdovi` does not read version 6, and hybrid refuses an older analyzer before it runs.
+  older `mkvdovi` does not read version 6, and an explicit hybrid refuses an older analyzer before it runs.
 
 ## [0.7.0] - 2026-10-18
 

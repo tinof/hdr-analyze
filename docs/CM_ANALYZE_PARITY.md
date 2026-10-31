@@ -25,7 +25,7 @@ Known differences today:
   values (since 2026-10-04). Before, they came from the generator's coarse lookup on L6.
 - There is no L4, L2 trims are neutral, L3 is the generator's neutral block under CM v4.0, and L8 is
   not derived. Every retail RPU of the test cuts carries L4 on every frame and non-neutral L2.
-- For HDR10+ inputs L1 is derived from the HDR10+ metadata by `dovi_tool`, not measured.
+- Under `--hdr10plus-l1 hdr10plus`, the path the HDR10+ figures here describe, L1 is derived from the HDR10+ metadata by `dovi_tool`, not measured.
 - L5 comes from one crop for the whole file, and there is no XML export.
 
 Status and prioritization live in the [roadmap](../ROADMAP.md); current conversion usage lives in
@@ -91,7 +91,7 @@ Key facts:
   usable. For Profile 8.4 the preset's 62/3079 is used regardless of L6. `--verify` checks the
   source range on every frame and reports, per field, the scenes whose L1 the generator's limits
   changed.
-- HDR10+ inputs are not analyzed. `dovi_tool generate --hdr10plus-json` takes L1 from the first
+- Under `--hdr10plus-l1 hdr10plus` HDR10+ inputs are not analyzed. `dovi_tool generate --hdr10plus-json` takes L1 from the first
   frame of each HDR10+ scene: minimum 0, average = PQ of the linear-light max-RGB mean rounded to
   whole nits, maximum from the selected peak.
 - Seven seek-based crop probes are used by default across 15% to 85% of seekable inputs. Black/low-signal
@@ -111,8 +111,8 @@ Key facts:
 | Level | Current state | Remaining gap | Roadmap |
 |-------|---------------|---------------|---------|
 | **L1 max** | PQ max-RGB direct peak measured and scored; opt-in percentile and synthetic-calibrated grain-robust estimators. Delivered with a floor of 2081 (24 of 435 test scenes raised) | Robust mode reduced real-content per-shot bias from +92.6 to +80.4 and from +74.4 to +66.4 codes; isolated-tail frames selected by fold-max remain the open gap, so shot aggregation is part of the fix. Spatial-support statistics measured 2026-10-03 remove 55 to 70% of the grain excess on a clean/grainy pair but lose real highlights; none passes ([roadmap](../ROADMAP.md) WS1). Target-gamut transforms. Sub-100-nit shot maxima are not delivered | WS1 / P10 |
-| **L1 avg** | Per-scene max-RGB mean delivered in the RPU with a floor of 819 (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar. HDR10+ inputs: derived from HDR10+ metadata, 156 to 505 codes (median 264) above the measured mean on the one test cut | Hybrid HDR10+ mode with a measured average; cm v4's "avg" is an anchored constant, not a mean. Retail averages sit at exactly 819 on most shots of two test cuts, so the floor is kept | P9 / WS1 |
-| **L1 min** | Noise-rejected active-area minimum measured per scene and passed to the generator, which writes any value above 12 codes as 12 (135 of 435 test scenes). HDR10+ inputs: 0 | The measured minimum does not reach the RPU when it is above 12 codes, while retail RPUs carry minima up to 251. `--verify` reports the clamped scenes per field (2026-10-04); open: decide whether to write L1 without the generator's clamp. No open renderer reads L1 min, so the effect can only be checked on a device | P10 |
+| **L1 avg** | Per-scene max-RGB mean delivered in the RPU with a floor of 819 (matches cm v2 shot averages within ~10 codes); Y mean also recorded in the sidecar. HDR10+ inputs under `--hdr10plus-l1 hdr10plus`: derived from HDR10+ metadata, 156 to 505 codes (median 264) above the measured mean on the one test cut | cm v4's "avg" is an anchored constant, not a mean. Retail averages sit at exactly 819 on most shots of two test cuts, so the floor is kept | P9 / WS1 |
+| **L1 min** | Noise-rejected active-area minimum measured per scene and passed to the generator, which writes any value above 12 codes as 12 (135 of 435 test scenes). `--hdr10plus-l1 hdr10plus`: 0 | The measured minimum does not reach the RPU when it is above 12 codes, while retail RPUs carry minima up to 251. `--verify` reports the clamped scenes per field (2026-10-04); open: decide whether to write L1 without the generator's clamp. No open renderer reads L1 min, so the effect can only be checked on a device | P10 |
 | **L4** | None; optimizer smooths madVR `target_nits`, not L1. `--mdfix` drops an authored L4 and says so | Every retail RPU of the test cuts has L4 on every frame; its anchor follows the per-frame average (r = 0.94 to 0.99 in eight of nine, 0.71 in one). Emission is deferred until something can validate it: no open renderer reads L4 | WS2 / P11 |
 | **L5** | Offsets from the committed crop (HDR10/HLG); sampled source L5 for Dolby Vision inputs | Per-scene offsets for changing aspect ratios | P3 / WS3 |
 | **L6 / source range** | Container/MediaInfo values with warned fallbacks; measured MaxCLL/MaxFALL fill fields the source does not state. `source_min_pq` / `source_max_pq` for 8.1 from the mastering values (2026-10-04) | Generator L1 limits remain (P10 step 3) | P6 / P10 |
@@ -169,7 +169,7 @@ codes (0.00026 nits). A measured raised black therefore stays in the sidecar and
 RPU. An earlier version of this document said it was delivered; that was wrong. Whether to write L1
 without the clamp is roadmap item P10.
 
-For HDR10+ inputs the average is not measured. On the HDR10+ test cut (11 scenes, full-frame
+Under `--hdr10plus-l1 hdr10plus` the average of an HDR10+ input is not measured. On the HDR10+ test cut (11 scenes, full-frame
 picture) the generator's average, PQ of the linear-light mean rounded to whole nits, is 156 to 505
 codes (median 264) above the analyzer's mean of PQ max-RGB in every scene; the rounding alone moves
 a 0.7-nit scene by 71 codes. A linear-light mean lies above a mean of PQ values by construction, but
