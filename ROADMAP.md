@@ -290,8 +290,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`).
 - Peak against retail is not scored: hybrid takes the same HDR10+ peak as `dovi_tool`, about 104
   codes below retail on the holdout cuts.
-- **Checked 2026-10-31 @2a7bb35:** P9.3: resolve one mode (`cli.rs:48`, `pipeline/mod.rs:130`,
-  `measure.rs:190`), hint `config.rs:162`, `sha256sum`; holdout had 0 fallbacks.
+- **Checked 2026-10-31 @9c69713:** P9.3: resolve one mode (`cli.rs:48`, `pipeline/mod.rs:130`,
+  `measure.rs:190`), hint `pipeline/config.rs:162`, `sha256sum`; holdout had 0 fallbacks. New
+  since P9.2: the `hdr10plus` path runs no analyzer, so the flipped default would refuse an HDR10+
+  input when the analyzer is missing or older (`measure.rs:210`); no gate clause covers this. Plan
+  it like `fast`: default falls back to `hdr10plus` with a notice, explicit `hybrid` refuses.
 
 ### P10: measured against delivered
 
