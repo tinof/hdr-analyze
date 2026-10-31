@@ -121,7 +121,11 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   `Composer::luminance_mapping()` name, for every composer including preset
   (`mkvdovi/src/pipeline/measure.rs` `run_fresh_analysis`, `external::analyzer_lists_option`), and
   then always passes `--hlg-composer`. An analyzer that does not name it (pre-P8) is refused before
-  any analysis. The analyzer's help text is therefore a cross-binary contract too.
+  any analysis. The analyzer's help text is therefore a cross-binary contract too. Under
+  `--hdr10plus-l1 hybrid` a fresh analysis needs the analyzer's `--help` to contain the capability
+  `l1-sidecar-frame-peak` (`ANALYZER_FRAME_PEAK_CAPABILITY`, printed in `hdr_analyzer_mvp/src/cli.rs`):
+  an analyzer that writes sidecars older than v6 is refused before it runs, so it cannot replace
+  existing measurements. The name is a capability, not a version, and stays for later sidecars.
 
 ## L1 sidecar contract
 

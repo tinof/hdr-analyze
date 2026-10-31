@@ -174,7 +174,9 @@ unknown name is applied, and recorded, as `max`.
 `max` estimator and source. It re-analyzes anything else with a warning, because a piece without a
 usable HDR10+ peak takes the largest peak of its own frames. That peak is still a measurement: analysis at
 `--downscale 2`, which `auto` resolves to on the CPU, or with `--pre-denoise median3` can miss a small
-highlight. Other conversions also reuse older versions.
+highlight. An analyzer whose `--help` does not name `l1-sidecar-frame-peak` is refused before a
+fresh hybrid analysis, so existing measurements stay in place. Other conversions also reuse older
+versions.
 
 `mkvdovi` reuses a sidecar below version 5 only when its frame count
 matches the input exactly, and it reuses a sidecar below version 4 with a warning that its averages were smoothed

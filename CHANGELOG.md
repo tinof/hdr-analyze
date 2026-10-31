@@ -32,7 +32,7 @@ This document provides a historical record of completed milestones, feature impl
   and the analyzer's applied `peak_source`. Under hybrid, older sidecars and measurements with a
   histogram peak source are re-analyzed with a warning. Other conversions still reuse older
   sidecars, and their RPUs do not change. Update `mkvdovi` and `hdr_analyzer_mvp` together: an
-  older `mkvdovi` does not read version 6.
+  older `mkvdovi` does not read version 6, and hybrid refuses an older analyzer before it runs.
 
 ## [0.7.0] - 2026-10-18
 
