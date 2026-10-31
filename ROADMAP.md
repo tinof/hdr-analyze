@@ -52,23 +52,21 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-10-27 at main@b86b447)
-<!-- roadmap-next: rev=3 scope=all config=d3831e416f18 probes=gpu:ok,corpus:ok ready=ca56f22be0c9 -->
+### Next up (checked 2026-10-31 at main@2a7bb35)
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=b5eb0ee05687 -->
 
-1. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: the hybrid fallback peak is the
+1. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: a hybrid fallback piece takes the
    whole analyzer scene's max (`hybrid.rs:340`); fix it before the flip, while "default RPU
-   baselines byte-identical" still means the old path. Branch `feat/p9-2-sidecar-v6`. Release: minor
+   baselines byte-identical" still means the old path. Priority 1 has no startable step.
+   Branch `feat/p9-2-sidecar-v6`. Release: minor
 2. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
-   after P9.2, so the default ships the exact fallback peak; v0.8.0 with E12.1 and P9.2. Own
-   branch `feat/p9-3-hybrid-default` (moves HDR10+ L1). Release: minor
-
-**Reassess:** needs-changed (WS6.8, PR #78): WS6.9's gate now gives the intercepts for arm A
-centre 912 (911.6 / 912.4 / 912.2) and follows `PREREG.md` draft 2; priority 1 has no desk step
-left until WS6.9 is measured.
-
-**Reassess:** plan-changed (WS6.6, PR #80): the forced-choice canary answered the WS6
-`code / 1023` question for the C9 (`code / 1023`, the bt2100 fit stays), so priority 1 and the
-1.0.0 row no longer wait on WS6; WS6.9 stays open as a metered run on the later list.
+   after P9.2, so the default ships the exact fallback peak; the order is stated here and in the
+   item, not as a `Needs:`. v0.8.0 with E12.1 and P9.2. Own branch `feat/p9-3-hybrid-default`
+   (moves HDR10+ L1). Release: minor
+3. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
+   measures this first, and a flip is MINOR, so the answer should exist before v0.8.0 is cut. A
+   kept `balanced` needs no code. Branch `fix/p1-1-cpu-default`, only if it flips. Release: none
+   (minor if CPU `auto` flips)
 
 ### Waiting for the owner
 
@@ -298,12 +296,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`).
 - Peak against retail is not scored: hybrid takes the same HDR10+ peak as `dovi_tool`, about 104
   codes below retail on the holdout cuts.
-- **Checked 2026-10-27 @b86b447:** P9.2 first: a fallback piece takes the whole analyzer scene's
-  max (`hybrid.rs:340`), not the piece's; `max_rgb_pq` per frame (`l1_sidecar.rs:52`) is not
-  serialized; decide when hybrid refuses a v5 sidecar (`hybrid.rs:115`). P9.3: `hdr10plus_l1` is a
-  bare enum with a default (`cli.rs:47`); resolve one mode for `pipeline/mod.rs:127`,
-  `measure.rs:184` and `resume_settings`; the hint at `pipeline/config.rs:161` must name
-  `--hdr10plus-l1 hdr10plus`. Holdout had 0 fallbacks: test fallbacks on dev material.
+- **Checked 2026-10-31 @2a7bb35:** P9.2 first: a fallback piece takes the scene max (`hybrid.rs:340`).
+  Serialize `pq_to_12bit(frame.peak_pq_2020)` after `select_peak_pq` (`scenes.rs:209`), the value
+  of the scene max (`l1_sidecar.rs:292`); `peak_source` is local (`scenes.rs:163`), thread it to
+  `pipeline/mod.rs:282`. Under hybrid refuse v5 (`measure.rs:410`). P9.3: resolve one mode (`cli.rs:48`,
+  `pipeline/mod.rs:130`, `measure.rs:185`), hint `config.rs:162`, `sha256sum`; holdout had 0 fallbacks.
 
 ### P10: measured against delivered
 
@@ -324,7 +321,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - **Status:** Open. Defect found 2026-10-15, not fixed; history in
   [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P12.1, for the next patch release.
 - Under `--mdfix` the mastering min/max come from the container or the defaults
-  (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:42-43`),
+  (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:43-44`),
   never from the source RPU's L6. On r5 Inside Out 2 (P8.1, no ST 2086 in the container) the RPU's
   0.0001/1000 nits becomes 0.005/1000 nits and `source_min_pq` 7 becomes 62 on every frame
   (baseline `~/mkvdovi-work/rpu-baseline/0.6.0/mdfix/r5-inside-out-2-mind-console`). The only
@@ -336,11 +333,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
   E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
   of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
-- **Checked 2026-10-17 @941489d:** the sampled L6 values are not kept: the authored-levels scan
+- **Checked 2026-10-31 @2a7bb35:** the sampled L6 values are not kept: the authored-levels scan
   records only `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu`
-  (`rpu_check.rs:177`) has no L6 field, and `prepare_configuration` (`pipeline/config.rs:42`) gets
+  (`rpu_check.rs:177`) has no L6 field, and `prepare_configuration` (`pipeline/config.rs:30`) gets
   no sampled metadata, so the fix threads the values through and tests the pipeline wiring.
-  `scripts/rpu-baseline.sh compare` strips the CRC (`:245`), so "byte-identical" needs `sha256sum`.
+  `scripts/rpu-baseline.sh compare` strips the CRC (`:248`), so "byte-identical" needs `sha256sum`.
 
 ## `cm_analyze` parity
 
@@ -836,7 +833,7 @@ The detailed gap table and validation method live in
   [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E17.1.
 - **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
   RPU passes; the existing `--verify` tests and the RPU baselines are unchanged.
-- [E17.1][desk] Hard-fail `--verify` on duplicate L8 `target_display_index` values, duplicate L10
+- [E17.1][corpus] Hard-fail `--verify` on duplicate L8 `target_display_index` values, duplicate L10
   target indices, an L8 target that resolves to neither a preset nor an L10 block of the same
   frame, and optional L8 fields whose presence disagrees with the block length. First check what
   the `dolby_vision` crate (3.4.0) already rejects at parse time, and drop the checks it covers.
