@@ -433,8 +433,11 @@ input it stores `RPU.bin`, `rpu.json.gz`, `scenes.txt`, the `dovi_tool info` sum
 log, the analyzer's `.l1.json` sidecar, and `manifest.json` (input name, size and sha256, capture
 time, repo commit, versions of mkvdovi, hdr_analyzer_mvp, dovi_tool, mkvmerge, ffmpeg and
 mediainfo, the mkvdovi command line, the RPU frame count). Inputs above 2 GiB are identified by
-size, mtime and the sha256 of the first 64 MiB; the manifest says which method was used. A missing
-tool, a failed conversion or verification, or an empty RPU ends the run with a non-zero status.
+size, mtime and the sha256 of the first 64 MiB; the manifest says which method was used. Size and
+mtime follow a symlink to the real file. A manifest captured through a symlink before P9.3 holds
+the link's size, so `compare` refuses it against a new capture of the same input (exit 2): capture
+that baseline again. A missing tool, a failed conversion or verification, or an empty RPU ends the
+run with a non-zero status.
 
 Baselines are derived from media and are not committed. Keep them outside the repository, one
 directory per released version (on the CUDA dev host: `~/mkvdovi-work/rpu-baseline/v0.5.1/`, with
