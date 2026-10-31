@@ -372,6 +372,33 @@ fn mkvdovi_with_fake_analyzer(dir: &Path, help: &str) -> (PathBuf, PathBuf) {
     (mkvdovi, analyzed)
 }
 
+/// [`mkvdovi_with_fake_analyzer`] whose analyzer answers `--help` with the capability once, then
+/// can no longer be started, so the analysis fails at the spawn and not with an exit status.
+#[cfg(unix)]
+fn mkvdovi_with_analyzer_that_stops_starting(dir: &Path) -> PathBuf {
+    let (mkvdovi, _) = mkvdovi_with_fake_analyzer(dir, "Capabilities: l1-sidecar-frame-peak");
+    let analyzer = dir.join("hdr_analyzer_mvp");
+    let script = std::fs::read_to_string(&analyzer).unwrap();
+    let script = script.replace(
+        "--help) echo 'Capabilities: l1-sidecar-frame-peak' ;;",
+        "--help) echo 'Capabilities: l1-sidecar-frame-peak'; chmod -x \"$0\" ;;",
+    );
+    std::fs::write(&analyzer, script).unwrap();
+    mkvdovi
+}
+
+/// [`mkvdovi_with_fake_analyzer`] with an analyzer that cannot be started at all, which wins over
+/// any analyzer on `PATH`, as a missing one would not.
+#[cfg(unix)]
+fn mkvdovi_with_unstartable_analyzer(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (mkvdovi, _) = mkvdovi_with_fake_analyzer(dir, "Capabilities: l1-sidecar-frame-peak");
+    let plain = std::fs::Permissions::from_mode(0o644);
+    std::fs::set_permissions(dir.join("hdr_analyzer_mvp"), plain).unwrap();
+    mkvdovi
+}
+
 #[cfg(unix)]
 #[test]
 fn hybrid_refuses_an_analyzer_without_the_frame_peak_before_analysis() {
@@ -432,6 +459,9 @@ fn without_the_flag_a_file_that_cannot_take_the_hybrid_converts_from_the_metadat
         &dir.path().join("failing"),
         "Capabilities: l1-sidecar-frame-peak",
     );
+    let unstartable = mkvdovi_with_unstartable_analyzer(&dir.path().join("unstartable"));
+    let vanishing = mkvdovi_with_analyzer_that_stops_starting(&dir.path().join("vanishing"));
+    let vanishing_too = mkvdovi_with_analyzer_that_stops_starting(&dir.path().join("vanishing2"));
     let clip = dir.path().join("clip");
     std::fs::create_dir(&clip).unwrap();
     synthesize_hdr10plus_clip(&clip);
@@ -472,6 +502,13 @@ fn without_the_flag_a_file_that_cannot_take_the_hybrid_converts_from_the_metadat
         "the analyzer did not run:\n{log}"
     );
 
+    let log = convert_with(Command::new(&unstartable), &clip, &[]);
+    assert_metadata_path(&log, "hdr_analyzer_mvp is missing");
+
+    // The analysis itself cannot start, which is an error and not a failed run.
+    let log = convert_with(Command::new(&vanishing), &clip, &[]);
+    assert_metadata_path(&log, "the analysis failed (Failed to spawn command");
+
     // The same conditions refuse an explicit hybrid.
     let hybrid = ["--hdr10plus-l1", "hybrid"];
     for (mkvdovi, extra, reason) in [
@@ -481,6 +518,12 @@ fn without_the_flag_a_file_that_cannot_take_the_hybrid_converts_from_the_metadat
             "rebuild or update hdr_analyzer_mvp",
         ),
         (Command::new(&failing), &[][..], "Failed to process"),
+        (
+            Command::new(&unstartable),
+            &[][..],
+            "rebuild or update hdr_analyzer_mvp",
+        ),
+        (Command::new(&vanishing_too), &[][..], "Failed to spawn command"),
         (
             mkvdovi_cmd(),
             &["--analysis-quality", "fast"][..],

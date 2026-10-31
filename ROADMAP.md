@@ -701,8 +701,8 @@ The detailed gap table and validation method live in
 - **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
-  at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+, HLG, two MEL
-  incl. an open-GOP start; `--mdfix` on MEL and Profile 8; HLG with `--hlg-composer preset`, the
+  at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+ captured with
+  `-- --hdr10plus-l1 hdr10plus`, HLG, two MEL incl. an open-GOP start; `--mdfix` on MEL and Profile 8; HLG with `--hlg-composer preset`, the
   path without the RPU rewrite), and
   `MKVDOVI_CORPUS_DIR=~/mkvdovi-work/corpus/dev cargo test -p mkvdovi corpus_cuts_are_classified_like_their_manifests`,
   the only test that reaches the Profile 7 MEL/FEL branch of `check_hdr_format`, which the step 3
@@ -727,7 +727,8 @@ The detailed gap table and validation method live in
   Gate: as E13.6.
 - Code lines below are clippy's count (blank and comment lines skipped), 2026-10-28 @dc4882d. The
   mkvdovi gate: fmt, clippy, tests, and `scripts/rpu-baseline.sh compare --require-identical-l1`
-  against `~/mkvdovi-work/rpu-baseline/e13-step5/`.
+  against `~/mkvdovi-work/rpu-baseline/e13-step5/`; HDR10+ also against the no-flag captures in
+  `~/mkvdovi-work/rpu-baseline/p9-3-hybrid-default/default/`.
 - [E13.12][corpus] Split `convert_file` (`mkvdovi/src/pipeline/mod.rs`) by phase; step 4 left it at
   281 lines. Gate: the mkvdovi gate.
 - [E13.13][corpus] Split `verify_post_mux_with_options` (`mkvdovi/src/verify.rs`, 256 lines) by
