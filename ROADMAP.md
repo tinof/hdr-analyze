@@ -53,20 +53,20 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-10-31 at main@2a7bb35)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=b5eb0ee05687 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=4a0584135735 -->
 
-1. **P9.2 Sidecar v6** (priority 2). Gate: the step's gate. Why: a hybrid fallback piece takes the
-   whole analyzer scene's max (`hybrid.rs:340`); fix it before the flip, while "default RPU
-   baselines byte-identical" still means the old path. Priority 1 has no startable step.
-   Branch `feat/p9-2-sidecar-v6`. Release: minor
-2. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
+1. **P9.3 Flip the `--hdr10plus-l1` default to hybrid** (priority 2). Gate: the step's gate. Why:
    after P9.2, so the default ships the exact fallback peak; the order is stated here and in the
    item, not as a `Needs:`. v0.8.0 with E12.1 and P9.2. Own branch `feat/p9-3-hybrid-default`
    (moves HDR10+ L1). Release: minor
-3. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
+2. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
    measures this first, and a flip is MINOR, so the answer should exist before v0.8.0 is cut. A
    kept `balanced` needs no code. Branch `fix/p1-1-cpu-default`, only if it flips. Release: none
    (minor if CPU `auto` flips)
+
+- Recheck before P9.3: as the default, hybrid's fallback peak inherits `--downscale 2` (CPU `auto`)
+  and `--pre-denoise median3`, the limits `check_measurements` documents (`hybrid.rs:123`), and
+  every HDR10+ conversion now depends on the analyzer `--help` capability (`measure.rs:210`).
 
 ### Waiting for the owner
 
@@ -257,9 +257,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Partial. Step 0, scene list, opt-in hybrid flag and peak parity done by
-  2026-10-14; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P9.2, then P9.3
-  (owner, 2026-10-17: flip the default after v0.7.0).
+- **Status:** Partial. Step 0, scene list, opt-in hybrid flag, peak parity and sidecar v6 done;
+  history in [the log](docs/ROADMAP_LOG.md). Open: P9.3 (owner, 2026-10-17: flip the default after
+  v0.7.0).
 - **Finding for the fallback:** both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL 0 on every
   frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on Alita) and
   the average are present. A peak taken from MaxSCL is unusable on such sources, so the pixel
@@ -276,12 +276,6 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   per-frame MAE of L1 max and of L1 min against retail is not higher than today's path; the owner
   confirms the flip. Done 2026-10-17: PASS on every clause, flip confirmed for the minor after
   v0.7.0.
-- [P9.2][gpu][corpus] Sidecar v6 with a per-frame max for an exact fallback peak, also recording
-  the analyzer's resolved `--peak-source` so `check_measurements` can refuse a percentile peak.
-  Gate: v6 written with a per-frame max and the resolved `--peak-source`; mkvdovi and
-  `tools/l1_diff` accept 1–6; `check_measurements` refuses a percentile-peak sidecar under hybrid;
-  the fallback peak equals the per-frame max over the piece; default RPU baselines byte-identical;
-  CUDA parity; the L1 gate without `--update`.
 - [P9.3][corpus] Flip the default, after the v0.7.0 release PR (Release plan: v0.8.0). Gate:
   `--hdr10plus-l1` defaults to `hybrid` and the old path stays selectable by name; HDR10+ RPU
   baselines are re-captured and every other baseline stays byte-identical; CHANGELOG entry under
@@ -296,11 +290,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   and only an explicit `hybrid` keeps today's refusal (`hybrid_sampling_refusal`).
 - Peak against retail is not scored: hybrid takes the same HDR10+ peak as `dovi_tool`, about 104
   codes below retail on the holdout cuts.
-- **Checked 2026-10-31 @2a7bb35:** P9.2 first: a fallback piece takes the scene max (`hybrid.rs:340`).
-  Serialize `pq_to_12bit(frame.peak_pq_2020)` after `select_peak_pq` (`scenes.rs:209`), the value
-  of the scene max (`l1_sidecar.rs:292`); `peak_source` is local (`scenes.rs:163`), thread it to
-  `pipeline/mod.rs:282`. Under hybrid refuse v5 (`measure.rs:410`). P9.3: resolve one mode (`cli.rs:48`,
-  `pipeline/mod.rs:130`, `measure.rs:185`), hint `config.rs:162`, `sha256sum`; holdout had 0 fallbacks.
+- **Checked 2026-10-31 @2a7bb35:** P9.3: resolve one mode (`cli.rs:48`, `pipeline/mod.rs:130`,
+  `measure.rs:190`), hint `config.rs:162`, `sha256sum`; holdout had 0 fallbacks.
 
 ### P10: measured against delivered
 
