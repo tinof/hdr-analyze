@@ -216,7 +216,7 @@ pub fn run(
 
     // Smooth the histograms and the madVR frame averages with scene-aware resets. The L1
     // measurements stay unfiltered.
-    if cli.hist_bin_ema_beta > 0.0 || cli.hist_temporal_median > 0 {
+    if histogram_pass_runs(cli) {
         apply_histogram_smoothing_pass(&scenes, &mut frames, cli, peak_domain)?;
     }
 
@@ -288,6 +288,7 @@ pub fn run(
         &cli.pre_denoise,
         peak_domain,
         cli.peak_estimator,
+        applied_peak_source_for(cli, peak_domain),
         cli.peak_percentile,
         crop,
         &SidecarProvenance {

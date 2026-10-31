@@ -2,8 +2,8 @@
 //! scenes. Every delivered RPU frame must carry the L1 of its union piece: the HDR10+ peak of
 //! the HDR10+ scene, and the average and minimum of the measured frames of the piece, after the
 //! generator's clamps. With `--peak-source max-scl` (MaxSCL is 0 here, as on HDR10+ Profile A
-//! discs) every piece takes the peak of its analyzer scene instead. Without the flag nothing is
-//! measured.
+//! discs) every piece takes the measured peak of its own frames instead. Without the flag nothing
+//! is measured.
 //!
 //! Skipped (with a message) when ffmpeg with libx265, ffprobe, mkvmerge, dovi_tool or
 //! hdr10plus_tool is missing, or when no `hdr_analyzer_mvp` is built next to the test's mkvdovi
@@ -20,13 +20,18 @@ use dolby_vision::rpu::vdr_dm_data::CmVersion;
 use dolby_vision::utils::nits_to_pq_12_bit;
 use serde_json::{json, Value};
 
+/// What `dovi_tool generate` writes for any lower L1 maximum (the 100-nit floor).
+const L1_MAX_FLOOR: u16 = 2081;
 const SOURCE: &str = "clip.mkv";
 const OUTPUT: &str = "clip.DV.mkv";
 const FRAMES: u64 = 48;
 /// Frame where the picture turns from dark to bright (an analyzer cut).
 const STEP_FRAME: u64 = 12;
+/// The HDR10+ scene start inside the dark analyzer scene. A small bright block starts here, so
+/// the measured peak of the piece before it is far below the peak of its analyzer scene.
+const HDR10PLUS_START: u64 = 6;
 /// HDR10+ scene starts (6 and 36 fall inside analyzer scenes) and their peaks in nits.
-const HDR10PLUS_SCENES: [(u64, u64); 3] = [(0, 1500), (6, 2000), (36, 4000)];
+const HDR10PLUS_SCENES: [(u64, u64); 3] = [(0, 1500), (HDR10PLUS_START, 2000), (36, 4000)];
 
 #[allow(deprecated)]
 fn mkvdovi_cmd() -> Command {
@@ -143,7 +148,7 @@ fn synthesize_hdr10plus_clip(dir: &Path) -> PathBuf {
             "-i",
             &format!(
                 "nullsrc=s=256x144:r=24,format=yuv420p10le,\
-                 geq=lum='if(lt(N\\,{STEP_FRAME})\\,200\\,700)+mod(X+N\\,32)':cb='512':cr='512'"
+                 geq=lum='if(lt(N\\,{STEP_FRAME})\\,if(gte(N\\,{HDR10PLUS_START})*between(X\\,96\\,111)*between(Y\\,48\\,63)\\,600\\,200)\\,700)+mod(X+N\\,32)':cb='512':cr='512'"
             ),
             "-frames:v",
             &FRAMES.to_string(),
@@ -284,8 +289,8 @@ fn mean_code(codes: &[u16]) -> u16 {
 }
 
 /// The L1 every frame must carry: the union pieces of the analyzer's scenes in `sidecar` and
-/// the HDR10+ scenes, with `peak(piece_start, analyzer_scene_max)` as the piece maximum, after
-/// the generator's clamps.
+/// the HDR10+ scenes, with `peak(piece_start, piece_max)` as the piece maximum, where `piece_max`
+/// is the largest frame peak in the piece, after the generator's clamps.
 fn expected_l1(sidecar: &Value, peak: impl Fn(u64, u16) -> u16) -> Vec<(u16, u16, u16)> {
     let scenes = sidecar["scenes"].as_array().unwrap();
     let field = |name: &str| -> Vec<u16> {
@@ -297,6 +302,7 @@ fn expected_l1(sidecar: &Value, peak: impl Fn(u64, u16) -> u16) -> Vec<(u16, u16
             .collect()
     };
     let (avg, min) = (field("avg_max_rgb_pq_12bit"), field("min_pq_12bit"));
+    let frame_peaks = field("max_pq_12bit");
     let mut cuts: Vec<u64> = scenes
         .iter()
         .map(|s| s["start"].as_u64().unwrap())
@@ -308,15 +314,10 @@ fn expected_l1(sidecar: &Value, peak: impl Fn(u64, u16) -> u16) -> Vec<(u16, u16
     for (index, &start) in cuts.iter().enumerate() {
         let end = cuts.get(index + 1).copied().unwrap_or(FRAMES);
         let range = start as usize..end as usize;
-        let scene_max = scenes
-            .iter()
-            .rfind(|s| s["start"].as_u64().unwrap() <= start)
-            .unwrap()["max_pq_12bit"]
-            .as_u64()
-            .unwrap() as u16;
+        let piece_max = *frame_peaks[range.clone()].iter().max().unwrap();
         let block = ExtMetadataBlockLevel1::from_stats_cm_version(
             *min[range.clone()].iter().min().unwrap(),
-            peak(start, scene_max),
+            peak(start, piece_max),
             mean_code(&avg[range.clone()]),
             CmVersion::V29,
         );
@@ -354,6 +355,22 @@ fn hybrid_l1_takes_the_hdr10plus_peak_and_the_measured_average_per_union_piece()
         .map(|s| s["start"].as_u64().unwrap())
         .collect();
     assert!(scene_starts.contains(&STEP_FRAME), "{scene_starts:?}");
+    let frame_peaks: Vec<u64> = sidecar["frames"]["max_pq_12bit"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|code| code.as_u64().unwrap())
+        .collect();
+    assert_eq!(frame_peaks.len() as u64, FRAMES);
+    for scene in sidecar["scenes"].as_array().unwrap() {
+        let start = scene["start"].as_u64().unwrap() as usize;
+        let end = scene["end"].as_u64().unwrap() as usize;
+        assert_eq!(
+            frame_peaks[start..=end].iter().max(),
+            Some(&scene["max_pq_12bit"].as_u64().unwrap()),
+            "the scene peak is the maximum of its frames: {scene}"
+        );
+    }
     for (start, _) in &HDR10PLUS_SCENES[1..] {
         assert!(
             !scene_starts.contains(start),
@@ -382,8 +399,8 @@ fn hybrid_l1_takes_the_hdr10plus_peak_and_the_measured_average_per_union_piece()
     assert_eq!(delivered[5].2, delivered[6].2);
     std::fs::remove_file(&output).unwrap();
 
-    // MaxSCL is 0 on every frame: every piece falls back to its analyzer scene's peak, visibly.
-    // The measurements of the previous run are reused.
+    // MaxSCL is 0 on every frame: every piece falls back to its own measured peak, visibly. The
+    // measurements of the previous run are reused.
     let log = convert(
         dir.path(),
         &["--hdr10plus-l1", "hybrid", "--peak-source", "max-scl"],
@@ -392,5 +409,9 @@ fn hybrid_l1_takes_the_hdr10plus_peak_and_the_measured_average_per_union_piece()
     assert!(log.contains(&format!("zero {pieces}")), "{log}");
     assert!(log.contains("HDR10+ peak is 0"), "{log}");
     let delivered = l1_per_access_unit(&output);
-    assert_eq!(delivered, expected_l1(&sidecar, |_, scene_max| scene_max));
+    assert_eq!(delivered, expected_l1(&sidecar, |_, piece_max| piece_max));
+    // Frames 0-5 hold no bright block, so their peak is the generator's floor; the next piece of
+    // the same analyzer scene keeps the block's peak.
+    assert_eq!(delivered[5].1, L1_MAX_FLOOR);
+    assert!(delivered[6].1 > 2200, "{:?}", delivered[6]);
 }

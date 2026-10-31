@@ -8,7 +8,7 @@ use madvr_parse::{MadVRFrame, MadVRScene};
 
 use crate::analysis::frame::FramePeakStats;
 use crate::analysis::histogram::{
-    apply_histogram_ema, apply_histogram_temporal_median, select_peak_pq,
+    applied_peak_source, apply_histogram_ema, apply_histogram_temporal_median, select_peak_pq,
 };
 use crate::analysis::scene::{scene_series, select_scene_cuts, SceneSeries};
 use crate::cli::{Cli, PeakDomain};
@@ -143,6 +143,39 @@ pub(super) fn smooth_average(
     smoothed
 }
 
+/// Whether [`apply_histogram_smoothing_pass`] runs. It is the only place that applies
+/// `--peak-source`.
+pub(super) fn histogram_pass_runs(cli: &Cli) -> bool {
+    cli.hist_bin_ema_beta > 0.0 || cli.hist_temporal_median > 0
+}
+
+/// `--peak-source`, or its default for the peak domain and optimizer profile.
+///
+/// A max-RGB domain defaults to its direct measurement. Histogram sources remain available as
+/// explicit Y-based noise-robustness choices. The legacy profile-dependent default applies only
+/// to the luma domain.
+fn requested_peak_source(cli: &Cli, peak_domain: PeakDomain) -> &str {
+    cli.peak_source.as_deref().unwrap_or_else(|| {
+        if peak_domain == PeakDomain::MaxRgb
+            || cli.optimizer_profile.eq_ignore_ascii_case("conservative")
+        {
+            "max"
+        } else {
+            "histogram99"
+        }
+    })
+}
+
+/// The source the frame peaks really follow, for the L1 sidecar: `"max"` when the histogram pass
+/// does not run, however `--peak-source` is set.
+pub(super) fn applied_peak_source_for(cli: &Cli, peak_domain: PeakDomain) -> &'static str {
+    if histogram_pass_runs(cli) {
+        applied_peak_source(requested_peak_source(cli, peak_domain))
+    } else {
+        "max"
+    }
+}
+
 pub(super) fn apply_histogram_smoothing_pass(
     scenes: &[MadVRScene],
     frames: &mut [MadVRFrame],
@@ -157,18 +190,7 @@ pub(super) fn apply_histogram_smoothing_pass(
     let ema_beta = cli.hist_bin_ema_beta;
     let temporal_window = cli.hist_temporal_median;
 
-    // A max-RGB domain defaults to its direct measurement. Histogram sources
-    // remain available as explicit Y-based noise-robustness choices. The legacy
-    // profile-dependent default applies only to the luma domain.
-    let peak_source = cli.peak_source.as_deref().unwrap_or_else(|| {
-        if peak_domain == PeakDomain::MaxRgb
-            || cli.optimizer_profile.eq_ignore_ascii_case("conservative")
-        {
-            "max"
-        } else {
-            "histogram99"
-        }
-    });
+    let peak_source = requested_peak_source(cli, peak_domain);
 
     // Process each scene independently to reset all smoothing state at boundaries.
     for scene in scenes {

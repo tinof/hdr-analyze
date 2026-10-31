@@ -10,6 +10,10 @@ use crate::analysis::histogram::pq_to_nits;
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
+/// Version 6 adds `frames.max_pq_12bit`, the frame peak that each scene's `max_pq_12bit` is the
+/// maximum of, and `peak_source`, the histogram source that frame peak follows: `"max"`,
+/// `"histogram99"` or `"histogram999"` (`pipeline::scenes::applied_peak_source_for`). `"max"` is
+/// the direct peak of `peak_domain` and `peak_estimator`. The layout is otherwise unchanged.
 /// Version 5 adds `source.stream_frames` (coded pictures in the video stream) and
 /// `source.leading_skipped_frames` (RASL pictures at the start of an open-GOP cut that no decoder
 /// outputs). Measured frame `i` is stream frame `i + leading_skipped_frames` in presentation
@@ -36,7 +40,7 @@ use crate::crop::CropRect;
 /// (`dovi84_composer::LEGACY_LUMINANCE_MAPPINGS`), and the version stays 5. Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
-pub const L1_SIDECAR_VERSION: u32 = 5;
+pub const L1_SIDECAR_VERSION: u32 = 6;
 
 /// Coordinate space of `L1Sidecar::crop` since version 2.
 pub const CROP_SPACE_FULL: &str = "full";
@@ -67,6 +71,8 @@ pub struct L1Sidecar {
     pub denoise_mode: String,
     pub peak_domain: String,
     pub peak_estimator: String,
+    /// The histogram source the frame peak follows; see [`L1_SIDECAR_VERSION`].
+    pub peak_source: String,
     pub peak_percentile: f64,
     pub crop: CropMetadata,
     /// Absent when the peak domain is luma (the frame average would not be max-RGB) or the
@@ -147,6 +153,8 @@ pub struct FrameL1Metadata {
     pub min_pq_12bit: Vec<u16>,
     pub avg_luma_pq_12bit: Vec<u16>,
     pub avg_max_rgb_pq_12bit: Vec<u16>,
+    /// Added in version 6. Each scene's `max_pq_12bit` is the maximum of its frames here.
+    pub max_pq_12bit: Vec<u16>,
 }
 
 pub fn sidecar_path(output_path: &Path) -> PathBuf {
@@ -164,6 +172,7 @@ pub fn write_l1_sidecar(
     denoise_mode: &str,
     peak_domain: PeakDomain,
     peak_estimator: PeakEstimator,
+    peak_source: &str,
     peak_percentile: f64,
     crop: CropRect,
     provenance: &SidecarProvenance,
@@ -199,6 +208,7 @@ pub fn write_l1_sidecar(
             PeakEstimator::Robust => "robust",
         }
         .to_owned(),
+        peak_source: peak_source.to_owned(),
         peak_percentile,
         crop: CropMetadata {
             x: crop.x,
@@ -224,6 +234,10 @@ pub fn write_l1_sidecar(
             avg_max_rgb_pq_12bit: measurements
                 .iter()
                 .map(|measurement| pq_to_12bit(measurement.avg_max_rgb_pq))
+                .collect(),
+            max_pq_12bit: frames
+                .iter()
+                .map(|frame| pq_to_12bit(frame.peak_pq_2020))
                 .collect(),
         },
     };
@@ -363,6 +377,7 @@ mod tests {
             "none",
             PeakDomain::MaxRgb,
             PeakEstimator::Max,
+            "max",
             99.9,
             CropRect {
                 x: 0,
@@ -375,7 +390,7 @@ mod tests {
         .unwrap();
 
         let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-        assert_eq!(json["version"], 5);
+        assert_eq!(json["version"], 6);
         assert_eq!(json["source"]["stream_frames"], 4);
         assert_eq!(json["source"]["leading_skipped_frames"], 2);
         // The measurements are zero and the (smoothed) madVR frame averages are 0.2 and 0.3:
@@ -393,6 +408,76 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn frame_peaks_are_the_selected_peaks_the_scene_peak_comes_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("m.bin");
+        let scenes = vec![MadVRScene {
+            start: 0,
+            end: 1,
+            ..Default::default()
+        }];
+        let frames = [0.6, 0.25].map(|peak_pq_2020| MadVRFrame {
+            peak_pq_2020,
+            ..Default::default()
+        });
+        // The direct max-RGB measurement differs, as it does under a percentile peak source.
+        let measurements = vec![
+            FrameL1Measurement {
+                max_rgb_pq: 0.9,
+                ..Default::default()
+            };
+            2
+        ];
+        let path = write_l1_sidecar(
+            &output,
+            &scenes,
+            &frames,
+            &measurements,
+            0.1,
+            "none",
+            PeakDomain::MaxRgb,
+            PeakEstimator::Max,
+            "histogram99",
+            99.9,
+            CropRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            &SidecarProvenance {
+                source: SourceMetadata {
+                    file_name: "input.mkv".into(),
+                    size_bytes: 1,
+                    width: 1920,
+                    height: 1080,
+                    transfer_function: "PQ (SMPTE 2084)".into(),
+                    stream_frames: 2,
+                    leading_skipped_frames: 0,
+                },
+                analysis: AnalysisMetadata {
+                    downscale: 1,
+                    sample_rate: 1,
+                    gpu: false,
+                    no_crop: true,
+                    luminance_mapping: crate::analysis::hlg::PQ_MAPPING.into(),
+                },
+            },
+        )
+        .unwrap();
+
+        let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
+        assert_eq!(json["version"], 6);
+        assert_eq!(json["peak_source"], "histogram99");
+        // 0.6 and 0.25 of 4095.
+        assert_eq!(
+            json["frames"]["max_pq_12bit"],
+            serde_json::json!([2457, 1024])
+        );
+        assert_eq!(json["scenes"][0]["max_pq_12bit"], 2457);
     }
 
     #[test]
@@ -437,6 +522,7 @@ mod tests {
                 "none",
                 PeakDomain::Luma,
                 PeakEstimator::Max,
+                "max",
                 99.9,
                 CropRect {
                     x: 0,

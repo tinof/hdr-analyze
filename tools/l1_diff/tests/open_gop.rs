@@ -419,3 +419,23 @@ fn an_older_sidecar_with_a_stream_reference_gets_the_hint() {
         text(&output)
     );
 }
+
+#[test]
+fn sidecar_version_6_is_read_and_a_newer_one_is_refused() {
+    let dir = scratch("versions");
+    let reference = dir.join("reference.csv");
+    write_reference(&reference, 0..STREAM, stream_to_ours);
+
+    let bin = write_run(&dir, 6, v5_source(STREAM, LEADING));
+    let output = l1_diff(&["--ours", p(&bin), "--reference", p(&reference)]);
+    assert!(output.status.success(), "{}", text(&output));
+
+    let bin = write_run(&dir, 7, v5_source(STREAM, LEADING));
+    let output = l1_diff(&["--ours", p(&bin), "--reference", p(&reference)]);
+    assert!(!output.status.success());
+    assert!(
+        text(&output).contains("unsupported L1 sidecar version 7"),
+        "{}",
+        text(&output)
+    );
+}

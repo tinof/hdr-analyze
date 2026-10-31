@@ -717,7 +717,153 @@ fn saturated_peak_matches_constructed_max_rgb_and_luma() {
                 expected
             );
         }
+        let expected_code = (expected * 4095.0).round() as u16;
+        assert_eq!(
+            sidecar_frame_codes(&bin, "max_pq_12bit"),
+            vec![expected_code; FRAMES],
+            "{label}: sidecar frame peaks"
+        );
     }
+}
+
+/// Runs the analyzer with `flags` and returns its sidecar.
+fn analyze_to_sidecar(
+    clip: &std::path::Path,
+    bin: &std::path::Path,
+    flags: &[&str],
+) -> serde_json::Value {
+    let status = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
+        .arg(clip)
+        .arg("-o")
+        .arg(bin)
+        .arg("--no-crop")
+        .args(flags)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("run analyzer");
+    assert!(status.success(), "analyzer failed with {flags:?}");
+    serde_json::from_slice(&std::fs::read(sidecar_path(bin)).expect("read L1 sidecar"))
+        .expect("parse L1 sidecar")
+}
+
+/// 12-bit PQ code of a limited-range 10-bit luma code on neutral chroma.
+fn pq_12bit_of(y_code: u16) -> u16 {
+    (f64::from(y_code - 64) / 876.0 * 4095.0).round() as u16
+}
+
+#[test]
+fn sidecar_records_the_applied_peak_source_with_its_frame_peaks() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    // Flat Y 769 is PQ 0.8048, in histogram bin 179 of 256 (64 bins below PQ(100 nits), 192
+    // above): the direct peak is code 3296, histogram99 reads 179 / 255 of 4095.
+    let clip = encode_clip(dir.path(), 769, 512, 512);
+    let direct = pq_12bit_of(769);
+    assert_eq!(direct, 3296);
+    let histogram = 2875;
+    for (flags, applied, expected) in [
+        (&["--disable-optimizer"][..], "max", direct),
+        (
+            &["--disable-optimizer", "--peak-source", "histogram99"][..],
+            "histogram99",
+            histogram,
+        ),
+        // Without the histogram pass nothing applies --peak-source.
+        (
+            &[
+                "--disable-optimizer",
+                "--peak-source",
+                "histogram99",
+                "--hist-bin-ema-beta",
+                "0",
+            ][..],
+            "max",
+            direct,
+        ),
+        (
+            &["--disable-optimizer", "--peak-source", "bogus"][..],
+            "max",
+            direct,
+        ),
+    ] {
+        let bin = dir.path().join("recorded.bin");
+        let sidecar = analyze_to_sidecar(&clip, &bin, flags);
+        assert_eq!(sidecar["peak_source"], applied, "{flags:?}");
+        assert_eq!(
+            sidecar_frame_codes(&bin, "max_pq_12bit"),
+            vec![expected; FRAMES],
+            "{flags:?}"
+        );
+    }
+}
+
+#[test]
+fn sidecar_frame_peaks_follow_each_frame() {
+    if !have_ffmpeg() {
+        eprintln!("Skipping: ffmpeg not found in PATH");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    const BACKGROUND: u16 = 300;
+    const BLOCK: usize = 16;
+    let block_code = |frame: usize| 400 + 8 * frame as u16;
+    let planes: Vec<Vec<u16>> = (0..FRAMES)
+        .map(|frame| {
+            let mut plane = vec![BACKGROUND; W * H];
+            for row in plane.chunks_exact_mut(W).take(BLOCK) {
+                row[..BLOCK].fill(block_code(frame));
+            }
+            plane
+        })
+        .collect();
+    let plane_refs: Vec<&[u16]> = planes.iter().map(Vec::as_slice).collect();
+    let clip = encode_tagged_yuv_sequence(
+        dir.path(),
+        "frame_peaks",
+        &plane_refs,
+        &vec![512; W * H / 4],
+        &vec![512; W * H / 4],
+        "smpte2084",
+    );
+    let expected: Vec<u16> = (0..FRAMES).map(|f| pq_12bit_of(block_code(f))).collect();
+
+    // The optimizer does not touch the frame peaks.
+    for flags in [&["--disable-optimizer"][..], &[][..]] {
+        let bin = dir.path().join("direct.bin");
+        analyze_to_sidecar(&clip, &bin, flags);
+        assert_eq!(sidecar_frame_codes(&bin, "max_pq_12bit"), expected);
+    }
+
+    // The series is the selected peak: the median pixel, while MaxCLL stays the brightest one.
+    let bin = dir.path().join("percentile.bin");
+    let sidecar = analyze_to_sidecar(
+        &clip,
+        &bin,
+        &[
+            "--disable-optimizer",
+            "--peak-estimator",
+            "percentile",
+            "--peak-percentile",
+            "50",
+        ],
+    );
+    assert_eq!(sidecar["peak_estimator"], "percentile");
+    let background = pq_12bit_of(BACKGROUND);
+    for code in sidecar_frame_codes(&bin, "max_pq_12bit") {
+        assert!(code.abs_diff(background) <= 1, "{code} != {background}");
+    }
+    let brightest = pq_to_nits(f64::from(expected[FRAMES - 1]) / 4095.0);
+    let max_cll = sidecar["light_level"]["max_cll_nits"]
+        .as_f64()
+        .expect("max_cll_nits");
+    assert!(
+        (max_cll - brightest).abs() <= 1.0,
+        "{max_cll} != {brightest}"
+    );
 }
 
 #[test]
@@ -939,7 +1085,7 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
     let sidecar: serde_json::Value =
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
-    assert_eq!(sidecar["version"], 5);
+    assert_eq!(sidecar["version"], 6);
     assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v3");
     assert_eq!(sidecar["peak_domain"], "max-rgb");
 
@@ -1016,7 +1162,7 @@ fn hlg_flat_frame_measures_through_the_bt2100_composer() {
     let sidecar: serde_json::Value =
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
-    assert_eq!(sidecar["version"], 5);
+    assert_eq!(sidecar["version"], 6);
     assert_eq!(
         sidecar["analysis"]["luminance_mapping"],
         "dovi84-bt2100-v1-spec420"

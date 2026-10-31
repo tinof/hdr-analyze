@@ -219,6 +219,24 @@ fn check_parity(
         .as_array()
         .map_or(0, Vec::len);
     assert!(frame_count > 0, "{label}: the clip produced no frames");
+    // `section_differences` below passes a key both sides lack, so check the frame peaks exist.
+    for (name, run) in [("cpu", &cpu), ("gpu", &gpu)] {
+        assert_eq!(
+            run.sidecar["frames"]["max_pq_12bit"]
+                .as_array()
+                .map_or(0, Vec::len),
+            frame_count,
+            "{label}: {name} sidecar frame peaks"
+        );
+    }
+    assert!(
+        cpu.sidecar["peak_source"].is_string(),
+        "{label}: cpu sidecar has no `peak_source`"
+    );
+    assert_eq!(
+        cpu.sidecar["peak_source"], gpu.sidecar["peak_source"],
+        "{label}: CPU and CUDA peak sources differ"
+    );
 
     // The light-level block is only written for max-RGB runs.
     assert!(

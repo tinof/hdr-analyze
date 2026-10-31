@@ -16,7 +16,9 @@ use serde_json::Value;
 
 use super::hdr10plus::hdr10plus_peak_nits;
 use crate::cli::PeakSource;
-use crate::metadata::{L1Sidecar, L1SidecarScene, L1_SIDECAR_STREAM_FRAMES_VERSION};
+use crate::metadata::{
+    L1Sidecar, L1SidecarScene, L1_SIDECAR_FRAME_PEAK_VERSION, L1_SIDECAR_STREAM_FRAMES_VERSION,
+};
 use crate::progress;
 
 /// Fallback lines printed one by one before the rest is summarized.
@@ -51,7 +53,7 @@ impl FallbackReason {
     }
 }
 
-/// A piece whose peak came from the enclosing analyzer scene.
+/// A piece whose peak is the maximum of its own measured frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Fallback {
     /// First and last stream frame of the piece (the first piece also covers leading pictures).
@@ -91,7 +93,7 @@ impl HybridReport {
         ));
         for fallback in self.fallbacks.iter().take(MAX_FALLBACK_LINES) {
             progress::print_warn(&format!(
-                "HDR10+ hybrid: frames {}-{} take the peak of their analyzer scene ({}).",
+                "HDR10+ hybrid: frames {}-{} take the measured peak of their own frames ({}).",
                 fallback.first_frame,
                 fallback.last_frame,
                 fallback.reason.describe()
@@ -99,7 +101,7 @@ impl HybridReport {
         }
         if self.fallbacks.len() > MAX_FALLBACK_LINES {
             progress::print_warn(&format!(
-                "HDR10+ hybrid: ... and {} more pieces with the analyzer scene's peak.",
+                "HDR10+ hybrid: ... and {} more pieces with their own measured peak.",
                 self.fallbacks.len() - MAX_FALLBACK_LINES
             ));
         }
@@ -112,12 +114,14 @@ impl HybridReport {
     }
 }
 
-/// Whether a sidecar can carry the hybrid's average and minimum: every frame measured (sample
-/// rate 1), per-frame arrays for all of them, a max-RGB peak domain and the `max` estimator, a PQ
-/// mapping, and the stream frame count (version 5) for the HDR10+ match. The fallback peak is the
-/// analyzer scene's `max_pq_12bit`. The sidecar does not record the analyzer's own
-/// `--peak-source`, so measurements made by hand with `histogram99` pass this check and their
-/// scene peak is a luma percentile; mkvdovi's own analyzer runs use `max`.
+/// Whether a sidecar can carry the hybrid's average, minimum and fallback peak: every frame
+/// measured (sample rate 1), per-frame arrays for all of them, a max-RGB peak domain, the `max`
+/// estimator and the analyzer's `max` peak source, so a frame peak is a direct maximum, a PQ
+/// mapping, the stream frame count (version 5) for the HDR10+ match, and the per-frame peak and
+/// peak source (version 6) for the fallback.
+///
+/// A direct maximum can still miss a small highlight under `--downscale 2`, which is what `auto`
+/// resolves to on the CPU, or `--pre-denoise median3`, which the sidecar reader does not see.
 pub(super) fn check_measurements(sidecar: &L1Sidecar) -> Result<(), String> {
     if sidecar.version < L1_SIDECAR_STREAM_FRAMES_VERSION
         || sidecar
@@ -128,6 +132,12 @@ pub(super) fn check_measurements(sidecar: &L1Sidecar) -> Result<(), String> {
     {
         return Err(format!(
             "sidecar v{} does not record the stream frame count (needs v{L1_SIDECAR_STREAM_FRAMES_VERSION})",
+            sidecar.version
+        ));
+    }
+    if sidecar.version < L1_SIDECAR_FRAME_PEAK_VERSION {
+        return Err(format!(
+            "sidecar v{} has no per-frame peak and no analyzer peak source (needs v{L1_SIDECAR_FRAME_PEAK_VERSION}, from an hdr_analyzer_mvp as new as mkvdovi)",
             sidecar.version
         ));
     }
@@ -152,6 +162,15 @@ pub(super) fn check_measurements(sidecar: &L1Sidecar) -> Result<(), String> {
     if let Some(estimator) = sidecar.peak_estimator.as_deref().filter(|&e| e != "max") {
         return Err(format!("the peak estimator is {estimator}, not max"));
     }
+    match sidecar.peak_source.as_deref() {
+        Some("max") => {}
+        source => {
+            return Err(format!(
+                "the analyzer's peak source is {}, not max",
+                source.unwrap_or("not recorded")
+            ))
+        }
+    }
     let frames = sidecar.frame_count();
     let Some(per_frame) = &sidecar.frames else {
         return Err("the sidecar has no per-frame values".into());
@@ -159,6 +178,7 @@ pub(super) fn check_measurements(sidecar: &L1Sidecar) -> Result<(), String> {
     for (name, len) in [
         ("minimum", per_frame.min_pq_12bit.len()),
         ("max-RGB average", per_frame.avg_max_rgb_pq_12bit.len()),
+        ("maximum", per_frame.max_pq_12bit.len()),
     ] {
         if len as u64 != frames {
             return Err(format!(
@@ -205,6 +225,7 @@ pub(super) fn apply(
         &sidecar.scenes,
         &frames.avg_max_rgb_pq_12bit,
         &frames.min_pq_12bit,
+        &frames.max_pq_12bit,
         sidecar.leading_frames(),
         &starts,
         &peaks,
@@ -282,19 +303,20 @@ fn hdr10plus_scenes(
 
 /// The union pieces, in measured frames.
 ///
-/// `scenes` are the analyzer's scenes (contiguous from frame 0, validated); `avg` and `min` are
-/// per measured frame; `leading` is the count of undecodable pictures before
+/// `scenes` are the analyzer's scenes (contiguous from frame 0, validated); `avg`, `min` and
+/// `peak` are per measured frame; `leading` is the count of undecodable pictures before
 /// measured frame 0; `hdr10plus_starts` are stream frames with the selected peak of each scene's
 /// first frame in `hdr10plus_peaks` (nits).
 ///
 /// A piece's average is the mean of its frame codes rounded half away from zero and its minimum
 /// the smallest frame code (the pre-registered rule). Its peak is the HDR10+ peak of the scene
 /// that holds its first stream frame, rounded to whole nits and converted as `dovi_tool` does,
-/// or, per [`FallbackReason`], the maximum of the analyzer scene that holds it.
+/// or, per [`FallbackReason`], the largest of its own frame peaks.
 pub(super) fn build_pieces(
     scenes: &[L1SidecarScene],
     avg: &[u16],
     min: &[u16],
+    peak: &[u16],
     leading: u64,
     hdr10plus_starts: &[u64],
     hdr10plus_peaks: &[Option<f64>],
@@ -323,11 +345,10 @@ pub(super) fn build_pieces(
         let end = cuts.get(index + 1).map_or(frames, |&next| next) - 1;
         let range = start as usize..=end as usize;
         let piece_avg = mean_code(&avg[range.clone()]);
-        let piece_min = min[range].iter().copied().min().unwrap_or(0);
+        let piece_min = min[range.clone()].iter().copied().min().unwrap_or(0);
 
-        // Every analyzer start is a cut, so the piece lies inside one analyzer scene; every
-        // HDR10+ start past the leading pictures is one too, so it lies inside one HDR10+ scene.
-        let scene = &scenes[scenes.partition_point(|scene| scene.start <= start) - 1];
+        // Every HDR10+ start past the leading pictures is a cut, so the piece lies inside one
+        // HDR10+ scene.
         let hdr10plus = hdr10plus_starts.partition_point(|&s| s <= start + leading) - 1;
         let max = match hdr10plus_peak_code(hdr10plus_peaks[hdr10plus], piece_avg) {
             Ok(code) => code,
@@ -337,7 +358,7 @@ pub(super) fn build_pieces(
                     last_frame: end + leading,
                     reason,
                 });
-                scene.max_pq_12bit
+                peak[range].iter().copied().max().unwrap_or(0)
             }
         };
         pieces.push(L1SidecarScene {
@@ -408,6 +429,8 @@ mod tests {
     }
     const AVG: [u16; 10] = [800, 801, 800, 801, 900, 901, 1000, 1000, 1001, 1002];
     const MIN: [u16; 10] = [5, 3, 7, 9, 20, 2, 11, 11, 11, 10];
+    /// Frame peaks whose maximum per scene is the scene's peak in [`fixture_scenes`].
+    const MAX: [u16; 10] = [2300, 2290, 2305, 2310, 2500, 2420, 2600, 2550, 2510, 2580];
 
     fn spans(pieces: &[L1SidecarScene]) -> Vec<(u64, u64)> {
         pieces
@@ -426,6 +449,7 @@ mod tests {
             &fixture_scenes(),
             &AVG,
             &MIN,
+            &MAX,
             0,
             &[0, 4],
             &[Some(100.0), Some(1000.0)],
@@ -457,14 +481,17 @@ mod tests {
     }
 
     #[test]
-    fn missing_zero_and_malformed_peaks_take_the_analyzer_scene_peak() {
+    fn missing_zero_and_malformed_peaks_take_the_measured_maximum_of_the_piece() {
         for (peaks, reason) in [
             ([None, None], FallbackReason::Missing),
             ([Some(0.0), Some(0.4)], FallbackReason::Zero),
             ([Some(10_000.1), Some(f64::NAN)], FallbackReason::Malformed),
         ] {
-            let (pieces, report) = build_pieces(&fixture_scenes(), &AVG, &MIN, 0, &[0, 4], &peaks);
-            assert_eq!(maxima(&pieces), [2500, 2500, 2600], "{reason:?}");
+            let (pieces, report) =
+                build_pieces(&fixture_scenes(), &AVG, &MIN, &MAX, 0, &[0, 4], &peaks);
+            // Piece 0 peaks on its last frame, piece 1 on its first: neither is the 2500 of the
+            // analyzer scene that holds piece 0.
+            assert_eq!(maxima(&pieces), [2310, 2500, 2600], "{reason:?}");
             let reasons: Vec<_> = report.fallbacks.iter().map(|f| f.reason).collect();
             assert_eq!(reasons, [reason; 3]);
             let frames: Vec<_> = report
@@ -477,6 +504,43 @@ mod tests {
     }
 
     #[test]
+    fn the_fallback_peak_covers_exactly_the_frames_of_the_piece() {
+        let none = [None, None];
+        // A cut at 8 splits the second analyzer scene: 2600 stays with piece (6, 7).
+        let (pieces, _) = build_pieces(&fixture_scenes(), &AVG, &MIN, &MAX, 0, &[0, 8], &none);
+        assert_eq!(spans(&pieces), [(0, 5), (6, 7), (8, 9)]);
+        assert_eq!(maxima(&pieces), [2500, 2600, 2580]);
+
+        // A piece that is a whole analyzer scene keeps that scene's peak.
+        let (pieces, _) = build_pieces(&fixture_scenes(), &AVG, &MIN, &MAX, 0, &[0], &[None]);
+        let scene_peaks: Vec<u16> = fixture_scenes().iter().map(|s| s.max_pq_12bit).collect();
+        assert_eq!(maxima(&pieces), scene_peaks);
+    }
+
+    #[test]
+    fn the_fallback_peak_reads_measured_frames_past_the_leading_pictures() {
+        // Two leading pictures: the cut at stream frame 6 is measured frame 4. Reading the peaks
+        // in stream frames would give piece (0, 3) the 2500 of measured frame 4.
+        let (pieces, report) = build_pieces(
+            &fixture_scenes(),
+            &AVG,
+            &MIN,
+            &MAX,
+            2,
+            &[0, 2, 6],
+            &[None, None, None],
+        );
+        assert_eq!(spans(&pieces), [(0, 3), (4, 5), (6, 9)]);
+        assert_eq!(maxima(&pieces), [2310, 2500, 2600]);
+        let frames: Vec<_> = report
+            .fallbacks
+            .iter()
+            .map(|f| (f.first_frame, f.last_frame))
+            .collect();
+        assert_eq!(frames, [(0, 5), (6, 7), (8, 11)]);
+    }
+
+    #[test]
     fn a_peak_that_would_lower_the_measured_average_falls_back() {
         // 2081 is the generator's floor for the maximum: an HDR10+ peak of 1 nit is written as
         // 2081 and still lies above an average of 801, so only the floored value counts.
@@ -484,6 +548,7 @@ mod tests {
             &fixture_scenes(),
             &AVG,
             &MIN,
+            &MAX,
             0,
             &[0, 4],
             &[Some(1.0), Some(1000.0)],
@@ -496,13 +561,14 @@ mod tests {
             &fixture_scenes(),
             &bright,
             &MIN,
+            &MAX,
             0,
             &[0, 4],
             &[Some(100.0), Some(100.0)],
         );
         // Piece 0: average 2100 above the floored peak 2081. Pieces 1 and 2: average 2081 equal
         // to it, which the generator would also lower to 2080.
-        assert_eq!(maxima(&pieces), [2500, 2500, 2600]);
+        assert_eq!(maxima(&pieces), [2310, 2500, 2600]);
         assert!(report
             .fallbacks
             .iter()
@@ -518,6 +584,7 @@ mod tests {
             &fixture_scenes(),
             &AVG,
             &MIN,
+            &MAX,
             2,
             &[0, 2, 6],
             &[None, Some(100.0), Some(1000.0)],
@@ -554,7 +621,7 @@ mod tests {
 
     fn fixture_sidecar(leading: u64) -> L1Sidecar {
         L1Sidecar {
-            version: 5,
+            version: 6,
             scenes: fixture_scenes(),
             source: Some(L1SidecarSource {
                 file_name: "clip.mkv".into(),
@@ -581,9 +648,11 @@ mod tests {
             frames: Some(L1SidecarFrames {
                 min_pq_12bit: MIN.to_vec(),
                 avg_max_rgb_pq_12bit: AVG.to_vec(),
+                max_pq_12bit: MAX.to_vec(),
             }),
             peak_domain: Some("max-rgb".into()),
             peak_estimator: Some("max".into()),
+            peak_source: Some("max".into()),
             ..Default::default()
         }
     }
@@ -613,7 +682,7 @@ mod tests {
             PeakSource::MaxScl,
         )
         .unwrap();
-        assert_eq!(maxima(&hybrid.scenes), [2500, 2500, 2600]);
+        assert_eq!(maxima(&hybrid.scenes), [2310, 2500, 2600]);
         assert_eq!(report.fallbacks.len(), 3);
     }
 
@@ -705,6 +774,7 @@ mod tests {
             assert!(error.contains(needle), "{error}");
         };
         rejected(|s| s.version = 4, "stream frame count");
+        rejected(|s| s.version = 5, "needs v6");
         rejected(
             |s| s.analysis.as_mut().unwrap().sample_rate = 3,
             "sample-rate 3",
@@ -721,6 +791,19 @@ mod tests {
             |s| s.peak_estimator = Some("robust".into()),
             "peak estimator is robust",
         );
+        rejected(
+            |s| s.peak_estimator = Some("percentile".into()),
+            "peak estimator is percentile",
+        );
+        rejected(
+            |s| s.peak_source = Some("histogram99".into()),
+            "peak source is histogram99",
+        );
+        rejected(
+            |s| s.peak_source = Some("histogram999".into()),
+            "peak source is histogram999",
+        );
+        rejected(|s| s.peak_source = None, "peak source is not recorded");
         rejected(|s| s.frames = None, "no per-frame values");
         rejected(
             |s| s.frames.as_mut().unwrap().avg_max_rgb_pq_12bit.clear(),
@@ -731,6 +814,12 @@ mod tests {
                 s.frames.as_mut().unwrap().min_pq_12bit.pop();
             },
             "per-frame minimum has 9",
+        );
+        rejected(
+            |s| {
+                s.frames.as_mut().unwrap().max_pq_12bit.pop();
+            },
+            "per-frame maximum has 9",
         );
     }
 }

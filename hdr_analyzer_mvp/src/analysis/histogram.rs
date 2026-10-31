@@ -154,6 +154,16 @@ pub fn select_peak_pq(histogram: &[f64], direct_max_pq: f64, peak_source: &str) 
     }
 }
 
+/// The source [`select_peak_pq`] applies for `peak_source`, which treats an unknown name as
+/// the direct maximum.
+pub fn applied_peak_source(peak_source: &str) -> &'static str {
+    match peak_source {
+        "histogram99" => "histogram99",
+        "histogram999" => "histogram999",
+        _ => "max",
+    }
+}
+
 /// Apply exponential moving average (EMA) smoothing to histogram bins.
 ///
 /// This reduces frame-to-frame noise in the histogram while preserving temporal trends.
@@ -317,6 +327,30 @@ pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn applied_peak_source_names_what_select_peak_pq_does() {
+        let mut histogram = vec![0.0; 256];
+        histogram[100] = 99.5;
+        histogram[200] = 0.5;
+        let direct = 0.9;
+        let select = |source| select_peak_pq(&histogram, direct, source);
+        // The three sources must give different peaks for the comparison below to mean anything.
+        assert_eq!(select("max"), direct);
+        assert_eq!(select("histogram99"), 100.0 / 255.0);
+        assert_eq!(select("histogram999"), 200.0 / 255.0);
+
+        for (source, applied) in [
+            ("max", "max"),
+            ("histogram99", "histogram99"),
+            ("histogram999", "histogram999"),
+            ("Histogram99", "max"),
+            ("bogus", "max"),
+        ] {
+            assert_eq!(applied_peak_source(source), applied, "{source}");
+            assert_eq!(select(source), select(applied), "{source}");
+        }
+    }
 
     #[test]
     fn test_pq_nits_round_trip() {

@@ -39,8 +39,9 @@ pub struct Args {
     /// L1 for HDR10+ inputs. hdr10plus (default) = dovi_tool takes L1 from the HDR10+ metadata
     /// (first frame of each HDR10+ scene; minimum 0, average rounded to whole nits, no L5).
     /// hybrid = the analyzer also runs: scenes = union of the HDR10+ scene starts and the
-    /// analyzer's cuts; peak from HDR10+ (--peak-source), or from the analyzer scene where the
-    /// HDR10+ peak is missing, 0 or not above the measured average (each one is reported);
+    /// analyzer's cuts; peak from HDR10+ (--peak-source), or the measured peak of the piece's own
+    /// frames where the HDR10+ peak is missing, 0 or not above the measured average (each one is
+    /// reported);
     /// average, minimum and L5 from the measured pixels. Needs every frame analyzed (not
     /// --analysis-quality fast). Other inputs ignore it.
     /// hybrid cannot be combined with --legacy-madvr-l1.

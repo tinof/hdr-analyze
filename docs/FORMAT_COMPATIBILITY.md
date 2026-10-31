@@ -132,8 +132,8 @@ stream-level union, changing aspect ratios are not described per scene.
 ### L1 measurement sidecar
 
 Every `hdr_analyzer_mvp` run writes `<output>.l1.json` next to the madVR `.bin`. The versioned JSON
-records the minimum percentile, denoise mode, committed crop, per-frame robust minimum and Y/max-RGB
-means, and per-scene min/avg/max values as 12-bit PQ codes. Scene minimum is the minimum of the
+records the minimum percentile, denoise mode, committed crop, per-frame robust minimum, Y/max-RGB
+means and peak, and per-scene min/avg/max values as 12-bit PQ codes. Scene minimum is the minimum of the
 noise-rejected per-frame minima. Use `--min-percentile <percent>` to change the default P0.1 lower
 percentile; `--min-percentile 0` requests the absolute minimum.
 
@@ -156,14 +156,27 @@ write `light_level` (`max_cll_nits`, `max_fall_nits`): the content light levels 
 the active image area, with the frame average taken in linear light. The block is optional, so a
 version 4 sidecar written before it existed stays valid.
 
-Version 5 (current) adds `source.stream_frames` and `source.leading_skipped_frames`. A stream cut
+Version 5 adds `source.stream_frames` and `source.leading_skipped_frames`. A stream cut
 at an open-GOP CRA picture starts with RASL pictures that no decoder outputs. They still come first
 in the RPU's presentation order, so measured frame `i` is stream frame `i + leading_skipped_frames`.
 `mkvdovi` moves the scenes back by that count, and `--verify` compares in stream frames. The
 analyzer refuses a stream that loses any other picture, for example one that does not start at a
 random access picture.
 
-`mkvdovi` accepts versions 1–5. It reuses a sidecar below version 5 only when its frame count
+Version 6 (current) adds `frames.max_pq_12bit` and `peak_source`. Each scene's `max_pq_12bit` is the
+maximum of its frames in the new array. `peak_source` is what the frame peak follows: `max`,
+`histogram99` or `histogram999`. `max` is the direct peak of `peak_domain` and `peak_estimator`. The
+value records what was applied, not what was asked for: `--peak-source` works only in the histogram
+smoothing pass, so with `--hist-bin-ema-beta 0` and `--hist-temporal-median 0` it stays `max`, and an
+unknown name is applied, and recorded, as `max`.
+
+`mkvdovi` accepts versions 1–6. `--hdr10plus-l1 hybrid` needs version 6 with a max-RGB domain and
+`max` estimator and source. It re-analyzes anything else with a warning, because a piece without a
+usable HDR10+ peak takes the largest peak of its own frames. That peak is still a measurement: analysis at
+`--downscale 2`, which `auto` resolves to on the CPU, or with `--pre-denoise median3` can miss a small
+highlight. Other conversions also reuse older versions.
+
+`mkvdovi` reuses a sidecar below version 5 only when its frame count
 matches the input exactly, and it reuses a sidecar below version 4 with a warning that its averages were smoothed
 over time (delete the measurements to re-analyze). HLG input requires version 3 or later with the selected composer's name, and a `dovi84`
 sidecar is rejected for a non-HLG input. Version 1 carries no identity or full-resolution crop, so
@@ -183,7 +196,7 @@ For HDR10+ input, `mkvdovi` forwards the selected peak source to
 Under `--hdr10plus-l1 hybrid` the same source gives the peak of each piece, from the first frame of
 the HDR10+ scene holding it, rounded to whole nits as `dovi_tool` does. Where that peak is missing,
 0 (MaxSCL on Profile A sources), out of range, or not above the measured average after the 100-nit
-floor, the analyzer scene's peak is used and the fallback is reported.
+floor, the piece takes the largest measured peak of its own frames and the fallback is reported.
 
 Neutral L2 compatibility targets remain `100,600,1000`. They are not panel-calibration controls and
 should not be replaced with a television's measured peak brightness. A Dolby Vision-capable display
