@@ -474,11 +474,8 @@ pub fn run_command_inherit_stderr(cmd: &mut Command, log_path: &Path) -> Result<
 mod tests {
     #[test]
     fn an_analyzer_that_cannot_be_started_lists_no_option() {
-        let missing = std::path::Path::new("/nonexistent/hdr_analyzer_mvp");
-        assert!(!super::analyzer_lists_option(
-            missing,
-            "l1-sidecar-frame-peak"
-        ));
+        let missing = Path::new("/nonexistent/hdr_analyzer_mvp");
+        assert!(!analyzer_lists_option(missing, "l1-sidecar-frame-peak"));
     }
 
     use super::*;
