@@ -3,7 +3,7 @@
 //! the HDR10+ scene, and the average and minimum of the measured frames of the piece, after the
 //! generator's clamps. With `--peak-source max-scl` (MaxSCL is 0 here, as on HDR10+ Profile A
 //! discs) every piece takes the measured peak of its own frames instead. Without the flag nothing
-//! is measured.
+//! is measured. An analyzer that cannot record the per-frame peak is refused before it runs.
 //!
 //! Skipped (with a message) when ffmpeg with libx265, ffprobe, mkvmerge, dovi_tool or
 //! hdr10plus_tool is missing, or when no `hdr_analyzer_mvp` is built next to the test's mkvdovi
@@ -324,6 +324,82 @@ fn expected_l1(sidecar: &Value, peak: impl Fn(u64, u16) -> u16) -> Vec<(u16, u16
         frames.extend(range.map(|_| (block.min_pq, block.max_pq, block.avg_pq)));
     }
     frames
+}
+
+/// A copy of mkvdovi with a fake `hdr_analyzer_mvp` beside it, which mkvdovi prefers over any
+/// other analyzer. The fake prints `help` for `--help`; any analysis run leaves `analyzed` and
+/// fails. Written before the slow clip synthesis, so that no test's fork holds these files open
+/// for writing when they are executed.
+#[allow(deprecated)]
+#[cfg(unix)]
+fn mkvdovi_with_fake_analyzer(dir: &Path, help: &str) -> (PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::create_dir(dir).unwrap();
+    let mkvdovi = dir.join("mkvdovi");
+    std::fs::copy(assert_cmd::cargo::cargo_bin("mkvdovi"), &mkvdovi).unwrap();
+    let analyzed = dir.join("analyzed");
+    let analyzer = dir.join("hdr_analyzer_mvp");
+    std::fs::write(
+        &analyzer,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n\
+             --help) echo '{help}' ;;\n\
+             --version) echo 'hdr_analyzer_mvp 0.0.0' ;;\n\
+             *) : > '{}'; exit 1 ;;\n\
+             esac\n",
+            analyzed.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&analyzer, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (mkvdovi, analyzed)
+}
+
+#[cfg(unix)]
+#[test]
+fn hybrid_refuses_an_analyzer_without_the_frame_peak_before_analysis() {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!("Skipping HDR10+ hybrid test: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (stale, stale_analyzed) =
+        mkvdovi_with_fake_analyzer(&dir.path().join("stale"), "Usage: hdr_analyzer_mvp");
+    let (current, current_analyzed) = mkvdovi_with_fake_analyzer(
+        &dir.path().join("current"),
+        "Capabilities: l1-sidecar-frame-peak",
+    );
+    let clip = dir.path().join("clip");
+    std::fs::create_dir(&clip).unwrap();
+    synthesize_hdr10plus_clip(&clip);
+    let hybrid = |mkvdovi: &Path| {
+        let conversion = Command::new(mkvdovi)
+            .current_dir(&clip)
+            .arg(SOURCE)
+            .args(["--keep-source", "--hwaccel", "none", "--no-resume"])
+            .args(["--hdr10plus-l1", "hybrid"])
+            .output()
+            .unwrap();
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&conversion.stdout),
+            String::from_utf8_lossy(&conversion.stderr)
+        )
+    };
+    const REFUSAL: &str = "rebuild or update hdr_analyzer_mvp";
+
+    let log = hybrid(&stale);
+    assert!(log.contains(REFUSAL), "{log}");
+    assert!(!stale_analyzed.exists(), "the analyzer ran:\n{log}");
+    assert!(!clip.join("clip_measurements.bin").exists(), "{log}");
+
+    let log = hybrid(&current);
+    assert!(!log.contains(REFUSAL), "{log}");
+    assert!(
+        current_analyzed.exists(),
+        "the analyzer did not run:\n{log}"
+    );
 }
 
 #[test]

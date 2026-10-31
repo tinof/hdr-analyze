@@ -21,6 +21,11 @@ use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::rpu_check::{self, AuthoredLevels, Level5Offsets};
 
+/// What the analyzer's `--help` names when its L1 sidecar records the per-frame peak and the
+/// applied peak source (sidecar v6). A capability, not a version: later sidecars keep it.
+/// `hdr_analyzer_mvp/src/cli.rs` prints it.
+const ANALYZER_FRAME_PEAK_CAPABILITY: &str = "l1-sidecar-frame-peak";
+
 /// What the measurement phase hands to the configuration: the format after any fallback or
 /// `--mdfix` rebuild, and where the L1 comes from.
 pub(super) struct Measured {
@@ -200,6 +205,19 @@ pub(super) fn acquire_measurements(
             if reuse {
                 progress::print_info("Using existing measurements file.");
             } else {
+                // Without this check the run would end in `hybrid::check_measurements` after a
+                // full analysis, and that analysis would replace any measurements already here.
+                if !external::analyzer_lists_option(
+                    &analyzer_executable(),
+                    ANALYZER_FRAME_PEAK_CAPABILITY,
+                ) {
+                    progress::print_error(
+                        "--hdr10plus-l1 hybrid needs an hdr_analyzer_mvp that records the \
+                         per-frame peak (sidecar v6), and this analyzer's --help does not name \
+                         it; rebuild or update hdr_analyzer_mvp.",
+                    );
+                    return Ok(None);
+                }
                 // Counted as an HDR10 analysis: `total_steps_for(Hdr10Plus)` has no analysis step.
                 match run_fresh_analysis(
                     input_file,
