@@ -121,7 +121,11 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   `Composer::luminance_mapping()` name, for every composer including preset
   (`mkvdovi/src/pipeline/measure.rs` `run_fresh_analysis`, `external::analyzer_lists_option`), and
   then always passes `--hlg-composer`. An analyzer that does not name it (pre-P8) is refused before
-  any analysis. The analyzer's help text is therefore a cross-binary contract too.
+  any analysis. The analyzer's help text is therefore a cross-binary contract too. Under
+  `--hdr10plus-l1 hybrid` a fresh analysis needs the analyzer's `--help` to contain the capability
+  `l1-sidecar-frame-peak` (`ANALYZER_FRAME_PEAK_CAPABILITY`, printed in `hdr_analyzer_mvp/src/cli.rs`):
+  an analyzer that writes sidecars older than v6 is refused before it runs, so it cannot replace
+  existing measurements. The name is a capability, not a version, and stays for later sidecars.
 
 ## L1 sidecar contract
 
@@ -129,10 +133,10 @@ The field-by-field schema per version is in FORMAT_COMPATIBILITY.md ("L1 measure
 This section covers the code on each side.
 
 - The analyzer writes per-scene L1 stats to `<measurements>.l1.json`
-  (`hdr_analyzer_mvp/src/l1_sidecar.rs`, currently `version: 5`); mkvdovi reads it through
+  (`hdr_analyzer_mvp/src/l1_sidecar.rs`, currently `version: 6`); mkvdovi reads it through
   `metadata::load_l1_sidecar` for source-honest per-scene L1. Version 2's full-resolution `crop`
   becomes mkvdovi's L5 offsets.
-- **Versions accepted:** mkvdovi and `tools/l1_diff` accept 1–5 (`metadata::L1_SIDECAR_MAX_VERSION`).
+- **Versions accepted:** mkvdovi and `tools/l1_diff` accept 1–6 (`metadata::L1_SIDECAR_MAX_VERSION`).
   mkvdovi reuses a pre-v4 sidecar with an advisory about smoothed averages, and a pre-v5 sidecar
   only on an exact MediaInfo frame count. A missing, invalid or unknown-version sidecar produces a
   visible warning and re-analysis, never a silent fallback. A schema change must bump the version
@@ -143,6 +147,11 @@ This section covers the code on each side.
   over the crop; FALL is a linear-light mean of the 4096-bin PQ histogram) fills the L6 fields the
   source does not state (`metadata::resolve_light_levels`). It needs `sample_rate` 1, and
   `downscale` 1 for MaxCLL; it never changes a source-stated value; HLG MaxCLL is capped at 1000.
+- **Frame peak (v6):** `frames.max_pq_12bit` is `MadVRFrame::peak_pq_2020` after `select_peak_pq`, the
+  value each scene's `max_pq_12bit` folds, and `peak_source` is the source that pass applied
+  (`pipeline::scenes::applied_peak_source_for`). `hybrid::check_measurements` needs v6 and `max`, so
+  older measurements are re-analyzed under `--hdr10plus-l1 hybrid` and reused otherwise. The sidecar's
+  `peak_source` is the analyzer's flag, not mkvdovi's `--peak-source`, which selects an HDR10+ statistic.
 - **Stream frames (v5):** an open-GOP cut at a CRA starts with RASL pictures that no decoder
   outputs, but `dovi_tool inject-rpu` maps RPU `n` to presentation picture `n`, and those pictures
   come first. The analyzer counts them from the packets' NAL types (`leading_pictures.rs`) and fails
@@ -165,7 +174,8 @@ This section covers the code on each side.
 
 - L1 comes from the source HDR10+ metadata. Under the opt-in `--hdr10plus-l1 hybrid` the analyzer
   also runs and L1 comes from union pieces (HDR10+ starts ∪ analyzer cuts; HDR10+ peak with a
-  reported fallback to the analyzer scene peak; measured average and minimum; `pipeline/hybrid.rs`).
+  reported fallback to the measured peak of the piece's own frames; measured average and minimum;
+  `pipeline/hybrid.rs`).
 - The panel peak is **not** passed as a `--trim-targets` override.
 - HDR10+ scene peaks above 3× the mastering-display peak produce advisory warnings only. **Never
   add a silent clamp.**

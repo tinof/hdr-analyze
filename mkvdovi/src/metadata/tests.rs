@@ -687,17 +687,24 @@ fn per_frame_averages_and_peak_settings_are_read_but_not_validated() {
     // Sidecars without them (every fixture above) still load; the hybrid checks their lengths.
     let sidecar: L1Sidecar = serde_json::from_value(current_sidecar_json()).unwrap();
     assert!(sidecar.peak_domain.is_none() && sidecar.peak_estimator.is_none());
-    assert!(sidecar.frames.unwrap().avg_max_rgb_pq_12bit.is_empty());
+    assert!(sidecar.peak_source.is_none());
+    let frames = sidecar.frames.unwrap();
+    assert!(frames.avg_max_rgb_pq_12bit.is_empty());
+    assert!(frames.max_pq_12bit.is_empty());
 
     let mut json = current_sidecar_json();
     json["peak_domain"] = json!("max-rgb");
     json["peak_estimator"] = json!("max");
+    json["peak_source"] = json!("histogram99");
     json["frames"]["avg_max_rgb_pq_12bit"] = json!(vec![700; 19]);
+    json["frames"]["max_pq_12bit"] = json!(vec![2400; 18]);
     let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
     assert_eq!(sidecar.peak_domain.as_deref(), Some("max-rgb"));
     assert_eq!(sidecar.peak_estimator.as_deref(), Some("max"));
+    assert_eq!(sidecar.peak_source.as_deref(), Some("histogram99"));
     let frames = sidecar.frames.as_ref().unwrap();
     assert_eq!(frames.avg_max_rgb_pq_12bit.len(), 19);
+    assert_eq!(frames.max_pq_12bit.len(), 18);
     // One average short of the 20 frames: plain HDR10 loading does not look at the array.
     assert!(validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).is_ok());
 }

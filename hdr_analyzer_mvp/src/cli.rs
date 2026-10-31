@@ -47,6 +47,8 @@ pub enum TransferOverride {
 #[command(name = "hdr_analyzer_mvp")]
 #[command(version = VERSION)]
 #[command(about = "HDR10 to Dolby Vision converter - Phase 1 MVP")]
+// mkvdovi reads this line (`ANALYZER_FRAME_PEAK_CAPABILITY`): keep the name for later sidecars.
+#[command(after_help = "Capabilities: l1-sidecar-frame-peak")]
 pub struct Cli {
     /// Path to the input video file (positional)
     #[arg(value_name = "INPUT")]
@@ -146,7 +148,8 @@ pub struct Cli {
     pub optimizer_profile: String,
 
     /// Peak brightness source: max (direct max), histogram99 (99th percentile), histogram999 (99.9th percentile)
-    /// Default: max in max-rgb domain; in luma, histogram99 for balanced/aggressive and max for conservative
+    /// Default: max in max-rgb domain; in luma, histogram99 for balanced/aggressive and max for conservative.
+    /// Applied by the histogram smoothing pass: with --hist-bin-ema-beta 0 and --hist-temporal-median 0 the peak stays direct
     #[arg(long)]
     pub peak_source: Option<String>,
 

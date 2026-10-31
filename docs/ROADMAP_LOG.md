@@ -6,6 +6,35 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-10-31: P9.2 Sidecar v6 (PR #83)
+
+Step: - [P9.2][gpu][corpus] Sidecar v6 with a per-frame max for an exact fallback peak, also recording
+  the analyzer's resolved `--peak-source` so `check_measurements` can refuse a percentile peak.
+  Gate: v6 written with a per-frame max and the resolved `--peak-source`; mkvdovi and
+  `tools/l1_diff` accept 1–6; `check_measurements` refuses a percentile-peak sidecar under hybrid;
+  the fallback peak equals the per-frame max over the piece; default RPU baselines byte-identical;
+  CUDA parity; the L1 gate without `--update`.
+
+Gate evidence: on the PR head, `gate`, `clippy-cuda`, `l1-regression` without `--update`,
+`tool:l1_diff` and `cuda-parity` pass; CI on PR #83. `hdr_analyzer_mvp/tests/synthetic_accuracy.rs`
+and `tools/l1_diff/tests/open_gop.rs` cover v6 and the accepted versions, and
+`hdr10plus_hybrid_reanalyzes_measurements_older_than_sidecar_v6` the re-analysis. On d8e2b58
+(`~/mkvdovi-work/p9-2-sidecar-v6-2026-10-31/README.md`): 9 default-path captures pass `compare
+--require-identical-l1` and their `RPU.bin` sha256 equals 0.7.0; 8 hybrid cuts without fallbacks
+are identical to the 2026-10-14 runs. With `--peak-source max-scl` every piece falls back: frame
+peaks equal `raw_max_pq` of a direct run, and the delivered RPU equals the piece max after the 2081
+floor. On one cut 6 of 20 pieces came out lower (median 142, max 324 codes), on another 1 of 18
+(16 codes). A v5 sidecar and a `histogram99` sidecar are re-analyzed. Mutants on the diff: 29
+caught, 1 unviable, 0 missed. The corpus runs predate the review fix, which changes only the
+analyzer `--help` and adds a check on the hybrid path.
+
+Resolution: closes P9.2. A hybrid fallback piece now takes the peak of its own frames. Sidecar v6
+adds `frames.max_pq_12bit` and `peak_source`. The self-check's one P2 (a pre-v6 analyzer refused
+only after a full analysis) was fixed with the `--help` capability `l1-sidecar-frame-peak`;
+Codex exec and the GitHub review found nothing. Accepted limits for the fallback peak: `--downscale 2`
+and `--pre-denoise median3`. The 2026-10-14 decision that the fallback peak is the enclosing scene's
+max is replaced.
+
 ### 2026-10-30: E18.2 Byte budgets in the contract (PR #82)
 
 Step: - [E18.2][desk] Byte budgets in `.claude/workflow.md` "## Size limits" (`CLAUDE.md` 24,000,

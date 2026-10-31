@@ -875,39 +875,75 @@ fn hdr10plus_hybrid_reanalyzes_measurements_that_skipped_frames() {
     fs::write(&input, b"src").unwrap();
     let measurements = dir.path().join("in_measurements.bin");
     fs::write(&measurements, b"bin").unwrap();
-    let sidecar = json!({
-        "version": 5,
-        "source": {"file_name": "in.mkv", "size_bytes": 3, "width": 1920, "height": 1080,
-                   "transfer_function": "PQ (SMPTE 2084)", "stream_frames": 4,
-                   "leading_skipped_frames": 0},
-        "analysis": {"downscale": 2, "sample_rate": 3, "gpu": false, "no_crop": false,
-                     "luminance_mapping": "pq"},
-        "scenes": [{"start": 0, "end": 3, "min_pq_12bit": 1, "avg_luma_pq_12bit": 500,
-                    "avg_max_rgb_pq_12bit": 520, "max_pq_12bit": 2400}],
-        "frames": {"min_pq_12bit": [1, 1, 1, 1], "avg_max_rgb_pq_12bit": [520, 520, 520, 520]}
-    });
+    let sidecar = hybrid_sidecar(6, 3);
     fs::write(
         metadata::l1_sidecar_path(&measurements),
         serde_json::to_vec(&sidecar).unwrap(),
     )
     .unwrap();
     let args = Args::try_parse_from(["mkvdovi", "--analysis-quality", "balanced"]).unwrap();
-    let reuse = |hybrid| {
-        let (mut measurements_file, mut l1_sidecar) = (None, None);
-        let reused = find_reusable_measurements(
-            &input,
-            input.to_str().unwrap(),
-            &args,
-            None,
-            hybrid,
-            &mut measurements_file,
-            &mut l1_sidecar,
-        );
-        (reused, measurements_file.is_some(), l1_sidecar.is_some())
-    };
+    let reuse = |hybrid| reuse_measurements(&input, &args, hybrid);
     // Plain HDR10 reuses it under balanced (with a warning); the hybrid needs every frame.
     assert_eq!(reuse(false), (true, true, true));
     assert_eq!(reuse(true), (false, false, false));
+}
+
+#[test]
+fn hdr10plus_hybrid_reanalyzes_measurements_older_than_sidecar_v6() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.mkv");
+    fs::write(&input, b"src").unwrap();
+    let measurements = dir.path().join("in_measurements.bin");
+    fs::write(&measurements, b"bin").unwrap();
+    let args = Args::try_parse_from(["mkvdovi", "--analysis-quality", "accurate"]).unwrap();
+    let sidecar_path = metadata::l1_sidecar_path(&measurements);
+
+    fs::write(&sidecar_path, hybrid_sidecar(5, 1).to_string()).unwrap();
+    assert_eq!(reuse_measurements(&input, &args, false), (true, true, true));
+    assert_eq!(
+        reuse_measurements(&input, &args, true),
+        (false, false, false)
+    );
+
+    fs::write(&sidecar_path, hybrid_sidecar(6, 1).to_string()).unwrap();
+    assert_eq!(reuse_measurements(&input, &args, true), (true, true, true));
+}
+
+/// A sidecar for a 4-frame `in.mkv`. From version 6 on it records the per-frame peak and the
+/// analyzer's peak source, as the analyzer writes them.
+fn hybrid_sidecar(version: u32, sample_rate: u32) -> serde_json::Value {
+    let mut sidecar = json!({
+        "version": version,
+        "source": {"file_name": "in.mkv", "size_bytes": 3, "width": 1920, "height": 1080,
+                   "transfer_function": "PQ (SMPTE 2084)", "stream_frames": 4,
+                   "leading_skipped_frames": 0},
+        "analysis": {"downscale": 1, "sample_rate": sample_rate, "gpu": false, "no_crop": false,
+                     "luminance_mapping": "pq"},
+        "scenes": [{"start": 0, "end": 3, "min_pq_12bit": 1, "avg_luma_pq_12bit": 500,
+                    "avg_max_rgb_pq_12bit": 520, "max_pq_12bit": 2400}],
+        "frames": {"min_pq_12bit": [1, 1, 1, 1], "avg_max_rgb_pq_12bit": [520, 520, 520, 520]}
+    });
+    if version >= 6 {
+        sidecar["peak_source"] = json!("max");
+        sidecar["frames"]["max_pq_12bit"] = json!([2400, 2300, 2200, 2100]);
+    }
+    sidecar
+}
+
+/// What `find_reusable_measurements` makes of the measurements next to `input`: whether it
+/// reused them, and whether it filled in the file and the sidecar.
+fn reuse_measurements(input: &Path, args: &Args, hybrid: bool) -> (bool, bool, bool) {
+    let (mut measurements_file, mut l1_sidecar) = (None, None);
+    let reused = find_reusable_measurements(
+        input,
+        input.to_str().unwrap(),
+        args,
+        None,
+        hybrid,
+        &mut measurements_file,
+        &mut l1_sidecar,
+    );
+    (reused, measurements_file.is_some(), l1_sidecar.is_some())
 }
 
 /// A temp dir from an interrupted run: `extra.json` holding `config`, sealed `RPU.bin` and

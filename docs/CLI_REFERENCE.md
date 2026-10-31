@@ -12,9 +12,10 @@ All defaults below are taken directly from `--help`; run `<binary> --help` to co
 
 Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file plus an
 analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics and
-provenance (sidecar version 5: analyzer version, input identity, sampling settings, full-resolution
-crop, `analysis.luminance_mapping`, and the stream frame count with the leading pictures no decoder
-outputs, `source.stream_frames` / `source.leading_skipped_frames`). Inputs tagged with a non-HDR
+provenance (sidecar version 6: analyzer version, input identity, sampling settings, full-resolution
+crop, `analysis.luminance_mapping`, the stream frame count with the leading pictures no decoder
+outputs, `source.stream_frames` / `source.leading_skipped_frames`, the per-frame peak
+`frames.max_pq_12bit`, and the applied `peak_source`). Inputs tagged with a non-HDR
 transfer are refused.
 
 ```bash
@@ -61,7 +62,7 @@ hdr_analyzer_mvp "video.mkv"
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--peak-domain <max-rgb\|luma>` | `max-rgb` | Domain used for direct peak measurement. For HLG, `max-rgb` uses the full Dolby Vision 8.4 decode and `luma` the 8.4 luma curve alone |
-| `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source |
+| `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source. Applied by the histogram smoothing pass, so it has no effect with `--hist-bin-ema-beta 0` and `--hist-temporal-median 0` |
 | `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or the raw maximum less the part of the upper tail that the measured grain explains |
 | `--peak-percentile <0-100>` | `99.99` | Fine 4096-bin percentile used by `--peak-estimator percentile` |
 | `--header-peak-source <max\|histogram99\|histogram999>` | none | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
@@ -249,7 +250,7 @@ mkvdovi "input.mkv"     # process a specific file
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--peak-source <histogram\|histogram99\|max-scl\|max-scl-luminance>` | `histogram` | Maps to `dovi_tool generate --hdr10plus-peak-source`; also the HDR10+ peak under `--hdr10plus-l1 hybrid` |
-| `--hdr10plus-l1 <hdr10plus\|hybrid>` | `hdr10plus` | L1 for HDR10+ input. `hybrid` (opt-in) also runs the analyzer: scenes = union of HDR10+ starts and analyzer cuts, HDR10+ peak (reported fallback to the analyzer scene peak), measured average, minimum and L5. Refused with `--analysis-quality fast` (per file) and with `--legacy-madvr-l1` (at startup) |
+| `--hdr10plus-l1 <hdr10plus\|hybrid>` | `hdr10plus` | L1 for HDR10+ input. `hybrid` (opt-in) also runs the analyzer: scenes = union of HDR10+ starts and analyzer cuts, HDR10+ peak (reported fallback to the measured peak of the piece's own frames), measured average, minimum and L5. Refused with `--analysis-quality fast` (per file) and with `--legacy-madvr-l1` (at startup). When analysis has to run, the file is refused before analysis if the analyzer's `--help` does not name `l1-sidecar-frame-peak`; such an analyzer writes sidecars older than version 6 and must be updated |
 | `-b, --boost` | off | Brighter preset; switches another selected `--peak-source` to `histogram99` |
 | `--boost-experimental` | off | Asks `hdr_analyzer_mvp` to use a more aggressive optimizer profile |
 

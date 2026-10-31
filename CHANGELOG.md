@@ -26,6 +26,13 @@ This document provides a historical record of completed milestones, feature impl
   to 9 minutes downloading 70 MB. A pull request that changes only Markdown, `docs/` or `LICENSE`
   skips the Rust jobs. The cross-platform build no longer waits for the test job. `cargo audit`
   and `cargo deny` run on pull requests that change dependencies, on main and weekly.
+- `--hdr10plus-l1 hybrid`: a piece with no usable HDR10+ peak now takes the largest measured peak
+  of its own frames instead of its whole analyzer scene, so it no longer inherits a peak it does
+  not contain. This needs L1 sidecar version 6, which adds a per-frame peak (`frames.max_pq_12bit`)
+  and the analyzer's applied `peak_source`. Under hybrid, older sidecars and measurements with a
+  histogram peak source are re-analyzed with a warning. Other conversions still reuse older
+  sidecars, and their RPUs do not change. Update `mkvdovi` and `hdr_analyzer_mvp` together: an
+  older `mkvdovi` does not read version 6, and hybrid refuses an older analyzer before it runs.
 
 ## [0.7.0] - 2026-10-18
 

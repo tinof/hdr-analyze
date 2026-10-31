@@ -56,10 +56,11 @@ pub fn find_details_file(input_file: &Path) -> Option<PathBuf> {
 }
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
-/// Versions 1 to 5 are accepted; version 2 adds provenance and a full-resolution crop,
+/// Versions 1 to 6 are accepted; version 2 adds provenance and a full-resolution crop,
 /// version 3 adds `analysis.luminance_mapping` (`"pq"` or a [`Composer::luminance_mapping`] name),
 /// version 4 stores unfiltered averages (same layout), and version 5 records the stream's
-/// picture count and the undecodable leading pictures before the first measured frame.
+/// picture count and the undecodable leading pictures before the first measured frame, and
+/// version 6 adds a per-frame peak and the analyzer's applied peak source.
 #[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
     pub version: u32,
@@ -79,9 +80,14 @@ pub struct L1Sidecar {
     /// `"max-rgb"` or `"luma"`; what the scene maximum and minimum measure.
     #[serde(default)]
     pub peak_domain: Option<String>,
-    /// How the frame peak was taken: `"max"`, `"histogram-percentile"`, `"robust"`, ...
+    /// How the frame peak was taken: `"max"`, `"percentile"`, `"robust"`, ...
     #[serde(default)]
     pub peak_estimator: Option<String>,
+    /// The histogram source the analyzer applied to the frame peak: `"max"`, `"histogram99"` or
+    /// `"histogram999"` (version 6+). This is the analyzer's `--peak-source`, unrelated to
+    /// mkvdovi's flag of that name, which selects an HDR10+ statistic.
+    #[serde(default)]
+    pub peak_source: Option<String>,
     /// Content MaxCLL / MaxFALL measured by the analyzer (max-RGB runs of newer version 4
     /// analyzers only).
     #[serde(default)]
@@ -134,7 +140,10 @@ pub struct L1SidecarAnalysis {
 }
 
 /// Newest sidecar version this build reads.
-pub const L1_SIDECAR_MAX_VERSION: u32 = 5;
+pub const L1_SIDECAR_MAX_VERSION: u32 = 6;
+
+/// From this version on the sidecar has a per-frame peak and the analyzer's applied peak source.
+pub const L1_SIDECAR_FRAME_PEAK_VERSION: u32 = 6;
 
 /// From this version on the sidecar accounts for every picture of the video stream, including
 /// undecodable leading pictures at the start.
@@ -188,6 +197,10 @@ pub struct L1SidecarFrames {
     /// checks their length itself (`pipeline::hybrid::check_measurements`).
     #[serde(default)]
     pub avg_max_rgb_pq_12bit: Vec<u16>,
+    /// Frame peaks; each scene's `max_pq_12bit` is the maximum of its frames here (version 6+).
+    /// Only the HDR10+ hybrid mode reads them, and it checks their length itself.
+    #[serde(default)]
+    pub max_pq_12bit: Vec<u16>,
 }
 
 impl L1Sidecar {
