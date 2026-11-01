@@ -53,7 +53,7 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-01 at main@4e55715)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=f72c568946ce skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=9acc36605420 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
 1. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
    measures this first, and a flip is MINOR, so the answer should exist before v0.8.0. A kept
@@ -64,8 +64,8 @@ Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
    tag. Branch `docs/e10-1-l1-code-scaling`. Release: none (patch if ×4096)
 3. **E12.1 Build the CUDA release archives** (priority 11, ahead of the rows in `skip=`). Gate: the
    item gate. Why: the release window: P9.2 and P9.3 start `docs/RELEASING.md` rule 1, so v0.8.0
-   is due about 2026-11-07, and E12.1 is its one open step. E8.1 and E9.1 wait for a later minor.
-   Branch `feat/e12-1-cuda-release-binaries`. Release: minor
+   is due about 2026-11-07, and E12.1 is its one open step. When it merges, cut `v0.8.0-rc.1`
+   (Release plan). Branch `feat/e12-1-cuda-release-binaries`. Release: minor
 
 ### Waiting for the owner
 
@@ -78,8 +78,6 @@ P8 second device, E12 NVRTC, P10 evidence, and the gates of every `TODO(owner)` 
 hardware after a startable step has prepared it, a gate not stated, and steps timed to a release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
-- **WS1.4: acceptance gate not stated.** True target-gamut peaks: found without a gate when the
-  roadmap moved to the step format; the owner left it open (2026-10-17).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
 - **E15.1: not in the Priorities list.** It has a gate and is startable, but no priority names it
@@ -99,10 +97,15 @@ under "Waiting for the owner", which is the list `/ship:roadmap-next` reads.
   `code / 1023` question no longer depends on it (WS6.6 answered it), so it measures the
   per-gain neutral with an instrument.
 
-### Release plan (2026-10-14)
+### Release plan (2026-11-01)
 
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
 `/ship:roadmap-next` keeps this table current. Latest release: v0.7.0 (2026-10-18; P7, P9, P11 and P13, tagged without an rc).
+
+**Next release point (owner, 2026-11-01):** cut `v0.8.0-rc.1` right after E12.1 merges, with P1.1
+and E10.1 merged before it. The final v0.8.0 follows the owner's Windows test. Due about
+2026-11-07; if E12.1 is not close by about 2026-11-05, the owner decides whether v0.8.0 ships
+without it.
 
 | Release | Content | Trigger / gate |
 |---|---|---|
@@ -154,7 +157,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    12 frames. Gate: precision and recall against authored shot lists, no loss on the other cuts.
 9. **Research, default unchanged** (WS1, WS2.2, WS2.4, WS4): grain-robust peak; per-frame L1 inside detected
    transitions; L4; automatic trims. Each stays opt-in or unbuilt until its gate is met. Gate: per
-   item (WS4: blinded A/B on a device; WS1.2–WS1.4 and WS2.2–WS2.4: in the items).
+   item (WS4: blinded A/B on a device; WS1.2, WS1.3 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, P5, WS0, WS6): the
@@ -364,7 +367,6 @@ The detailed gap table and validation method live in
 - [WS1.3][gpu][corpus] A grain-robust peak. Gate: the item gate (beats `max` on pooled per-shot
   peak MAE against retail on the development tier, no frozen synthetic case worse by more than
   1 code, CPU = CUDA, confirmed on unseen holdout cuts). Needs: WS1.1.
-- [WS1.4][owner] True target-gamut peaks. Gate: TODO(owner).
 
 ### WS2: shots and scene averages
 

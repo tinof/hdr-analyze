@@ -6,6 +6,14 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-01: WS1.4 dropped by the owner
+
+Step: - [WS1.4][owner] True target-gamut peaks. Gate: TODO(owner).
+
+Dropped, not done; no gate was ever stated. The madVR v6 peaks `peak_pq_dcip3` and `peak_pq_709`
+stay approximated as 99% and 95% of `peak_pq_2020`. Dolby Vision conversion does not read them, so
+the approximation only affects a standalone v6 `.bin` used directly by madVR. No step needed WS1.4.
+
 ### 2026-11-01: P9.3 Flip the default (PR #84)
 
 Step: - [P9.3][corpus] Flip the default, after the v0.7.0 release PR (Release plan: v0.8.0). Gate:

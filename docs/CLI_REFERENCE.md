@@ -159,8 +159,8 @@ warning; `mkvdovi` refuses such HLG input (see [HLG input](#hlg-input)).
   factors. They are a **madVR measurement-file** feature and are **not consumed by the Dolby Vision
   conversion**: `mkvdovi` writes v5, and `dovi_tool` builds L1 from the BT.2020 peak + histogram. The
   approximation therefore affects only a standalone v6 `.bin` used directly by madVR, not DV output.
-- Accurate per-gamut peaks are still a follow-up. The max-RGB decode machinery now exists, but v6
-  output continues to use the approximations above until target-gamut transforms are implemented.
+- Accurate per-gamut peaks are not planned: the owner dropped that roadmap step (WS1.4,
+  2026-11-01). v6 output keeps the approximations above.
 
 ### Examples
 
