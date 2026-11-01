@@ -52,18 +52,20 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-10-31 at main@2a7bb35)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=e2433aaf9990 -->
+### Next up (checked 2026-11-01 at main@4e55715)
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=f72c568946ce skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
 1. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
-   measures this first, and a flip is MINOR, so the answer should exist before v0.8.0 is cut. A
-   kept `balanced` needs no code. Branch `fix/p1-1-cpu-default`, only if it flips. Release: none
-   (minor if CPU `auto` flips)
-
-**Reassess:** needs-changed (P9.3, PR #84): the E13 mkvdovi gates now name the hybrid baselines.
-
-- Recheck before P1.1: CPU `auto` now also sets the HDR10+ measurement, so `--downscale 2` limits
-  the hybrid's fallback peak (`hybrid.rs:123`); measure an HDR10+ cut too.
+   measures this first, and a flip is MINOR, so the answer should exist before v0.8.0. A kept
+   `balanced` needs only a log entry. Branch `fix/p1-1-cpu-default`. Release: none (minor if CPU
+   `auto` flips)
+2. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap (18 retail
+   `RPU.bin` files in the dev corpus), and a ×4096 answer is a delivered-L1 fix to know before the
+   tag. Branch `docs/e10-1-l1-code-scaling`. Release: none (patch if ×4096)
+3. **E12.1 Build the CUDA release archives** (priority 11, ahead of the rows in `skip=`). Gate: the
+   item gate. Why: the release window: P9.2 and P9.3 start `docs/RELEASING.md` rule 1, so v0.8.0
+   is due about 2026-11-07, and E12.1 is its one open step. E8.1 and E9.1 wait for a later minor.
+   Branch `feat/e12-1-cuda-release-binaries`. Release: minor
 
 ### Waiting for the owner
 
@@ -82,6 +84,9 @@ hardware after a startable step has prepared it, a gate not stated, and steps ti
   until the hold is lifted.
 - **E15.1: not in the Priorities list.** It has a gate and is startable, but no priority names it
   (priority 10 only says it is not held); the owner places it (found 2026-10-25).
+- **E13.19: `feat/dev-corpus` cannot land.** The step, and the `l1_diff` part of E13.20, wait for that
+  branch, but it is local-only behind a pre-push guard (`docs/TESTING.md` §7). The owner restates the
+  condition, for example "rebase the branch after the move" (found 2026-11-01).
 
 ### Metered tests (later)
 
@@ -101,7 +106,7 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
+| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E10.1 check (if ×4095 stands; a ×4096 fix is PATCH), E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
@@ -189,11 +194,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   frames. Gate: the item gate (CPU cost of `accurate` and the `FAST_BILINEAR` effect on L1 max and
   MaxCLL measured, forced CPU and fresh analyses, then flip or keep); a flip adds
   `cargo mutants --in-diff`. Between E13 moves.
-- **Checked 2026-10-17 @941489d:** the visible note for CPU `auto` already exists
-  (`analysis_quality_notice`, `mkvdovi/src/pipeline/analyzer.rs:246`), so keeping `balanced` needs
-  no code. Measure with CPU analysis forced and fresh analyses for both presets (`auto` picks
-  `accurate` with GPU analysis, and an existing sidecar can be reused); compare measured MaxCLL
-  from the sidecar, since a source-stated MaxCLL wins in L6.
+- **Checked 2026-11-01 @4e55715:** keeping `balanced` needs no code: `analysis_quality_notice`
+  exists (`pipeline/analyzer.rs:238`). Force CPU analysis, use fresh sidecars per preset (`accurate`
+  rejects a coarser one, `balanced` reuses it, `analyzer.rs:176`) and compare the sidecar's MaxCLL:
+  a stated one wins in L6. Also measure one HDR10+ cut: `--downscale 2` limits the hybrid's fallback
+  peak (`hybrid.rs:123`), which needs the fallback report: `--peak-source` defaults to `histogram`.
 
 ### P3: L5 from the crop
 
@@ -306,11 +311,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
   E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
   of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
-- **Checked 2026-10-31 @2a7bb35:** the sampled L6 values are not kept: the authored-levels scan
+- **Checked 2026-11-01 @4e55715:** the sampled L6 values are not kept: the authored-levels scan
   records only `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu`
   (`rpu_check.rs:177`) has no L6 field, and `prepare_configuration` (`pipeline/config.rs:30`) gets
-  no sampled metadata, so the fix threads the values through and tests the pipeline wiring.
-  `scripts/rpu-baseline.sh compare` strips the CRC (`:248`), so "byte-identical" needs `sha256sum`.
+  no sampled metadata, so the fix threads the values through and tests the pipeline wiring. P6.2's
+  C5 reads the same values. `scripts/rpu-baseline.sh compare` strips the CRC (`:253`), so
+  "byte-identical" needs `sha256sum`, against captures taken after P9.3.
 
 ## `cm_analyze` parity
 
@@ -611,13 +617,13 @@ The detailed gap table and validation method live in
   (2026-10-29). Open: E8.1, in a later minor release.
 - **Gate:** a bin-edge round-trip unit test and an optimizer unit test (CUDA parity and the L1 gate
   run with `--disable-optimizer`, so they do not cover it). **Prerequisite:** E13 step 5 (met 2026-10-17, #59).
-- **Checked 2026-10-06 @df54ad4:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
+- **Checked 2026-11-01 @4e55715:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
   on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
   (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
   `--disable-optimizer`, so a round-trip and optimizer unit test is the gate. The bin edges are
-  written in `frame.rs:667` (`analyze_native_frame_cropped`) and `gpu.rs`
-  `build_luminance_bin_lut`; `frame.rs:970` (`analyze_native_frame`) bins uniformly. Line numbers
-  are from before the E13 step 5 split; the function names stay valid.
+  written in `analysis/frame/mod.rs:442` and `analysis/gpu/mod.rs:157`; `analyze_native_frame`
+  (`frame/mod.rs:584`) bins uniformly. The default max-RGB run's direct peak is untouched
+  (`pipeline/scenes.rs:157`); `--peak-source histogram99` and `histogram999` move (`scenes.rs:231`).
 - [E8.1][gpu] One shared bin-edge function for writer and readers, with a round-trip test. Gate:
   the item gate.
 
@@ -733,10 +739,10 @@ The detailed gap table and validation method live in
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
-- **Checked 2026-10-17 @941489d:** before the split the Stop hook's count (`.claude/hooks/rust-check.sh`)
-  gave `pipeline.rs` 1348, `analysis/frame.rs` 1026 and `analysis/gpu.rs` 951 lines; both gates pass
-  `--disable-optimizer`, so the step diffed optimizer-enabled `.bin` files. Baselines from
-  2026-10-11 in `~/mkvdovi-work/rpu-baseline/l6-fix-e052c3d/`.
+- **Checked 2026-11-01 @4e55715:** both analyzer gates pass `--disable-optimizer`, so step 5 diffed
+  optimizer-enabled `.bin` files, and E13.6 does too. The size count left the repo hook for the ship
+  plugin's global hook. `feat/dev-corpus` is 11 commits ahead of main and cannot land (owner list).
+  Baselines: `e13-step5/`, `p9-3-hybrid-default/default/` and `l6-fix-e052c3d/` exist.
 
 ### E14: test-suite audit
 
