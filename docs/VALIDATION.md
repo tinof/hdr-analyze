@@ -442,7 +442,7 @@ run with a non-zero status.
 Baselines are derived from media and are not committed. Keep them outside the repository, one
 directory per released version (on the CUDA dev host: `~/mkvdovi-work/rpu-baseline/v0.5.1/`, with
 the synthetic PQ input under `inputs/`). The analysis settings depend on the host (`--hwaccel auto`
-and `--analysis-quality auto`), so capture baseline and candidate on the same host with the same
+picks the decoder and the analysis backend), so capture baseline and candidate on the same host with the same
 flags.
 
 `compare` checks, in this order: equal frame counts, equal scene-cut flags, and identical content

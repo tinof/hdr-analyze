@@ -1,6 +1,6 @@
 use super::analyzer::{
     analysis_quality_notice, analysis_sampling, coarser_sampling, gpu_analysis_missing,
-    rejects_coarser_sidecar,
+    rejects_coarser_sidecar, resolve_analysis_quality,
 };
 use super::config::{commit_config, withdraw_stale_rpu};
 use super::deliver::{extract_base_layer, inject_rpu, mux_output};
@@ -42,7 +42,40 @@ fn analysis_quality_maps_to_analyzer_sampling_args() {
     assert_eq!(analysis_sampling(AnalysisQuality::Fast), (2, 3));
     assert_eq!(analysis_sampling(AnalysisQuality::Balanced), (2, 1));
     assert_eq!(analysis_sampling(AnalysisQuality::Accurate), (1, 1));
-    assert_eq!(analysis_sampling(AnalysisQuality::Auto), (2, 1));
+    assert_eq!(analysis_sampling(AnalysisQuality::Auto), (1, 1));
+}
+
+#[test]
+fn auto_quality_resolves_to_accurate_and_explicit_presets_stay() {
+    // P1.1: auto is accurate on the CPU too, so a file gets the same L1 on any host.
+    assert_eq!(
+        resolve_analysis_quality(AnalysisQuality::Auto),
+        AnalysisQuality::Accurate
+    );
+    for quality in [
+        AnalysisQuality::Fast,
+        AnalysisQuality::Balanced,
+        AnalysisQuality::Accurate,
+    ] {
+        assert_eq!(resolve_analysis_quality(quality), quality);
+    }
+}
+
+#[test]
+fn startup_resolution_sets_accurate_for_cpu_auto_and_keeps_an_explicit_preset() {
+    // --hwaccel none skips the NVIDIA probe, so this is the CPU host on any machine.
+    let mut auto = Args::parse_from(["mkvdovi", "--hwaccel", "none"]);
+    resolve_auto_settings(&mut auto);
+    assert_eq!(auto.analysis_quality, AnalysisQuality::Accurate);
+    let mut balanced = Args::parse_from([
+        "mkvdovi",
+        "--hwaccel",
+        "none",
+        "--analysis-quality",
+        "balanced",
+    ]);
+    resolve_auto_settings(&mut balanced);
+    assert_eq!(balanced.analysis_quality, AnalysisQuality::Balanced);
 }
 
 fn sidecar_sampled_at(downscale: u32, sample_rate: u32) -> metadata::L1Sidecar {
@@ -136,9 +169,12 @@ fn quality_notice_warns_about_coarse_presets_only_with_gpu_analysis() {
     assert!(analysis_quality_notice(AnalysisQuality::Auto, true)
         .unwrap()
         .contains("accurate"));
-    assert!(analysis_quality_notice(AnalysisQuality::Auto, false)
-        .unwrap()
-        .contains("MaxCLL"));
+    let cpu_auto = analysis_quality_notice(AnalysisQuality::Auto, false).unwrap();
+    assert!(cpu_auto.contains("using accurate"), "{cpu_auto}");
+    assert!(
+        cpu_auto.contains("--analysis-quality balanced"),
+        "{cpu_auto}"
+    );
 }
 
 #[test]
