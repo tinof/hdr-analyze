@@ -53,20 +53,20 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-02 at main@f5f1877)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=cf96f83e67c2 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=a1ce677c5d8b skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
-1. **E12.1 Build the CUDA release archives** (priority 11, ahead of the rows in `skip=`). Gate: the
-   item gate. Why: the v0.8.0 window (due about 2026-11-07); the rc is cut when it merges, so it lands
-   with `Landed: PR #<n>; gate pending.` and closes on the Windows rc test. Kernel shipped as embedded
-   PTX (owner, 2026-11-02). Branch `feat/e12-1-cuda-release-binaries`. Release: minor
-2. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap, and the
+1. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap, and the
    owner's release point wants the answer before `v0.8.0-rc.1`. Runs on the Oracle host, which has
    the bigger dev corpus (owner, 2026-11-02). Branch `docs/e10-1-l1-code-scaling`. Release: none
    (patch if ×4096)
-3. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
+2. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
    step gate. Why: delivered L1 differs for NVIDIA users without GPU analysis, and after E12.1 still
    for a `+cuda` build whose CUDA analysis does not start. Own branch (moves L1):
    `fix/e12-2-nvdec-cpu-decode`. Release: patch (in v0.8.0 if merged before rc.1)
+
+**Reassess:** new-defect (E12.1, PR #86): E12.3 added (CPU and CUDA hue bins differ for 2 of 2^20
+chroma pairs). **Reassess:** owner-decision (E12.1, PR #86): the kernel ships as embedded PTX, so the
+archives need only the driver; E12.1 waits for the owner's `v0.8.0-rc.1` Windows test.
 
 ### Waiting for the owner
 
@@ -644,9 +644,9 @@ The detailed gap table and validation method live in
 
 ### E12: CUDA release binaries
 
-- **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  `release.yml` builds without `--features cuda`, so release users get CPU analysis; on an NVIDIA
-  host NVDEC decodes and the frames go through swscale (E12.2). Open: E12.1 for v0.8.0, E12.2, E12.3.
+- **Status:** Partial. E12.1 landed (PR #86: Linux x64 and Windows x64 archives with an embedded PTX
+  kernel, driver only); its gate waits for the owner's `v0.8.0-rc.1` Windows test. Open: E12.2,
+  E12.3.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. The kernel
@@ -663,6 +663,7 @@ The detailed gap table and validation method live in
   from `PATH` (Release plan).
 - [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in
   the plan (embedded PTX, driver only), with the smoke tests, for v0.8.0. Gate: the item gate.
+  Landed: PR #86; gate pending.
 - **Defect (found 2026-11-02, P1.1):** an analyzer without `+cuda` run with `--hwaccel cuda` (what
   mkvdovi passes on any NVIDIA host, `mkvdovi/src/pipeline/analyzer.rs` `run_hdr_analyzer`) decodes
   with NVDEC and sends the P010 frames through swscale even at downscale 1
