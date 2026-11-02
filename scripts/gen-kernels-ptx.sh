@@ -12,6 +12,9 @@
 #   scripts/gen-kernels-ptx.sh            # rewrite kernels.ptx
 #   scripts/gen-kernels-ptx.sh --check    # exit 1 with a diff when kernels.ptx is stale
 #
+# Exit 1: kernels.ptx is stale or kernels.cu does not compile. Exit 2: the environment is wrong
+# (no NVRTC 12.6.77 at the path, another NVRTC version, a bad argument).
+#
 # NVRTC: $NVRTC_LIB (an absolute path to libnvrtc.so.12 of 12.6.77), else the CUDA 12.6
 # toolkit's /usr/local/cuda-12.6/lib64/libnvrtc.so.12. CI installs the pinned pip wheel
 # (scripts/ci/nvrtc-requirements.txt), whose library gives the same bytes as the toolkit's.
@@ -29,7 +32,7 @@ check=0
 case "${1:-}" in
     "") ;;
     --check) check=1 ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
 esac
 
@@ -41,11 +44,11 @@ fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-python3 -I scripts/ci/nvrtc_ptx.py "$lib" "$NVRTC_VERSION" "$SRC" "$tmp/kernels.ptx" "${OPTIONS[@]}"
+python3 -I scripts/ci/nvrtc_ptx.py "$lib" "$NVRTC_VERSION" "$SRC" "$tmp/kernels.ptx" "${OPTIONS[@]}" || exit $?
 if ! grep -q "release $NVRTC_VERSION, $NVRTC_BUILD\$" "$tmp/kernels.ptx"; then
     echo "the PTX header does not name $NVRTC_BUILD:" >&2
     head -n 6 "$tmp/kernels.ptx" >&2
-    exit 1
+    exit 2
 fi
 
 if [ "$check" = 1 ]; then

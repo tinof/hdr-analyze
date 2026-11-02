@@ -5,6 +5,9 @@ plain name, so the PTX cannot silently come from another NVRTC version on the ho
 is NVRTC's PTX byte for byte (trailing NUL removed): no header or stamp is added.
 
 Usage: python3 -I nvrtc_ptx.py <libnvrtc path> <expected major.minor> <source.cu> <out.ptx> [option...]
+
+Exit 1: the kernel does not compile. Exit 2: the environment is wrong (arguments, library path or
+version, an NVRTC call that fails), which no edit to the kernel fixes.
 """
 
 import ctypes
@@ -12,9 +15,9 @@ import os
 import sys
 
 
-def fail(message: str) -> None:
+def fail(message: str, code: int = 2) -> None:
     sys.stderr.write(f"nvrtc_ptx: {message}\n")
-    sys.exit(1)
+    sys.exit(code)
 
 
 def main() -> None:
@@ -49,7 +52,7 @@ def main() -> None:
     _ = nvrtc.nvrtcGetProgramLog(program, log)
     log_text = log.value.decode(errors="replace").strip()
     if status != 0:
-        fail(f"compile failed ({status}):\n{log_text}")
+        fail(f"compile failed ({status}):\n{log_text}", code=1)
     if log_text:
         sys.stderr.write(f"nvrtc_ptx: compiler log:\n{log_text}\n")
 

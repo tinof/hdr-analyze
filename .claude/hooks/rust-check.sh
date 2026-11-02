@@ -140,7 +140,12 @@ for root in "${!roots[@]}"; do
         out="$(cd "$root" && timeout "$NVCC_TIMEOUT" scripts/gen-kernels-ptx.sh --check 2>&1)"
         case $? in
         0) ;;
-        1) report+=("$(grep -m1 . <<<"$out" | sed 's/^::error:://')") ;;
+        1)
+            # The stale line, not NVRTC's compiler log that may come first; a compile error
+            # has no ::error:: prefix.
+            line="$(grep -m1 '^::error::' <<<"$out" || grep -m1 . <<<"$out")"
+            report+=("${line#::error::}")
+            ;;
         *) infra_error="kernel PTX check did not run: $(grep -m1 . <<<"$out")" ;;
         esac
     fi
