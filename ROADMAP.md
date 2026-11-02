@@ -53,19 +53,21 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-01 at main@4e55715)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=9acc36605420 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=8ed14cbc2060 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
-1. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
-   measures this first, and a flip is MINOR, so the answer should exist before v0.8.0. A kept
-   `balanced` needs only a log entry. Branch `fix/p1-1-cpu-default`. Release: minor (CPU `auto`
-   flips, 2026-11-02)
-2. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap (18 retail
+1. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap (18 retail
    `RPU.bin` files in the dev corpus), and a ×4096 answer is a delivered-L1 fix to know before the
    tag. Branch `docs/e10-1-l1-code-scaling`. Release: none (patch if ×4096)
-3. **E12.1 Build the CUDA release archives** (priority 11, ahead of the rows in `skip=`). Gate: the
+2. **E12.1 Build the CUDA release archives** (priority 11, ahead of the rows in `skip=`). Gate: the
    item gate. Why: the release window: P9.2 and P9.3 start `docs/RELEASING.md` rule 1, so v0.8.0
    is due about 2026-11-07, and E12.1 is its one open step. When it merges, cut `v0.8.0-rc.1`
    (Release plan). Branch `feat/e12-1-cuda-release-binaries`. Release: minor
+
+**Reassess:** new-defect (P1.1, PR #85): E12.2 added under E12 (NVDEC decode with CPU analysis
+still differs from software decode); E12.1 now moves NVIDIA users from full-resolution CPU analysis.
+
+- Recheck before E12.1: CPU `auto` is `accurate` since P1.1 (`resolve_analysis_quality`,
+  `mkvdovi/src/pipeline/analyzer.rs`), so the rc test compares GPU with full-resolution CPU runs.
 
 ### Waiting for the owner
 
@@ -138,10 +140,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process (P10.3). Gate: the WS7 simulator
    decides (owner, 2026-10-17).
-4. **Narrow code defects** (E8, E9, P1, E10, P6, E7): histogram percentile reader, `--pre-denoise`
-   values, half-resolution CPU default, L1 scaling note (the three L6 defects found 2026-10-07 were
-   fixed 2026-10-11). Gate: unit tests for the reader and the option (E8.1, E9.1); measure the CPU
-   default first (P1.1). **Prerequisite:** E13.5 (analyzer split) before E8.1 + E9.1, because
+4. **Narrow code defects** (E8, E9, E10, P6, E7): histogram percentile reader, `--pre-denoise`
+   values, L1 scaling note (the three L6 defects found 2026-10-07 were fixed 2026-10-11; the CPU
+   default was decided in P1.1, 2026-11-02). Gate: unit tests for the reader and the option (E8.1,
+   E9.1). **Prerequisite:** E13.5 (analyzer split) before E8.1 + E9.1, because
    E8.1 moves the default `.bin` (met 2026-10-17, #59).
 5. **`--mdfix` fidelity** (P12): full regeneration stays (owner decision 2026-10-13) and the
    notice that names the dropped levels shipped 2026-10-15 (`CHANGELOG.md` `[Unreleased]`). Open:
@@ -180,28 +182,6 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   and broader hardware acceleration (E5). Neutral trims stay.
 
 ## Conversion quality
-
-### P1: CPU analysis default
-
-- **Status:** Partial. Source-honest generation is the default; `accurate` is the only
-  parity-checked preset; on CUDA `balanced`/`fast` differ by backend, no gate covers them, and they
-  lose the measured MaxCLL. History in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P1.1.
-- **Gate:** the CPU cost of `accurate` and the effect of `FAST_BILINEAR` on L1 max and MaxCLL are
-  measured (priority 4: measure the CPU default first); then CPU `auto` flips to `accurate` or
-  `balanced` stays with a visible note.
-- [P1.1][corpus] Decide the CPU fallback default. `auto` resolves to `accurate` only with CUDA,
-  otherwise `balanced`, which downsizes with `FAST_BILINEAR` at half resolution and averages small
-  highlights. Measure the CPU cost of `accurate` and the effect of `FAST_BILINEAR` on L1 max, then
-  flip CPU `auto` to `accurate` (the same file then gives the same L1 on any host) or keep
-  `balanced` with a visible note. `fast` puts cuts on a 3-frame grid and misses peaks on skipped
-  frames. Gate: the item gate (CPU cost of `accurate` and the `FAST_BILINEAR` effect on L1 max and
-  MaxCLL measured, forced CPU and fresh analyses, then flip or keep); a flip adds
-  `cargo mutants --in-diff`. Between E13 moves.
-- **Checked 2026-11-02 @448c5e8:** measured on all 45 cuts ([log](docs/ROADMAP_LOG.md),
-  2026-11-02): the rule flips CPU `auto` to `accurate` (`resolve_analysis_quality`,
-  `pipeline/analyzer.rs`), on branch `fix/p1-1-cpu-default`. `FAST_BILINEAR` does not average small
-  highlights: it reads them high and low. Found on the way: NVDEC decode with CPU analysis differs
-  from software decode, because P010 frames go through swscale; tracked as E12.2.
 
 ### P3: L5 from the crop
 

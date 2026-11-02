@@ -6,6 +6,43 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-02: P1.1 Decide the CPU fallback default (PR #85)
+
+Step: - [P1.1][corpus] Decide the CPU fallback default. `auto` resolves to `accurate` only with CUDA,
+  otherwise `balanced`, which downsizes with `FAST_BILINEAR` at half resolution and averages small
+  highlights. Measure the CPU cost of `accurate` and the effect of `FAST_BILINEAR` on L1 max, then
+  flip CPU `auto` to `accurate` (the same file then gives the same L1 on any host) or keep
+  `balanced` with a visible note. `fast` puts cuts on a 3-frame grid and misses peaks on skipped
+  frames. Gate: the item gate (CPU cost of `accurate` and the `FAST_BILINEAR` effect on L1 max and
+  MaxCLL measured, forced CPU and fresh analyses, then flip or keep); a flip adds
+  `cargo mutants --in-diff`. Between E13 moves.
+
+Gate evidence: the measurement entry below (2026-11-02), with the pre-registered rule applied clause
+by clause on all 45 development cuts; on the PR head, `gate` passes; CI on PR #85;
+`cargo mutants --in-diff` on the Rust diff caught 9 of 9 (the startup-resolution test
+`startup_resolution_sets_accurate_for_cpu_auto_and_keeps_an_explicit_preset` was added for the one
+survivor). New tests: `auto_quality_resolves_to_accurate_and_explicit_presets_stay` and the one above;
+`analysis_quality_maps_to_analyzer_sampling_args` now expects `auto` at (1, 1). A CPU `auto`
+conversion gave L1 identical to an explicit `accurate` run and the measured MaxCLL in L6.
+
+Resolution: closes P1.1 with the flip. `--analysis-quality auto` is `accurate` on every host
+(`resolve_analysis_quality`); `balanced` stays selectable; CHANGELOG entry under Changed, marked
+Breaking. Found on the way and tracked as E12.2: NVDEC decode with CPU analysis sends P010 frames
+through swscale. Codex exec and the GitHub review found nothing.
+
+### P1: CPU analysis default (moved from the roadmap)
+
+- **Status:** Done: CPU `auto` is `accurate` on every host ([log](ROADMAP_LOG.md), 2026-11-02,
+  PR #85); no step open. NVDEC decode with CPU analysis is E12.2.
+- **Gate:** the CPU cost of `accurate` and the effect of `FAST_BILINEAR` on L1 max and MaxCLL are
+  measured (priority 4: measure the CPU default first); then CPU `auto` flips to `accurate` or
+  `balanced` stays with a visible note.
+- **Checked 2026-11-02 @448c5e8:** measured on all 45 cuts ([log](ROADMAP_LOG.md),
+  2026-11-02): the rule flips CPU `auto` to `accurate` (`resolve_analysis_quality`,
+  `pipeline/analyzer.rs`), on branch `fix/p1-1-cpu-default`. `FAST_BILINEAR` does not average small
+  highlights: it reads them high and low. Found on the way: NVDEC decode with CPU analysis differs
+  from software decode, because P010 frames go through swscale; tracked as E12.2.
+
 ### 2026-11-02: P1.1 measurement, CPU `auto` flips to `accurate`
 
 Decision rule fixed before the data (approved plan); scripts, logs and per-cut tables in
