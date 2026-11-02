@@ -85,6 +85,7 @@ hooks run only where pre-commit is installed
   `scripts/ci/nvrtc-requirements.txt`, and runs `scripts/gen-kernels-ptx.sh --check`: the
   committed `hdr_analyzer_mvp/src/analysis/kernels.ptx` must be that NVRTC's output for
   `kernels.cu`. No GPU is needed. The Stop hook runs the same check for a touched `kernels.cu` or
-  `kernels.ptx` when it finds NVRTC 12.6, and never rewrites the file.
+  `kernels.ptx` and never rewrites the file. A stale PTX or a compile error (exit 1) is reported
+  as a problem to fix; a missing or wrong NVRTC (exit 2) or a timeout is only a system message.
 - The hook does not lint the `cuda`-gated Rust code; CI's lint job does
   (`cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings`).
