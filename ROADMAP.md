@@ -53,7 +53,7 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-02 at main@f5f1877)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=8ed14cbc2060 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=cf96f83e67c2 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
 1. **E12.1 Build the CUDA release archives** (priority 11, ahead of the rows in `skip=`). Gate: the
    item gate. Why: the v0.8.0 window (due about 2026-11-07); the rc is cut when it merges, so it lands
@@ -646,7 +646,7 @@ The detailed gap table and validation method live in
 
 - **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
   `release.yml` builds without `--features cuda`, so release users get CPU analysis; on an NVIDIA
-  host NVDEC decodes and the frames go through swscale (E12.2). Open: E12.1 for v0.8.0, E12.2.
+  host NVDEC decodes and the frames go through swscale (E12.2). Open: E12.1 for v0.8.0, E12.2, E12.3.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. The kernel
@@ -673,6 +673,15 @@ The detailed gap table and validation method live in
   downscale 1 in the analyzer, or have mkvdovi pass `--hwaccel none` to an analyzer without `+cuda`
   (NVDEC speed lost). Gate: with `--hwaccel cuda` and an analyzer without `cuda`, `.bin` and sidecar
   byte-identical to software decode on one PQ and one HLG cut, with a test for both sides.
+- **Defect (found 2026-11-02, E12.1 research):** the GPU hue bin (f32 `atan2f`,
+  `analysis/kernels.cu:513-517`) and the CPU one (f64, `analysis/histogram.rs:304-308`) differ for
+  2 of the 2^20 centred chroma pairs, (254, −109) and (508, −218): CPU bin 28, GPU bin 29, within
+  f32 rounding of the 336.77° bin edge (both NVRTC 12.6 and 13.1). The hue histogram is in the
+  `.bin`, not in L1; `scripts/cuda-parity.sh` passes because its clips never hit those pairs.
+- [E12.3][gpu] Make the hue bin match between CPU and CUDA for every chroma pair (for example one
+  integer lookup table both sides index). Gate: a test over all 2^20 centred chroma pairs, CPU
+  against the kernel's formula, with 0 mismatches; `scripts/cuda-parity.sh` passes; the L1
+  regression gate passes without `--update`.
 - **Checked 2026-11-02 @f5f1877:** CPU `auto` is `accurate` (`resolve_analysis_quality`,
   `mkvdovi/src/pipeline/analyzer.rs:234`). The CPU reader takes separate U/V planes
   (`analysis/frame/mod.rs:266`), so reading P010 directly needs semi-planar chroma; `median3`
