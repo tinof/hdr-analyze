@@ -33,11 +33,10 @@ pub fn analyzer_executable() -> PathBuf {
 
 /// Resolve `auto` settings to concrete values for this machine, once at startup.
 /// `--hwaccel auto` becomes `cuda` when an NVIDIA GPU is detected (else `none`);
-/// `--analysis-quality auto` becomes `accurate` only when GPU analysis is actually
-/// available (CUDA resolved + analyzer built with the cuda feature), because
-/// full-resolution every-frame analysis on the CPU would be slower than today's
-/// balanced default. With GPU analysis an explicit `balanced` or `fast` is kept but warned
-/// about: it saves no time on an NVDEC-bound run, and only `accurate` is parity-checked.
+/// `--analysis-quality auto` becomes `accurate` on every host ([`resolve_analysis_quality`]),
+/// so a file gets the same L1 with or without GPU analysis. With GPU analysis an explicit
+/// `balanced` or `fast` is kept but warned about: it saves no time on an NVDEC-bound run, and
+/// only `accurate` is parity-checked.
 pub fn resolve_auto_settings(args: &mut Args) {
     if args.hwaccel == HwAccel::Auto {
         if external::detect_nvidia_gpu() {
@@ -59,13 +58,7 @@ pub fn resolve_auto_settings(args: &mut Args) {
                 progress::print_warn(message);
             }
         }
-        if args.analysis_quality == AnalysisQuality::Auto {
-            args.analysis_quality = if gpu_analysis {
-                AnalysisQuality::Accurate
-            } else {
-                AnalysisQuality::Balanced
-            };
-        }
+        args.analysis_quality = resolve_analysis_quality(args.analysis_quality);
     }
     let version = external::dovi_tool_version();
     if args.dovi_input == DoviInput::Auto {
@@ -170,9 +163,10 @@ pub(super) fn report_reused_sidecar(
 }
 
 /// Under `--analysis-quality accurate`, measurements sampled more coarsely are not reused but
-/// re-analyzed: `accurate` is the only parity-checked sampling, and on CUDA the re-analysis costs
-/// only decode time. Other presets keep reusing them with the warning in
-/// [`report_reused_sidecar`]. Returns true when the candidate was rejected (and says so).
+/// re-analyzed: `accurate` is the only parity-checked sampling. `auto` resolves to it on every
+/// host, so a CPU host re-analyzes measurements that an older `auto` run took at half
+/// resolution; on CUDA that costs only decode time. Other presets keep reusing them with the
+/// warning in [`report_reused_sidecar`]. Returns true when the candidate was rejected (and says so).
 pub(super) fn rejects_coarser_sidecar(
     sidecar: &metadata::L1Sidecar,
     measurements: &Path,
@@ -233,6 +227,16 @@ pub(super) fn gpu_analysis_missing(
     hwaccel == HwAccel::Cuda && analyzed_on_cpu && analyzer_has_cuda()
 }
 
+/// The preset `--analysis-quality` resolves to: `auto` is `accurate` with or without GPU
+/// analysis. `balanced` resamples with swscale `FAST_BILINEAR`, which reads small highlights
+/// both high and low (P1.1, docs/ROADMAP_LOG.md), so it is never chosen for the user.
+pub(super) fn resolve_analysis_quality(quality: AnalysisQuality) -> AnalysisQuality {
+    match quality {
+        AnalysisQuality::Auto => AnalysisQuality::Accurate,
+        other => other,
+    }
+}
+
 /// What `--analysis-quality` means on this host, or `None` when there is nothing to say.
 /// `quality` is the value given on the command line, before `auto` is resolved.
 pub(super) fn analysis_quality_notice(
@@ -244,7 +248,7 @@ pub(super) fn analysis_quality_notice(
             Some("GPU analysis available: using accurate (full-resolution) analysis quality.")
         }
         (AnalysisQuality::Auto, false) => Some(
-            "No GPU analysis: using balanced (half-resolution) analysis quality. MaxCLL is then not taken from the measurements; --analysis-quality accurate measures it, at a higher CPU cost.",
+            "No GPU analysis: using accurate (full-resolution) analysis quality on the CPU, which takes about two to three times as long as balanced. --analysis-quality balanced is faster but misreads small highlights and drops the measured MaxCLL.",
         ),
         (AnalysisQuality::Balanced, true) => Some(
             "--analysis-quality balanced saves no time with GPU analysis (the run is limited by NVDEC decoding), drops the measured MaxCLL, and is not parity-checked (CUDA samples every second pixel, the CPU resizes). Use auto or accurate unless you want this on purpose.",
@@ -261,9 +265,9 @@ pub(super) fn analysis_quality_notice(
 /// `(downscale, sample_rate)` passed to the analyzer for a resolved --analysis-quality preset.
 pub(super) fn analysis_sampling(quality: AnalysisQuality) -> (u32, u32) {
     match quality {
-        // Auto is resolved to a concrete value at startup; map it defensively.
-        AnalysisQuality::Auto | AnalysisQuality::Balanced => (2, 1),
+        AnalysisQuality::Balanced => (2, 1),
         AnalysisQuality::Fast => (2, 3),
-        AnalysisQuality::Accurate => (1, 1),
+        // Auto is resolved to accurate at startup; map it the same way defensively.
+        AnalysisQuality::Auto | AnalysisQuality::Accurate => (1, 1),
     }
 }

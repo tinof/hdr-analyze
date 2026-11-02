@@ -6,6 +6,53 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-02: P1.1 measurement, CPU `auto` flips to `accurate`
+
+Decision rule fixed before the data (approved plan); scripts, logs and per-cut tables in
+`~/mkvdovi-work/p1-1-cpu-default-2026-11-01/` (`compare-step1.tsv`, `results.tsv`, `README.md`). All
+45 development cuts, both presets, CPU only, with a release-equivalent analyzer (`RUSTFLAGS=""`, no
+`cuda` feature, apt FFmpeg 6.1); one analysis at a time on the 16-thread WSL2 host.
+
+- **Cost (clause 1): pass.** The slowest real 4K cut (an HLG nature cut, 25p) ran `accurate` with
+  crop at 12.71 fps median over three repeats (12.70 to 12.78) against the 12 fps limit; the other
+  timing cuts ran 13.1 to 23.3 fps. `balanced` ran 2.0 to 2.9 times faster. A full 86,275-frame HLG
+  episode ran at 18.7 fps. Peak RSS rose from 1.10 GB (5,000 frames) through 1.13 GB (20,000) to
+  1.35 GB (86,275), about 3 KB per frame, so about 1.6 GB for 172,600 frames (limit 8.5 GB).
+  Advisory: under `taskset -c 0-7` the slowest cut ran 11.41 fps.
+- **Harm veto (clause 2): none.** Synthetic peak: `accurate` exact (error 0) on both highlight
+  cuts. Crop: no cut where `accurate` is off the authored L5 and `balanced` is not. Shots against
+  `truth/shotlist.txt` at ±1 frame: pooled F1 0.8252 (`accurate`) against 0.8266, no cut with fewer
+  matches.
+- **Flip (clause 3): all three parts hold.** `balanced` overshoots the synthetic 3534-code highlight
+  by 258 and 310 codes (MaxCLL 4975 and 5602 nits against 2774). On 37 of 39 real cuts the 95th
+  percentile of per-shot |Δ L1 max| on the `accurate` shot grid is 10 codes or more (median 105,
+  largest 423); the signed bias is negative on 34, so `balanced` mostly reads low but sometimes high
+  (a jet-highlight cut: 3340 against 3088). `accurate` measures MaxCLL, which reaches L6 on
+  sources without a stated value; `balanced` falls back to 1000 nits.
+- **Resampler:** the per-pixel dump shows the synthetic neutral 2×2 highlight at 3534 becoming one
+  3792 pixel at half resolution, brighter than any source pixel, while smooth areas average (1984
+  against a 2×2 mean of 2000). So `FAST_BILINEAR` at 2:1 neither averages nor decimates small
+  highlights; the separately resampled chroma most likely tints them.
+- **Determinism:** sidecars and `.bin` files identical across three repeats, 8 and 16 threads, and
+  with or without `--profile-performance`. Crop differed between presets on 5 cuts; with `--no-crop`
+  the peak and MaxCLL deltas match the crop-on runs on four of them and move slightly on the fifth
+  (p95 131.6 to 134.7 codes), so crop does not explain the peak gap.
+- **End to end** (`mkvdovi --hwaccel none`, final RPU): HDR10+ cuts with the default `histogram`
+  peak source keep L1 max identical between presets (avg and min within 4 codes); L6 MaxCLL is the
+  measured value under `accurate` and 1000 under `balanced` where the source states none. With
+  `--peak-source max-scl` (every piece falls back) L1 max moves by up to 505 codes. An HDR10 cut
+  without a stated MaxCLL: L1 max up to 49 codes, L6 1208 against 1000.
+- **CPU against CUDA, `accurate`:** `.bin` and sidecar identical on three of four cuts. The fourth
+  differs on one frame of 1,450: FFmpeg's software HEVC decoder and NVDEC decode that frame
+  differently (`framemd5`), so it is a decoder difference, not the analysis.
+- **New finding, not fixed here:** NVDEC decoding with CPU analysis (an analyzer without `cuda`
+  and `--hwaccel cuda`, which `mkvdovi` passes on an NVIDIA host) differs from software decoding on
+  both cuts tested (MaxCLL 194 against 182, 903 against 855): the P010 frames go through swscale even
+  at downscale 1 (`hdr_analyzer_mvp/src/pipeline/analyze.rs`, `needs_scaling`). Today's CPU-only
+  release binaries take this path on NVIDIA hosts.
+- Limits: a corpus chosen as a stress set; cuts understate a title's MaxCLL; one host; retail L1 was
+  not used to rank the presets (the `max` peak reads high on clean sources, WS1).
+
 ### 2026-11-01: WS1.4 dropped by the owner
 
 Step: - [WS1.4][owner] True target-gamut peaks. Gate: TODO(owner).

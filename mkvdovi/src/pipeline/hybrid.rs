@@ -120,8 +120,9 @@ impl HybridReport {
 /// mapping, the stream frame count (version 5) for the HDR10+ match, and the per-frame peak and
 /// peak source (version 6) for the fallback.
 ///
-/// A direct maximum can still miss a small highlight under `--downscale 2`, which is what `auto`
-/// resolves to on the CPU, or `--pre-denoise median3`, which the sidecar reader does not see.
+/// A direct maximum can still misread a small highlight under `--downscale 2` (an explicit
+/// `--analysis-quality balanced`), or under `--pre-denoise median3`, which the sidecar reader
+/// does not see.
 pub(super) fn check_measurements(sidecar: &L1Sidecar) -> Result<(), String> {
     if sidecar.version < L1_SIDECAR_STREAM_FRAMES_VERSION
         || sidecar

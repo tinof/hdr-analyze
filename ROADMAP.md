@@ -57,8 +57,8 @@ Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 1. **P1.1 Decide the CPU fallback default** (priority 4). Gate: the item gate. Why: priority 4
    measures this first, and a flip is MINOR, so the answer should exist before v0.8.0. A kept
-   `balanced` needs only a log entry. Branch `fix/p1-1-cpu-default`. Release: none (minor if CPU
-   `auto` flips)
+   `balanced` needs only a log entry. Branch `fix/p1-1-cpu-default`. Release: minor (CPU `auto`
+   flips, 2026-11-02)
 2. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap (18 retail
    `RPU.bin` files in the dev corpus), and a ×4096 answer is a delivered-L1 fix to know before the
    tag. Branch `docs/e10-1-l1-code-scaling`. Release: none (patch if ×4096)
@@ -109,9 +109,9 @@ without it.
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | P1.1 measurement (if `balanced` stays; a flip of CPU `auto` is MINOR and goes into the next minor), E10.1 check (if ×4095 stands; a ×4096 fix is PATCH), E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
+| none | E10.1 check (if ×4095 stands; a ×4096 fix is PATCH), E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| v0.8.0 | E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
+| v0.8.0 | P1.1 CPU `auto` becomes `accurate` (changed default, measured 2026-11-02); E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
@@ -197,11 +197,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   frames. Gate: the item gate (CPU cost of `accurate` and the `FAST_BILINEAR` effect on L1 max and
   MaxCLL measured, forced CPU and fresh analyses, then flip or keep); a flip adds
   `cargo mutants --in-diff`. Between E13 moves.
-- **Checked 2026-11-01 @4e55715:** keeping `balanced` needs no code: `analysis_quality_notice`
-  exists (`pipeline/analyzer.rs:238`). Force CPU analysis, use fresh sidecars per preset (`accurate`
-  rejects a coarser one, `balanced` reuses it, `analyzer.rs:176`) and compare the sidecar's MaxCLL:
-  a stated one wins in L6. Also measure one HDR10+ cut: `--downscale 2` limits the hybrid's fallback
-  peak (`hybrid.rs:123`), which needs the fallback report: `--peak-source` defaults to `histogram`.
+- **Checked 2026-11-02 @448c5e8:** measured on all 45 cuts ([log](docs/ROADMAP_LOG.md),
+  2026-11-02): the rule flips CPU `auto` to `accurate` (`resolve_analysis_quality`,
+  `pipeline/analyzer.rs`), on branch `fix/p1-1-cpu-default`. `FAST_BILINEAR` does not average small
+  highlights: it reads them high and low. Found on the way: NVDEC decode with CPU analysis differs
+  from software decode, because P010 frames go through swscale (`analyze.rs`, `needs_scaling`).
 
 ### P3: L5 from the crop
 

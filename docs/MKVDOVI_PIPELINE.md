@@ -102,7 +102,7 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `--legacy-madvr-l1` is the only way to reach the old `--madvr-file --use-custom-targets` L1
   (optimizer targets as max, placeholder avg). It is HDR10-only and refused for HLG.
 - **`--analysis-quality`** controls sampling (downscale/sample-rate): `auto` (default) = `accurate`
-  when GPU analysis is available, else `balanced`; `fast` = half resolution, every 3rd frame;
+  on every host (P1.1: `balanced` misreads small highlights, high and low); `fast` = half resolution, every 3rd frame;
   `balanced` = half resolution, every frame; `accurate` = full resolution, every frame. CUDA is the
   main pipeline: `accurate` is the only preset where CPU and CUDA give identical output (above
   downscale 1 CUDA strides while the CPU resizes), and on CUDA every preset runs at NVDEC speed, so

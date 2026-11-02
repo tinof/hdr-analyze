@@ -107,9 +107,10 @@ pub struct Args {
     pub optimizer_profile: OptimizerProfile,
 
     /// Analysis quality for HDR10, HLG and HDR10+ sources (HDR10+ unless --hdr10plus-l1 hdr10plus).
-    /// fast = half-res, every 3rd frame (old default); balanced = half-res, every frame;
-    /// accurate = full-res, every frame (most precise L1; the only preset where CPU and CUDA
-    /// give identical output). With GPU analysis all three run at the same speed.
+    /// auto = accurate; fast = half-res, every 3rd frame; balanced = half-res, every frame
+    /// (about two to three times faster on the CPU, but misreads small highlights and drops the
+    /// measured MaxCLL); accurate = full-res, every frame (most precise L1; the only preset where
+    /// CPU and CUDA give identical output). With GPU analysis all three run at the same speed.
     #[arg(long, value_enum, default_value_t = AnalysisQuality::Auto)]
     pub analysis_quality: AnalysisQuality,
 
@@ -437,19 +438,19 @@ impl std::fmt::Display for OptimizerProfile {
 }
 
 /// Controls the resolution and frame-sampling rate of the hdr_analyzer_mvp pass.
-/// auto (default) picks accurate on a CUDA-capable setup, balanced otherwise.
+/// auto (default) picks accurate with or without GPU analysis.
 /// Higher quality = more accurate per-scene L1 luminance, at the cost of CPU analysis time.
 /// GPU analysis is limited by NVDEC decoding, so there every preset runs at the same speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum AnalysisQuality {
-    /// Pick automatically: accurate when GPU analysis is active, balanced otherwise.
+    /// Accurate on every host, so a file gets the same L1 with or without GPU analysis.
     #[default]
     Auto,
     /// Half-resolution, every 3rd frame — fastest on the CPU; may miss brief peak frames.
     Fast,
-    /// Half-resolution, every frame — CPU default; no measured MaxCLL.
+    /// Half-resolution, every frame — faster on the CPU; misreads small highlights (high and
+    /// low) and drops the measured MaxCLL.
     Balanced,
-    /// Full resolution, every frame — most accurate L1; default with GPU analysis, slower on
-    /// the CPU.
+    /// Full resolution, every frame — most accurate L1; the default, slower on the CPU.
     Accurate,
 }
