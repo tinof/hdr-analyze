@@ -89,8 +89,11 @@ steps 4 to 6 for `vX.Y.Z`: the final-version commit needs its own dry run. A fix
   allow-list fails the job (`scripts/ci/check-test-skips.sh`), so the HLG and open-GOP tests cannot
   pass by skipping.
 - **build**: Windows x64, macOS Intel and Apple Silicon, Linux x64 and ARM64 (on
-  `ubuntu-24.04-arm`). Each archive's binaries must start and report the tagged version. Release
-  binaries are CPU-only (no `cuda` feature) until ROADMAP E12.
+  `ubuntu-24.04-arm`). Each archive's binaries must start and report the tagged version. The Linux
+  x64 and Windows x64 analyzers are built with the `cuda` feature (embedded PTX, driver only): their
+  `--version` must contain `(+cuda)`, the others' must not, and a `--hwaccel cuda` run on a small
+  FFV1 PQ clip must fall back to CPU analysis on the driverless runner (`analysis.gpu == false`).
+  The runners have no GPU, so GPU analysis itself is tested on the CUDA host before an rc.
 - **publish**: writes `SHA256SUMS`, attests build provenance (`actions/attest`, pinned by SHA), creates the
   release as a draft with every asset, then publishes it. The notes are a fixed header plus the
   CHANGELOG section (`scripts/ci/release-notes.sh`).

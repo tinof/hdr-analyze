@@ -66,6 +66,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      # The analyzer embeds kernels.ptx, NVRTC 12.6's output for kernels.cu. Recompile it with
+      # the pinned NVRTC wheel (no GPU needed) and fail when the committed file is stale.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Committed kernel PTX is current
+        shell: bash
+        run: |
+          python -m pip install --no-deps --require-hashes -r scripts/ci/nvrtc-requirements.txt --target "$RUNNER_TEMP/nvrtc"
+          NVRTC_LIB="$RUNNER_TEMP/nvrtc/nvidia/cuda_nvrtc/lib/libnvrtc.so.12" scripts/gen-kernels-ptx.sh --check
       - uses: dtolnay/rust-toolchain@stable
       # Only main saves: a pull request's cache serves only re-runs of that pull request, and
       # pull requests restore main's.
@@ -78,7 +88,7 @@ jobs:
       - name: cargo clippy (deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
       # The CUDA analysis backend is the main pipeline but has no GPU runner. cudarc loads the
-      # driver and NVRTC at runtime, so this compiles and lints without a GPU or CUDA toolkit.
+      # driver at runtime and the kernel ships as PTX, so this lints without a GPU or toolkit.
       - name: cargo clippy, analyzer with the cuda feature (deny warnings)
         run: cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings
 

@@ -1,0 +1,2 @@
+# The analyzer embeds this file byte for byte (include_str!); a CRLF checkout would change it.
+hdr_analyzer_mvp/src/analysis/kernels.ptx -text

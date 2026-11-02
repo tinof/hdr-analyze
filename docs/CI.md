@@ -7,8 +7,8 @@ how an edit is made; the release workflow is in [RELEASING.md](RELEASING.md).
 
 - **Triggers:** pushes to `main` and `fix-*`, and PRs to `main`. Other branches (for example
   `perf/*`) get CI only through a PR.
-- **Job order:** `changes` → lint (fmt + clippy, including clippy with the analyzer's `cuda`
-  feature) → test, `l1-regression`, `rpu-builder` and the cross-platform release build
+- **Job order:** `changes` → lint (the kernel PTX check, then fmt + clippy, including clippy with
+  the analyzer's `cuda` feature) → test, `l1-regression`, `rpu-builder` and the cross-platform release build
   (Ubuntu/macOS/Windows) side by side. The build does not wait for test.
 - **`changes`** (`scripts/ci/ci-changes.sh`, tested by `scripts/ci/tests/ci-changes-test.sh` in the
   same job) reads the PR's files. A PR that changes only `*.md`, `docs/` or `LICENSE` (the
@@ -66,7 +66,7 @@ hooks run only where pre-commit is installed
   `~/.cargo/bin/rust-analyzer` is only the rustup proxy, the LSP server crashes with exit code 1,
   and no diagnostics arrive.
 - **End of turn:** `.claude/hooks/rust-check.sh`, wired in `.claude/settings.json`. PostToolUse
-  records touched `.rs`/`.cu`/Cargo/lint-config files. The Stop hook then rustfmts those files
+  records touched `.rs`/`.cu`/`.ptx`/Cargo/lint-config files. The Stop hook then rustfmts those files
   without reporting, and runs `cargo clippy --workspace --all-targets` (plus
   `--manifest-path tools/<crate>/Cargo.toml` for a touched tool crate). It feeds back only errors
   from any file and warnings in touched files. A touched `.cu` kernel is also compiled with
@@ -81,5 +81,10 @@ hooks run only where pre-commit is installed
   touched `.rs` file over 800 code lines, or `CLAUDE.md`, `AGENTS.md` or `ROADMAP.md` over its byte
   budget, once per session; it never blocks. It is not part of this
   repo: a host without the synced plugin gets no note, and `/ship` still runs the same check.
+- **Kernel PTX check:** the lint job installs the NVRTC 12.6.77 pip wheel, pinned by hash in
+  `scripts/ci/nvrtc-requirements.txt`, and runs `scripts/gen-kernels-ptx.sh --check`: the
+  committed `hdr_analyzer_mvp/src/analysis/kernels.ptx` must be that NVRTC's output for
+  `kernels.cu`. No GPU is needed. The Stop hook runs the same check for a touched `kernels.cu` or
+  `kernels.ptx` when it finds NVRTC 12.6, and never rewrites the file.
 - The hook does not lint the `cuda`-gated Rust code; CI's lint job does
   (`cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings`).

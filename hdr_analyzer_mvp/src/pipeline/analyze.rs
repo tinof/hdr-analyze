@@ -177,7 +177,7 @@ pub(super) fn run_native_analysis_pipeline(
         ) {
             Ok(analyzer) => {
                 println!(
-                    "CUDA analysis active (NVRTC kernel on full-resolution frames, {}x sampling stride)",
+                    "CUDA analysis active (precompiled PTX kernel on full-resolution frames, {}x sampling stride)",
                     downscale
                 );
                 Some(analyzer)

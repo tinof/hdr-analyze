@@ -6,9 +6,12 @@ and 490 fps (4K HLG) on an RTX 4070 without changing a single bit of the output.
 test conditions are in [PERFORMANCE.md](PERFORMANCE.md).
 
 The CUDA path needs a build with `--features cuda` and is selected with `--hwaccel cuda` (`mkvdovi`
-passes it when a GPU is detected). No CUDA toolkit is needed to build: the driver and NVRTC are
-loaded at runtime, and the kernel is compiled from `hdr_analyzer_mvp/src/analysis/kernels.cu` when
-the analyzer starts.
+passes it when a GPU is detected). No CUDA toolkit is needed to build or run: the driver is
+loaded at runtime (R560 or newer), and the kernel ships as PTX embedded in the binary
+(`hdr_analyzer_mvp/src/analysis/kernels.ptx`), which the driver JIT-compiles for the GPU. The PTX is
+NVRTC 12.6.77's output for `kernels.cu` with `--gpu-architecture=compute_52`, made by
+`scripts/gen-kernels-ptx.sh`; CI recompiles it with a pinned NVRTC wheel and fails when the
+committed file is stale.
 
 ## How a frame flows
 
@@ -257,10 +260,26 @@ What it does not prove:
 - `--sample-rate` above 1, the forced download path (`HDR_ANALYZER_CUDA_HOST_FRAMES`) and CUDA
   failures are not exercised.
 
+## When `kernels.cu` changes
+
+The binary runs `kernels.ptx`, not `kernels.cu`. After an edit to the kernel:
+
+1. `scripts/gen-kernels-ptx.sh` rewrites `kernels.ptx` with NVRTC 12.6.77 (`$NVRTC_LIB`, else the
+   CUDA 12.6 toolkit). Another NVRTC version emits different float code (13.1 contracts more
+   operations into FMAs), and `nvcc -ptx` does not produce NVRTC's bytes, so the script refuses
+   both.
+2. `scripts/cuda-parity.sh` must pass on the new PTX.
+3. Commit both files. CI's lint job runs `scripts/gen-kernels-ptx.sh --check`, and the Stop hook
+   runs it when it finds NVRTC 12.6.
+
+A driver older than CUDA 12.6 is refused before any other CUDA call (`check_driver_version` in
+`analysis/gpu/mod.rs`): cudarc's `cuda-12060` bindings would abort the process on a missing driver
+symbol, and the driver could not JIT PTX ISA 8.5 anyway.
+
 ## Code map and fallbacks
 
-- Code: `analysis/gpu/` (`mod.rs`; the `cuda`-gated `backend.rs`) and the NVRTC-compiled
-  `analysis/kernels.cu`; NVDEC setup in `ffmpeg_io.rs`. Decoder and analyzer share device 0's
+- Code: `analysis/gpu/` (`mod.rs`; the `cuda`-gated `backend.rs`) and `analysis/kernels.cu`, embedded
+  as `analysis/kernels.ptx` (see "When `kernels.cu` changes"); NVDEC setup in `ffmpeg_io.rs`. Decoder and analyzer share device 0's
   primary context.
 - `pipeline/analyze.rs` downloads a frame (`host_view`) only for fallback crop detection,
   scene-cut crop sampling or CPU analysis. Scene cuts download a frame only when crop monitoring is

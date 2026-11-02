@@ -158,7 +158,7 @@ Throughput is frame count divided by the `Elapsed (wall clock) time` line from `
 |---|---|
 | CPU model | `lscpu \| grep 'Model name'` |
 | GPU and driver version | `nvidia-smi --query-gpu=name,driver_version --format=csv` |
-| NVRTC / CUDA version | `ldconfig -p \| grep nvrtc` (the library the analyzer loads at runtime) |
+| Kernel PTX | NVRTC 12.6 since E12.1 (embedded `kernels.ptx`; earlier builds compiled with the NVRTC found at runtime, `ldconfig -p \| grep nvrtc`) |
 | FFmpeg version | `ffmpeg -version \| head -1` |
 | Operating system | `uname -a` and the distribution release |
 | Source codec, bitrate, duration, frame count | `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,bit_rate,nb_frames:format=duration,bit_rate "$SRC"` |

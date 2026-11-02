@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## High-signal commands (use these exact forms)
 
 - Quality gate (matches pre-commit + CI lint): `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace --verbose`
-- Release binaries: `cargo build --release --workspace`. CUDA analyzer (NVIDIA hosts): `cargo build --release -p hdr_analyzer_mvp --features cuda`; lint it with `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` (no GPU or toolkit needed: cudarc loads the driver and NVRTC at runtime; CI's lint job runs it, the Stop hook does not).
+- Release binaries: `cargo build --release --workspace`. CUDA analyzer (NVIDIA hosts): `cargo build --release -p hdr_analyzer_mvp --features cuda`; lint it with `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` (no GPU or toolkit needed: cudarc loads the driver at runtime; CI's lint job runs it, the Stop hook does not).
 - One crate: `cargo test -p <crate>` (`hdr_analyzer_mvp`, `mkvdovi`, `verifier`, `dovi84_composer`, `dovi_rpu_builder`); one test: `cargo test -p <crate> -- <test_name>`; one binary: `cargo run -p <crate> -- ...`
 - **Claude refreshes the dev install itself.** When a change set touches code that ends up in `mkvdovi`, `hdr_analyzer_mvp` or `verifier` (their crates, `dovi84_composer`, `dovi_rpu_builder`, workspace `Cargo.toml`/`Cargo.lock`), run `./scripts/dev-refresh.sh` at the end, unasked, and report the `--version` lines it prints. It builds the workspace release binaries, then the CUDA analyzer last when `nvidia-smi` is found. `~/.local/bin/{mkvdovi,hdr_analyzer_mvp,verifier}` must stay `-> …/target/release/` symlinks, not copies. Do not skip the refresh because tests passed: the user runs the installed commands.
 - **A host that does not push** (the Oracle ARM host): at session start `git fetch`; when `main` is checked out, clean apart from untracked files and behind `origin/main`, `git pull --ff-only`, then refresh. A local `--version` check is not enough. Host traps (systemd-run for the long build, stale FFmpeg build cache, `CC=clang`): [`docs/INSTALLATION.md`](docs/INSTALLATION.md) "Development hosts".
@@ -61,7 +61,7 @@ Change every side in the same PR; the review rules and their priority are in `AG
 ## Real entrypoints and boundaries
 
 - **Analyzer:** `hdr_analyzer_mvp/src/main.rs` → `pipeline::run`; analysis in `analysis/` (frame, histogram, scene, hlg, gpu) plus `crop.rs`, `optimizer.rs`, `ffmpeg_io.rs`, `l1_sidecar.rs`, `writer.rs`. HLG is measured through the Profile 8.4 decode of the composer `--hlg-composer` selects (`bt2100` default, `preset` fallback); since P8 max-RGB follows the spec 4:2:0 structure in `code / 1023` f32, clamped to [62, 3079] on purpose. Only PQ/HLG is analyzed; transfer detection is `ffmpeg_io::resolve_transfer`, overridden by `--transfer`. Details: [`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md) §1.5, [`docs/HLG_COMPOSER.md`](docs/HLG_COMPOSER.md).
-- **CUDA backend** (`cuda` feature, off by default; `--hwaccel cuda`; `analysis/gpu/` + NVRTC-compiled `analysis/kernels.cu`). Rules ([`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md) has the design, the code map and the full list):
+- **CUDA backend** (`cuda` feature, off by default; `--hwaccel cuda`; `analysis/gpu/` + `analysis/kernels.cu`, embedded as `kernels.ptx`). Rules ([`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md) has the design, the code map and the full list):
   - `GpuAnalyzer::new` stays ahead of `setup_hardware_decoder` (shared primary context).
   - Never hand an `AV_PIX_FMT_CUDA` frame to host code; download through `host_view`.
   - A failed CUDA call stops the run when frames come from NVDEC; a download is no health check.
@@ -103,7 +103,7 @@ Each rule is one line; the reasons and code paths are in [`docs/MKVDOVI_PIPELINE
 
 - Workspace lints in root `Cargo.toml`: clippy `all` allowed but `correctness` denied; `dbg_macro` denied; `too_many_lines` warns (threshold 150 in `clippy.toml`); rustc `rust_2018_idioms` and `unused_qualifications` warn — all fail under `-D warnings` in CI. `unwrap`/`expect`/`print` are allowed everywhere.
 - `unsafe_op_in_unsafe_fn = "deny"`, but `unsafe_code` is **allowed**. A `clippy.toml` key acts only when its lint is enabled in `Cargo.toml`; add the two together. No `msrv` key: clippy reads a crate's `rust-version` (only `dovi_rpu_builder` sets one; `tools/` crates lint at the toolchain's MSRV).
-- `kernels.cu` is only compiled by NVRTC at runtime. The Stop hook's `nvcc -ptx` catches syntax and type errors, but nvcc is not the NVRTC the binary loads, so a `--hwaccel cuda` run (`scripts/cuda-parity.sh`) is the real check.
+- The binary embeds `kernels.ptx`, NVRTC 12.6's output for `kernels.cu`. After a kernel edit run `scripts/gen-kernels-ptx.sh` and `scripts/cuda-parity.sh` (the Stop hook's `nvcc -ptx` only catches syntax errors), then commit both.
 - Imports: std → third-party → `crate::`, grouped with braces, absolute `crate::` paths internally. `anyhow::Result` + `.context()` at app level; `thiserror` for library error types.
 
 ## Module size

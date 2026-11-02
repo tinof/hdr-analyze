@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Claude Code hook: CI-equivalent Rust check at the end of a turn, only when Rust changed.
 #
-#   rust-check.sh mark   PostToolUse(Edit|Write): record touched Rust/Cargo/.cu files (silent)
+#   rust-check.sh mark   PostToolUse(Edit|Write): record touched Rust/Cargo/.cu/.ptx files (silent)
 #   rust-check.sh stop   Stop: rustfmt touched files (silent), then cargo clippy; report
 #                        errors anywhere + warnings in touched files as Stop hook feedback.
-#                        Touched CUDA kernels (.cu) are also compiled with nvcc, when present:
-#                        NVRTC compiles them only at runtime, so nothing else catches an error.
+#                        Touched CUDA kernels (.cu) are also compiled with nvcc, when present,
+#                        and a touched kernels.cu or kernels.ptx runs scripts/gen-kernels-ptx.sh
+#                        --check (needs NVRTC 12.6), which reports a stale embedded PTX.
 #                        The file-size note comes from the global ship hook (size-check.sh), which
 #                        reads .claude/workflow.md "## Size limits"; this hook does not give it.
 #
@@ -32,7 +33,7 @@ case "$mode" in
 mark)
     file="$(jq -r '.tool_input.file_path // empty' <<<"$input" 2>/dev/null)"
     case "$file" in
-    *.rs | *.cu | */Cargo.toml | */Cargo.lock | */clippy.toml | */rustfmt.toml | */.cargo/config.toml) ;;
+    *.rs | *.cu | *.ptx | */Cargo.toml | */Cargo.lock | */clippy.toml | */rustfmt.toml | */.cargo/config.toml) ;;
     *) exit 0 ;;
     esac
     mkdir -p "$state" || exit 0
@@ -129,7 +130,22 @@ for root in "${!roots[@]}"; do
         fi
     done
 
-    # 3. CUDA kernels: compile each touched .cu file to PTX and discard the output.
+    # 3. The embedded PTX must be NVRTC 12.6's output for kernels.cu. Only report: the hook's
+    #    nvcc is another compiler, so regenerating here would write the wrong file.
+    ptx_touched=0
+    for r in "${rel[@]}"; do
+        case "$r" in */kernels.cu | */kernels.ptx) ptx_touched=1 ;; esac
+    done
+    if [ "$ptx_touched" -eq 1 ] && [ -x "$root/scripts/gen-kernels-ptx.sh" ]; then
+        out="$(cd "$root" && timeout "$NVCC_TIMEOUT" scripts/gen-kernels-ptx.sh --check 2>&1)"
+        case $? in
+        0) ;;
+        1) report+=("$(grep -m1 . <<<"$out" | sed 's/^::error:://')") ;;
+        *) infra_error="kernel PTX check did not run: $(grep -m1 . <<<"$out")" ;;
+        esac
+    fi
+
+    # 4. CUDA kernels: compile each touched .cu file to PTX and discard the output.
     [ -n "$nvcc" ] || continue
     for r in "${rel[@]}"; do
         [[ "$r" == *.cu && -f "$root/$r" ]] || continue
@@ -171,7 +187,7 @@ if [ "$blocks" -ge "$MAX_BLOCKS" ]; then
     # Claude already got MAX_BLOCKS rounds of feedback: tell the user once, do not continue the turn.
     emit_system_message "the check still fails after $MAX_BLOCKS fix attempts; quiet until the next Rust or .cu edit."$'\n'"$body"
 else
-    msg="cargo clippy (CI gate, --workspace --all-targets) and nvcc (touched .cu files) report problems in this turn's changes. Fix them before finishing:"$'\n'"$body"
+    msg="cargo clippy (CI gate, --workspace --all-targets), the kernel PTX check and nvcc (touched .cu files) report problems in this turn's changes. Fix them before finishing:"$'\n'"$body"
     jq -n --arg m "$msg" '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $m}}'
 fi
 exit 0

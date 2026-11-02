@@ -25,6 +25,12 @@ on:
       - scripts/ci/check-test-skips.sh
       - scripts/ci/bundle-windows-ffmpeg.sh
       - scripts/install.sh
+      # The CUDA analysis kernel and its loader: the two cuda archives embed kernels.ptx.
+      - hdr_analyzer_mvp/src/analysis/kernels.cu
+      - hdr_analyzer_mvp/src/analysis/kernels.ptx
+      - hdr_analyzer_mvp/src/analysis/gpu/backend.rs
+      - scripts/gen-kernels-ptx.sh
+      - scripts/ci/nvrtc*
       # The aarch64 Linux linker setting and the toolchain; ci.yml builds neither ARM64 Linux nor
       # macOS Intel. Cargo.lock and the manifests are left out on purpose: every dependency bump
       # would run five release builds. The pre-flight requires a dispatch run before each tag.
@@ -138,8 +144,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # features: cuda builds the analyzer with GPU analysis (ROADMAP E12). The kernel is
+          # embedded PTX, so users need only the NVIDIA driver; without one it analyzes on the CPU.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
+            features: cuda
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
@@ -148,11 +157,13 @@ jobs:
             os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            features: cuda
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       TAG: ${{ needs.check.outputs.tag }}
+      FEATURES: ${{ matrix.features }}
 
     steps:
       - uses: actions/checkout@v6
@@ -164,14 +175,19 @@ jobs:
           key: ${{ matrix.target }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # .cargo/config.toml links aarch64 Linux through clang, installed here with the FFmpeg dev
-      # libs. The empty RUSTFLAGS drops its `-fuse-ld=lld`, so the default linker is used.
+      # libs. The empty RUSTFLAGS drops its `-fuse-ld=lld`, so the default linker is used. The
+      # Linux cuda archive needs the ffmpeg CLI for its smoke clip; Windows has BtbN's on PATH.
       - id: ffmpeg
         uses: ./.github/actions/setup-ffmpeg
         with:
-          extra-packages: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'clang' || '' }}
+          extra-packages: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'clang' || matrix.target == 'x86_64-unknown-linux-gnu' && 'ffmpeg' || '' }}
 
       - name: Build all binaries
-        run: cargo build --locked --verbose --release --workspace --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          flags=()
+          [ "$FEATURES" = cuda ] && flags=(-F hdr_analyzer_mvp/cuda)
+          cargo build --locked --verbose --release --workspace --target ${{ matrix.target }} "${flags[@]}"
 
       - name: Build archive
         shell: bash
@@ -196,6 +212,29 @@ jobs:
             echo "$out"
             [[ $out == *"${TAG#v}"* ]] || { echo "::error::$bin reports '$out', expected ${TAG#v}"; exit 1; }
           done
+          # mkvdovi reads "+cuda" in the analyzer's --version to decide on GPU analysis.
+          out=$("$staging/bin/hdr_analyzer_mvp$ext" --version)
+          if [ "$FEATURES" = cuda ]; then
+            [[ $out == *"(+cuda)"* ]] || { echo "::error::cuda archive analyzer reports '$out', expected (+cuda)"; exit 1; }
+            # The runner has no NVIDIA driver: --hwaccel cuda must fall back to CPU analysis and
+            # software decode, and still write the measurements.
+            smoke="$RUNNER_TEMP/smoke"
+            mkdir -p "$smoke"
+            ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x180:rate=24:duration=1 \
+              -pix_fmt yuv420p10le -c:v ffv1 -color_primaries bt2020 -color_trc smpte2084 \
+              -colorspace bt2020nc -color_range tv "$smoke/smoke.mkv"
+            "$staging/bin/hdr_analyzer_mvp$ext" "$smoke/smoke.mkv" -o "$smoke/smoke.bin" \
+              --transfer pq --hwaccel cuda > "$smoke/log.txt" 2>&1 \
+              || { cat "$smoke/log.txt"; echo "::error::--hwaccel cuda without a driver failed"; exit 1; }
+            cat "$smoke/log.txt"
+            grep -q 'CUDA analysis unavailable' "$smoke/log.txt" \
+              || { echo "::error::no CPU fallback message without a driver"; exit 1; }
+            [ -s "$smoke/smoke.bin" ] || { echo "::error::no measurements written"; exit 1; }
+            jq -e '.analysis.gpu == false' "$smoke/smoke.bin.l1.json" > /dev/null \
+              || { echo "::error::the sidecar does not record CPU analysis"; exit 1; }
+          else
+            [[ $out != *"+cuda"* ]] || { echo "::error::$out: only the x86_64 Linux and Windows archives have cuda"; exit 1; }
+          fi
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a "dist/$staging.zip" "$staging"
           else
