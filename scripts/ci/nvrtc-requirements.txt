@@ -1,0 +1,6 @@
+# NVRTC 12.6.77 for scripts/gen-kernels-ptx.sh --check in CI (ci.yml, lint job). Install with
+# pip install --no-deps --require-hashes -r scripts/ci/nvrtc-requirements.txt --target <dir>.
+# The version must match NVRTC_BUILD in scripts/gen-kernels-ptx.sh.
+nvidia-cuda-nvrtc-cu12==12.6.77 \
+    --hash=sha256:35b0cc6ee3a9636d5409133e79273ce1f3fd087abb0532d2d2e8fff1fe9efc53 \
+    --hash=sha256:f7007dbd914c56bd80ea31bc43e8e149da38f68158f423ba845fc3292684e45a

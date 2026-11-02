@@ -13,7 +13,7 @@ HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby 
 - HDR10 and HDR10+ files become Profile 8.1 MKVs, and HLG files become Profile 8.4 MKVs. The video stream is copied, not re-encoded: `mkvdovi` never encodes video.
 - An open-source analysis engine that measures decoded pixels and writes per-scene L1 plus L2, L6, L9 and L11 metadata. `dovi_tool` generates and injects the RPU.
 - Direct analysis of the compressed source. You do not need a ProRes or raw intermediate.
-- Optional NVDEC decode and CUDA analysis that works on the decoded frames in GPU memory: about 325 fps (4K HDR10) and 490 fps (4K HLG) end to end on an RTX 4070 ([details](docs/PERFORMANCE.md)). Release binaries are CPU-only; GPU analysis needs a source build.
+- Optional NVDEC decode and CUDA analysis that works on the decoded frames in GPU memory: about 325 fps (4K HDR10) and 490 fps (4K HLG) end to end on an RTX 4070 ([details](docs/PERFORMANCE.md)). The Linux x64 and Windows x64 release archives include it and need only the NVIDIA driver (R560 or newer).
 - Published validation against synthetic references and Dolby-generated metadata, including an open gap on grainy content ([docs/VALIDATION.md](docs/VALIDATION.md)).
 
 It also reuses existing HDR10+ metadata, audits RPUs with `mkvdovi inspect`, rebuilds metadata on existing Dolby Vision files with `--mdfix`, and runs on the CPU under Linux, macOS and Windows.
@@ -49,7 +49,7 @@ Install these tools separately and put them on `PATH`. `mkvdovi` checks for all 
 
 HDR10+ conversions also run `hdr_analyzer_mvp`, which ships with `mkvdovi`. Without a current analyzer they take L1 from the HDR10+ metadata alone, with a warning.
 
-To build from source instead, run `cargo build --release --workspace`. For GPU analysis on an NVIDIA host, add `cargo build --release -p hdr_analyzer_mvp --features cuda` (needs the NVIDIA driver and NVRTC, no `nvcc`). FFmpeg dev libraries, clang and per-OS notes are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
+To build from source instead, run `cargo build --release --workspace`. For GPU analysis on an NVIDIA host, add `cargo build --release -p hdr_analyzer_mvp --features cuda` (needs only the NVIDIA driver at runtime, no CUDA toolkit). FFmpeg dev libraries, clang and per-OS notes are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
 ## Compatibility
 

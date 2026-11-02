@@ -73,6 +73,29 @@ const BLOCK_THREADS: u32 = 256;
 #[cfg(feature = "cuda")]
 const BLOCKS_PER_SM: u32 = 8;
 
+/// Lowest `cuDriverGetVersion` value GPU analysis accepts: CUDA 12.6 (driver R560). The
+/// embedded `kernels.ptx` is PTX ISA 8.5 from NVRTC 12.6, and cudarc's `cuda-12060`
+/// bindings abort the process on a driver symbol an older driver lacks.
+#[cfg(any(feature = "cuda", test))]
+const MIN_DRIVER_VERSION: i32 = 12060;
+
+/// Refuse a driver older than [`MIN_DRIVER_VERSION`], so `--hwaccel cuda` falls back to the CPU
+/// with a message instead of failing inside the driver's PTX JIT or cudarc.
+#[cfg(any(feature = "cuda", test))]
+fn check_driver_version(version: i32) -> Result<()> {
+    if version >= MIN_DRIVER_VERSION {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "the NVIDIA driver supports CUDA {}.{}; GPU analysis needs CUDA {}.{} \
+         (driver R560 or newer), so update the driver",
+        version / 1000,
+        version % 1000 / 10,
+        MIN_DRIVER_VERSION / 1000,
+        MIN_DRIVER_VERSION % 1000 / 10
+    ))
+}
+
 // `dovi_params` layout; must match the DOVI_* defines in kernels.cu.
 #[cfg(any(feature = "cuda", test))]
 const DOVI_MMR_WORDS: usize = 1 + MMR_MAX_ORDER * MMR_TERMS;

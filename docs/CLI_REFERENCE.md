@@ -372,7 +372,7 @@ entirely.
 
 - `cuda`: with a `--features cuda` build, enables the full GPU path: NVDEC decode through an
   FFmpeg CUDA `AVHWDeviceContext` (falling back to `hevc_cuvid`, then software) plus an
-  NVRTC-compiled CUDA kernel that computes the histograms, max-RGB peaks, and per-pixel means on
+  CUDA kernel (embedded PTX, needs only the NVIDIA driver, R560 or newer) that computes the histograms, max-RGB peaks, and per-pixel means on
   full-resolution frames with a sampling stride (`--downscale` maps to the stride). P010 frames from
   the FFmpeg CUDA device decoder are analyzed in GPU memory without a host round trip; `hevc_cuvid`
   frames, 8-bit and 12-bit surfaces are downloaded to host memory first. Bit-identical L1 output vs.

@@ -80,9 +80,11 @@ gh attestation verify hdr-analyze-<version>-<target>.tar.gz -R tinof/hdr-analyze
 
 ### What release archives do not include
 
-- GPU analysis. Release archives are built with `cargo build --release --workspace`, without the
-  `cuda` feature, so the bundled `hdr_analyzer_mvp` analyzes on the CPU only. For CUDA analysis, see
-  [CUDA analysis build](#cuda-analysis-build).
+- GPU analysis on macOS and Linux ARM64. The Linux x64 and Windows x64 archives are built with the
+  `cuda` feature: their `hdr_analyzer_mvp --version` ends in `(+cuda)`, and with `--hwaccel cuda`
+  (which `mkvdovi` passes when it finds an NVIDIA GPU) they analyze on the GPU. They need only the
+  NVIDIA driver, R560 or newer (CUDA 12.6): the analysis kernel is embedded as PTX. Without a
+  driver, or with an older one, they analyze on the CPU. The other archives analyze on the CPU only.
 - The runtime tools listed in the next section.
 
 ## Runtime tools
@@ -195,13 +197,11 @@ same path in `target/release/`, so building the workspace last replaces the CUDA
 
 Runtime requirements:
 
-- The NVIDIA driver (`libcuda.so.1` on Linux, `nvcuda.dll` on Windows).
-- NVRTC from CUDA 12 or 13 (`libnvrtc.so.12` or `libnvrtc.so.13` on Linux,
-  `nvrtc64_120_0.dll`, `nvrtc64_130_0.dll` or `nvrtc64_131_0.dll` on Windows).
-- No `nvcc` or CUDA toolkit compiler. The analysis kernel is compiled by NVRTC when the analyzer
-  starts.
+- The NVIDIA driver, R560 or newer (CUDA 12.6; `libcuda.so.1` on Linux, `nvcuda.dll` on Windows).
+- Nothing else: no NVRTC, `nvcc` or CUDA toolkit. The analysis kernel is embedded as PTX
+  (`hdr_analyzer_mvp/src/analysis/kernels.ptx`), and the driver compiles it for the GPU.
 
-If a library is missing, `--hwaccel cuda` falls back to CPU analysis.
+If the driver is missing or older, `--hwaccel cuda` falls back to CPU analysis with a message.
 
 Check the build:
 

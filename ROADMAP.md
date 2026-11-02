@@ -52,22 +52,21 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-01 at main@4e55715)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=8ed14cbc2060 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+### Next up (checked 2026-11-02 at main@f5f1877)
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=a1ce677c5d8b skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
-1. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap (18 retail
-   `RPU.bin` files in the dev corpus), and a ×4096 answer is a delivered-L1 fix to know before the
-   tag. Branch `docs/e10-1-l1-code-scaling`. Release: none (patch if ×4096)
-2. **E12.1 Build the CUDA release archives** (priority 11, ahead of the rows in `skip=`). Gate: the
-   item gate. Why: the release window: P9.2 and P9.3 start `docs/RELEASING.md` rule 1, so v0.8.0
-   is due about 2026-11-07, and E12.1 is its one open step. When it merges, cut `v0.8.0-rc.1`
-   (Release plan). Branch `feat/e12-1-cuda-release-binaries`. Release: minor
+1. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap, and the
+   owner's release point wants the answer before `v0.8.0-rc.1`. Runs on the Oracle host, which has
+   the bigger dev corpus (owner, 2026-11-02). Branch `docs/e10-1-l1-code-scaling`. Release: none
+   (patch if ×4096)
+2. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
+   step gate. Why: delivered L1 differs for NVIDIA users without GPU analysis, and after E12.1 still
+   for a `+cuda` build whose CUDA analysis does not start. Own branch (moves L1):
+   `fix/e12-2-nvdec-cpu-decode`. Release: patch (in v0.8.0 if merged before rc.1)
 
-**Reassess:** new-defect (P1.1, PR #85): E12.2 added under E12 (NVDEC decode with CPU analysis
-still differs from software decode); E12.1 now moves NVIDIA users from full-resolution CPU analysis.
-
-- Recheck before E12.1: CPU `auto` is `accurate` since P1.1 (`resolve_analysis_quality`,
-  `mkvdovi/src/pipeline/analyzer.rs`), so the rc test compares GPU with full-resolution CPU runs.
+**Reassess:** new-defect (E12.1, PR #86): E12.3 added (CPU and CUDA hue bins differ for 2 of 2^20
+chroma pairs). **Reassess:** owner-decision (E12.1, PR #86): the kernel ships as embedded PTX, so the
+archives need only the driver; E12.1 waits for the owner's `v0.8.0-rc.1` Windows test.
 
 ### Waiting for the owner
 
@@ -113,7 +112,7 @@ without it.
 |---|---|---|
 | none | E10.1 check (if ×4095 stands; a ×4096 fix is PATCH), E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| v0.8.0 | P1.1 CPU `auto` becomes `accurate` (changed default, measured 2026-11-02); E12.1 CUDA release binaries (Linux x64, Windows x64; the Windows zip bundles NVRTC); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
+| v0.8.0 | P1.1 CPU `auto` becomes `accurate` (changed default, measured 2026-11-02); E12.1 CUDA release binaries (Linux x64, Windows x64; the kernel is embedded PTX, so users need only the NVIDIA driver); E12.2 NVDEC + CPU analysis fix if merged before rc.1, else the next patch; P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
@@ -626,6 +625,11 @@ The detailed gap table and validation method live in
   against 3697), show which one the reference uses; ×4096 → a one-code fix in analyzer and
   generator conversion, otherwise close (owner, 2026-10-17).
 - [E10.1][corpus] The check against retail RPUs. Gate: the item gate.
+- **Checked 2026-11-02 @f5f1877:** the dev corpus has two 4000-nit masters with retail `RPU.bin`
+  (the two The Shining cuts, container mastering 0.005/4000 nits). A ×4096 fix reaches the source
+  range (`dovi_rpu_builder/src/params.rs:266` via `metadata/rpu_config.rs:53`) and the HDR10+ L1
+  (`dovi_rpu_builder/src/hdr10plus.rs:207`, `pipeline/hybrid.rs:396`), and `dovi_rpu_builder`
+  must stay byte-identical to `dovi_tool generate` 2.3.4, so the fix sits before the code step.
 
 ### E11: `l1_diff` and open-GOP cuts
 
@@ -640,15 +644,16 @@ The detailed gap table and validation method live in
 
 ### E12: CUDA release binaries
 
-- **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  `release.yml` builds without `--features cuda`, so release users get CPU analysis; on an NVIDIA
-  host NVDEC decodes and the frames go through swscale (E12.2). Open: E12.1 for v0.8.0, E12.2.
+- **Status:** Partial. E12.1 landed (PR #86: Linux x64 and Windows x64 archives with an embedded PTX
+  kernel, driver only); its gate waits for the owner's `v0.8.0-rc.1` Windows test. Open: E12.2,
+  E12.3.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
-  and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. NVIDIA's
-  driver does not ship NVRTC, which compiles `kernels.cu` at runtime (`gpu/backend.rs`), so the
-  Windows zip bundles the NVRTC DLLs (NVRTC is on NVIDIA's redistributable list; owner decision
-  2026-10-17); Linux users still need the NVRTC library installed.
+  and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. The kernel
+  ships as PTX that NVRTC 12.6 compiled ahead of time (`analysis/kernels.ptx`, made by
+  `scripts/gen-kernels-ptx.sh`, checked for staleness in CI), loaded through the driver's PTX JIT,
+  so users need only the NVIDIA driver (R560 or newer). This replaces the 2026-10-17 plan to bundle
+  the NVRTC DLLs (owner decision 2026-11-02, after the speakrs write-up on shipping prebuilt PTX).
 - **Effect:** NVIDIA release users move from CPU analysis to GPU analysis: mainly speed, plus the
   small E12.2 swscale difference in L1 and MaxCLL (CPU `auto` is `accurate` since P1.1); needs a
   CHANGELOG entry.
@@ -657,7 +662,8 @@ The detailed gap table and validation method live in
   `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
   from `PATH` (Release plan).
 - [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in
-  the plan (the Windows zip bundles NVRTC), with the smoke tests, for v0.8.0. Gate: the item gate.
+  the plan (embedded PTX, driver only), with the smoke tests, for v0.8.0. Gate: the item gate.
+  Landed: PR #86; gate pending.
 - **Defect (found 2026-11-02, P1.1):** an analyzer without `+cuda` run with `--hwaccel cuda` (what
   mkvdovi passes on any NVIDIA host, `mkvdovi/src/pipeline/analyzer.rs` `run_hdr_analyzer`) decodes
   with NVDEC and sends the P010 frames through swscale even at downscale 1
@@ -668,6 +674,21 @@ The detailed gap table and validation method live in
   downscale 1 in the analyzer, or have mkvdovi pass `--hwaccel none` to an analyzer without `+cuda`
   (NVDEC speed lost). Gate: with `--hwaccel cuda` and an analyzer without `cuda`, `.bin` and sidecar
   byte-identical to software decode on one PQ and one HLG cut, with a test for both sides.
+- **Defect (found 2026-11-02, E12.1 research):** the GPU hue bin (f32 `atan2f`,
+  `analysis/kernels.cu:513-517`) and the CPU one (f64, `analysis/histogram.rs:304-308`) differ for
+  2 of the 2^20 centred chroma pairs, (254, −109) and (508, −218): CPU bin 28, GPU bin 29, within
+  f32 rounding of the 336.77° bin edge (both NVRTC 12.6 and 13.1). The hue histogram is in the
+  `.bin`, not in L1; `scripts/cuda-parity.sh` passes because its clips never hit those pairs.
+- [E12.3][gpu] Make the hue bin match between CPU and CUDA for every chroma pair (for example one
+  integer lookup table both sides index). Gate: a test over all 2^20 centred chroma pairs, CPU
+  against the kernel's formula, with 0 mismatches; `scripts/cuda-parity.sh` passes; the L1
+  regression gate passes without `--update`.
+- **Checked 2026-11-02 @f5f1877:** CPU `auto` is `accurate` (`resolve_analysis_quality`,
+  `mkvdovi/src/pipeline/analyzer.rs:234`). The CPU reader takes separate U/V planes
+  (`analysis/frame/mod.rs:266`), so reading P010 directly needs semi-planar chroma; `median3`
+  also forces CPU analysis on NVDEC frames (`pipeline/analyze.rs:165`). Sidecar reuse
+  (`mkvdovi/src/pipeline/measure.rs:518`) does not tell the NVDEC route apart; E12.2 decides
+  whether old sidecars are re-analyzed. The mkvdovi-only fix leaves `+cuda` fallbacks affected.
 
 ### E13: module size refactor
 

@@ -318,3 +318,22 @@ fn luminance_bin_lut_uses_exact_cpu_boundaries() {
         }
     }
 }
+
+// cuDriverGetVersion reports 1000 * major + 10 * minor (CUDA driver API docs); the embedded PTX
+// is ISA 8.5 from NVRTC 12.6, which a CUDA 12.6 driver (R560) is the first to JIT.
+#[test]
+fn driver_version_accepts_cuda_12_6_and_newer() {
+    for version in [12_060, 12_080, 13_000, 13_010] {
+        assert!(check_driver_version(version).is_ok(), "{version}");
+    }
+}
+
+#[test]
+fn driver_version_refuses_older_than_cuda_12_6() {
+    for version in [0, 11_080, 12_000, 12_050] {
+        let error = check_driver_version(version).unwrap_err().to_string();
+        assert!(error.contains("needs CUDA 12.6"), "{version}: {error}");
+    }
+    let error = check_driver_version(12_040).unwrap_err().to_string();
+    assert!(error.contains("supports CUDA 12.4;"), "{error}");
+}

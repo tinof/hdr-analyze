@@ -8,6 +8,15 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- GPU analysis in the Linux x64 and Windows x64 release archives. Their `hdr_analyzer_mvp` is built
+  with the `cuda` feature, so `mkvdovi` analyzes on the GPU when it finds an NVIDIA GPU. The
+  analysis kernel is now embedded as PTX that the driver compiles, so these archives, and any
+  `--features cuda` build, need only the NVIDIA driver, R560 or newer (CUDA 12.6), and no NVRTC
+  or CUDA toolkit. With no driver or an older one, the analyzer falls back to the CPU with a
+  message. With `--analysis-quality accurate` (the default), GPU and CPU
+  analysis give the same `.bin` and sidecar on the parity clips (`scripts/cuda-parity.sh`). An
+  NVDEC-decoded run that falls back to CPU analysis can differ slightly (ROADMAP E12.2). The macOS and Linux ARM64 archives stay CPU-only.
+
 - `dovi_rpu_builder`, a library crate that builds Dolby Vision Profile 8.1 and 8.4 RPUs in-process,
   one RPU NAL per access unit, byte-identical to `dovi_tool generate` 2.3.4. It covers shot L1,
   HDR10+ payloads (with `dovi_tool`'s scene rule), static 8.1 and 8.4 RPUs, and the preset, bt2100
@@ -40,7 +49,7 @@ This document provides a historical record of completed milestones, feature impl
   MaxCLL, so an HDR10 or HDR10+ source without a stated MaxCLL got the 1000-nit default in L6. Now
   CPU analysis of a software-decoded file gives the same L1 as GPU analysis, except on frames the
   two decoders decode differently, and that L6 carries the measured value. One exception remains:
-  an analyzer without `+cuda` on an NVIDIA host, as in today's CPU-only release archives, decodes
+  an analyzer without `+cuda` on an NVIDIA host (a build without the `cuda` feature) decodes
   with NVDEC and converts the frames through swscale, which shifts L1 and MaxCLL slightly (ROADMAP
   E12.2). Analysis on the CPU takes about two to three
   times as long as before: on a 16-thread CPU about 13 to 23 frames per second for 4K, so a

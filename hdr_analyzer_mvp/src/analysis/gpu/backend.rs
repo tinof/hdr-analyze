@@ -4,7 +4,7 @@ use cudarc::driver::sys::{self, CUctx_flags, CUdevice_attribute, CUresult};
 use cudarc::driver::{
     CudaContext, CudaFunction, CudaSlice, CudaStream, DevicePtr, LaunchConfig, PushKernelArg,
 };
-use cudarc::nvrtc::compile_ptx;
+use cudarc::nvrtc::Ptx;
 use ffmpeg_next::ffi;
 use libloading::Library;
 use madvr_parse::MadVRFrame;
@@ -54,7 +54,7 @@ fn check(result: CUresult, call: &str) -> Result<()> {
 fn prepare_primary_context() -> Result<()> {
     let wanted = CUctx_flags::CU_CTX_SCHED_BLOCKING_SYNC as u32;
     // SAFETY: plain driver API calls on out-parameters owned by this frame; the driver
-    // library was loaded and validated by `load_cuda_libraries`.
+    // library was loaded and validated by `load_cuda_driver`.
     unsafe {
         check(sys::cuInit(0), "cuInit")?;
         let mut device = 0;
@@ -83,7 +83,6 @@ fn prepare_primary_context() -> Result<()> {
 
 pub struct GpuAnalyzer {
     _cuda_driver: Library,
-    _nvrtc: Library,
     stream: Arc<CudaStream>,
     kernel: CudaFunction,
     compose_kernel: CudaFunction,
@@ -110,7 +109,7 @@ impl GpuAnalyzer {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn load_first_library(kind: &str, candidates: &[&str]) -> Result<Library> {
         for candidate in candidates {
-            // SAFETY: loading the CUDA/NVRTC library only runs its platform loader hooks;
+            // SAFETY: loading the CUDA driver library only runs its platform loader hooks;
             // cudarc resolves and validates all symbols it actually uses.
             if let Ok(library) = unsafe { Library::new(*candidate) } {
                 return Ok(library);
@@ -123,32 +122,17 @@ impl GpuAnalyzer {
     }
 
     #[cfg(target_os = "linux")]
-    fn load_cuda_libraries() -> Result<(Library, Library)> {
-        let driver = Self::load_first_library("CUDA driver", &["libcuda.so.1", "libcuda.so"])?;
-        let nvrtc = Self::load_first_library(
-            "CUDA NVRTC",
-            &["libnvrtc.so.12", "libnvrtc.so.13", "libnvrtc.so"],
-        )?;
-        Ok((driver, nvrtc))
+    fn load_cuda_driver() -> Result<Library> {
+        Self::load_first_library("CUDA driver", &["libcuda.so.1", "libcuda.so"])
     }
 
     #[cfg(target_os = "windows")]
-    fn load_cuda_libraries() -> Result<(Library, Library)> {
-        let driver = Self::load_first_library("CUDA driver", &["nvcuda.dll"])?;
-        let nvrtc = Self::load_first_library(
-            "CUDA NVRTC",
-            &[
-                "nvrtc64_120_0.dll",
-                "nvrtc64_130_0.dll",
-                "nvrtc64_131_0.dll",
-                "nvrtc64.dll",
-            ],
-        )?;
-        Ok((driver, nvrtc))
+    fn load_cuda_driver() -> Result<Library> {
+        Self::load_first_library("CUDA driver", &["nvcuda.dll"])
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    fn load_cuda_libraries() -> Result<(Library, Library)> {
+    fn load_cuda_driver() -> Result<Library> {
         Err(anyhow!(
             "CUDA analysis is supported only on Linux and Windows"
         ))
@@ -156,18 +140,33 @@ impl GpuAnalyzer {
 
     /// `composer` selects the Profile 8.4 decode for HLG input; it is ignored for PQ.
     pub fn new(transfer_function: TransferFunction, composer: Composer) -> Result<Self> {
-        // cudarc's dynamic loader panics when a library is wholly absent. Probe with
-        // libloading first so `--hwaccel cuda` can reliably fall back to CPU.
-        let (cuda_driver, nvrtc) = Self::load_cuda_libraries()?;
+        // cudarc's dynamic loader panics when a library or a symbol is absent. Probe the
+        // driver with libloading and check its CUDA version first, so `--hwaccel cuda` can
+        // reliably fall back to CPU. NVRTC is not needed: the kernel ships as PTX.
+        let cuda_driver = Self::load_cuda_driver()?;
+        let mut driver_version = 0;
+        // SAFETY: an out-parameter owned by this frame; cuDriverGetVersion exists in every
+        // CUDA driver and needs no cuInit.
+        check(
+            unsafe { sys::cuDriverGetVersion(&mut driver_version) },
+            "cuDriverGetVersion",
+        )?;
+        check_driver_version(driver_version)?;
         prepare_primary_context()?;
         let context =
             CudaContext::new(0).map_err(|err| anyhow!("failed to open CUDA device 0: {err:?}"))?;
         let stream = context.default_stream();
-        let ptx = compile_ptx(include_str!("../kernels.cu"))
-            .map_err(|err| anyhow!("NVRTC failed to compile HDR analysis kernel: {err}"))?;
+        // `kernels.ptx` is NVRTC 12.6's output for `kernels.cu` with
+        // `--gpu-architecture=compute_52`, made by `scripts/gen-kernels-ptx.sh` (CI checks that it
+        // is current); the driver JIT-compiles it for this GPU.
         let module = context
-            .load_module(ptx)
-            .map_err(|err| anyhow!("failed to load CUDA analysis module: {err:?}"))?;
+            .load_module(Ptx::from_src(include_str!("../kernels.ptx")))
+            .map_err(|err| {
+                anyhow!(
+                    "the NVIDIA driver could not load the analysis kernel ({err:?}); \
+                     updating the driver may help"
+                )
+            })?;
         let kernel = module
             .load_function("analyze_frame")
             .map_err(|err| anyhow!("failed to load analyze_frame kernel: {err:?}"))?;
@@ -193,7 +192,6 @@ impl GpuAnalyzer {
 
         Ok(Self {
             _cuda_driver: cuda_driver,
-            _nvrtc: nvrtc,
             stream,
             kernel,
             compose_kernel,
