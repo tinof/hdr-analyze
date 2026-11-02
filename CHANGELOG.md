@@ -38,8 +38,11 @@ This document provides a historical record of completed milestones, feature impl
   directions: a synthetic highlight read up to 310 codes high, and on 37 of 39 real cuts the 95th
   percentile per-shot change of L1 max was 10 codes or more (median 105). It also gave no measured
   MaxCLL, so an HDR10 or HDR10+ source without a stated MaxCLL got the 1000-nit default in L6. Now
-  CPU analysis gives the same L1 as GPU analysis, except on frames the two decoders decode
-  differently, and that L6 carries the measured value. Analysis on the CPU takes about two to three
+  CPU analysis of a software-decoded file gives the same L1 as GPU analysis, except on frames the
+  two decoders decode differently, and that L6 carries the measured value. One exception remains:
+  an analyzer without `+cuda` on an NVIDIA host, as in today's CPU-only release archives, decodes
+  with NVDEC and converts the frames through swscale, which shifts L1 and MaxCLL slightly (ROADMAP
+  E12.2). Analysis on the CPU takes about two to three
   times as long as before: on a 16-thread CPU about 13 to 23 frames per second for 4K, so a
   two-hour film takes roughly 2 to 4 hours. This matters most for HDR10+
   inputs, which now always run the analysis. Measurements from an older `auto` run on the CPU are

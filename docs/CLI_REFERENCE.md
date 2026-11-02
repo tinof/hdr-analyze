@@ -359,7 +359,8 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
   `/usr/lib/wsl/lib/nvidia-smi`) → behaves as `--hwaccel cuda`.
 - Otherwise → behaves as `--hwaccel none` (today's CPU pipeline).
 - `--analysis-quality auto` (the default) resolves to `accurate` on every host, with or without GPU
-  analysis, so a file gets the same L1 everywhere. Full-resolution CPU analysis takes about two to
+  analysis, so a file gets the same L1 as GPU analysis (exception: an analyzer without `+cuda` with
+  `--hwaccel cuda`, ROADMAP E12.2). Full-resolution CPU analysis takes about two to
   three times as long as `balanced`; `--analysis-quality balanced` keeps the faster half-resolution
   run. `mkvdovi` warns when `--hwaccel cuda` meets an analyzer without `+cuda`, and after a run that
   expected GPU analysis but was analyzed on the CPU.

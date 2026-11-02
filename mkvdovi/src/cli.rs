@@ -443,7 +443,8 @@ impl std::fmt::Display for OptimizerProfile {
 /// GPU analysis is limited by NVDEC decoding, so there every preset runs at the same speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum AnalysisQuality {
-    /// Accurate on every host, so a file gets the same L1 with or without GPU analysis.
+    /// Accurate on every host, so a file gets the same L1 with or without GPU analysis
+    /// (exception: an analyzer without `+cuda` under `--hwaccel cuda`, ROADMAP E12.2).
     #[default]
     Auto,
     /// Half-resolution, every 3rd frame — fastest on the CPU; may miss brief peak frames.

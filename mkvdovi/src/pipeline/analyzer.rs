@@ -34,7 +34,8 @@ pub fn analyzer_executable() -> PathBuf {
 /// Resolve `auto` settings to concrete values for this machine, once at startup.
 /// `--hwaccel auto` becomes `cuda` when an NVIDIA GPU is detected (else `none`);
 /// `--analysis-quality auto` becomes `accurate` on every host ([`resolve_analysis_quality`]),
-/// so a file gets the same L1 with or without GPU analysis. With GPU analysis an explicit
+/// so a file gets the same L1 with or without GPU analysis (exception: an analyzer without
+/// `+cuda` under `--hwaccel cuda`, ROADMAP E12.2). With GPU analysis an explicit
 /// `balanced` or `fast` is kept but warned about: it saves no time on an NVDEC-bound run, and
 /// only `accurate` is parity-checked.
 pub fn resolve_auto_settings(args: &mut Args) {

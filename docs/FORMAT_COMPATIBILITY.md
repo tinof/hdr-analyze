@@ -100,7 +100,8 @@ For HDR10/HLG analysis, `--analysis-quality` selects:
 | `accurate` | full | every frame |
 
 The default `auto` resolves to `accurate` on every host, so a file gets the same L1 with or without
-GPU analysis. On the CPU it takes about two to three times as long as `balanced`; `balanced` is
+GPU analysis (exception: an analyzer without `+cuda` with `--hwaccel cuda` decodes with NVDEC and
+converts through swscale; ROADMAP E12.2). On the CPU it takes about two to three times as long as `balanced`; `balanced` is
 faster but misreads small highlights, high and low, and gives no measured MaxCLL.
 
 The analyzer still computes its dynamic `target_nits` optimizer for the madVR `.bin`, but `mkvdovi`
@@ -179,7 +180,7 @@ unknown name is applied, and recorded, as `max`.
 `mkvdovi` accepts versions 1–6. `--hdr10plus-l1 hybrid` needs version 6 with a max-RGB domain and
 `max` estimator and source. It re-analyzes anything else with a warning, because a piece without a
 usable HDR10+ peak takes the largest peak of its own frames. That peak is still a measurement: analysis at
-`--downscale 2`, which `auto` resolves to on the CPU, or with `--pre-denoise median3` can miss a small
+`--downscale 2` (`--analysis-quality balanced`), or with `--pre-denoise median3` can miss a small
 highlight. Without `--hdr10plus-l1`, an analyzer that is missing or whose `--help` does not name
 `l1-sidecar-frame-peak` takes the file to the metadata path with a warning, even when reusable
 measurements sit beside it. An explicit `--hdr10plus-l1 hybrid` reuses those measurements, and

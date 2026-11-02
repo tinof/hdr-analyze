@@ -201,7 +201,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   2026-11-02): the rule flips CPU `auto` to `accurate` (`resolve_analysis_quality`,
   `pipeline/analyzer.rs`), on branch `fix/p1-1-cpu-default`. `FAST_BILINEAR` does not average small
   highlights: it reads them high and low. Found on the way: NVDEC decode with CPU analysis differs
-  from software decode, because P010 frames go through swscale (`analyze.rs`, `needs_scaling`).
+  from software decode, because P010 frames go through swscale; tracked as E12.2.
 
 ### P3: L5 from the crop
 
@@ -661,22 +661,33 @@ The detailed gap table and validation method live in
 ### E12: CUDA release binaries
 
 - **Status:** Open. Nothing landed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  `release.yml` builds without `--features cuda`, so `auto` resolves to CPU `balanced` for
-  release users. Open: E12.1, for v0.8.0.
+  `release.yml` builds without `--features cuda`, so release users get CPU analysis; on an NVIDIA
+  host NVDEC decodes and the frames go through swscale (E12.2). Open: E12.1 for v0.8.0, E12.2.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. NVIDIA's
   driver does not ship NVRTC, which compiles `kernels.cu` at runtime (`gpu/backend.rs`), so the
   Windows zip bundles the NVRTC DLLs (NVRTC is on NVIDIA's redistributable list; owner decision
   2026-10-17); Linux users still need the NVRTC library installed.
-- **Effect:** changes delivered L1 and MaxCLL for NVIDIA release users (`balanced` → `accurate`);
-  needs a CHANGELOG entry.
+- **Effect:** NVIDIA release users move from CPU analysis to GPU analysis: mainly speed, plus the
+  small E12.2 swscale difference in L1 and MaxCLL (CPU `auto` is `accurate` since P1.1); needs a
+  CHANGELOG entry.
 - **Gate:** the release archives report `+cuda` in `--version` and fall back cleanly to the CPU
   without libcuda; the Windows archive runs GPU analysis with only the driver present;
   `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
   from `PATH` (Release plan).
 - [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in
   the plan (the Windows zip bundles NVRTC), with the smoke tests, for v0.8.0. Gate: the item gate.
+- **Defect (found 2026-11-02, P1.1):** an analyzer without `+cuda` run with `--hwaccel cuda` (what
+  mkvdovi passes on any NVIDIA host, `mkvdovi/src/pipeline/analyzer.rs` `run_hdr_analyzer`) decodes
+  with NVDEC and sends the P010 frames through swscale even at downscale 1
+  (`hdr_analyzer_mvp/src/pipeline/analyze.rs`, `needs_scaling`), so L1 and MaxCLL differ from
+  software decode (MaxCLL 194 against 182 and 903 against 855 nits; log 2026-11-02). It also
+  applies to a `+cuda` build whose CUDA analysis does not start.
+- [E12.2][gpu] Make NVDEC decode with CPU analysis match software decode: read P010 directly at
+  downscale 1 in the analyzer, or have mkvdovi pass `--hwaccel none` to an analyzer without `+cuda`
+  (NVDEC speed lost). Gate: with `--hwaccel cuda` and an analyzer without `cuda`, `.bin` and sidecar
+  byte-identical to software decode on one PQ and one HLG cut, with a test for both sides.
 
 ### E13: module size refactor
 
