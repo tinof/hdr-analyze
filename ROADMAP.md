@@ -52,17 +52,26 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-02 at main@f5f1877)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=d9ea9485f542 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+### Next up (checked 2026-11-03 at main@a57563c)
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=d9ea9485f542 skip=E7.2,E8.1,E9.1 -->
 
-1. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
-   step gate. Why: delivered L1 differs for NVIDIA users without GPU analysis, and after E12.1 still
-   for a `+cuda` build whose CUDA analysis does not start. Own branch (moves L1):
-   `fix/e12-2-nvdec-cpu-decode`. Release: patch (in v0.8.0 if merged before rc.1)
+Before any step: cut `v0.8.0-rc.1` (owner, 2026-11-03; `docs/RELEASING.md` Checklist). P1.1, E12.1
+and E10.1 are merged, so the release point is reached; the owner's Windows test of rc.1 is the E12.1
+gate. Code merged to `main` before the final v0.8.0 tag ships in v0.8.0 untested by rc.1, so the
+steps below merge after that tag unless the owner takes them into v0.8.0.
 
-**Reassess:** new-defect (E12.1, PR #86): E12.3 added (CPU and CUDA hue bins differ for 2 of 2^20
-chroma pairs). **Reassess:** owner-decision (E12.1, PR #86): the kernel ships as embedded PTX, so the
-archives need only the driver; E12.1 waits for the owner's `v0.8.0-rc.1` Windows test.
+1. **E7.1 Direct-MKV `dovi_tool` steps still accept exit status plus non-empty output** (priority 4).
+   Gate: E7 gate (1). Why: highest-priority startable step, desk-only, no L1 or RPU change.
+   Branch: `fix/e7-1-direct-mkv-truncation`. Release: patch
+2. **P6.2 Implement the five picked checks, warn-only** (priority 4). Gate: P6 step 2 gate. Why:
+   warn-only, RPU baselines byte-identical. Branch: `feat/p6-2-source-consistency-warnings`.
+   Release: patch
+3. **P12.1 Under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults** (priority 5).
+   Gate: the P12.1 gate. Why: the batched next patch with E12.2. Own branch (changes delivered RPUs):
+   `fix/p12-1-mdfix-source-l6`. Release: patch
+
+Passed over: E7.2 builds on E7.1's check in the same files; E8.1 and E9.1 are "a later minor" in the
+Release plan and would put a MINOR change into the v0.8.0 rc window.
 
 ### Waiting for the owner
 
@@ -99,16 +108,15 @@ under "Waiting for the owner", which is the list `/ship:roadmap-next` reads.
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
 `/ship:roadmap-next` keeps this table current. Latest release: v0.7.0 (2026-10-18; P7, P9, P11 and P13, tagged without an rc).
 
-**Next release point (owner, 2026-11-01):** cut `v0.8.0-rc.1` right after E12.1 merges, with P1.1
-and E10.1 merged before it. The final v0.8.0 follows the owner's Windows test. Due about
-2026-11-07; if E12.1 is not close by about 2026-11-05, the owner decides whether v0.8.0 ships
-without it.
+**Next release point (owner, 2026-11-01; confirmed 2026-11-03):** cut `v0.8.0-rc.1` now: E12.1
+(#86), P1.1 (#85) and E10.1 (#87) are merged. E12.2 was not merged before rc.1, so it moves to the
+next patch. The final v0.8.0 follows the owner's Windows test, due about 2026-11-07.
 
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| v0.8.0 | P1.1 CPU `auto` becomes `accurate` (changed default, measured 2026-11-02); E12.1 CUDA release binaries (Linux x64, Windows x64; the kernel is embedded PTX, so users need only the NVIDIA driver); E12.2 NVDEC + CPU analysis fix if merged before rc.1, else the next patch; P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
+| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1 and P6.2 if they merge after the v0.8.0 tag | PATCH, batched (`docs/RELEASING.md` rule 2) |
+| v0.8.0 | P1.1 CPU `auto` becomes `accurate` (changed default, measured 2026-11-02); E12.1 CUDA release binaries (Linux x64, Windows x64; the kernel is embedded PTX, so users need only the NVIDIA driver); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
