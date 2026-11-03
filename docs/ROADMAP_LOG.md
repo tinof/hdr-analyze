@@ -6,6 +6,40 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-03: E10.1 The check against retail RPUs (PR #87)
+
+Step: - [E10.1][corpus] The check against retail RPUs. Gate: the item gate.
+
+Gate evidence: the item gate asks retail RPUs of 4000-nit masters which scaling the reference uses.
+PQ(4000 nits) = 0.902572 gives `source_max_pq` 3696.03 → 3696 with ×4095 and 3696.94 → 3697 with
+×4096; `source_min_pq` (0.005 nits) is 62 either way. Nine retail 4000-nit masters all carry 62 and
+3696, read from frame 0 with `dovi_tool` 2.3.4 `info`: eight UHD disc remuxes (10 Cloverfield Lane,
+First Man, Joker, Mission: Impossible Ghost Protocol, Obsession, Saving Private Ryan, The Invisible
+Man, The Substance; Profile 7 MEL and FEL), streamed 48 frames each from the Oracle host's library
+over SSH, and the two The Shining dev-corpus cuts (`truth/RPU.bin`). Twelve 1000-nit masters (disc
+and streaming, Profiles 5, 7 and 8) read 3079, which both scalings give. Results and the probe
+script: `~/mkvdovi-work/e10-1-retail-rpu-2026-11-03/` (local only). The diff is docs-only, so the
+cargo gate was skipped (`gate-skip`); CI on PR #87.
+
+Resolution: ×4095 stands, so the analyzer and `dolby_vision::utils::nits_to_pq_12_bit` already
+match the reference and no one-code fix is due; `docs/CM_ANALYZE_PARITY.md` records the result.
+Both Codex review surfaces hit the usage limit; the cold review was Gemini's, by the owner's choice
+(LGTM).
+
+### E10: L1 code scaling (moved from the roadmap)
+
+- **Status:** Done: retail RPUs use ×4095, the analyzer's and the generator's scaling
+  ([log](ROADMAP_LOG.md), 2026-11-03, PR #87); no step open, no code change.
+- **Gate:** retail RPUs of 4000-nit masters, where the two scalings differ (`source_max_pq` 3696
+  against 3697), show which one the reference uses; ×4096 → a one-code fix in analyzer and
+  generator conversion, otherwise close (owner, 2026-10-17).
+- [E10.1][corpus] The check against retail RPUs. Gate: the item gate.
+- **Checked 2026-11-02 @f5f1877:** the dev corpus has two 4000-nit masters with retail `RPU.bin`
+  (the two The Shining cuts, container mastering 0.005/4000 nits). A ×4096 fix reaches the source
+  range (`dovi_rpu_builder/src/params.rs:266` via `metadata/rpu_config.rs:53`) and the HDR10+ L1
+  (`dovi_rpu_builder/src/hdr10plus.rs:207`, `pipeline/hybrid.rs:396`), and `dovi_rpu_builder`
+  must stay byte-identical to `dovi_tool generate` 2.3.4, so the fix sits before the code step.
+
 ### 2026-11-02: P1.1 Decide the CPU fallback default (PR #85)
 
 Step: - [P1.1][corpus] Decide the CPU fallback default. `auto` resolves to `accurate` only with CUDA,

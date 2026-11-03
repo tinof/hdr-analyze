@@ -53,13 +53,9 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-02 at main@f5f1877)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=a1ce677c5d8b skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=d9ea9485f542 skip=P6.2,E7.1,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
-1. **E10.1 The check against retail RPUs** (priority 4). Gate: the item gate. Why: cheap, and the
-   owner's release point wants the answer before `v0.8.0-rc.1`. Runs on the Oracle host, which has
-   the bigger dev corpus (owner, 2026-11-02). Branch `docs/e10-1-l1-code-scaling`. Release: none
-   (patch if ×4096)
-2. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
+1. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
    step gate. Why: delivered L1 differs for NVIDIA users without GPU analysis, and after E12.1 still
    for a `+cuda` build whose CUDA analysis does not start. Own branch (moves L1):
    `fix/e12-2-nvdec-cpu-decode`. Release: patch (in v0.8.0 if merged before rc.1)
@@ -110,7 +106,7 @@ without it.
 
 | Release | Content | Trigger / gate |
 |---|---|---|
-| none | E10.1 check (if ×4095 stands; a ×4096 fix is PATCH), E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
+| none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR) | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | v0.8.0 | P1.1 CPU `auto` becomes `accurate` (changed default, measured 2026-11-02); E12.1 CUDA release binaries (Linux x64, Windows x64; the kernel is embedded PTX, so users need only the NVIDIA driver); E12.2 NVDEC + CPU analysis fix if merged before rc.1, else the next patch; P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
@@ -139,8 +135,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: decide whether to write L1 in-process (P10.3). Gate: the WS7 simulator
    decides (owner, 2026-10-17).
-4. **Narrow code defects** (E8, E9, E10, P6, E7): histogram percentile reader, `--pre-denoise`
-   values, L1 scaling note (the three L6 defects found 2026-10-07 were fixed 2026-10-11; the CPU
+4. **Narrow code defects** (E8, E9, P6, E7): histogram percentile reader, `--pre-denoise`
+   values (the three L6 defects found 2026-10-07 were fixed 2026-10-11; the CPU
    default was decided in P1.1, 2026-11-02). Gate: unit tests for the reader and the option (E8.1,
    E9.1). **Prerequisite:** E13.5 (analyzer split) before E8.1 + E9.1, because
    E8.1 moves the default `.bin` (met 2026-10-17, #59).
@@ -614,22 +610,6 @@ The detailed gap table and validation method live in
   [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E9.1.
 - **Gate:** a unit test for the option (priority 4). **Prerequisite:** E13 step 5 (met 2026-10-17, #59).
 - [E9.1][gpu] Restrict the values to `off` and `median3`. Gate: the item gate.
-
-### E10: L1 code scaling
-
-- **Status:** Open; unverified. The analyzer converts normalized PQ to a 12-bit code with ×4095;
-  ETSI GS CCM 001 §6.2.2 encodes L1 as `clip(round(x × 4096))`. The difference is at most one
-  code. The generator's own conversion (`dolby_vision::utils::nits_to_pq_12_bit`, also used for
-  the P10 source range) is ×4095 too, so analyzer and generator agree (checked 2026-10-04).
-- **Gate:** retail RPUs of 4000-nit masters, where the two scalings differ (`source_max_pq` 3696
-  against 3697), show which one the reference uses; ×4096 → a one-code fix in analyzer and
-  generator conversion, otherwise close (owner, 2026-10-17).
-- [E10.1][corpus] The check against retail RPUs. Gate: the item gate.
-- **Checked 2026-11-02 @f5f1877:** the dev corpus has two 4000-nit masters with retail `RPU.bin`
-  (the two The Shining cuts, container mastering 0.005/4000 nits). A ×4096 fix reaches the source
-  range (`dovi_rpu_builder/src/params.rs:266` via `metadata/rpu_config.rs:53`) and the HDR10+ L1
-  (`dovi_rpu_builder/src/hdr10plus.rs:207`, `pipeline/hybrid.rs:396`), and `dovi_rpu_builder`
-  must stay byte-identical to `dovi_tool generate` 2.3.4, so the fix sits before the code step.
 
 ### E11: `l1_diff` and open-GOP cuts
 
