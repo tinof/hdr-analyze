@@ -6,6 +6,21 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-03
+
+### Upgrade notes
+
+- **HDR10+ RPUs change, and every HDR10+ conversion now runs a full analysis**, which can take
+  hours on the CPU (`--hdr10plus-l1 hybrid` is the default). `--hdr10plus-l1 hdr10plus` gives the
+  0.7.0 output, byte for byte, with no analysis.
+- **CPU analysis is slower:** `--analysis-quality auto` is `accurate` on the CPU too, about two to
+  three times as long as 0.7.0. Measurements from an older CPU `auto` run are analyzed again.
+  `--analysis-quality balanced` keeps the old speed.
+- **Update `mkvdovi` and `hdr_analyzer_mvp` together:** the analyzer writes L1 sidecar version 6,
+  which an older `mkvdovi` does not read.
+- **The Linux x64 and Windows x64 archives analyze on the GPU** when they find an NVIDIA driver,
+  R560 or newer. Without one, they fall back to the CPU with a message.
+
 ### Added
 
 - GPU analysis in the Linux x64 and Windows x64 release archives. Their `hdr_analyzer_mvp` is built
