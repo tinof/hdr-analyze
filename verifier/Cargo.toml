@@ -1,6 +1,6 @@
 [package]
 name = "verifier"
-version = "0.7.0"
+version = "0.8.0-rc.1"
 edition = "2021"
 description = "Verification tool for MadVR measurement files"
 license = "MIT"
