@@ -88,9 +88,11 @@ Key facts:
   other than ≤ 0.001 or exactly 0.005 nits gives 0. Since 2026-10-04 `mkvdovi` passes the two
   fields explicitly, as the PQ codes of the mastering minimum and peak (the `dolby_vision` crate's
   conversion for a Dolby CM XML), so the lookup applies only to a mastering range that is not
-  usable. For Profile 8.4 the preset's 62/3079 is used regardless of L6. `--verify` checks the
-  source range on every frame and reports, per field, the scenes whose L1 the generator's limits
-  changed.
+  usable. The conversion scales normalized PQ by 4095, as retail RPUs do: nine retail 4000-nit
+  masters (disc Profile 7 MEL and FEL) all carry `source_max_pq` 3696, where × 4096 would give 3697
+  (checked 2026-11-03, [log](ROADMAP_LOG.md) E10.1). For Profile 8.4 the preset's 62/3079 is used
+  regardless of L6. `--verify` checks the source range on every frame and reports, per field, the
+  scenes whose L1 the generator's limits changed.
 - Under `--hdr10plus-l1 hdr10plus` HDR10+ inputs are not analyzed. `dovi_tool generate --hdr10plus-json` takes L1 from the first
   frame of each HDR10+ scene: minimum 0, average = PQ of the linear-light max-RGB mean rounded to
   whole nits, maximum from the selected peak.
