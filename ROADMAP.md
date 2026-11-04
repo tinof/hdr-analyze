@@ -301,6 +301,33 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   C5 reads the same values. `scripts/rpu-baseline.sh compare` strips the CRC (`:253`), so
   "byte-identical" needs `sha256sum`, against captures taken after P9.3.
 
+### P14: per-shot dynamic contrast (opt-in)
+
+- **Status:** Open. A prototype on the local branch `exp/dynamic-contrast` (Oracle host,
+  `tools/dyncon_proto/`, 353da3c..31802c9) writes one tone curve per shot into the reshaping of a
+  Profile 8.1 RPU (luma polynomial plus chroma MMR); the base layer stays bit-exact and the HDR10
+  fallback is untouched. On the LG OLED C9 it beat the TV's Dynamic Contrast on a very dim CM v4.0
+  series (strength 0.85 preferred), and well-exposed titles looked unchanged. Prototype design,
+  guards and measurements: [the log](docs/ROADMAP_LOG.md) (2026-11-04).
+- **Scope (owner, 2026-11-04):** opt-in for the few titles that look dull; off by default. No
+  in-player variant: curves from the RPU's own L1/L3 missed the histogram curves by 15 to 42
+  codes, because web RPUs often sit on the L1 floors without L3.
+- **Gate:** the C9 shows that the display applies 8.1 reshaping (chroma-offset canary turned the
+  picture green, 2026-11-04: met). Then P14.1 and P14.2.
+- [P14.1][desk] `mkvdovi --dynamic-contrast <off|low|medium|high>` (strength 0.35 / 0.6 / 0.85,
+  default off) for every 8.1 output, a generated RPU or a kept P8.1 source RPU; refused for P5,
+  P7 and 8.4. A Rust port of the prototype: per-shot anchors from the analyzer's 256-bin PQ
+  histograms, the APL taper (full effect at a shot luma APL of 6 nits, none at 30), the
+  1000-nit rejoin, the C1 fit with penalty refits, the CM-version-aware L1/L3 rewrite, the flag
+  in `pipeline::resume_settings`. Gate: unit tests red on the parent show, on synthetic and
+  recorded shot histograms, that every written curve stays within 1.5 codes of the identity from
+  below over codes 64..940, has slope ≤ 2.5 and never reverses, and that shots at or above 30
+  nits APL get the identity; `--verify` passes; with the flag off every RPU baseline is
+  byte-identical (`sha256sum`).
+- [P14.2][owner] Playback acceptance. Gate: on the C9, a full converted episode of the dim
+  series at `high` looks better than its source, and a well-exposed title looks unchanged
+  (owner verdict). Needs: P14.1.
+
 ## `cm_analyze` parity
 
 The detailed gap table and validation method live in
