@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "dovi84_composer"
-version = "0.8.0-rc.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "dolby_vision",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "dovi_rpu_builder"
-version = "0.8.0-rc.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "dolby_vision",

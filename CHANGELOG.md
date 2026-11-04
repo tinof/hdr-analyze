@@ -6,7 +6,7 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-11-03
+## [0.8.0] - 2026-11-04
 
 ### Upgrade notes
 
