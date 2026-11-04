@@ -6,6 +6,51 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-04: P14 dynamic-contrast prototype (no PR; local branch `exp/dynamic-contrast`)
+
+Why: on a very dim CM v4.0 web series the owner found the picture dull, and LG's Dynamic Contrast
+brought it to life. Its keyframes peak at a median 64 nits with a median frame mean of 1.9 nits;
+its L1 sits on the CM v4.0 floors (max 2081, avg 1229) on every frame, and L1 + 2 × (L3 − 2048)
+reconstructs the measured values (median peak 66 nits against 64, average 567 against 555 codes).
+
+- **Device:** an 8.1 canary (both chroma polynomial constants −1/16, luma identity) turned the
+  picture green on the LG OLED C9 in Wholphin and Nuvio over Jellyfin, so the C9 applies
+  non-identity 8.1 reshaping, not only 8.4.
+- **Design** (`tools/dyncon_proto/design.py`): per shot, anchors from the luma histogram (p0.5,
+  p50, p99.9; neighbouring shots blended 2:1:1); a shadow anchor at 40 % from black to mid stays
+  identity; mid gain `1 + s·(clip((12/mid)^0.6, 1, 2.5) − 1)`, highlight gain
+  `1 + s·(clip((400/hi)^0.7, 1, 3) − 1)`, highlights never lowered; strength fades from full at a
+  shot luma APL of 6 nits to none at 30 (the larger of own and blended APL); a smoothstep lift
+  fade meets the identity tangentially at 1000 nits or above (it widens until its slope stays at
+  or above 0.25). Fitted to a C1 order-2 luma spline on 9 pivots with penalty refits; chroma MMR
+  order 1 scales Cb/Cr by the curve's PQ slope (clamped 0.8 to 1.8). L1/L3 are the effective
+  statistics mapped through the curve, floored at 2081 and 1229 with L3 always written (the
+  CM v4.0 source RPUs it edits) or at 819 without L3 (CM v2.9). Input: per-shot 1024-code Y
+  histograms of every uncropped frame scaled to 1080p (`yuv420p10le`), and a P8.1 source RPU
+  whose reshaping is the identity on every frame; it refuses any other.
+- **Guards**, checked on the written polynomial over codes 64..940 at 1/8-code steps: at most
+  1.5 codes below the identity, slope ≤ 2.5, no reversal; a failing shot backs off in strength
+  and finally gets the identity. Four 3-minute test cuts (the dim series, a space documentary,
+  a UHD action remux, a sci-fi film; 289 shots): all pass at strengths 0.6 and 0.85 without
+  backing off; populated-range fit error median 3.7, p95 6.4, max 8.4 codes.
+- **Effect at 0.6** (median shot, luma): the dim series mid 1.0 → 1.9 nits, p99.9 47 → 103 nits;
+  the documentary mid 3.2 → 4.7, p99.9 124 → 169; the remux unchanged (mid 13.5 nits); the
+  sci-fi film mid 0.36 → 0.50, bright shots unchanged.
+- **RPU-only variant** (curves from L1/L3 alone, for in-player use): leave-one-title-out its
+  curves missed the histogram curves by 15 to 42 codes (median shot), mid output off by 0.06× to
+  12×. The documentary has 80 % and the sci-fi film 51 % of shots on the average floor without
+  L3, so the RPU does not record how dark they are.
+- **Reviews:** four Codex rounds (gpt-6.1-sol, read-only), the last with no defect across 289
+  shots after its two P2s were fixed; an Opus visual panel judged dim interiors improved with
+  no banding, slightly more visible grain in lifted shadows, and some loss of mood on mid-toned
+  hazy shots. Its "crushed blacks" on near-identity frames did not reproduce (≤ 1.4 codes).
+- **Owner verdict on the C9:** strength 0.85 is best on the dim series; the documentary and the
+  remux showed little difference, as intended. Wanted only for a few dull titles (P14 scope).
+- **Pitfalls:** FFmpeg `format=gray10le` expands limited-range luma (64..940 → 0..1023); use
+  `yuv420p10le` and read Y. Raw output without `-fps_mode passthrough` duplicated a frame at a
+  timestamp gap. Jellyfin's internet metadata renamed test files after real films ("Original",
+  "A2 medium"), so test files carry code names.
+
 ### 2026-11-03: E10.1 The check against retail RPUs (PR #87)
 
 Step: - [E10.1][corpus] The check against retail RPUs. Gate: the item gate.
