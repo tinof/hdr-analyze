@@ -95,7 +95,7 @@ fn crc_is_iso_hdlc() {
 #[test]
 fn non_picture_packets_are_listed_and_kept_out_of_presentation_order() {
     let mut rec = recorder();
-    feed(&mut rec, &[(IDR_W_RADL, 0), (TRAIL_R, 1), (EOS, 1)]);
+    feed(&mut rec, &[(IDR_W_RADL, 0), (TRAIL_R, 1), (EOS, 2)]);
     let table = finish(rec, &outputs(&[0, 1]), None).unwrap();
     assert_eq!(table.aus.count, 3);
     assert_eq!(table.aus.non_picture, vec![2]);
@@ -150,6 +150,15 @@ fn duplicate_picture_pts_is_refused() {
     let mut rec = recorder();
     feed(&mut rec, &[(IDR_W_RADL, 0), (TRAIL_R, 1), (TRAIL_R, 1)]);
     let error = finish(rec, &outputs(&[0, 1, 1]), None).unwrap_err();
+    assert!(error.to_string().contains("same pts 1"), "{error}");
+}
+
+#[test]
+fn non_picture_packet_sharing_a_picture_pts_is_refused() {
+    // The matcher finds an AU by its pts, so a pts must be unique over every AU, pictures or not.
+    let mut rec = recorder();
+    feed(&mut rec, &[(IDR_W_RADL, 0), (TRAIL_R, 1), (EOS, 1)]);
+    let error = finish(rec, &outputs(&[0, 1]), None).unwrap_err();
     assert!(error.to_string().contains("same pts 1"), "{error}");
 }
 

@@ -11,7 +11,7 @@
 //!
 //! `--help` advertises the capability `au-table-v1` (`cli.rs`); mkvdovi probes it before it
 //! relies on the table. Version 1 covers one HEVC video track in Matroska. It refuses laced video blocks, packets
-//! without a pts and two pictures with one pts; the measurements are unaffected by a refusal.
+//! without a pts and two video packets with one pts; the measurements are unaffected by a refusal.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -295,6 +295,12 @@ fn check_presentation_order(
     leading_skipped: u64,
     output_pts: &[Option<i64>],
 ) -> Result<()> {
+    // The matcher finds an AU by its pts, so it must be unique over every AU, pictures or not.
+    let mut all = pts.to_vec();
+    all.sort_unstable();
+    if let Some(pair) = all.windows(2).find(|pair| pair[0] == pair[1]) {
+        anyhow::bail!("two video packets have the same pts {}", pair[0]);
+    }
     let mut pictures: Vec<i64> = pts
         .iter()
         .enumerate()
@@ -302,9 +308,6 @@ fn check_presentation_order(
         .map(|(_, &pts)| pts)
         .collect();
     pictures.sort_unstable();
-    if let Some(pair) = pictures.windows(2).find(|pair| pair[0] == pair[1]) {
-        anyhow::bail!("two pictures have the same pts {}", pair[0]);
-    }
     let skip = usize::try_from(leading_skipped).unwrap_or(usize::MAX);
     let expected = pictures.get(skip..).unwrap_or_default();
     if output_pts.len() != expected.len() {

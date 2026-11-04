@@ -215,7 +215,7 @@ pub struct Cli {
     /// Also write <output>.au.json: every video packet in decode order (pts, size, CRC-32 of
     /// IRAP pictures) with the source and track identity and the SHA-256 of the sidecar, for the
     /// playback manifest. Matroska with one HEVC video track; laced video, a packet without a
-    /// pts and two pictures with one pts are refused (the measurements are still written).
+    /// pts and two video packets with one pts are refused (the measurements are still written).
     #[arg(long)]
     pub au_table: bool,
 
