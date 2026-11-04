@@ -74,6 +74,8 @@ struct Run {
     sidecar: Value,
     /// `--dump-frame-stats` CSV: peak candidates and grain statistics per frame.
     frame_stats: String,
+    /// The `--au-table` output, for MKV clips (ROADMAP P15.1).
+    au_table: Option<Value>,
 }
 
 fn run_analyzer(
@@ -98,6 +100,12 @@ fn run_analyzer(
     }
     command.args(extra_args);
     command.arg("--dump-frame-stats").arg(&stats_path);
+    let au_table = clip
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mkv"));
+    if au_table {
+        command.arg("--au-table");
+    }
     let output = command.output().expect("run analyzer");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -120,6 +128,12 @@ fn run_analyzer(
         bin: std::fs::read(bin).expect("read measurements"),
         sidecar: serde_json::from_str(&sidecar_text).expect("parse L1 sidecar"),
         frame_stats: std::fs::read_to_string(&stats_path).expect("read frame stats"),
+        au_table: au_table.then(|| {
+            let path = PathBuf::from(format!("{}.au.json", bin.display()));
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{label}: read {}: {error}", path.display()));
+            serde_json::from_str(&text).expect("parse AU table")
+        }),
     }
 }
 
@@ -260,6 +274,22 @@ fn check_parity(
         cpu.bin.len(),
         gpu.bin.len()
     );
+    // The AU table comes from packets and the decoder's output pts, so NVDEC must give the same
+    // table as software decode. Only the sidecar digest differs (`analysis.gpu`).
+    if let (Some(cpu_table), Some(gpu_table)) = (&cpu.au_table, &gpu.au_table) {
+        let without_digest = |table: &Value| {
+            let mut table = table.clone();
+            table
+                .as_object_mut()
+                .expect("AU table is an object")
+                .remove("sidecar_sha256");
+            table
+        };
+        assert!(
+            without_digest(cpu_table) == without_digest(gpu_table),
+            "{label}: CPU and CUDA AU tables differ"
+        );
+    }
     // Peak candidates and grain statistics per frame. With the robust estimator every column
     // must be equal: sigma and the effective tail count come from the cross-quad difference
     // histogram, so this proves the kernel counts like the CPU. Without it the GPU does not

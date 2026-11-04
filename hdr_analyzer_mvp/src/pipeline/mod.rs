@@ -5,6 +5,9 @@ use ffmpeg_next::{format, util::color};
 
 use crate::analysis::frame::FrameAnalysisOptions;
 use crate::analysis::hlg::PQ_MAPPING;
+use crate::au_table::{
+    au_table_path, file_sha256, remove_stale_au_table, write_au_table, AuRecorder,
+};
 use crate::cli::{Cli, PeakDomain, PeakEstimator};
 use crate::ffmpeg_io::{probe_crop, TransferFunction, VideoInfo};
 use crate::l1_sidecar::{write_l1_sidecar, AnalysisMetadata, SidecarProvenance, SourceMetadata};
@@ -12,10 +15,12 @@ use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
 use crate::writer::write_measurement_file;
 
 mod analyze;
+mod au_pass;
 mod crop_space;
 mod scenes;
 
 use self::analyze::*;
+use self::au_pass::{run_au_table_only, scene_settings};
 use self::crop_space::*;
 use self::scenes::*;
 
@@ -137,6 +142,29 @@ pub fn run(
         .as_deref()
         .or(cli.input_flag.as_deref())
         .context("input path is required")?;
+    let output_path = match &cli.output {
+        Some(path) => path.clone(),
+        None => {
+            let stem = Path::new(input_path)
+                .file_stem()
+                .context("Input file has no filename")?
+                .to_str()
+                .context("Invalid UTF-8 in filename")?;
+            format!("{}_measurements.bin", stem)
+        }
+    };
+    let au_path = au_table_path(Path::new(&output_path));
+    remove_stale_au_table(&au_path)?;
+    if cli.au_table_only {
+        return run_au_table_only(cli, Path::new(input_path), &mut input_context, &au_path);
+    }
+    // Refuses an input the table cannot describe before the long analysis starts.
+    let mut au_recorder = if cli.au_table {
+        Some(AuRecorder::new(Path::new(input_path), &input_context)?)
+    } else {
+        None
+    };
+
     let initial_crop = if cli.no_crop || cli.crop_probes == 0 {
         None
     } else {
@@ -199,6 +227,7 @@ pub fn run(
             peak_percentile: cli.peak_percentile,
             dump_max_rgb: max_rgb_dump_dir().is_some(),
         },
+        &mut au_recorder,
     )?;
 
     if let Some(path) = &cli.dump_frame_stats {
@@ -252,23 +281,6 @@ pub fn run(
         println!("Target_nits smoothing complete.");
     }
 
-    let output_path = match &cli.output {
-        Some(path) => path.clone(),
-        None => {
-            let input_path_obj = Path::new(
-                cli.input_positional
-                    .as_ref()
-                    .unwrap_or(cli.input_flag.as_ref().unwrap()),
-            );
-            let stem = input_path_obj
-                .file_stem()
-                .context("Input file has no filename")?
-                .to_str()
-                .context("Invalid UTF-8 in filename")?;
-            format!("{}_measurements.bin", stem)
-        }
-    };
-
     println!("Writing measurement file: {}", output_path);
     write_measurement_file(
         &output_path,
@@ -320,6 +332,25 @@ pub fn run(
         },
     )?;
     println!("Wrote L1 measurement sidecar: {}", sidecar_path.display());
+
+    if let Some(recorder) = au_recorder {
+        let table = recorder
+            .finish(Some(file_sha256(&sidecar_path)?), scene_settings(cli))
+            .context("No AU table written (the .bin and the L1 sidecar were)")?;
+        if table.leading_skipped != stream_frames.leading_skipped {
+            anyhow::bail!(
+                "No AU table written: it counts {} leading pictures, the sidecar {}",
+                table.leading_skipped,
+                stream_frames.leading_skipped
+            );
+        }
+        write_au_table(&au_path, &table)?;
+        println!(
+            "Wrote AU table: {} ({} access units)",
+            au_path.display(),
+            table.aus.count
+        );
+    }
 
     Ok(())
 }

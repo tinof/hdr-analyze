@@ -243,10 +243,17 @@ pub fn write_l1_sidecar(
     };
 
     let path = sidecar_path(output_path);
-    let file = File::create(&path)
-        .with_context(|| format!("Failed to create L1 sidecar {}", path.display()))?;
+    // Through a temp file and a rename: an interrupted run leaves no partial sidecar, and the
+    // AU table's digest always refers to complete bytes.
+    let mut temp: OsString = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    let temp = PathBuf::from(temp);
+    let file = File::create(&temp)
+        .with_context(|| format!("Failed to create L1 sidecar {}", temp.display()))?;
     serde_json::to_writer_pretty(file, &sidecar)
-        .with_context(|| format!("Failed to serialize L1 sidecar {}", path.display()))?;
+        .with_context(|| format!("Failed to serialize L1 sidecar {}", temp.display()))?;
+    std::fs::rename(&temp, &path)
+        .with_context(|| format!("Failed to move L1 sidecar into place at {}", path.display()))?;
     Ok(path)
 }
 

@@ -1,6 +1,7 @@
 # Playback manifest (P15)
 
-Status: design, written 2026-11-04. Nothing in this document is implemented yet. Steps: ROADMAP P15.
+Status: design written 2026-11-04. The AU table is implemented (P15.1); the manifest, the matcher
+and `mkvdovi manifest` are not yet (P15.2 to P15.4). Steps: ROADMAP P15.
 
 ## Purpose
 
@@ -58,12 +59,17 @@ It needs no second read of the file. The fields:
   - `head_sha256` over bytes `[0, min(1 MiB, size))`;
   - `tail_sha256` over bytes `[max(0, size − 1 MiB), size)`.
 - `track`:
-  - `track_number` (the Matroska TrackNumber), `codec`, `width`, `height`;
+  - `container` (`matroska`), `codec` (`hevc`), `width`, `height`;
   - `codec_private_sha256`;
   - `time_base` as `[num, den]`, which is FFmpeg's stream time base (TimestampScale / 10⁹).
+  - No Matroska TrackNumber: FFmpeg does not expose it. Version 1 allows one video track, so the
+    track is the file's only video track.
+- `analyzer_version`.
 - `aus`:
-  - `count`, `pts_first`, `pts_delta[]` (decode order, in time-base ticks), `size[]`;
-  - `non_picture[]`: a packet without a slice NAL, such as an end-of-sequence packet;
+  - `count`, `pts_first`, `pts_delta[]` (`count − 1` entries, `pts[k+1] − pts[k]` in decode
+    order, in time-base ticks), `size[]`;
+  - `non_picture[]`: the decode indices of packets without a slice NAL, such as an
+    end-of-sequence packet;
   - `irap_crc32`: `[[k, crc], …]`. The CRC is CRC-32/ISO-HDLC, the one `java.util.zip.CRC32`
     computes, taken over the whole packet. Only IRAP AUs get one.
   - Sizes and CRCs are over the stored frame bytes after Matroska header stripping is undone,
@@ -77,7 +83,10 @@ The analyzer proves this rather than assuming it: the pts of the frames the deco
 equal the sorted picture pts, minus the first `leading_skipped` entries. H.265 outputs RASL before
 RADL, so the smallest pts are the skipped RASL pictures. That matches mkvdovi's shot mapping,
 where scene 0 absorbs the leading pictures. If the check fails, the analyzer writes no AU table
-and reports why. The measurements are unaffected.
+and exits with status 1. The `.bin` and the sidecar are written either way.
+
+`--au-table-only` writes the table without measuring. It still decodes every frame for the order
+check, and `sidecar_sha256` is null.
 
 **Lacing.** FFmpeg splits a laced block into several packets. Its timestamps for the laces need
 not match the times Media3 synthesizes from the track's default duration. The analyzer refuses
@@ -92,7 +101,7 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
 - `source`: as in the AU table, plus `lookup_key` = SHA-256 of (size as a big-endian u64 ‖ head
   digest ‖ tail digest). A plain HTTP folder can serve `<lookup_key>.dvmanifest.json`. The player
   computes the key from one size lookup and two 1 MiB range reads.
-- `track`: as in the AU table, plus `container: "matroska"`.
+- `track`: as in the AU table.
 - `aus`: as in the AU table.
 - `analysis`: `luminance_mapping` (`pq` or the HLG composer name), `downscale`, `sample_rate`,
   `gpu`, `no_crop`, `crop`, the peak settings and `scene`.
@@ -129,7 +138,7 @@ one definition. The parser never panics. It refuses:
 The player then follows these steps:
 
 1. **Candidate.** Size, both chunk digests and `lookup_key` match.
-2. **Track.** Track number, CodecPrivate digest and time base match. The time base must agree
+2. **Track.** The file has one video track, and its CodecPrivate digest and time base match. The time base must agree
    with the player's TimestampScale. Times are compared as raw ticks (cluster timecode plus block
    timecode), never as rounded microseconds.
 3. **Per AU.**

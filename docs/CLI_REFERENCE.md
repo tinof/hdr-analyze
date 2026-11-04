@@ -36,6 +36,8 @@ hdr_analyzer_mvp "video.mkv"
 | `--sample-rate <N>` | `1` | Analyze every Nth frame. Skipped frames inherit the previous frame's measurements. High performance impact |
 | `--crop-probes <N>` | `7` | Seek-based active-area probes across the middle 70% of the input; `0` uses hardened in-stream fallback detection |
 | `--no-crop` | off | Disable crop probing/detection and analyze the full frame |
+| `--au-table` | off | Also write `<output>.au.json`: every video packet in decode order (pts, size, CRC-32 of IRAP pictures), the source and track identity and the sidecar's SHA-256, for the playback manifest ([`PLAYBACK_MANIFEST.md`](PLAYBACK_MANIFEST.md)). Matroska with one HEVC video track. Laced video, a packet without a pts and two pictures with one pts are refused after the `.bin` and the sidecar are written (exit status 1) |
+| `--au-table-only` | off | Write only the AU table: decode every frame for the presentation-order check, measure nothing, write no `.bin` and no sidecar (`sidecar_sha256` is null) |
 
 ### Scene detection
 

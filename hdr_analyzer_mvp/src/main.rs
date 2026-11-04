@@ -4,6 +4,7 @@ use anyhow::Result;
 mod crop;
 
 mod analysis;
+mod au_table;
 mod cli;
 mod ffmpeg_io;
 mod l1_sidecar;

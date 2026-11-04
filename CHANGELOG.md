@@ -6,6 +6,18 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Added
+
+- `hdr_analyzer_mvp --au-table` writes `<measurements>.au.json`, the AU table of the playback
+  manifest (ROADMAP P15.1, [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md)). It lists every
+  video packet in decode order with its pts, size and the CRC-32 of IRAP pictures, plus the source and
+  track identity, and is bound to the sidecar by its SHA-256. `--au-table-only` writes the table
+  without measuring. `--help` lists the capability `au-table-v1`.
+
+### Changed
+
+- The L1 sidecar is written through a temp file and a rename, so an interrupted run leaves none.
+
 ## [0.8.0] - 2026-11-04
 
 ### Upgrade notes
