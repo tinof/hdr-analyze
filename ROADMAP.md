@@ -306,27 +306,46 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - **Status:** Open. A prototype on the local branch `exp/dynamic-contrast` (Oracle host,
   `tools/dyncon_proto/`, 353da3c..31802c9) writes one tone curve per shot into the reshaping of a
   Profile 8.1 RPU (luma polynomial plus chroma MMR); the base layer stays bit-exact and the HDR10
-  fallback is untouched. On the LG OLED C9 it beat the TV's Dynamic Contrast on a very dim CM v4.0
-  series (strength 0.85 preferred), and well-exposed titles looked unchanged. Prototype design,
-  guards and measurements: [the log](docs/ROADMAP_LOG.md) (2026-11-04).
+  fallback is untouched. On the LG OLED C9 the owner preferred it at strength 0.85 on a very dim
+  CM v4.0 series, and well-exposed titles looked unchanged. Prototype design, guards and
+  measurements: [the log](docs/ROADMAP_LOG.md) (2026-11-04). Open: P14.1 to P14.3.
 - **Scope (owner, 2026-11-04):** opt-in for the few titles that look dull; off by default. No
   in-player variant: curves from the RPU's own L1/L3 missed the histogram curves by 15 to 42
   codes, because web RPUs often sit on the L1 floors without L3.
+- **Prototype input:** per-shot 1024-code Y histograms of every uncropped frame scaled to 1080p,
+  and a P8.1 source RPU whose reshaping is the identity on every frame (it refuses any other).
+  Its thresholds and measurements hold for that input only.
 - **Gate:** the C9 shows that the display applies 8.1 reshaping (chroma-offset canary turned the
-  picture green, 2026-11-04: met). Then P14.1 and P14.2.
-- [P14.1][desk] `mkvdovi --dynamic-contrast <off|low|medium|high>` (strength 0.35 / 0.6 / 0.85,
-  default off) for every 8.1 output, a generated RPU or a kept P8.1 source RPU; refused for P5,
-  P7 and 8.4. A Rust port of the prototype: per-shot anchors from the analyzer's 256-bin PQ
-  histograms, the APL taper (full effect at a shot luma APL of 6 nits, none at 30), the
-  1000-nit rejoin, the C1 fit with penalty refits, the CM-version-aware L1/L3 rewrite, the flag
-  in `pipeline::resume_settings`. Gate: unit tests red on the parent show, on synthetic and
-  recorded shot histograms, that every written curve stays within 1.5 codes of the identity from
-  below over codes 64..940, has slope ≤ 2.5 and never reverses, and that shots at or above 30
-  nits APL get the identity; `--verify` passes; with the flag off every RPU baseline is
-  byte-identical (`sha256sum`).
-- [P14.2][owner] Playback acceptance. Gate: on the C9, a full converted episode of the dim
+  picture green, 2026-11-04: met). Then P14.1 to P14.3.
+- [P14.1][desk] Curve planner, a Rust port of the prototype without I/O: from per-shot luma
+  histograms to each shot's reshaping and curve-mapped L1/L3. It ports the anchors with the
+  neighbour blend, the APL taper (full effect at a shot luma APL of 6 nits, none at 30), the
+  tangential rejoin at 1000 nits or above (the fade widens until its slope stays ≥ 0.25), the C1
+  fit with penalty refits, the chroma MMR scale (the curve's PQ slope, clamped to 0.8..1.8), and
+  the guards with strength back-off to the identity; it reports how many shots backed off and how
+  many got the identity. Gate: unit tests red on the parent show, on synthetic and recorded shot
+  histograms, that every written curve stays within 1.5 codes of the identity from below over
+  codes 64..940, has slope ≤ 2.5 and never reverses; that shots at or above 30 nits APL get the
+  identity; that each chroma scale is the clamped PQ slope; and that on the four test cuts'
+  recorded histograms the curves match the prototype's `plan.json` within 2 codes.
+- [P14.2][desk] `mkvdovi --dynamic-contrast <off|low|medium|high>` (strength 0.35 / 0.6 / 0.85,
+  default off). Inputs: HDR10 and HDR10+ (generated 8.1 RPU), and a new P8.1 path that keeps the
+  source RPU when every frame's reshaping is the 8.1 identity and rewrites only its reshaping and
+  L1/L3. Refused before temp work: P8.1 with other reshaping, P5, P7 (MEL fast path and
+  `--mdfix`), FEL and 8.4. The flag always runs the analyzer for histograms; the plan names the
+  transport (a sidecar version bump on all three sides, or a `.bin` reader validated against the
+  input), and analyzer histograms (cropped, 256 bins, smoothed) rerun P14.1's `plan.json` check.
+  L1/L3 keep the RPU's floors: 819 avg for a generated RPU (`metadata/rpu_config.rs`), 2081/1229
+  plus L3 for a kept CM v4.0 source, no L3 for CM v2.9. `--verify` checks the delivered L1/L3
+  against the sidecar statistics mapped through each shot's written curve and the reshaping
+  against the plan (identity with the flag off); it never drops the L1 check. The flag goes into
+  `pipeline::resume_settings`. Gate: tests red on the parent for each refusal, for a kept P8.1 RPU
+  whose other levels survive byte for byte, and for a `--verify` that fails without the
+  curve-mapped expectation; `--verify` passes with the flag on and off; with the flag off every
+  RPU baseline is byte-identical (`sha256sum`). Needs: P14.1.
+- [P14.3][owner] Playback acceptance. Gate: on the C9, a full converted episode of the dim
   series at `high` looks better than its source, and a well-exposed title looks unchanged
-  (owner verdict). Needs: P14.1.
+  (owner verdict). Needs: P14.2.
 
 ## `cm_analyze` parity
 

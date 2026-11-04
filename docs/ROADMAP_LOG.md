@@ -21,10 +21,13 @@ reconstructs the measured values (median peak 66 nits against 64, average 567 ag
   identity; mid gain `1 + s·(clip((12/mid)^0.6, 1, 2.5) − 1)`, highlight gain
   `1 + s·(clip((400/hi)^0.7, 1, 3) − 1)`, highlights never lowered; strength fades from full at a
   shot luma APL of 6 nits to none at 30 (the larger of own and blended APL); a smoothstep lift
-  fade meets the identity tangentially by 1000 nits. Fitted to a C1 order-2 luma spline on 9
-  pivots with penalty refits; chroma MMR order 1 scales Cb/Cr by the curve's PQ slope (clamped
-  0.8 to 1.8). L1/L3 are the effective statistics mapped through the curve, floored at 2081 and
-  1229 (CM v4.0, which always gets L3) or 819 (CM v2.9, no L3).
+  fade meets the identity tangentially at 1000 nits or above (it widens until its slope stays at
+  or above 0.25). Fitted to a C1 order-2 luma spline on 9 pivots with penalty refits; chroma MMR
+  order 1 scales Cb/Cr by the curve's PQ slope (clamped 0.8 to 1.8). L1/L3 are the effective
+  statistics mapped through the curve, floored at 2081 and 1229 with L3 always written (the
+  CM v4.0 source RPUs it edits) or at 819 without L3 (CM v2.9). Input: per-shot 1024-code Y
+  histograms of every uncropped frame scaled to 1080p (`yuv420p10le`), and a P8.1 source RPU
+  whose reshaping is the identity on every frame; it refuses any other.
 - **Guards**, checked on the written polynomial over codes 64..940 at 1/8-code steps: at most
   1.5 codes below the identity, slope ≤ 2.5, no reversal; a failing shot backs off in strength
   and finally gets the identity. Four 3-minute test cuts (the dim series, a space documentary,
