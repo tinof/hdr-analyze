@@ -7,7 +7,8 @@ steps DV2.1 and DV2.2). The fork adds an RPU to each AU during playback on a Shi
 wraps this crate in a JNI staticlib; JNI, Gradle and APK code stay in the fork. mkvdovi uses the
 same crate for the one definition of its `extra.json` and still runs `dovi_tool generate`
 (switching it to in-process generation is an owner decision, tied to ROADMAP P10.3). Roadmap
-step: E16.1.
+step: E16.1. The playback manifest that carries measured shots to the fork is designed in
+[`PLAYBACK_MANIFEST.md`](PLAYBACK_MANIFEST.md) (P15).
 
 ## Constraints
 

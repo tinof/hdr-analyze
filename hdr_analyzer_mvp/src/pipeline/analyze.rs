@@ -15,6 +15,7 @@ use crate::analysis::gpu::GpuAnalyzer;
 use crate::analysis::scene::{
     calculate_histogram_difference, convert_scene_cuts_to_scenes, cut_allowed,
 };
+use crate::au_table::AuRecorder;
 use crate::cli::Cli;
 use crate::crop::CropRect;
 use crate::ffmpeg_io::{
@@ -140,6 +141,7 @@ pub(super) fn run_native_analysis_pipeline(
     downscale: u32,
     initial_crop: Option<CropRect>,
     analysis_options: &FrameAnalysisOptions<'_>,
+    au_recorder: &mut Option<AuRecorder>,
 ) -> Result<(
     Vec<MadVRScene>,
     Vec<MadVRFrame>,
@@ -297,7 +299,14 @@ pub(super) fn run_native_analysis_pipeline(
     }
     pb.set_position(0); // Show initial progress immediately
 
+    // pts of every output frame, for the AU table's presentation-order check.
+    let record_output_pts = au_recorder.is_some();
+    let mut output_pts: Vec<Option<i64>> = Vec::new();
+
     let mut process_decoded = |decoded_frame: &frame::Video| -> Result<()> {
+        if record_output_pts {
+            output_pts.push(decoded_frame.pts());
+        }
         // Determine if we should analyze this frame or use cached data
         let should_analyze = frame_count % sample_rate == 0 || last_analyzed_frame.is_none();
 
@@ -479,6 +488,9 @@ pub(super) fn run_native_analysis_pipeline(
     for (stream, packet) in input_context.packets() {
         if stream.index() == video_stream_index {
             let data = packet.data().unwrap_or_default();
+            if let Some(recorder) = au_recorder.as_mut() {
+                recorder.observe_packet(packet.pts(), packet.position() as i64, data);
+            }
             // For HEVC only packets with a slice are pictures (not an end-of-sequence packet).
             let picture = match leading_scan.as_mut() {
                 Some(scan) => scan.observe_packet(data),
@@ -504,6 +516,9 @@ pub(super) fn run_native_analysis_pipeline(
         process_decoded(&decoded_frame)?;
     }
     drop(process_decoded);
+    if let Some(recorder) = au_recorder.as_mut() {
+        recorder.set_output_pts(output_pts);
+    }
 
     // Finalize progress display
     pb.finish_with_message("Complete");

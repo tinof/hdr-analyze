@@ -114,7 +114,7 @@ zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1 and P6.2 | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
+| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); P15 (new analyzer `--help` contract and `mkvdovi manifest`) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Priorities
@@ -169,6 +169,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
     checks for authored CM v4.0 blocks (E17), hot-file byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 
+- **Owner direction (2026-11-04):** P15 (playback manifest for the NuvioTV fork) goes ahead of
+  the current Next up; its steps rank in their own order (P15.1, P15.2, then P15.3, P15.4).
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
@@ -344,6 +346,28 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - [P14.2][owner] Playback acceptance. Gate: on the C9, a full converted episode of the dim
   series at `high` looks better than its source, and a well-exposed title looks unchanged
   (owner verdict). Needs: P14.1.
+
+### P15: playback manifest for the NuvioTV fork
+
+- **Status:** In progress. P15.1 (analyzer AU table) landed in PR #91 with `cuda-parity` pending on
+  the CUDA host; P15.2–P15.4 are open. Design, scope and the fork's use:
+  [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md).
+- [P15.1][gpu] Analyzer AU table (`--au-table`, `--au-table-only`, token `au-table-v1`). Gate:
+  tests red on the parent for CFR with B-frames, VFR, a non-zero start, an open-GOP cut, chunk
+  digests (oracle `mkvinfo`), and refusals (laced, missing or duplicate pts, two video tracks, a
+  stale table); the L1 regression unchanged; CPU and CUDA tables equal in `cuda-parity`.
+  Landed: PR #91; gate pending.
+- [P15.2][desk] `dovi_rpu_builder::manifest`: schema, strict parse, `AuMatcher`, params round
+  trip. Gate: unit tests on both sides of every rule, including the seek wait for an IRAP;
+  `tool:rpu_builder_check`; the Android check.
+- [P15.3][corpus] `mkvdovi manifest <input> [--out] [--work-dir]`; never muxes or deletes.
+  Gate: VFR, non-zero start and open-GOP accepted; builder RPUs from the manifest equal the
+  `--keep-source` output byte for byte for 8.4 bt2100 and 8.1; a different encode and a
+  mismatched composer rejected; `extra.json` goldens and RPU baselines unchanged. Needs: P15.1,
+  P15.2, E13.15.
+- [P15.4][gpu] `mkvdovi manifest --rpu`: an imported `RPU.bin`, accepted only when it rebuilds
+  byte for byte from the manifest. Gate: a good file accepted; a wrong composer, a wrong count
+  and per-frame trims refused, naming the first differing AU. Needs: P15.3, E15.1.
 
 ## `cm_analyze` parity
 

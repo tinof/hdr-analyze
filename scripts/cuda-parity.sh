@@ -9,7 +9,8 @@
 # the CUDA run. The HLG clip is checked once per Profile 8.4 composer (--hlg-composer preset and
 # bt2100, each with its sidecar luminance_mapping), and the PQ clip also with
 # --hlg-composer bt2100, which must leave PQ output unchanged. It fails closed: a missing tool,
-# a missing GPU or a CPU fallback is an error.
+# a missing GPU or a CPU fallback is an error. MKV clips also get --au-table, and the CPU and
+# CUDA AU tables must be equal apart from the sidecar digest (P15.1).
 #
 # Usage:
 #   scripts/cuda-parity.sh [--pq <file>] [--hlg <file>]

@@ -193,6 +193,17 @@ over time (delete the measurements to re-analyze). HLG input requires version 3 
 sidecar is rejected for a non-HLG input. Version 1 carries no identity or full-resolution crop, so
 only structure and frame count are checked and no L5 is derived from it.
 
+### AU table
+
+`hdr_analyzer_mvp --au-table` also writes `<measurements>.au.json` (version 1) for the playback
+manifest of the NuvioTV fork. It lists every packet of the video stream in decode order (pts in
+the stream time base, size, CRC-32 of IRAP pictures) with the source identity (size, SHA-256 of
+the first and last MiB) and track identity (CodecPrivate digest, dimensions, time base). It is
+bound to the sidecar of the same run by `sidecar_sha256`. It is written only when the decoder's
+output is the pictures in pts order (after the skipped leading pictures), so a picture's
+presentation index is its pts rank. Every analyzer run removes an AU table left by an earlier run.
+Schema and rules: [`PLAYBACK_MANIFEST.md`](PLAYBACK_MANIFEST.md).
+
 ## HDR10+ peak mapping
 
 For HDR10+ input, the selected peak source gives the peak of each hybrid piece. Under

@@ -47,8 +47,9 @@ pub enum TransferOverride {
 #[command(name = "hdr_analyzer_mvp")]
 #[command(version = VERSION)]
 #[command(about = "HDR10 to Dolby Vision converter - Phase 1 MVP")]
-// mkvdovi reads this line (`ANALYZER_FRAME_PEAK_CAPABILITY`): keep the name for later sidecars.
-#[command(after_help = "Capabilities: l1-sidecar-frame-peak")]
+// mkvdovi reads this line (`ANALYZER_FRAME_PEAK_CAPABILITY`, and `au-table-v1` for the AU table of
+// `crate::au_table`): keep the names; a new version of either gets a new token.
+#[command(after_help = "Capabilities: l1-sidecar-frame-peak, au-table-v1")]
 pub struct Cli {
     /// Path to the input video file (positional)
     #[arg(value_name = "INPUT")]
@@ -210,4 +211,16 @@ pub struct Cli {
     /// so peaks on skipped frames are missed and scene cuts fall on the sampling grid.
     #[arg(long, default_value_t = 1)]
     pub sample_rate: u32,
+
+    /// Also write <output>.au.json: every video packet in decode order (pts, size, CRC-32 of
+    /// IRAP pictures) with the source and track identity and the SHA-256 of the sidecar, for the
+    /// playback manifest. Matroska with one HEVC video track; laced video, a packet without a
+    /// pts and two video packets with one pts are refused (the measurements are still written).
+    #[arg(long)]
+    pub au_table: bool,
+
+    /// Write only the AU table: decode every frame to check presentation order, measure
+    /// nothing, write no .bin and no sidecar.
+    #[arg(long, conflicts_with = "au_table")]
+    pub au_table_only: bool,
 }

@@ -26,7 +26,11 @@ fn test_help_flag() {
         .stdout(predicate::str::contains(
             dovi84_composer::Composer::Bt2100V1.luminance_mapping(),
         ))
-        .stdout(predicate::str::contains("bt2100"));
+        .stdout(predicate::str::contains("bt2100"))
+        // mkvdovi probes these capability tokens before it relies on the outputs they name.
+        .stdout(predicate::str::contains("l1-sidecar-frame-peak"))
+        .stdout(predicate::str::contains("au-table-v1"))
+        .stdout(predicate::str::contains("--au-table-only"));
 }
 
 #[test]
