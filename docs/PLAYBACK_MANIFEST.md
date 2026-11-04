@@ -39,7 +39,7 @@ starts any analysis. That is the same pattern as `l1-sidecar-frame-peak`.
 - HLG to 8.4 and HDR10 to 8.1, with measured L1.
 - Refused before analysis: HDR10+ input (the fork has its own HDR10+ provider), Dolby Vision
   input, `--legacy-madvr-l1`, and non-Matroska input.
-- Refused while the packets are read: laced video blocks, a video packet without a pts, and two
+- Refused by the packet pass: laced video blocks, a video packet without a pts, and two
   video packets with the same pts.
 - Imported `RPU.bin` files (P15.4) are accepted only when they are reproducible from the manifest's
   parameters and shot list, byte for byte for every AU. Storing arbitrary per-AU RPU payloads is
