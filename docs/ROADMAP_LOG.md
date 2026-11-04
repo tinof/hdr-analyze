@@ -6,6 +6,27 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-05: P15.1 Analyzer AU table (PR #91)
+
+Step: - [P15.1][gpu] Analyzer AU table (`--au-table`, `--au-table-only`, token `au-table-v1`). Gate:
+tests red on the parent for CFR with B-frames, VFR, a non-zero start, an open-GOP cut, chunk
+digests (oracle `mkvinfo`), and refusals (laced, missing or duplicate pts, two video tracks, a
+stale table); the L1 regression unchanged; CPU and CUDA tables equal in `cuda-parity`.
+
+Gate evidence: the tests and the L1 part ran in PR #91, as listed in its body. The new tests in
+`hdr_analyzer_mvp/tests/au_table.rs` use `mkvinfo` as the oracle. `scripts/ci/test-gate.sh` had
+526 passed with only allowed skips, and `scripts/ci/l1-regression-gate.sh` showed L1 unchanged
+without `--update`. CI also ran on PR #91. The pending part, `scripts/cuda-parity.sh`, passed on
+2026-11-05 on the RTX 4070 WSL2 host, on `main` with PR #91 merged. All 20 CPU/CUDA cases matched:
+PQ, HLG with the preset and bt2100 composers, crop detection, `--no-crop` and the robust
+estimator. Each had a byte-identical `.bin` (242 frames, 139,500 bytes) and equal sidecars. The
+MKV clips also ran with `--au-table`, and the CPU and CUDA AU tables were equal apart from
+`sidecar_sha256`. Every CUDA run analyzed its 242 NVDEC frames in place, with none downloaded
+to host memory. Log: `~/mkvdovi-work/p15-1-cuda-parity-2026-11-05/` (local only).
+
+Resolution: NVDEC decode gives the same AU table as software decode, so P15.1 is done. P15.2 can
+start, and P15.3's `Needs: P15.1` is met.
+
 ### 2026-11-04: P14 dynamic-contrast prototype (no PR; local branch `exp/dynamic-contrast`)
 
 Why: on a very dim CM v4.0 web series the owner found the picture dull, and LG's Dynamic Contrast
