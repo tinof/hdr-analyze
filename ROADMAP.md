@@ -55,10 +55,8 @@ Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 ### Next up (checked 2026-11-03 at main@a57563c)
 <!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=d9ea9485f542 skip=E7.2,E8.1,E9.1 -->
 
-Before any step: cut `v0.8.0-rc.1` (owner, 2026-11-03; `docs/RELEASING.md` Checklist). P1.1, E12.1
-and E10.1 are merged, so the release point is reached; the owner's Windows test of rc.1 is the E12.1
-gate. Code merged to `main` before the final v0.8.0 tag ships in v0.8.0 untested by rc.1, so the
-steps below merge after that tag unless the owner takes them into v0.8.0.
+v0.8.0 is released from the `chore(release): v0.8.0` commit; `v0.8.0-rc.1` passed the Windows test on
+2026-11-04, which is the E12.1 gate evidence (Release plan). The steps below go into the next patch.
 
 1. **E7.1 Direct-MKV `dovi_tool` steps still accept exit status plus non-empty output** (priority 4).
    Gate: E7 gate (1). Why: highest-priority startable step, desk-only, no L1 or RPU change.
@@ -103,20 +101,19 @@ under "Waiting for the owner", which is the list `/ship:roadmap-next` reads.
   `code / 1023` question no longer depends on it (WS6.6 answered it), so it measures the
   per-gain neutral with an instrument.
 
-### Release plan (2026-11-01)
+### Release plan (2026-11-04)
 
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
-`/ship:roadmap-next` keeps this table current. Latest release: v0.7.0 (2026-10-18; P7, P9, P11 and P13, tagged without an rc).
+`/ship:roadmap-next` keeps this table current. Latest release: v0.8.0 (2026-11-04; P1.1, P9.2, P9.3 and
+E12.1). `v0.8.0-rc.1` was published 2026-11-03 and passed the Windows test on 2026-11-04: the Windows
+zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ and one HLG clip.
 
-**Next release point (owner, 2026-11-01; confirmed 2026-11-03):** cut `v0.8.0-rc.1` now: E12.1
-(#86), P1.1 (#85) and E10.1 (#87) are merged. E12.2 was not merged before rc.1, so it moves to the
-next patch. The final v0.8.0 follows the owner's Windows test, due about 2026-11-07.
+**Next release point:** the next patch, batched (`docs/RELEASING.md` rule 2).
 
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1 and P6.2 if they merge after the v0.8.0 tag | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| v0.8.0 | P1.1 CPU `auto` becomes `accurate` (changed default, measured 2026-11-02); E12.1 CUDA release binaries (Linux x64, Windows x64; the kernel is embedded PTX, so users need only the NVIDIA driver); P9.2 sidecar v6 (cross-binary contract; exact fallback peak, before P9.3, 2026-10-27); P9.3 hybrid becomes the HDR10+ default (owner decision 2026-10-17: after v0.7.0) | MINOR: delivered L1 changes for NVIDIA users. `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkit hidden (owner decision 2026-10-17). Owner decision 2026-10-14: E12 moved out of v0.7.0 |
+| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1 and P6.2 | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
