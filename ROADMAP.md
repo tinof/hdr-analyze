@@ -349,14 +349,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P15: playback manifest for the NuvioTV fork
 
-- **Status:** In progress. P15.1 (analyzer AU table) landed in PR #91 with `cuda-parity` pending on
-  the CUDA host; P15.2–P15.4 are open. Design, scope and the fork's use:
+- **Status:** In progress. P15.1 (analyzer AU table) is done ([log](docs/ROADMAP_LOG.md),
+  2026-11-05, PR #91); P15.2–P15.4 are open. Design, scope and the fork's use:
   [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md).
-- [P15.1][gpu] Analyzer AU table (`--au-table`, `--au-table-only`, token `au-table-v1`). Gate:
-  tests red on the parent for CFR with B-frames, VFR, a non-zero start, an open-GOP cut, chunk
-  digests (oracle `mkvinfo`), and refusals (laced, missing or duplicate pts, two video tracks, a
-  stale table); the L1 regression unchanged; CPU and CUDA tables equal in `cuda-parity`.
-  Landed: PR #91; gate pending.
 - [P15.2][desk] `dovi_rpu_builder::manifest`: schema, strict parse, `AuMatcher`, params round
   trip. Gate: unit tests on both sides of every rule, including the seek wait for an IRAP;
   `tool:rpu_builder_check`; the Android check.
