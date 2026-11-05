@@ -81,14 +81,20 @@ pub(super) fn uints<T: TryFrom<u64>>(values: &[Value], path: &str) -> Result<Vec
 /// A SHA-256 digest as 64 lowercase hex digits.
 pub(super) fn digest_at(map: &Map<String, Value>, key: &str, path: &str) -> Result<String> {
     let text = str_at(map, key, path)?;
+    check_digest(text, &format!("{path}.{key}"))?;
+    Ok(text.to_owned())
+}
+
+/// A SHA-256 as 64 lowercase hex digits.
+pub(super) fn check_digest(text: &str, path: &str) -> Result<()> {
     let valid = text.len() == 64
         && text
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
     if !valid {
-        return fail(format!("{path}.{key} is not a SHA-256 hex digest"));
+        return fail(format!("{path} is not a SHA-256 hex digest"));
     }
-    Ok(text.to_owned())
+    Ok(())
 }
 
 /// Indices that rise strictly and stay below `count`.

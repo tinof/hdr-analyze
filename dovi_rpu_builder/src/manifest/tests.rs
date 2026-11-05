@@ -604,6 +604,50 @@ fn the_matcher_refuses_a_hand_built_manifest_that_validate_refuses() {
     refused_by_new(|m| m.aus.non_picture = vec![4, 1], "not strictly rising");
 }
 
+/// The parser's track and digest rules hold for a hand-built manifest too, in `to_json` and in
+/// `AuMatcher::new`.
+#[test]
+fn validate_applies_the_track_and_digest_rules() {
+    let refused_everywhere = |edit: fn(&mut PlaybackManifest), needle: &str| {
+        let mut m = manifest();
+        edit(&mut m);
+        for error in [
+            m.validate().unwrap_err(),
+            m.to_json().unwrap_err(),
+            AuMatcher::new(&m).unwrap_err(),
+        ] {
+            assert_eq!(error.code(), 8, "{error}");
+            assert!(
+                error.to_string().contains(needle),
+                "'{needle}' not in: {error}"
+            );
+        }
+    };
+    refused_everywhere(|m| m.track.codec = "avc".into(), "matroska/hevc");
+    refused_everywhere(|m| m.track.container = "webm".into(), "matroska/hevc");
+    refused_everywhere(
+        |m| m.source.lookup_key = "abc".into(),
+        "source.lookup_key is not a SHA-256",
+    );
+    refused_everywhere(
+        |m| m.source.head_sha256 = DIGEST.to_uppercase(),
+        "source.head_sha256",
+    );
+    refused_everywhere(
+        |m| m.source.tail_sha256 = format!("{}g", &DIGEST[1..]),
+        "source.tail_sha256",
+    );
+    refused_everywhere(
+        |m| m.producer.sidecar_sha256 = String::new(),
+        "producer.sidecar_sha256",
+    );
+    refused_everywhere(
+        |m| m.track.codec_private_sha256 = format!("{DIGEST}0"),
+        "track.codec_private_sha256",
+    );
+    assert!(manifest().validate().is_ok());
+}
+
 #[test]
 fn picture_count_does_not_underflow() {
     let mut aus = manifest().aus;

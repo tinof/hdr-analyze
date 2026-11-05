@@ -25,7 +25,8 @@ use dovi84_composer::Composer;
 use serde_json::{json, Map, Value};
 
 use self::json::{
-    array_at, check_rising, digest_at, fail, field, i64_at, object, str_at, u64_at, uint_at, uints,
+    array_at, check_digest, check_rising, digest_at, fail, field, i64_at, object, str_at, u64_at,
+    uint_at, uints,
 };
 use crate::builder::{RpuBuilder, L1};
 use crate::composer::HlgComposer;
@@ -181,6 +182,7 @@ impl PlaybackManifest {
 
     /// Every cross-field rule. [`parse`](Self::parse) runs it; a producer runs it before writing.
     pub fn validate(&self) -> Result<()> {
+        self.validate_identity()?;
         self.validate_aus()?;
         self.validate_shots_and_coverage()?;
         let mapping = self.luminance_mapping()?;
@@ -195,6 +197,28 @@ impl PlaybackManifest {
         }
         RpuBuilder::new(&self.rpu)
             .map_err(|error| crate::Error::Manifest(format!("rpu cannot be built: {error}")))?;
+        Ok(())
+    }
+
+    /// The track kind version 1 covers, and the digests' syntax; the parser reads the digests with
+    /// the same check.
+    fn validate_identity(&self) -> Result<()> {
+        let track = &self.track;
+        if (track.container.as_str(), track.codec.as_str()) != ("matroska", "hevc") {
+            return fail(format!(
+                "track is {}/{}; version 1 covers matroska/hevc",
+                track.container, track.codec
+            ));
+        }
+        for (digest, path) in [
+            (&self.producer.sidecar_sha256, "producer.sidecar_sha256"),
+            (&self.source.head_sha256, "source.head_sha256"),
+            (&self.source.tail_sha256, "source.tail_sha256"),
+            (&self.source.lookup_key, "source.lookup_key"),
+            (&track.codec_private_sha256, "track.codec_private_sha256"),
+        ] {
+            check_digest(digest, path)?;
+        }
         Ok(())
     }
 
