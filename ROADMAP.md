@@ -52,20 +52,22 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-05 at main@cd44e61)
-<!-- roadmap-next: rev=3 scope=E13.15:-split config=b3103c892048 probes=gpu:ok,corpus:ok ready=7f382b9b1e15 skip=E13.6,E13.7,E13.9,E13.10,E13.13 -->
+### Next up (checked 2026-11-05 at main@eb727a0)
+<!-- roadmap-next: rev=3 scope=P15.3 config=b3103c892048 probes=gpu:ok,corpus:ok ready=7f382b9b1e15 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.13,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
 
-Scoped ranking of E13 (the owner asked for E13.15, closed by PR #95). It was the last open
-prerequisite of P15.3, which the owner direction of 2026-11-04 puts ahead of the earlier Next up
-(E7.1, P6.2, P12.1).
+Scoped ranking of P15.3 (owner request). The owner direction of 2026-11-04 puts P15 ahead of
+the numbered priorities; P15.3's prerequisites P15.1, P15.2 and E13.15 are done. Codex agreed.
 
-1. **E13.12 Split `convert_file` by phase** (priority 11). Gate: the mkvdovi gate. Why: P15.3's
-   subcommand follows its phase order. Branch: `refactor/e13-12-split-convert-file`. Release: none
-2. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
+1. **P15.3 `mkvdovi manifest <input> [--out] [--work-dir]`** (owner direction, P15). Gate: the
+   step's gate. Why: last step before the NuvioTV fork can read measured L1; P15.4 needs it.
+   Branch: `feat/p15-3-mkvdovi-manifest`. Release: minor
+2. **E13.12 Split `convert_file` by phase** (priority 11). Gate: the mkvdovi gate. Why: the
+   function P15.3 mirrors. Branch: `refactor/e13-12-split-convert-file`. Release: none
+3. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
    P15.3 measures without the mux. Branch: `refactor/e13-14-split-acquire-measurements`. Release: none
 
-Passed over: E13.6, E13.9, E13.10 (analyzer, CUDA parity, no P15 link), E13.7 (chore), E13.13
-(verify, no P15 link). P15.3 comes before both entries.
+Passed over by the scope: the startable steps of priorities 2 to 9 (`skip=`); an unscoped run
+ranks them.
 
 ### Waiting for the owner
 
@@ -354,6 +356,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - [P15.4][gpu] `mkvdovi manifest --rpu`: an imported `RPU.bin`, accepted only when it rebuilds
   byte for byte from the manifest. Gate: a good file accepted; a wrong composer, a wrong count
   and per-frame trims refused, naming the first differing AU. Needs: P15.3, E15.1.
+- **Checked 2026-11-05 @eb727a0:** `run_hdr_analyzer` writes `<stem>_measurements.bin` beside the
+  input (`mkvdovi/src/pipeline/analyzer.rs:107`), so `--work-dir` needs its own output path;
+  `generate_extra_json` writes the 8.4 preset (`mkvdovi/src/metadata/rpu_config.rs:96`), so the
+  manifest's `rpu` names the selected composer; mkvdovi's `L1Sidecar` drops `min_percentile` and
+  `denoise_mode` (`mkvdovi/src/metadata/sidecar.rs:65`), which the `full` class needs.
 
 ## `cm_analyze` parity
 
