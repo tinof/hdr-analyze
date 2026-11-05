@@ -52,21 +52,25 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-05 at main@eb727a0)
-<!-- roadmap-next: rev=3 scope=P15.3 config=b3103c892048 probes=gpu:ok,corpus:ok ready=d98831be9317 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.13,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
+### Next up (checked 2026-11-05 at main@a0ea795)
+<!-- roadmap-next: rev=3 scope=P15.4 config=b3103c892048 probes=gpu:ok,corpus:ok ready=543f30b919a0 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
 
-Scoped ranking of P15.3 (owner request). The owner direction of 2026-11-04 puts P15 ahead of
-the numbered priorities; P15.3's prerequisites P15.1, P15.2 and E13.15 are done. Codex agreed.
+Scoped ranking of P15.4 (owner request). P15.4 needs E15.1; the owner placed E15.1 with P15 as
+its prerequisite (2026-11-05). Codex agreed: E15.1, then P15.4; P15.5 does not come first.
 
-1. **E13.12 Split `convert_file` by phase** (priority 11). Gate: the mkvdovi gate. Why: the
-   function P15.3 mirrors. Branch: `refactor/e13-12-split-convert-file`. Release: none
-2. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
-   P15.3 measures without the mux. Branch: `refactor/e13-14-split-acquire-measurements`. Release: none
+1. **E15.1 Pre-scan source RPUs for the unparseable piece** (P15 prerequisite). Gate: in E15.
+   Why: the only blocker of P15.4, whose `--rpu` import parses an untrusted `RPU.bin`. Branch:
+   `fix/e15-1-abort-safe-rpu-parsing`. Release: patch
+2. **P15.5 Manifest for an FFmpeg-cut open-GOP file** (P15). Gate: in P15. Why: same item; may
+   pin the refusal. Branch: `fix/p15-5-open-gop-manifest`. Release: minor
+3. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
+   the earlier Next up entry. Branch: `refactor/e13-14-split-acquire-measurements`. Release: none
 
 **Reassess:** new-defect (P15.3, PR #96): P15.5, an FFmpeg-cut open-GOP file is refused.
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
+- Recheck before P15.4: route the `--rpu` import through E15.1's guarded parse, not `parse_rpu_file`.
 
-Passed over by the scope: the startable steps of priorities 2 to 9 (`skip=`); an unscoped run
+Passed over by the scope: the startable steps of priorities 2 to 11 (`skip=`); an unscoped run
 ranks them.
 
 ### Waiting for the owner
@@ -82,8 +86,6 @@ hardware after a startable step has prepared it, a gate not stated, and steps ti
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
 - **FEL:** on hold by the owner (2026-10-13, confirmed 2026-10-17: revisit after 1.0.0); no gate
   until the hold is lifted.
-- **E15.1: not in the Priorities list.** It has a gate and is startable, but no priority names it
-  (priority 10 only says it is not held); the owner places it (found 2026-10-25).
 - **E13.19: `feat/dev-corpus` cannot land.** The step, and the `l1_diff` part of E13.20, wait for that
   branch, but it is local-only behind a pre-push guard (`docs/TESTING.md` §7). The owner restates the
   condition, for example "rebase the branch after the move" (found 2026-11-01).
@@ -111,7 +113,7 @@ zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1 and P6.2 | PATCH, batched (`docs/RELEASING.md` rule 2) |
+| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1, P6.2 and E15.1 | PATCH, batched (`docs/RELEASING.md` rule 2) |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); P15 (new analyzer `--help` contract and `mkvdovi manifest`) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
@@ -169,6 +171,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 - **Owner direction (2026-11-04):** P15 (playback manifest for the NuvioTV fork) goes ahead of
   the current Next up; its steps rank in their own order (P15.1, P15.2, then P15.3, P15.4).
+  E15.1 ranks with P15, as P15.4's prerequisite (owner, 2026-11-05).
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
@@ -870,6 +873,10 @@ The detailed gap table and validation method live in
   unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
   too) gets an error from each of the three functions where the parent panics; a multi-file run
   continues with the next file; the existing mkvdovi tests pass unchanged.
+- **Checked 2026-11-05 @a0ea795:** the three callers are `mkvdovi/src/rpu_check.rs:314`, `:425` and
+  `:442`; the crate's header and mapping parsers are `pub(crate)`, so the scan re-reads the bits
+  itself. Other `parse_rpu_file` callers read RPUs mkvdovi generated (`mkvdovi/src/verify.rs:154`,
+  `dovi84_composer/src/rewrite.rs:79`). P15.4's import must use the same guarded parse.
 
 ### E17: `--verify` checks for authored CM v4.0 blocks
 
