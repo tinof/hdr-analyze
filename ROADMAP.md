@@ -53,20 +53,18 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-05 at main@a0ea795)
-<!-- roadmap-next: rev=3 scope=P15.4 config=b3103c892048 probes=gpu:ok,corpus:ok ready=543f30b919a0 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
+<!-- roadmap-next: rev=3 scope=P15.4 config=b3103c892048 probes=gpu:ok,corpus:ok ready=0f8e51d85a64 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
 
 Scoped ranking of P15.4 (owner request). P15.4 needs E15.1; the owner placed E15.1 with P15 as
 its prerequisite (2026-11-05). Codex agreed: E15.1, then P15.4; P15.5 does not come first.
 
-1. **E15.1 Pre-scan source RPUs for the unparseable piece** (P15 prerequisite). Gate: in E15.
-   Why: the only blocker of P15.4, whose `--rpu` import parses an untrusted `RPU.bin`. Branch:
-   `fix/e15-1-abort-safe-rpu-parsing`. Release: patch
-2. **P15.5 Manifest for an FFmpeg-cut open-GOP file** (P15). Gate: in P15. Why: same item; may
+1. **P15.5 Manifest for an FFmpeg-cut open-GOP file** (P15). Gate: in P15. Why: same item; may
    pin the refusal. Branch: `fix/p15-5-open-gop-manifest`. Release: minor
-3. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
+2. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
    the earlier Next up entry. Branch: `refactor/e13-14-split-acquire-measurements`. Release: none
 
 **Reassess:** new-defect (P15.3, PR #96): P15.5, an FFmpeg-cut open-GOP file is refused.
+**Reassess:** new-defect (E15.1, PR #97): E15.2, the guard for DM payload allocations; P15.4 needs it.
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 - Recheck before P15.4: route the `--rpu` import through E15.1's guarded parse, not `parse_rpu_file`.
 
@@ -171,7 +169,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 - **Owner direction (2026-11-04):** P15 (playback manifest for the NuvioTV fork) goes ahead of
   the current Next up; its steps rank in their own order (P15.1, P15.2, then P15.3, P15.4).
-  E15.1 ranks with P15, as P15.4's prerequisite (owner, 2026-11-05).
+  E15.1 ranks with P15, as P15.4's prerequisite (owner, 2026-11-05); its review added E15.2,
+  P15.4's other prerequisite.
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
@@ -864,15 +863,8 @@ The detailed gap table and validation method live in
 
 ### E15: abort-safe RPU parsing
 
-- **Status:** Open. Defect found, not fixed; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  Open: E15.1: `dolby_vision` 3.4.0's `unimplemented!` on a polynomial piece with
-  `poly_order_minus1 == 0` and `linear_interp_flag` set (`src/rpu/rpu_data_mapping.rs:415`) aborts
-  `classify_rpu_format`, `analyze_rpu_file` and `sample_rpu_windows` under `panic = "abort"`.
-- [E15.1][desk] Pre-scan each source RPU's data mapping for that piece before `parse_rpu_file` in the
-  three functions, and return an error instead; re-check the scan when the crate is bumped. Gate: a
-  unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
-  too) gets an error from each of the three functions where the parent panics; a multi-file run
-  continues with the next file; the existing mkvdovi tests pass unchanged.
+- **Status:** Open. E15.1, the guard for the data mapping (`mkvdovi/src/rpu_guard.rs`), is done
+  ([log](docs/ROADMAP_LOG.md)); open: E15.2, the allocations in the DM payload.
 - [E15.2][desk] Extend the guard (`mkvdovi/src/rpu_guard.rs`) past the mapping: the crate allocates
   `num_ext_blocks` (CM v2.9, v4.0) and a reserved block's length before it reads them. Gate: such
   RPUs get an error where the crate aborts; Profile 7 NLQ data is walked. Needs: E15.1.
