@@ -79,7 +79,7 @@ enum Unreadable {
     /// `unimplemented!` in `DoviPolynomialCurve::parse`.
     LinearInterpolation { component: usize, piece: u64 },
     /// More pivots or pieces than the RPU has bits: the crate allocates them before reading.
-    PivotCount { component: usize, pivots: u64 },
+    PivotCount { component: usize, pivots: u128 },
 }
 
 impl std::fmt::Display for Unreadable {
@@ -177,8 +177,9 @@ fn scan_mapping(r: &mut BitReader<'_>, header: &Header) -> Option<Option<Unreada
         let num_pivots_minus2 = r.ue()?;
         let pivots = num_pivots_minus2.wrapping_add(2);
         *pieces = num_pivots_minus2.wrapping_add(1);
-        let available = r.remaining() as u64;
-        if pivots > available || *pieces > available {
+        // The crate wraps the count in release builds; `pieces` is the larger one at the wrap.
+        if pivots.max(*pieces) > r.remaining() as u64 {
+            let pivots = u128::from(num_pivots_minus2) + 2;
             return Some(Some(Unreadable::PivotCount { component, pivots }));
         }
         for _ in 0..pivots {

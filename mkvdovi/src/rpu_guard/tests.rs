@@ -91,6 +91,11 @@ fn a_linear_interpolation_piece_is_an_error_where_the_crate_panics() {
             Rpu::p81(POLY, MMR, LINEAR_INTERP),
             "piece 0 of the Cr",
         ),
+        (
+            "cr after first-order mmr",
+            Rpu::p81(POLY, Piece::Mmr { order_minus1: 0 }, LINEAR_INTERP),
+            "piece 0 of the Cr",
+        ),
         ("second piece", multi_piece, "piece 1 of the Y"),
         ("profile 7 nlq", profile7, "piece 0 of the Cb"),
         ("float coefficients", float, "piece 0 of the Cr"),
@@ -205,11 +210,66 @@ fn a_pivot_count_larger_than_the_rpu_is_an_error() {
         "{error}"
     );
 
+    // Just above what the RPU holds (it is about 260 bits long).
+    let mut near = Rpu::p81(POLY, MMR, MMR);
+    near.num_pivots_minus2 = [298, 0, 0];
+    near.omit_pivots = true;
+    let error = format!(
+        "{:#}",
+        check_parseable(&rpu_bin(&[near.payload()])).unwrap_err()
+    );
+    assert!(error.contains("declares 300 pivots"), "{error}");
+
+    // The crate's release build wraps 2^64 pivots to none, but then allocates 2^64 - 1 pieces.
+    let mut wraps = Rpu::p81(POLY, MMR, MMR);
+    wraps.num_pivots_minus2 = [u64::MAX - 1, 0, 0];
+    wraps.omit_pivots = true;
+    let error = format!(
+        "{:#}",
+        check_parseable(&rpu_bin(&[wraps.payload()])).unwrap_err()
+    );
+    assert!(
+        error.contains(&format!("declares {} pivots", 1u128 << 64)),
+        "{error}"
+    );
+
     // The same count, when the pivots fit, is read and passes.
     let mut fits = Rpu::p81(POLY, MMR, MMR);
     fits.num_pivots_minus2 = [1, 0, 0];
     fits.omit_pivots = true;
     assert!(check_parseable(&rpu_bin(&[fits.payload()])).is_ok());
+}
+
+#[test]
+fn a_value_the_crate_refuses_stops_the_walk_before_a_later_piece() {
+    let mut wide_coefficients = Rpu::p81(POLY, POLY, LINEAR_INTERP);
+    // More than 64 bits per coefficient: the crate refuses the header, and its read would fail.
+    wide_coefficients.log2_denom = 65;
+    let cases = [
+        (
+            "mmr order 4",
+            Rpu::p81(POLY, Piece::Mmr { order_minus1: 3 }, LINEAR_INTERP),
+        ),
+        (
+            "polynomial order 3",
+            Rpu::p81(
+                Piece::Polynomial {
+                    order_minus1: 2,
+                    linear_interp: false,
+                },
+                MMR,
+                LINEAR_INTERP,
+            ),
+        ),
+        ("coefficients over 64 bits", wide_coefficients),
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    for (name, rpu) in cases {
+        let bytes = rpu_bin(&[rpu.payload()]);
+        let path = write(dir.path(), &format!("{name}.bin"), &bytes);
+        assert!(!crate_panics(&path), "{name}: the crate must stop first");
+        check_parseable(&bytes).unwrap_or_else(|error| panic!("{name}: {error:#}"));
+    }
 }
 
 #[test]

@@ -32,6 +32,8 @@ pub(crate) struct Rpu {
     pub profile7: bool,
     /// `coefficient_data_type` 1: 32-bit coefficients without an integer part.
     pub float_coefficients: bool,
+    /// `coefficient_log2_denom` (fixed-point coefficients only): the fraction's bit length.
+    pub log2_denom: u64,
     /// `use_prev_vdr_rpu_flag`: no data mapping follows the header.
     pub reuse_previous: bool,
     /// `num_pivots_minus2` per component; the pieces below must match it plus one.
@@ -47,6 +49,7 @@ impl Rpu {
         Self {
             profile7: false,
             float_coefficients: false,
+            log2_denom: 23,
             reuse_previous: false,
             num_pivots_minus2: [0; 3],
             omit_pivots: false,
@@ -68,7 +71,7 @@ impl Rpu {
         w.bit(false); // chroma_resampling_explicit_filter_flag
         w.bits(u64::from(self.float_coefficients), 2); // coefficient_data_type
         if !self.float_coefficients {
-            w.ue(23); // coefficient_log2_denom
+            w.ue(self.log2_denom); // coefficient_log2_denom
         }
         w.bits(1, 2); // vdr_rpu_normalized_idc
         w.bit(false); // bl_video_full_range_flag
@@ -92,7 +95,11 @@ impl Rpu {
     }
 
     fn write_mapping(&self, w: &mut BitWriter) {
-        let denom_bits = if self.float_coefficients { 32 } else { 23 };
+        let denom_bits = if self.float_coefficients {
+            32
+        } else {
+            self.log2_denom as u32
+        };
         w.ue(0); // vdr_rpu_id
         w.ue(0); // mapping_color_space
         w.ue(0); // mapping_chroma_format_idc
@@ -192,7 +199,7 @@ impl BitWriter {
 
     fn bits(&mut self, value: u64, n: u32) {
         for i in (0..n).rev() {
-            self.bit((value >> i) & 1 == 1);
+            self.bit(i < 64 && (value >> i) & 1 == 1);
         }
     }
 
