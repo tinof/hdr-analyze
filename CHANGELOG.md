@@ -31,8 +31,9 @@ This document provides a historical record of completed milestones, feature impl
   aborts mkvdovi and the rest of a multi-file run (ROADMAP E15.1). The file is refused with a
   warning naming the parse error, and the run continues with the next file.
 - The same refusal now covers RPUs whose CM v2.9 or v4.0 DM metadata declares more extension
-  blocks than the RPU holds, which the parser allocated before reading, including Profile 7 RPUs
-  and RPUs that reuse the previous mapping (ROADMAP E15.2).
+  blocks than the RPU holds, which the parser allocated before reading, or a CM v4.0 level 8, 9 or
+  10 block of a length the parser does not know, including Profile 7 RPUs and RPUs that reuse the
+  previous mapping (ROADMAP E15.2).
 
 ### Changed
 

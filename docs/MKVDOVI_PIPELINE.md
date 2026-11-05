@@ -12,8 +12,9 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `rpu_check.rs`: MEL/FEL/P8 classification and RPU diagnostics; it is what detects FEL.
 - `rpu_guard.rs`: `parse_source_rpu_file`, the guarded parse of source RPUs (`rpu_check.rs`). It walks each
   RPU's header, data mapping, Profile 7 NLQ data and DM payload before `parse_rpu_file` and returns
-  `UnparseableRpu` for a linear-interpolation polynomial piece, or a pivot/piece or CM v2.9/v4.0
-  extension-block count larger than the RPU, where
+  `UnparseableRpu` for a linear-interpolation polynomial piece, a pivot/piece count larger than the
+  RPU, a CM v2.9/v4.0 extension-block count above a ninth of the bits left, or a CM v4.0 L8/L9/L10
+  block length the crate does not know (L8 10/12/13/19/25, L9 1/17, L10 5/21), where
   `dolby_vision` 3.4 would abort the process under `panic = "abort"` (ROADMAP E15). The format
   sniff refuses such a file as unsupported with a warning instead of detecting it as HDR10.
 - `external.rs`: tool checks and invocation.

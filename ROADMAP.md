@@ -872,8 +872,8 @@ The detailed gap table and validation method live in
 - **Checked 2026-11-05 @7ec5c49:** callers use `parse_source_rpu_file` (`mkvdovi/src/rpu_check.rs:335`,
   `:450`, `:467`). In `dolby_vision` 3.4.0 the reserved-block allocation is unreachable (`ensure!(false)`
   first, `cmv29.rs:57`, `cmv40.rs:57`); the count is `extension_metadata/mod.rs:114`. The crate reads
-  the DM payload also under `use_prev_vdr_rpu_flag` (`dovi_rpu.rs:186`); `scan` stops there
-  (`rpu_guard.rs:144`). P15.4's import must use the same guarded parse.
+  the DM payload also under `use_prev_vdr_rpu_flag` (`dovi_rpu.rs:186`); the walk
+  follows it there too. P15.4's import must use the same guarded parse.
 
 ### E17: `--verify` checks for authored CM v4.0 blocks
 
