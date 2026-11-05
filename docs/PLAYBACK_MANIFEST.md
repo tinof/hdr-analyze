@@ -152,7 +152,9 @@ change L1 or the RPU, with the conversion's defaults: `--hlg-composer`, `--cm-ve
 
 - It never creates a temp directory, converts, muxes or deletes. It writes only
   `<stem>_measurements.bin` with its `.l1.json` and `.au.json`, `<stem>.manifest-analyzer.log`
-  and the manifest (through `<out>.tmp`, created for the run, and a rename). Any of these paths
+  and the manifest (through `<out>.tmp`, created for the run, and a rename; an existing
+  `<out>.tmp` may be another run's, so it is refused, never removed). The analyzer writes the
+  `.l1.json` and `.au.json` through `.tmp` files too. Any of these paths, temp files included,
   that names the input, also through a symlink or a hard link, is refused.
 - Refused before any analysis: input that is not Matroska (EBML DocType `matroska`), HDR10+,
   Dolby Vision, an HLG or PQ stream that fails the conversion's colour contracts, an analyzer

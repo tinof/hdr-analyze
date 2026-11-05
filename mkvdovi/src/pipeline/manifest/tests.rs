@@ -12,7 +12,7 @@ use super::build::{analysis, manifest, quality_class, Inputs};
 use super::identity::{
     hex, is_matroska_header, is_same_file, sha256_hex, FileIdentity, CHUNK_BYTES,
 };
-use super::{check_sampling, Paths};
+use super::{check_sampling, write_manifest, Paths};
 use crate::cli::Args;
 use crate::metadata::{CmV40Config, L1Sidecar};
 use crate::pipeline::config::Settled;
@@ -542,6 +542,40 @@ fn shots_move_back_by_the_leading_pictures_and_the_producer_is_named() {
         dovi_rpu_builder::manifest::PlaybackManifest::parse(&text).unwrap(),
         built
     );
+}
+
+#[test]
+fn a_temp_file_another_writer_holds_is_left_alone() {
+    // Two runs writing the same --out: if this run removed the other's `<out>.tmp`, the other
+    // could rename this run's file, or its own empty one, into place and report success.
+    let pair = good_pair(0, 24);
+    let sidecar = sidecar(0, 24);
+    let settled = settled("8.1");
+    let built = manifest(&inputs(&pair, &sidecar, &settled, None)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::new(
+        "clip.mkv",
+        Some(dir.path()),
+        Some(&dir.path().join("m.json")),
+    );
+    let mut other = std::fs::File::create(&paths.out_tmp).unwrap();
+
+    let error = write_manifest(&built, &paths).unwrap_err();
+    assert!(format!("{error:#}").contains("m.json.tmp"), "{error:#}");
+    assert!(!paths.out.exists());
+    // The other writer's file is still the one at that name.
+    std::io::Write::write_all(&mut other, b"other").unwrap();
+    assert_eq!(std::fs::read(&paths.out_tmp).unwrap(), b"other");
+
+    // Once it is gone, the manifest is written and parses back.
+    std::fs::remove_file(&paths.out_tmp).unwrap();
+    write_manifest(&built, &paths).unwrap();
+    let text = std::fs::read_to_string(&paths.out).unwrap();
+    assert_eq!(
+        dovi_rpu_builder::manifest::PlaybackManifest::parse(&text).unwrap(),
+        built
+    );
+    assert!(!paths.out_tmp.exists());
 }
 
 fn built_lookup_key() -> String {

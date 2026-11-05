@@ -422,7 +422,7 @@ fn check_sampling(sidecar: &L1Sidecar, args: &Args) -> Result<(), String> {
 }
 
 /// Serializes, parses the text back with the player's parser, and replaces `paths.out` through a
-/// temp file created for this run only.
+/// temp file created for this run only; an existing temp file is refused, never removed.
 fn write_manifest(manifest: &PlaybackManifest, paths: &Paths) -> Result<()> {
     let value = manifest
         .to_json()
@@ -430,17 +430,24 @@ fn write_manifest(manifest: &PlaybackManifest, paths: &Paths) -> Result<()> {
     let text = serde_json::to_string(&value)?;
     PlaybackManifest::parse(&text)
         .map_err(|error| anyhow::anyhow!("the written manifest does not parse back: {error}"))?;
-    match fs::remove_file(&paths.out_tmp) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            return Err(error).with_context(|| format!("cannot remove {}", paths.out_tmp.display()))
-        }
-        _ => {}
-    }
-    let mut file = OpenOptions::new()
+    // An existing temp file may belong to another run writing the same `--out`; removing it would
+    // let that run rename this one's file, or its own unwritten one, into place.
+    let mut file = match OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&paths.out_tmp)
-        .with_context(|| format!("cannot create {}", paths.out_tmp.display()))?;
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => anyhow::bail!(
+            "{} exists: another `mkvdovi manifest` is writing {}, or an earlier run stopped; \
+             remove it when no run is writing",
+            paths.out_tmp.display(),
+            paths.out.display()
+        ),
+        Err(error) => {
+            return Err(error).with_context(|| format!("cannot create {}", paths.out_tmp.display()))
+        }
+    };
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
     drop(file);
