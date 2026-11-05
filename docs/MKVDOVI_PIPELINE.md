@@ -14,7 +14,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `metadata/`: `CmV40Config`, L2/L5/L9/L11 generation; submodules `format`, `probe`, `rpu_config`,
   `sidecar`, `static_metadata`.
 - `pipeline/`: `convert_file` in `mod.rs`; by phase `temp_dir`, `measure`, `config`, `deliver`;
-  plus `analyzer`, `dovi_steps`, `hdr10plus`.
+  plus `analyzer`, `dovi_steps`, `hdr10plus`, and `manifest/` (`mkvdovi manifest`: the AU table
+  reader, the manifest build, no temp dir; [PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)).
 - `verify.rs`, `progress.rs`.
 
 ## External tools

@@ -17,6 +17,12 @@ This document provides a historical record of completed milestones, feature impl
   panics (`Error::Manifest`, code 8), and `AuMatcher`, which validates its manifest on
   construction, checks each AU a player reads against the AU table and returns its shot's L1 and
   scene refresh. RPUs built through it equal `dovi_tool` 2.3.4's fixtures byte for byte.
+- `mkvdovi manifest <input> [--out] [--work-dir]` (P15.3) writes the playback manifest
+  `<stem>.dvmanifest.json` of an HDR10 or HLG MKV: the measured per-shot L1, the RPU parameters and
+  the AU table a player checks it against. Its RPUs equal a `--keep-source` conversion's with the
+  same flags, AU for AU. It never converts, muxes or deletes; it refuses HDR10+, Dolby Vision and
+  non-Matroska input before any analysis, and reuses a measurement pair only when it is bound to
+  the file as it is now. `dovi_rpu_builder::VERSION` names the builder in the manifest.
 
 ### Changed
 

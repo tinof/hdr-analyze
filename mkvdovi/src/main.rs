@@ -139,6 +139,14 @@ fn main() -> anyhow::Result<()> {
             SubCmd::Inspect(inspect_args) => {
                 return rpu_check::inspect_file(&inspect_args.input);
             }
+            SubCmd::Manifest(manifest_args) => {
+                // Before `check_dependencies`: a manifest needs no mkvmerge, and it checks
+                // the tools it does need itself.
+                if !pipeline::manifest_file(manifest_args)? {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
         }
     }
 

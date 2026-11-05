@@ -43,3 +43,6 @@ pub use params::{
     MASTERING_MIN_NITS, MASTERING_PEAK_NITS, MAX_TRIM_TARGETS,
 };
 pub use static_l1::{static_84_params, STATIC_84_L1, STATIC_84_L1_AVG_CM_VERSION};
+
+/// This crate's version, for the playback manifest's `producer.rpu_builder_version`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

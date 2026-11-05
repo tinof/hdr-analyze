@@ -1,8 +1,8 @@
 # Playback manifest (P15)
 
-Status: design written 2026-11-04. The AU table (P15.1) and the manifest schema, parser and matcher
-in `dovi_rpu_builder::manifest` (P15.2) are implemented; `mkvdovi manifest` and the `RPU.bin`
-import are not yet (P15.3, P15.4). Steps: ROADMAP P15.
+Status: design written 2026-11-04. The AU table (P15.1), the manifest schema, parser and matcher
+in `dovi_rpu_builder::manifest` (P15.2) and `mkvdovi manifest` (P15.3) are implemented; the
+`RPU.bin` import is not yet (P15.4). Steps: ROADMAP P15.
 
 ## Purpose
 
@@ -100,12 +100,15 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
 - `producer`: mkvdovi version, analyzer version (with `+cuda`), sidecar version, AU table version,
   `dovi_rpu_builder` version, and `sidecar_sha256`.
 - `source`: as in the AU table, plus `lookup_key` = SHA-256 of (size as a big-endian u64 ‖ head
-  digest ‖ tail digest). A plain HTTP folder can serve `<lookup_key>.dvmanifest.json`. The player
-  computes the key from one size lookup and two 1 MiB range reads.
+  digest ‖ tail digest), where the digests are their 32 raw bytes, not the hex text: 72 bytes are
+  hashed. A plain HTTP folder can serve `<lookup_key>.dvmanifest.json`. The player computes the
+  key from one size lookup and two 1 MiB range reads.
 - `track`: as in the AU table.
 - `aus`: as in the AU table.
 - `analysis`: `luminance_mapping` (`pq` or the HLG composer name), `downscale`, `sample_rate`,
-  `gpu`, `no_crop`, `crop`, the peak settings and `scene`.
+  `gpu`, `no_crop`, `crop`, the peak and denoise settings (`peak_domain`, `peak_estimator`,
+  `peak_source`, `peak_percentile`, `min_percentile`, `denoise_mode`) and `scene`, copied from the
+  sidecar and the AU table; a field they do not state is left out.
 - `rpu`: everything `RpuParams` needs, written and read by `RpuParams::{to,from}_manifest_json`:
   - `profile`: `"8.1"` or `"8.4"`;
   - `composer`: `"preset"` or `"bt2100"` for 8.4, null for 8.1 (the P8 canary is refused);
@@ -128,7 +131,42 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
     server and on-device providers.
 
 **Parity.** For every AU, the builder's `shot(l1).write(scene_refresh)` from the manifest equals
-the RPU NAL that mkvdovi writes for the same file and settings. P15.3 tests this.
+the RPU NAL that mkvdovi writes for the same file and settings. P15.3 tests this
+(`mkvdovi/tests/playback_manifest.rs`): the source's packets go through `AuMatcher` in decode
+order and each built RPU is compared with the RPU of the same AU in the `--keep-source` output,
+for 8.1, 8.4 bt2100, VFR, a non-zero start, an open-GOP cut, CM v2.9, other trims and L9/L11, and a
+letterboxed source (L5).
+
+## `mkvdovi manifest`
+
+`mkvdovi manifest <input> [--out <file>] [--work-dir <dir>]` writes `<stem>.dvmanifest.json` into
+the work directory (default: the input's directory). It also takes the conversion flags that
+change L1 or the RPU, with the conversion's defaults: `--hlg-composer`, `--cm-version`,
+`--content-type`, `--reference-mode`, `--source-primaries`, `--trim-targets`,
+`--analysis-quality`, `--hwaccel`. Code: `mkvdovi/src/pipeline/manifest/`.
+
+- It never creates a temp directory, converts, muxes or deletes. It writes only
+  `<stem>_measurements.bin` with its `.l1.json` and `.au.json`, `<stem>.manifest-analyzer.log`
+  and the manifest (through `<out>.tmp`, created for the run, and a rename). Any of these paths
+  that names the input, also through a symlink or a hard link, is refused.
+- Refused before any analysis: input that is not Matroska (EBML DocType `matroska`), HDR10+,
+  Dolby Vision, an HLG or PQ stream that fails the conversion's colour contracts, an analyzer
+  whose `--help` does not name `au-table-v1`, and a missing `mediainfo` or `dovi_tool` (the
+  format detection needs both to tell Dolby Vision and HDR10+ from HDR10).
+- The measurements are the conversion's (`--transfer hlg`, `--hlg-composer`, the sampling of
+  `--analysis-quality`) plus `--au-table`. A pair already in the work directory is reused only
+  when the sidecar is valid for the input and composer, was sampled exactly as asked, the table
+  is version 1 and bound to these sidecar bytes, its structure passes the parser's AU rules, its
+  source still matches the file, and both count the same pictures and leading pictures.
+  Anything else is reported and analyzed again.
+- The RPU parameters come from the conversion's configuration phase
+  (`pipeline::config::settle_configuration`, `metadata::rpu_params`), so they equal `extra.json`'s,
+  except that an 8.4 manifest names the composer: the conversion installs it after
+  `dovi_tool generate`, and a player has no such step.
+- Coverage is one range over the stream. It is `full` when the files state downscale 1, sample
+  rate 1, `no_crop` false, scene `global`/`hist`/3.0/12, peak domain `max-rgb`, estimator and
+  source `max`, percentile 99.99, minimum percentile 0.1 and denoise `off` (the analyzer defaults
+  mkvdovi runs with); otherwise `approximate`.
 
 ## Matching rule (`dovi_rpu_builder::manifest`)
 

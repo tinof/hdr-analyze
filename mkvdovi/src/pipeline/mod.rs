@@ -17,6 +17,7 @@ mod deliver;
 mod dovi_steps;
 mod hdr10plus;
 mod hybrid;
+mod manifest;
 mod mdfix_notice;
 mod measure;
 mod temp_dir;
@@ -26,6 +27,7 @@ use self::config::{prepare_configuration, Configured};
 use self::deliver::{extract_base_layer, inject_rpu, mux_output};
 pub use self::dovi_steps::DOVI_TOOL_MKV_INPUT_MIN;
 use self::dovi_steps::{convert_mel_fast_path, generate_rpu};
+pub use self::manifest::manifest_file;
 use self::measure::{
     abort_unsupported, acquire_measurements, analyzer_records_frame_peak, report_detection,
     resolve_hdr10plus_mode, total_steps_for, Hdr10PlusMode,
