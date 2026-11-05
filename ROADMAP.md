@@ -225,6 +225,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   1.25 × MaxCLL, C7 HDR10+ MaxScl 0 on every frame, C3 stated MaxFALL above MaxCLL. Gate: the
   item's step 2 gate (each check warns on a clip that has the problem and stays silent on one that
   does not; all RPU baselines byte-identical).
+- [P6.3][desk] Check a Profile 8 record against its RPU: route by the RPU on a mismatch, as
+  Profile 7 does, and refuse compatibility ID 0 or 2 (8.2, SDR base) by name before temp work.
+  Gate: fixture tests on both sides; RPU baselines byte-identical.
+- [P6.4][desk] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
+  conversion drops. Gate: the item's step 2 gate.
 - **Checked 2026-10-11 (fix-l6-zero-light-levels):** none of the seven saved rpu-baseline inputs
   has a container 0, so the baselines do not cover the container-0 fix; unit and clip tests do,
   including the L6 of a generated `extra.json`.
@@ -244,26 +249,19 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Done: hybrid is the HDR10+ default ([log](docs/ROADMAP_LOG.md), PR #84). No step is
-  open; the item stays because priority 2 names only P9 and the owner decides whether that ends.
+- **Status:** Core complete: hybrid is the HDR10+ default ([log](docs/ROADMAP_LOG.md), PR #84).
+  Open: P9.4.
 - **Finding for the fallback:** both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL 0 on every
   frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on Alita) and
   the average are present. A peak taken from MaxSCL is unusable on such sources, so the pixel
   fallback is required, not optional; whether the percentiles can stand in is open.
-- **Plan:** opt-in hybrid mode (scene list = union of HDR10+ starts and the analyzer's cuts, peak
-  per piece from HDR10+; average, minimum and L5 from pixels),
-  scored on the development tier before any default change, with a pixel fallback for missing or
-  implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
-  suspicious scene peaks still only warn.
-- **Gate:** met (PR #84). Step 1's gate (owner, 2026-10-17), done: score the four
-  holdout cuts with retail DV L1 (`q-alita-01/02`, `q-the-shining-01/02`) against it; Alien and
-  Deadloch stay unseen. Pre-registered rule: hybrid becomes the default if the average's pooled
-  clamped MAE (above the floor and over all frames) is lower than today's HDR10+ path, and the
-  per-frame MAE of L1 max and of L1 min against retail is not higher than today's path; the owner
-  confirms the flip. Done 2026-10-17: PASS on every clause, flip confirmed for the minor after
-  v0.7.0.
-- Peak against retail is not scored: hybrid takes the same HDR10+ peak as `dovi_tool`, about 104
-  codes below retail on the holdout cuts.
+- **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
+  panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
+  retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
+- [P9.4][corpus] Count the frames that carry their own HDR10+ payload; `hdr10plus_tool` fills a
+  gap with the previous frame's, so partial coverage is silent today. Warn below full coverage;
+  refuse under an explicit `--hdr10plus-l1 hybrid`. Gate: corpus coverage counts in the log first;
+  then the warning fires on a gap clip and stays silent on a full one.
 
 ### P10: measured against delivered
 
@@ -478,6 +476,11 @@ The detailed gap table and validation method live in
   (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
   tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
   rules (`PREREG.md` draft 2). Needs: WS6.8. Landed: PR #80; gate pending.
+- [WS6.10][desk] Pulse files, one per level: a fixed pattern under RPUs that alternate one level
+  (L1 min, max, avg; each L2 target; L6; L11) and a null-RPU control, from `dovi_rpu_builder`, as a
+  Plex show. Gate: libplacebo pulses on L1 max and avg and is steady on the control.
+- [WS6.11][owner][reassess] View the pulse files on the LG OLED C9. Gate: pulse or steady per
+  level, recorded in the log. Needs: WS6.10.
 - **Checked 2026-10-25 @3c0c913:** `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
   (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
   evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there
@@ -545,6 +548,8 @@ The detailed gap table and validation method live in
   `FEL_ROADMAP.md` applies (owner, 2026-10-17).
 - Not held: E15.1 keeps a malformed source RPU (Profile 7, or one found by the RPU sniff) from
   aborting `mkvdovi` before the FEL refusal.
+- For when the hold lifts: AetherEngine's residual on/off measure and POC-slot pairing fit
+  FEL_PLAN §5d and §6; its float composer is no reference ([log](docs/ROADMAP_LOG.md) 2026-11-05).
 
 ### R2: Profile 5
 
@@ -869,7 +874,7 @@ The detailed gap table and validation method live in
 
 - **Status:** Open. `--verify` checks that the generated levels exist (`assert_rpu_invariants`),
   not whether authored L8 and L10 blocks from Dolby Vision inputs are consistent; prior art in
-  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E17.1.
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E17.1, E17.2.
 - **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
   RPU passes; the existing `--verify` tests and the RPU baselines are unchanged.
 - [E17.1][corpus] Hard-fail `--verify` on duplicate L8 `target_display_index` values, duplicate L10
@@ -877,6 +882,9 @@ The detailed gap table and validation method live in
   frame, and optional L8 fields whose presence disagrees with the block length. First check what
   the `dolby_vision` crate (3.4.0) already rejects at parse time, and drop the checks it covers.
   Gate: the item gate.
+- [E17.2][desk] Check the whole DV config record of every output: profile 8, a level, RPU and BL
+  present, no EL, compatibility ID 1 (PQ) or 4 (HLG); today only the HLG ID is read. Gate: unit
+  tests on canned ffprobe output, both sides; the existing `--verify` tests unchanged.
 
 ### E18: hot-file budgets
 

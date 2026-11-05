@@ -6,6 +6,79 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-05: AetherEngine review, six new steps (no PR)
+
+Why: the owner asked what AetherEngine (`superuser404notfound/AetherEngine` at `a6fbf0a1`, a
+Swift playback engine for Apple platforms) does with HDR10, HDR10+ and HLG, and whether any of it
+would help this project. It plays those formats as they are and never generates an RPU from a
+non-DV source, so it has nothing for our measurement or L1. Seven ideas were assessed, one agent
+each, plus a critic; the code references below were checked against both trees. AetherEngine is
+LGPL-3.0 and this repo is MIT: every step is written from public specs, and no AetherEngine code
+or numbers are copied (`docs/PROVENANCE.md`).
+
+New steps and their evidence:
+
+- **WS6.10, WS6.11, per-level pulse test.** AetherEngine proves that a device applies the RPU
+  with constant pixels under an RPU that alternates, and a null-RPU control
+  (`Probes/DolbyVisionPulse/`, `Scripts/gen_pulse.py`). We cannot test L1 min, L2, L3, L5, L6, L8,
+  L9 or L11 in libplacebo, and the P8 and WS6.6 canaries each answered one question. One pulse
+  file per level tells whether the Shield → C9 chain applies our L2 trims, L6 and L11, which
+  decides how much the deferred L2 trims work and P12 matter. The test pattern's base layer is
+  encoded once as a test asset; mkvdovi is not involved. Their quarter-stop threshold (about 300
+  PQ codes of L1 movement, `Sources/aetherctl/DvSurvey.swift:114`) has no derivation and is only
+  a starting value. Optional: a frame picker in `tools/l1_diff` that lists the frames where our L1
+  and trims move most, for viewing. Risk: the Shield may rewrite the RPU, so a steady level may
+  come from the player rather than the panel.
+- **P9.4, HDR10+ coverage.** `tools/rpu_builder_check/src/payloads.rs:4-7` mirrors
+  `hdr10plus_tool` 1.7.2: a frame without its own HDR10+ payload takes the previous frame's in
+  decode order. The extracted JSON therefore always has one entry per frame, and the hybrid frame
+  count check (`mkvdovi/src/pipeline/hybrid.rs`) cannot see partial coverage. Some discs may carry
+  HDR10+ only on scene-start frames, so the corpus is counted before any threshold is set.
+  AetherEngine's strict ST 2094-40 validator (`Sources/AetherEngine/Video/HDR10PlusMetadataScan.swift`)
+  adds nothing beyond `hdr10plus_tool`'s structural parse.
+- **E17.2, the whole DV configuration record in `--verify`.** `mkvdovi/src/verify.rs:83-101` reads
+  only `dv_bl_signal_compatibility_id` and only for HLG sources; nothing checks the profile,
+  level, RPU, BL or EL flags, or ID 1 for PQ outputs. AetherEngine's DV route needs exactly these
+  fields (`docs/formats.md:285-305` there). mkvmerge's out-of-band hvcC already meets its other
+  container rules, so no hvcC rebuild or level cap is planned: either would change a bit-exact copy.
+- **P6.3, a Profile 8 record against its RPU.** `mkvdovi/src/metadata/format.rs:55-56` returns
+  `DolbyVisionP8` on the MediaInfo string alone; Profile 7 is checked against the RPU
+  (`probe_profile7_kind`), and every other case goes through `sniff_dolby_vision_rpu`, so
+  AetherEngine's #532 case (a Profile 5 record over a P7/P8 RPU) and the recordless Profile 5 are
+  already handled. "profile 8" also matches 8.2 (SDR base), which under `--mdfix` fails late, not by
+  name. DV inputs keep their source, so no file is at risk.
+- **P6.4, HDR Vivid.** No detection exists (`rg -i 'vivid|cuva'` finds nothing). A CUVA T.35 SEI
+  (country 0x26, provider 0x0004, oriented code 0x0005) on an HLG or PQ base would be dropped
+  without a word. Count a hit only for a complete message with zero trailing bits, as
+  `Sources/AetherEngine/Video/HDRVividMetadataScan.swift` does, to avoid false positives.
+- **FEL (bullet only, the item stays on hold).** `Sources/AetherEngine/Diagnostics/FelResidualMeasure.swift`
+  composes each frame with and without the residual and reports diff share, mean, signed mean,
+  p99, the share at ≥ 2 and ≥ 4 codes and four luma bands. That is close to FEL_PLAN §5d, in 12-bit
+  codes instead of their 10-bit. `Decoder/DualLayerPictureAlignment.swift` pairs BL and EL by POC
+  display slot, an open point of FEL_PLAN §6. Their Metal composer computes in float with FMA
+  and is tested against its own CPU model, so it is not the integer reference §6 asks for.
+  `tools/fel_gpu/` (untracked) holds only `__pycache__/*.pyc` and a `.venv`; its source is gone.
+
+Not taken: alternative-transfer SEI HLG detection (#839 there) is already in place
+(`hdr_analyzer_mvp/src/ffmpeg_io.rs:497-503`, `mkvdovi/src/metadata/format.rs` frame-level
+fallback, the #43 work); an RPU CRC guard (our parsers already fail visibly); SDR preview stills
+(BT.2390 or Hable), which cannot show what the C9 does with L1.
+
+Moved from the P9 item in `ROADMAP.md` (verbatim):
+
+- **Plan:** opt-in hybrid mode (scene list = union of HDR10+ starts and the analyzer's cuts, peak
+  per piece from HDR10+; average, minimum and L5 from pixels),
+  scored on the development tier before any default change, with a pixel fallback for missing or
+  implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
+  suspicious scene peaks still only warn.
+- **Gate:** met (PR #84). Step 1's gate (owner, 2026-10-17), done: score the four
+  holdout cuts with retail DV L1 (`q-alita-01/02`, `q-the-shining-01/02`) against it; Alien and
+  Deadloch stay unseen. Pre-registered rule: hybrid becomes the default if the average's pooled
+  clamped MAE (above the floor and over all frames) is lower than today's HDR10+ path, and the
+  per-frame MAE of L1 max and of L1 min against retail is not higher than today's path; the owner
+  confirms the flip. Done 2026-10-17: PASS on every clause, flip confirmed for the minor after
+  v0.7.0.
+
 ### 2026-11-05: P15.2 `dovi_rpu_builder::manifest` (PR #93)
 
 Step: - [P15.2][desk] `dovi_rpu_builder::manifest`: schema, strict parse, `AuMatcher`, params round
