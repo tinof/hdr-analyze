@@ -53,7 +53,7 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-05 at main@eb727a0)
-<!-- roadmap-next: rev=3 scope=P15.3 config=b3103c892048 probes=gpu:ok,corpus:ok ready=7f382b9b1e15 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.13,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
+<!-- roadmap-next: rev=3 scope=P15.3 config=b3103c892048 probes=gpu:ok,corpus:ok ready=831bb54c4092 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.13,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
 
 Scoped ranking of P15.3 (owner request). The owner direction of 2026-11-04 puts P15 ahead of
 the numbered priorities; P15.3's prerequisites P15.1, P15.2 and E13.15 are done. Codex agreed.
@@ -650,7 +650,7 @@ The detailed gap table and validation method live in
 ### E7: completeness
 
 - **Status:** Partial. `--verify` checks the RPU frame count against the muxed track and the
-  sidecar; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E7.1, E7.2.
+  sidecar; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E7.1 to E7.3.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
@@ -659,6 +659,11 @@ The detailed gap table and validation method live in
   the item's gate (1).
 - [E7.2][corpus] An always-on frame-count check. Gate: the item's gate (2) (the added time per file
   is measured on real files).
+- [E7.3][desk] `mux_output` muxes the Annex B stream without the source's video timestamps
+  (`mkvdovi/src/pipeline/deliver.rs:176`): a VFR source comes out at a constant rate, and a video
+  start of 2000 ms moves to 0 while the audio keeps its own (found by P15.3's tests). Gate: tests
+  with a VFR source and a non-zero video start show the output's video pts equal the source's,
+  and the bitstream stays bit-identical.
 
 ### E8: histogram percentile reader
 
