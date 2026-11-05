@@ -11,8 +11,9 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   orchestration through `pipeline::convert_file`.
 - `rpu_check.rs`: MEL/FEL/P8 classification and RPU diagnostics; it is what detects FEL.
 - `rpu_guard.rs`: `parse_source_rpu_file`, the guarded parse of source RPUs (`rpu_check.rs`). It walks each
-  RPU's header and data mapping before `parse_rpu_file` and returns `UnparseableRpu` for a
-  linear-interpolation polynomial piece or a pivot/piece count larger than the RPU, where
+  RPU's header, data mapping, Profile 7 NLQ data and DM payload before `parse_rpu_file` and returns
+  `UnparseableRpu` for a linear-interpolation polynomial piece, or a pivot/piece or CM v2.9/v4.0
+  extension-block count larger than the RPU, where
   `dolby_vision` 3.4 would abort the process under `panic = "abort"` (ROADMAP E15). The format
   sniff refuses such a file as unsupported with a warning instead of detecting it as HDR10.
 - `external.rs`: tool checks and invocation.
