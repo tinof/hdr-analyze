@@ -41,7 +41,12 @@ starts any analysis. That is the same pattern as `l1-sidecar-frame-peak`.
 - Refused before analysis: HDR10+ input (the fork has its own HDR10+ provider), Dolby Vision
   input, `--legacy-madvr-l1`, and non-Matroska input.
 - Refused by the packet pass: laced video blocks, a video packet without a pts, and two
-  video packets with the same pts.
+  video packets with the same pts. The analyzer then writes no AU table and `mkvdovi manifest`
+  refuses the file; the measurements and a normal `mkvdovi` conversion are unaffected.
+- One known source of a packet without a pts is an open-GOP cut made by an FFmpeg stream copy:
+  its leading RASL pictures can carry negative Matroska timestamps, and FFmpeg's demuxer gives
+  them no pts. An open-GOP file whose leading pictures carry valid timestamps (tested on an x265 cut
+  muxed by mkvmerge) is accepted.
 - Imported `RPU.bin` files (P15.4) are accepted only when they are reproducible from the manifest's
   parameters and shot list, byte for byte for every AU. Storing arbitrary per-AU RPU payloads is
   a question for a version 2.
