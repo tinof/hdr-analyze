@@ -6,6 +6,25 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-05: E13.15 Split `prepare_configuration` by phase (PR #95)
+
+Step: - [E13.15][corpus] Split `prepare_configuration` (`mkvdovi/src/pipeline/config.rs`, 211 lines) by
+phase. Gate: the mkvdovi gate.
+
+Gate evidence: PR #95. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (555 tests,
+only allowed skips). The RPU part of the mkvdovi gate: 16 captures with the branch build (5 default,
+2 `--mdfix`, 1 `--hlg-composer preset`, 8 HDR10+ with no flag), compared with
+`~/mkvdovi-work/rpu-baseline/0.8.0/` by `~/mkvdovi-work/rpu-baseline/e13-15-addc604/run-e13-15.sh`.
+Every `compare --require-identical-l1` exits 0, every `RPU.bin` is byte-identical, and mkvdovi's own
+log lines match, so the messages kept their order. `e13-step5/`, which the gate named before, holds
+only analyzer `.bin` captures, so the gate now names `0.8.0/`. Review: Codex exec LGTM; Codex's
+GitHub review hit its usage limit and gave no review.
+
+Resolution: `prepare_configuration` is a coordinator over seven helpers in `config.rs` (CM v4.0
+config, HDR10+ peak advisory, fresh sidecar load, hybrid combine, L5 offsets, profile choice, source
+range); the `extra.json` write and commit stay in it. P15.3's `Needs: E13.15` is met. Open: no test
+reaches the non-hybrid refusal arms through `prepare_configuration`, here or before the split.
+
 ### 2026-11-05: AetherEngine review, six new steps (no PR)
 
 Why: the owner asked what AetherEngine (`superuser404notfound/AetherEngine` at `a6fbf0a1`, a

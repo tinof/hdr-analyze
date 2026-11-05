@@ -1,6 +1,7 @@
 //! The Dolby Vision configuration phase of `convert_file`: static metadata, CM v4.0, the L1
 //! sidecar, the profile, `extra.json`, and the withdrawal of an RPU built from an earlier one.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -26,7 +27,6 @@ pub(super) struct Configured {
 
 /// Writes `extra.json` for `dovi_tool generate`. Settles which L1 sidecar the RPU carries
 /// (`measured.l1_sidecar`). `None`: the phase printed why; `convert_file` returns `Ok(false)`.
-#[expect(clippy::too_many_lines, reason = "E13.15: split by phase")]
 pub(super) fn prepare_configuration(
     input_file: &str,
     temp_dir: &Path,
@@ -34,7 +34,7 @@ pub(super) fn prepare_configuration(
     resume_enabled: bool,
     hlg_composer: Option<Composer>,
     measured: &mut Measured,
-    mut level5_offsets: Option<Level5Offsets>,
+    level5_offsets: Option<Level5Offsets>,
 ) -> Result<Option<Configured>> {
     // Static Metadata
     // MaxCLL / MaxFALL are resolved after the L1 sidecar is loaded: measured values fill what the
@@ -43,6 +43,45 @@ pub(super) fn prepare_configuration(
     let mut static_meta = metadata::read_static_metadata(input_file);
     metadata::apply_static_defaults(&mut static_meta, &["max_dml", "min_dml"], hlg_source);
 
+    let cm_v40_config = cm_v40_config(input_file, args);
+    warn_on_hdr10plus_peaks(measured, &static_meta, args);
+
+    // Each step below may take the HDR10+ metadata path instead (`fall_back_to_hdr10plus`), so
+    // everything after them reads `measured` afresh.
+    if !load_fresh_sidecar(args, hlg_composer, measured) || !combine_hybrid(args, measured) {
+        return Ok(None);
+    }
+    let level5_offsets = sidecar_level5(measured, level5_offsets);
+    let Some(dv_profile) = choose_profile(measured, args) else {
+        return Ok(None);
+    };
+    // `None` is not a refusal: dovi_tool then derives the source range from L6.
+    let source_range = resolve_source_range(&mut static_meta, measured, dv_profile, hlg_source);
+
+    // Generate extra.json
+    let extra_json_path = temp_dir.join("extra.json");
+    // Validated in main before any file is processed.
+    let final_trims = args.trim_targets_nits().unwrap_or_default();
+    // Withdrawn before `extra.json` changes: an interruption between the two must not leave the
+    // new configuration beside an RPU built from the old one.
+    let next_config = temp_dir.join("extra.json.next");
+    metadata::generate_extra_json(
+        &next_config,
+        dv_profile,
+        &static_meta,
+        &final_trims,
+        cm_v40_config.as_ref(),
+        level5_offsets,
+        measured.l1_sidecar.as_ref(),
+    )?;
+    commit_config(temp_dir, &next_config, &extra_json_path, resume_enabled)?;
+    progress::print_info("Configuration written.");
+
+    Ok(Some(Configured { source_range }))
+}
+
+/// The CM v4.0 configuration (L9 primaries, L11 content type), or `None` under `--cm-version v29`.
+fn cm_v40_config(input_file: &str, args: &Args) -> Option<metadata::CmV40Config> {
     // Build CM v4.0 config if enabled
     let cm_v40_config = if args.cm_version == CmVersion::V40 {
         // Detect or use provided source primaries
@@ -67,9 +106,12 @@ pub(super) fn prepare_configuration(
             ));
         }
     }
+    cm_v40_config
+}
 
-    // Warn when generated HDR10+ scene L1 peaks look suspicious. This is advisory:
-    // valid sources can contain outliers, so never clamp them silently.
+/// Warns when generated HDR10+ scene L1 peaks look suspicious. This is advisory: valid sources can
+/// contain outliers, so never clamp them silently.
+fn warn_on_hdr10plus_peaks(measured: &Measured, static_meta: &HashMap<String, f64>, args: &Args) {
     if let (Some(metadata_path), Some(&max_dml)) = (
         measured.hdr10plus_json.as_deref(),
         static_meta.get("max_dml"),
@@ -87,12 +129,15 @@ pub(super) fn prepare_configuration(
             )),
         }
     }
+}
 
-    // Generate extra.json
-    let extra_json_path = temp_dir.join("extra.json");
-    // Validated in main before any file is processed.
-    let final_trims = args.trim_targets_nits().unwrap_or_default();
-
+/// Loads and validates the sidecar the analyzer wrote in this run, or drops it under
+/// `--legacy-madvr-l1`. False: refused, the phase printed why.
+fn load_fresh_sidecar(
+    args: &Args,
+    hlg_composer: Option<Composer>,
+    measured: &mut Measured,
+) -> bool {
     // Source-honest per-scene L1 from the analyzer sidecar is mandatory for measurement-based
     // generation. dovi_tool's madVR path fills L1 avg with a fixed placeholder and (with custom
     // targets) replaces L1 max with optimizer targets, so it is reachable only by explicit opt-in.
@@ -129,25 +174,30 @@ pub(super) fn prepare_configuration(
                     progress::print_error(&format!(
                         "The analyzer's L1 sidecar cannot be used for Profile 8.4 ({error}). The analyzer did not measure through the selected Dolby Vision 8.4 HLG composer and decode, so it is probably an older build: `hdr_analyzer_mvp --help` must list {required}."
                     ));
-                    return Ok(None);
+                    return false;
                 }
                 Err(error) if measured.hdr10plus_mode.is_hybrid() => {
                     let reason = format!("the analyzer's L1 sidecar is unusable ({error})");
                     if !fall_back_to_hdr10plus(measured, &reason) {
-                        return Ok(None);
+                        return false;
                     }
                 }
                 Err(error) => {
                     progress::print_error(&format!(
                         "The analyzer's L1 sidecar is unusable ({error}). Refusing to fall back to optimizer-derived L1; pass --legacy-madvr-l1 to force it."
                     ));
-                    return Ok(None);
+                    return false;
                 }
             }
         }
     }
-    // HDR10+ hybrid: the RPU's scenes become the union of the HDR10+ scenes and the analyzer's
-    // cuts, with the HDR10+ peak and the measured average and minimum.
+    true
+}
+
+/// HDR10+ hybrid: the RPU's scenes become the union of the HDR10+ scenes and the analyzer's cuts,
+/// with the HDR10+ peak and the measured average and minimum. False: refused, the phase printed
+/// why.
+fn combine_hybrid(args: &Args, measured: &mut Measured) -> bool {
     if measured.hdr10plus_mode.is_hybrid() {
         let combined = match (
             measured.l1_sidecar.take(),
@@ -167,11 +217,20 @@ pub(super) fn prepare_configuration(
                 let reason =
                     format!("the HDR10+ metadata and the measurements do not combine ({error})");
                 if !fall_back_to_hdr10plus(measured, &reason) {
-                    return Ok(None);
+                    return false;
                 }
             }
         }
     }
+    true
+}
+
+/// Announces the settled sidecar and returns the L5 offsets for the RPU: offsets sampled from a
+/// source RPU, else the committed crop the sidecar describes.
+fn sidecar_level5(
+    measured: &Measured,
+    mut level5_offsets: Option<Level5Offsets>,
+) -> Option<Level5Offsets> {
     if let Some(sidecar) = &measured.l1_sidecar {
         progress::print_info(&format!(
             "Using measured L1 sidecar ({}): source-honest per-scene min/avg/max in the RPU.",
@@ -189,7 +248,11 @@ pub(super) fn prepare_configuration(
             }
         }
     }
+    level5_offsets
+}
 
+/// The Dolby Vision profile for the settled measurements. `None`: refused, the phase printed why.
+fn choose_profile(measured: &Measured, args: &Args) -> Option<&'static str> {
     let dv_profile = match metadata::dv_profile_for(
         measured.hdr_type,
         measured.l1_sidecar.as_ref(),
@@ -200,7 +263,7 @@ pub(super) fn prepare_configuration(
             progress::print_error(&format!(
                 "Cannot choose the Dolby Vision profile: {error:#}"
             ));
-            return Ok(None);
+            return None;
         }
     };
     if dv_profile != "8.1" {
@@ -208,16 +271,26 @@ pub(super) fn prepare_configuration(
             "Generating Dolby Vision Profile {dv_profile} (base layer kept bit-exact)."
         ));
     }
+    Some(dv_profile)
+}
 
+/// Fills MaxCLL / MaxFALL the source does not state from the measurements, then returns the source
+/// range the RPU states, or `None` (with a warning) when the mastering display is not plausible.
+fn resolve_source_range(
+    static_meta: &mut HashMap<String, f64>,
+    measured: &Measured,
+    dv_profile: &str,
+    hlg_source: bool,
+) -> Option<(u16, u16)> {
     for message in
-        metadata::resolve_light_levels(&mut static_meta, measured.l1_sidecar.as_ref(), hlg_source)
+        metadata::resolve_light_levels(static_meta, measured.l1_sidecar.as_ref(), hlg_source)
     {
         progress::print_info(&message);
     }
 
     // Profile 8.1 states the mastering range explicitly; dovi_tool's own L6 lookup gets every
     // master other than 1000/2000/4000/10000 nits (and min 0.0001/0.005 nits) wrong.
-    let source_range = metadata::expected_source_range(dv_profile, &static_meta);
+    let source_range = metadata::expected_source_range(dv_profile, static_meta);
     if source_range.is_none() {
         progress::print_warn(&format!(
             "Mastering display luminance (min {} nits, max {} nits) is not plausible; dovi_tool derives the source range from L6.",
@@ -225,23 +298,7 @@ pub(super) fn prepare_configuration(
             static_meta.get("max_dml").copied().unwrap_or(f64::NAN)
         ));
     }
-
-    // Withdrawn before `extra.json` changes: an interruption between the two must not leave the
-    // new configuration beside an RPU built from the old one.
-    let next_config = temp_dir.join("extra.json.next");
-    metadata::generate_extra_json(
-        &next_config,
-        dv_profile,
-        &static_meta,
-        &final_trims,
-        cm_v40_config.as_ref(),
-        level5_offsets,
-        measured.l1_sidecar.as_ref(),
-    )?;
-    commit_config(temp_dir, &next_config, &extra_json_path, resume_enabled)?;
-    progress::print_info("Configuration written.");
-
-    Ok(Some(Configured { source_range }))
+    source_range
 }
 
 /// Takes the HDR10+ metadata path after the hybrid failed for `reason`, as if the input had never
