@@ -353,7 +353,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md).
 - [P15.4][gpu] `mkvdovi manifest --rpu`: an imported `RPU.bin`, accepted only when it rebuilds
   byte for byte from the manifest. Gate: a good file accepted; a wrong composer, a wrong count
-  and per-frame trims refused, naming the first differing AU. Needs: P15.3, E15.1.
+  and per-frame trims refused, naming the first differing AU. Needs: P15.3, E15.1, E15.2.
 - [P15.5][corpus] An FFmpeg stream-copy open-GOP cut whose RASL pictures have negative MKV
   timestamps gets no pts, so `mkvdovi manifest` refuses it; the conversion accepts it. Gate:
   such a cut gets a manifest whose RPUs equal the conversion's, or a test pins the refusal as
@@ -873,6 +873,9 @@ The detailed gap table and validation method live in
   unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
   too) gets an error from each of the three functions where the parent panics; a multi-file run
   continues with the next file; the existing mkvdovi tests pass unchanged.
+- [E15.2][desk] Extend the guard (`mkvdovi/src/rpu_guard.rs`) past the mapping: the crate allocates
+  `num_ext_blocks` (CM v2.9, v4.0) and a reserved block's length before it reads them. Gate: such
+  RPUs get an error where the crate aborts; Profile 7 NLQ data is walked. Needs: E15.1.
 - **Checked 2026-11-05 @a0ea795:** the three callers are `mkvdovi/src/rpu_check.rs:314`, `:425` and
   `:442`; the crate's header and mapping parsers are `pub(crate)`, so the scan re-reads the bits
   itself. Other `parse_rpu_file` callers read RPUs mkvdovi generated (`mkvdovi/src/verify.rs:154`,
