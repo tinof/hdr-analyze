@@ -52,24 +52,22 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-03 at main@a57563c)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=d9ea9485f542 skip=E7.2,E8.1,E9.1 -->
+### Next up (checked 2026-11-05 at main@cd44e61)
+<!-- roadmap-next: rev=3 scope=E13.15:-split config=b3103c892048 probes=gpu:ok,corpus:ok ready=a2ee206db8e8 skip=E13.6,E13.7,E13.9,E13.10,E13.13 -->
 
-v0.8.0 is released from the `chore(release): v0.8.0` commit; `v0.8.0-rc.1` passed the Windows test on
-2026-11-04, which is the E12.1 gate evidence (Release plan). The steps below go into the next patch.
+Scoped ranking of E13 (the owner asked for E13.15). E13.15 is the last open prerequisite of P15.3,
+which the owner direction of 2026-11-04 puts ahead of the earlier Next up (E7.1, P6.2, P12.1).
 
-1. **E7.1 Direct-MKV `dovi_tool` steps still accept exit status plus non-empty output** (priority 4).
-   Gate: E7 gate (1). Why: highest-priority startable step, desk-only, no L1 or RPU change.
-   Branch: `fix/e7-1-direct-mkv-truncation`. Release: patch
-2. **P6.2 Implement the five picked checks, warn-only** (priority 4). Gate: P6 step 2 gate. Why:
-   warn-only, RPU baselines byte-identical. Branch: `feat/p6-2-source-consistency-warnings`.
-   Release: patch
-3. **P12.1 Under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults** (priority 5).
-   Gate: the P12.1 gate. Why: the batched next patch with E12.2. Own branch (changes delivered RPUs):
-   `fix/p12-1-mdfix-source-l6`. Release: patch
+1. **E13.15 Split `prepare_configuration` by phase** (priority 11). Gate: the mkvdovi gate. Why:
+   P15.3 needs it; P15.1 and P15.2 are merged. Branch: `refactor/e13-15-split-prepare-configuration`.
+   Release: none
+2. **E13.12 Split `convert_file` by phase** (priority 11). Gate: the mkvdovi gate. Why: P15.3's
+   subcommand follows its phase order. Branch: `refactor/e13-12-split-convert-file`. Release: none
+3. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
+   P15.3 measures without the mux. Branch: `refactor/e13-14-split-acquire-measurements`. Release: none
 
-Passed over: E7.2 builds on E7.1's check in the same files; E8.1 and E9.1 are "a later minor" in the
-Release plan and would put a MINOR change into the v0.8.0 rc window.
+Passed over: E13.6, E13.9, E13.10 (analyzer, CUDA parity, no P15 link), E13.7 (chore), E13.13
+(verify, no P15 link). After E13.15, P15.3 comes before both alternates.
 
 ### Waiting for the owner
 
@@ -774,8 +772,8 @@ The detailed gap table and validation method live in
   Gate: as E13.6.
 - Code lines below are clippy's count (blank and comment lines skipped), 2026-10-28 @dc4882d. The
   mkvdovi gate: fmt, clippy, tests, and `scripts/rpu-baseline.sh compare --require-identical-l1`
-  against `~/mkvdovi-work/rpu-baseline/e13-step5/`; HDR10+ also against the no-flag captures in
-  `~/mkvdovi-work/rpu-baseline/p9-3-hybrid-default/default/`.
+  against the `default/`, `mdfix/`, `preset/` and `hdr10plus/` (no-flag) sets of
+  `~/mkvdovi-work/rpu-baseline/0.8.0/` (05a135c; they equal rc.1, 0.7.0 and `p9-3-hybrid-default/`).
 - [E13.12][corpus] Split `convert_file` (`mkvdovi/src/pipeline/mod.rs`) by phase; step 4 left it at
   281 lines. Gate: the mkvdovi gate.
 - [E13.13][corpus] Split `verify_post_mux_with_options` (`mkvdovi/src/verify.rs`, 256 lines) by
@@ -803,10 +801,11 @@ The detailed gap table and validation method live in
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
-- **Checked 2026-11-01 @4e55715:** both analyzer gates pass `--disable-optimizer`, so step 5 diffed
-  optimizer-enabled `.bin` files, and E13.6 does too. The size count left the repo hook for the ship
-  plugin's global hook. `feat/dev-corpus` is 11 commits ahead of main and cannot land (owner list).
-  Baselines: `e13-step5/`, `p9-3-hybrid-default/default/` and `l6-fix-e052c3d/` exist.
+- **Checked 2026-11-05 @cd44e61:** `e13-step5/` holds only the step 5 analyzer `.bin` captures, no
+  `rpu-baseline.sh` stems, so the mkvdovi gate now names the `0.8.0/` sets (`0.8.0/run-prerelease.sh`,
+  16 compares identical). Both analyzer gates pass `--disable-optimizer`, so E13.6 diffs
+  optimizer-enabled `.bin` files. No open branch touches `mkvdovi/src/pipeline/`; `feat/dev-corpus`
+  is 11 commits ahead of main and cannot land (owner list).
 
 ### E14: test-suite audit
 
