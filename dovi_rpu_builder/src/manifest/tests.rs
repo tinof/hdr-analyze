@@ -76,9 +76,21 @@ fn valid_json() -> Value {
     manifest().to_json().unwrap()
 }
 
+/// The fixture as profile 8.1, measured through PQ.
+fn p81_manifest() -> PlaybackManifest {
+    let mut m = manifest();
+    m.rpu.profile = Profile::P81 { source_range: None };
+    m.analysis
+        .insert("luminance_mapping".into(), json!(PQ_MAPPING));
+    m
+}
+
 /// Parses `json` after `edit` and expects a refusal that mentions `needle`.
 fn refused(edit: impl FnOnce(&mut Value), needle: &str) {
-    let mut json = valid_json();
+    refused_from(valid_json(), edit, needle);
+}
+
+fn refused_from(mut json: Value, edit: impl FnOnce(&mut Value), needle: &str) {
     edit(&mut json);
     let error = PlaybackManifest::from_value(&json).unwrap_err();
     assert_eq!(error.code(), 8, "{error}");
@@ -156,6 +168,17 @@ fn au_table_rules() {
         "two AUs have pts 0",
     );
     refused(|json| json["leading_skipped"] = json!(8), "leading_skipped");
+    // Every picture skipped is still a valid table: 7 pictures, 7 skipped.
+    let mut json = valid_json();
+    json["leading_skipped"] = json!(7);
+    assert_eq!(
+        PlaybackManifest::from_value(&json).unwrap().leading_skipped,
+        7
+    );
+    refused(
+        |json| json["track"]["time_base"] = json!([1, 2_147_483_648_i64]),
+        "two 32-bit integers",
+    );
     refused(
         |json| json["track"]["time_base"] = json!([0, 1000]),
         "time_base is not positive",
@@ -235,6 +258,15 @@ fn coverage_rules() {
         },
         "overlaps or is not sorted",
     );
+    // A start inside a shot: picture 1 is in shot 0, which starts at 0.
+    refused(
+        |json| json["coverage"][0]["start"] = json!(1),
+        "shot boundaries",
+    );
+    refused(
+        |json| json["coverage"] = json!([{"start": 4, "end": 4, "class": "full"}]),
+        "is empty or beyond",
+    );
     let mut json = valid_json();
     json["coverage"] = json!([{"start": 4, "end": 7, "class": "approximate"}]);
     assert!(PlaybackManifest::from_value(&json).is_ok());
@@ -254,14 +286,62 @@ fn composer_and_mapping_must_agree() {
     let mut p81 = manifest();
     p81.rpu.profile = Profile::P81 { source_range: None };
     assert!(p81.to_json().is_err());
-    p81.analysis
-        .insert("luminance_mapping".into(), json!(PQ_MAPPING));
+    let p81 = p81_manifest();
     let json = p81.to_json().unwrap();
     assert!(PlaybackManifest::from_value(&json).is_ok());
 
     let parsed = manifest();
     assert!(parsed.check_composer(HlgComposer::Bt2100).is_ok());
     assert!(parsed.check_composer(HlgComposer::Preset).is_err());
+    let error = p81.check_composer(HlgComposer::Bt2100).unwrap_err();
+    assert!(error.to_string().contains("profile 8.1"), "{error}");
+}
+
+#[test]
+fn rpu_object_rules() {
+    let p81 = || p81_manifest().to_json().unwrap();
+    refused_from(
+        p81(),
+        |json| json["rpu"]["composer"] = json!("bt2100"),
+        "composer must be null for profile 8.1",
+    );
+    refused_from(
+        p81(),
+        |json| json["rpu"]["source_range"] = json!([1, 2, 3]),
+        "source_range is not [min, max]",
+    );
+    let mut ranged = p81_manifest();
+    ranged.rpu.profile = Profile::P81 {
+        source_range: Some((7, 3696)),
+    };
+    let json = ranged.to_json().unwrap();
+    assert_eq!(json["rpu"]["source_range"], json!([7, 3696]));
+    assert_eq!(PlaybackManifest::from_value(&json).unwrap(), ranged);
+    refused(
+        |json| json["rpu"]["profile"] = json!("9"),
+        "rpu.profile '9' is not 8.1 or 8.4",
+    );
+    refused(
+        |json| json["rpu"]["cm"]["version"] = json!("V50"),
+        "rpu.cm.version 'V50'",
+    );
+    refused(
+        |json| json["rpu"]["l1_avg_pq_cm_version"] = json!("x"),
+        "rpu.l1_avg_pq_cm_version 'x'",
+    );
+}
+
+#[test]
+fn l1_policy_rules() {
+    refused(
+        |json| json["l1_policy"] = json!("auto"),
+        "l1_policy 'auto' is not measured or rpu-bin",
+    );
+    let mut m = manifest();
+    m.l1_policy = L1Policy::RpuBin;
+    let json = m.to_json().unwrap();
+    assert_eq!(json["l1_policy"], json!("rpu-bin"));
+    assert_eq!(PlaybackManifest::from_value(&json).unwrap(), m);
 }
 
 #[test]
@@ -350,7 +430,7 @@ fn reason(verdict: &AuVerdict) -> Option<RejectReason> {
 fn a_start_from_zero_gives_shots_by_presentation_rank() {
     let m = manifest();
     let (a, b) = (m.shots[0].l1, m.shots[1].l1);
-    let mut matcher = AuMatcher::new(&m);
+    let mut matcher = AuMatcher::new(&m).unwrap();
     let verdicts: Vec<AuVerdict> = (0..8).map(|index| feed(&mut matcher, index)).collect();
     assert_eq!(
         verdicts,
@@ -370,7 +450,7 @@ fn a_start_from_zero_gives_shots_by_presentation_rank() {
 
 #[test]
 fn a_different_encode_is_rejected_at_au_0() {
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     let verdict = matcher.next(0, &[1; 11], false);
     assert_eq!(reason(&verdict), Some(RejectReason::Size));
     // Sticky, also across a reset.
@@ -381,17 +461,17 @@ fn a_different_encode_is_rejected_at_au_0() {
 
 #[test]
 fn an_irap_with_other_bytes_is_rejected() {
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     let verdict = matcher.next(0, &[9; 10], false);
     assert_eq!(reason(&verdict), Some(RejectReason::Crc));
 }
 
 #[test]
 fn a_skipped_au_breaks_continuity() {
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     feed(&mut matcher, 0);
     assert_eq!(reason(&feed(&mut matcher, 2)), Some(RejectReason::Order));
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     feed(&mut matcher, 0);
     assert_eq!(
         reason(&matcher.next(99, &data(1), false)),
@@ -403,7 +483,7 @@ fn a_skipped_au_breaks_continuity() {
 fn after_a_seek_the_matcher_waits_for_an_irap() {
     let m = manifest();
     let b = m.shots[1].l1;
-    let mut matcher = AuMatcher::new(&m);
+    let mut matcher = AuMatcher::new(&m).unwrap();
     feed(&mut matcher, 0);
     matcher.reset();
     // Non-IRAP pictures and a non-picture packet before the IRAP: fallback, no rejection.
@@ -418,7 +498,7 @@ fn after_a_seek_the_matcher_waits_for_an_irap() {
 
 #[test]
 fn a_seek_to_an_irap_with_other_bytes_is_rejected() {
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     matcher.reset();
     assert_eq!(feed(&mut matcher, 1), AuVerdict::Fallback);
     assert_eq!(
@@ -426,7 +506,7 @@ fn a_seek_to_an_irap_with_other_bytes_is_rejected() {
         Some(RejectReason::Crc)
     );
     // A pts that is not in the table, while waiting.
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     assert_eq!(
         reason(&matcher.next(1234, &[0], false)),
         Some(RejectReason::UnknownPts)
@@ -435,7 +515,7 @@ fn a_seek_to_an_irap_with_other_bytes_is_rejected() {
 
 #[test]
 fn continuity_runs_through_a_non_picture_packet_and_checks_its_size() {
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     for index in 0..4 {
         feed(&mut matcher, index);
     }
@@ -447,7 +527,7 @@ fn continuity_runs_through_a_non_picture_packet_and_checks_its_size() {
 
 #[test]
 fn a_laced_au_is_rejected() {
-    let mut matcher = AuMatcher::new(&manifest());
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
     assert_eq!(
         reason(&matcher.next(0, &data(0), true)),
         Some(RejectReason::Laced)
@@ -463,7 +543,7 @@ fn uncovered_shots_get_the_fallback_and_are_still_checked() {
         class: QualityClass::Approximate,
     }];
     let b = m.shots[1].l1;
-    let mut matcher = AuMatcher::new(&m);
+    let mut matcher = AuMatcher::new(&m).unwrap();
     for index in 0..5 {
         assert_eq!(feed(&mut matcher, index), AuVerdict::Fallback, "AU {index}");
     }
@@ -477,12 +557,37 @@ fn uncovered_shots_get_the_fallback_and_are_still_checked() {
         }
     );
     // An uncovered AU with the wrong size still rejects.
-    let mut matcher = AuMatcher::new(&m);
+    let mut matcher = AuMatcher::new(&m).unwrap();
     feed(&mut matcher, 0);
     assert_eq!(
         reason(&matcher.next(PTS[1], &[0; 1], false)),
         Some(RejectReason::Size)
     );
+}
+
+/// The fields are public, so a manifest can skip the parser; the matcher validates it itself.
+#[test]
+fn the_matcher_refuses_a_hand_built_manifest_that_validate_refuses() {
+    let refused_by_new = |edit: fn(&mut PlaybackManifest), needle: &str| {
+        let mut m = manifest();
+        edit(&mut m);
+        let error = AuMatcher::new(&m).unwrap_err();
+        assert_eq!(error.code(), 8, "{error}");
+        assert!(
+            error.to_string().contains(needle),
+            "'{needle}' not in: {error}"
+        );
+    };
+    refused_by_new(|m| m.shots.clear(), "shots is empty");
+    refused_by_new(|m| m.aus.size.truncate(7), "differ in length");
+    refused_by_new(|m| m.aus.non_picture = vec![4, 1], "not strictly rising");
+}
+
+#[test]
+fn picture_count_does_not_underflow() {
+    let mut aus = manifest().aus;
+    aus.non_picture = (0..9).collect();
+    assert_eq!(aus.picture_count(), 0);
 }
 
 #[test]

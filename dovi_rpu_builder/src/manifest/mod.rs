@@ -85,7 +85,7 @@ pub struct Aus {
 
 impl Aus {
     pub fn picture_count(&self) -> u64 {
-        (self.pts.len() - self.non_picture.len()) as u64
+        self.pts.len().saturating_sub(self.non_picture.len()) as u64
     }
 }
 

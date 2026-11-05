@@ -134,7 +134,7 @@ fn manifest_rpus_equal_dovi_tool() {
         let text = serde_json::to_string(&manifest_for(&case).to_json().unwrap()).unwrap();
         let manifest = PlaybackManifest::parse(&text).unwrap();
         let builder = RpuBuilder::new(&manifest.rpu).unwrap();
-        let mut matcher = AuMatcher::new(&manifest);
+        let mut matcher = AuMatcher::new(&manifest).unwrap();
         let mut ours = Vec::new();
         for frame in 0..manifest.aus.pts.len() as i64 {
             let AuVerdict::Inject {

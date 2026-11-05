@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use super::crc32::crc32;
 use super::{Coverage, ManifestShot, PlaybackManifest, QualityClass};
 use crate::builder::L1;
+use crate::error::Result;
 
 /// Why the matcher rejected the manifest. [`code`](Self::code) is stable across releases, for
 /// callers across FFI; a new reason takes the next number.
@@ -93,7 +94,10 @@ pub struct AuMatcher {
 }
 
 impl AuMatcher {
-    pub fn new(manifest: &PlaybackManifest) -> Self {
+    /// Validates the manifest first ([`PlaybackManifest::validate`]): its fields are public, so a
+    /// manifest built by hand reaches here without the parser's checks.
+    pub fn new(manifest: &PlaybackManifest) -> Result<Self> {
+        manifest.validate()?;
         let aus = &manifest.aus;
         let index_by_pts = aus
             .pts
@@ -109,7 +113,7 @@ impl AuMatcher {
         for (presentation, &index) in pictures.iter().enumerate() {
             rank[index] = Some(presentation as u64);
         }
-        Self {
+        Ok(Self {
             pts: aus.pts.clone(),
             size: aus.size.clone(),
             index_by_pts,
@@ -122,7 +126,7 @@ impl AuMatcher {
             shots: manifest.shots.clone(),
             coverage: manifest.coverage.clone(),
             state: State::AwaitingIrap,
-        }
+        })
     }
 
     /// After a seek or a flush: wait for the next IRAP picture again. A rejection stays.
@@ -239,7 +243,7 @@ impl AuMatcher {
         else {
             return AuVerdict::Fallback;
         };
-        // Shots start at 0 and rise (the parser checks), so one starts at or before any index.
+        // Shots start at 0 and rise (`new` validates), so one starts at or before any index.
         let shot = self
             .shots
             .partition_point(|shot| shot.start <= presentation)
