@@ -565,6 +565,27 @@ fn uncovered_shots_get_the_fallback_and_are_still_checked() {
     );
 }
 
+#[test]
+fn a_wrong_size_while_waiting_for_an_irap_is_rejected() {
+    // At the start: AU 1 (pts 3, not an IRAP) with 1 byte instead of 6.
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
+    assert_eq!(
+        reason(&matcher.next(PTS[1], &[0; 1], false)),
+        Some(RejectReason::Size)
+    );
+    assert_eq!(matcher.rejection().unwrap().decode_index, Some(1));
+    // Sticky: a valid IRAP afterwards injects nothing.
+    assert_eq!(reason(&feed(&mut matcher, 0)), Some(RejectReason::Size));
+    // After a seek: the non-picture AU 4 with 3 bytes instead of 2.
+    let mut matcher = AuMatcher::new(&manifest()).unwrap();
+    feed(&mut matcher, 0);
+    matcher.reset();
+    assert_eq!(
+        reason(&matcher.next(PTS[4], &[0; 3], false)),
+        Some(RejectReason::Size)
+    );
+}
+
 /// The fields are public, so a manifest can skip the parser; the matcher validates it itself.
 #[test]
 fn the_matcher_refuses_a_hand_built_manifest_that_validate_refuses() {

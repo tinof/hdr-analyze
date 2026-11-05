@@ -166,8 +166,8 @@ The player then follows these steps:
    - The size must match, and an IRAP AU's CRC must match.
    - While reading is continuous, the decode index must be the previous one plus 1.
    - After a seek or reset the matcher waits for an IRAP. AUs before it get no manifest L1 and
-     carry the player's fallback RPU (Media3 normally drops them). The first IRAP is validated in
-     full, and continuity applies from there on.
+     carry the player's fallback RPU (Media3 normally drops them); their pts and size are still
+     checked. The first IRAP is validated in full, and continuity applies from there on.
 4. **Shot.** The presentation index p is the pts rank. The shot is the last one with
    `start ≤ p`, and `scene_refresh` is set only when `p == start` (mkvdovi parity).
    A non-picture AU, and a picture outside the coverage, get the fallback

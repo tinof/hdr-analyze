@@ -3,7 +3,8 @@
 //! [`AuMatcher::reset`] at every seek or flush.
 //!
 //! - After a start or reset the matcher waits for an IRAP picture: AUs before it get
-//!   [`AuVerdict::Fallback`] (Media3 drops them after a seek anyway). The first IRAP must match by
+//!   [`AuVerdict::Fallback`] (Media3 drops them after a seek anyway), but their pts and size are
+//!   still checked. The first IRAP must match by
 //!   pts, size and CRC-32; from there every AU must be the table's next one.
 //! - A picture whose presentation index lies in a coverage range gets the L1 of its shot, with
 //!   `scene_refresh` on the shot's first picture only (mkvdovi parity). Other pictures and
@@ -158,20 +159,22 @@ impl AuMatcher {
             );
         }
         let index = match self.locate(pts) {
-            Ok(Some(index)) => index,
-            Ok(None) => return AuVerdict::Fallback,
+            Ok(index) => index,
             Err(verdict) => return verdict,
         };
+        // Every AU's size is checked, also the ones before the IRAP a seek waits for.
         if let Some(verdict) = self.check_bytes(index, data) {
             return verdict;
+        }
+        if matches!(self.state, State::AwaitingIrap) && !self.irap_crc.contains_key(&index) {
+            return AuVerdict::Fallback;
         }
         self.state = State::Continuous { next: index + 1 };
         self.verdict(index)
     }
 
-    /// The table's decode index for this AU; `None` while waiting for an IRAP and this AU is
-    /// not one.
-    fn locate(&mut self, pts: i64) -> Result<Option<usize>, AuVerdict> {
+    /// The table's decode index for this AU.
+    fn locate(&mut self, pts: i64) -> Result<usize, AuVerdict> {
         match self.state {
             State::Rejected(ref rejection) => Err(AuVerdict::Rejected(rejection.clone())),
             State::AwaitingIrap => {
@@ -182,7 +185,7 @@ impl AuMatcher {
                         format!("pts {pts} is not in the AU table"),
                     ));
                 };
-                Ok(self.irap_crc.contains_key(&index).then_some(index))
+                Ok(index)
             }
             State::Continuous { next } => {
                 if next >= self.pts.len() {
@@ -204,7 +207,7 @@ impl AuMatcher {
                         format!("pts {pts}, the table's next AU has pts {}", self.pts[next]),
                     ));
                 }
-                Ok(Some(next))
+                Ok(next)
             }
         }
     }
