@@ -349,12 +349,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P15: playback manifest for the NuvioTV fork
 
-- **Status:** In progress. P15.1 (analyzer AU table) is done ([log](docs/ROADMAP_LOG.md),
-  2026-11-05, PR #91); P15.2–P15.4 are open. Design, scope and the fork's use:
+- **Status:** In progress. P15.1 (AU table, PR #91) and P15.2 (manifest crate, PR #93) are done
+  ([log](docs/ROADMAP_LOG.md)); P15.3 and P15.4 are open. Design, scope and the fork's use:
   [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md).
-- [P15.2][desk] `dovi_rpu_builder::manifest`: schema, strict parse, `AuMatcher`, params round
-  trip. Gate: unit tests on both sides of every rule, including the seek wait for an IRAP;
-  `tool:rpu_builder_check`; the Android check.
 - [P15.3][corpus] `mkvdovi manifest <input> [--out] [--work-dir]`; never muxes or deletes.
   Gate: VFR, non-zero start and open-GOP accepted; builder RPUs from the manifest equal the
   `--keep-source` output byte for byte for 8.4 bt2100 and 8.1; a different encode and a

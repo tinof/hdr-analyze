@@ -6,6 +6,24 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-05: P15.2 `dovi_rpu_builder::manifest` (PR #93)
+
+Step: - [P15.2][desk] `dovi_rpu_builder::manifest`: schema, strict parse, `AuMatcher`, params round
+trip. Gate: unit tests on both sides of every rule, including the seek wait for an IRAP;
+`tool:rpu_builder_check`; the Android check.
+
+Gate evidence: PR #93. The unit tests in `dovi_rpu_builder/src/manifest/tests.rs` cover the
+refusing and the accepting side of each parse and `validate()` rule, and the matcher's seek wait
+(`after_a_seek_the_matcher_waits_for_an_irap`, `a_seek_to_an_irap_with_other_bytes_is_rejected`,
+`a_wrong_size_while_waiting_for_an_irap_is_rejected`). `tests/manifest_params.rs` shows that RPUs
+built through a parsed manifest equal every non-canary `dovi_tool` 2.3.4 fixture byte for byte.
+Local gates: fmt, workspace clippy, `scripts/ci/test-gate.sh` with only allowed skips, and
+`tool:rpu_builder_check`. The Android check is CI's `rpu-builder` job on PR #93. The review fixed
+two P1s: the size check before the IRAP, and `validate()` applying the track and digest rules.
+
+Resolution: the manifest schema, parser and matcher are in the crate the fork links. P15.3's
+`Needs: P15.2` is met.
+
 ### 2026-11-05: P15.1 Analyzer AU table (PR #91)
 
 Step: - [P15.1][gpu] Analyzer AU table (`--au-table`, `--au-table-only`, token `au-table-v1`). Gate:
