@@ -188,8 +188,8 @@ The `dolby_vision` crate 3.4.0 stops with `unimplemented!` on a polynomial piece
 `poly_order_minus1 == 0` and `linear_interp_flag` set (parser `src/rpu/rpu_data_mapping.rs:415`,
 writer `:230`). Under the workspace's `panic = "abort"` that ends the process: no `Result` reaches
 the caller, and the crate's C API (`capi.rs`) has no `catch_unwind` either. Any code that parses
-authored FEL RPUs needs a pre-scan for this case; `mkvdovi/src/rpu_check.rs` already parses source
-RPUs with `parse_rpu_file` for the Profile 7 MEL/FEL classification (ROADMAP E15). AetherEngine also
+authored FEL RPUs needs a pre-scan for this case; mkvdovi parses source RPUs through the pre-scan
+in `mkvdovi/src/rpu_guard.rs` (ROADMAP E15.1). AetherEngine also
 reports a crash in libdovi's writer on curves that mix polynomial and MMR pieces, and rejects such
 RPUs before libdovi sees them. No such RPU was found on the test cuts.
 

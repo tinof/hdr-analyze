@@ -6,6 +6,35 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-05: E15.1 Pre-scan source RPUs for the unparseable piece (PR #97)
+
+Step: - [E15.1][desk] Pre-scan each source RPU's data mapping for that piece before `parse_rpu_file` in the
+  three functions, and return an error instead; re-check the scan when the crate is bumped. Gate: a
+  unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
+  too) gets an error from each of the three functions where the parent panics; a multi-file run
+  continues with the next file; the existing mkvdovi tests pass unchanged.
+
+Gate evidence: PR #97. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (only
+allowed skips). `mkvdovi/src/rpu_guard.rs` walks each source RPU's header and data mapping with
+the crate's bit reads before `parse_rpu_file`. Bit-built fixtures (`rpu_guard/fixtures.rs`,
+committed as `mkvdovi/tests/fixtures/linear_interp_RPU.bin`) put the piece in each component,
+after MMR pieces, in a second piece, with Profile 7 NLQ and with float coefficients; a
+`catch_unwind` on the crate proves each one panics, and the guard returns an error naming the
+RPU. `rpu_check::tests::a_linear_interpolation_piece_is_an_error_not_an_abort` (classify, analyze)
+and `a_refused_window_fails_the_sample_even_beside_a_good_one` (`sample_rpu_windows`) fail on the
+parent behaviour. `mkvdovi/tests/source_rpu_abort.rs` runs two files with `dovi_tool` and
+`mediainfo` shims: the run reaches the second file and ends normally, and the HDR10-tagged second
+file is refused instead of "Detected: HDR10". Valid RPUs (8.1 CM v2.9/v4.0, 5, 8.4 preset and
+bt2100) pass and parse unchanged. `cargo mutants --in-diff`: survivors triaged (tests added for
+six, nine equivalent, two pre-existing).
+
+Review: the pre-PR panel found the sniff fallback (a refused RPU passed as HDR10; fixed) and the
+DM payload allocations (new step E15.2). Codex exec found that one refused window was hidden by a
+readable one (fixed); Codex's GitHub review: LGTM.
+
+Resolution: source RPUs that `dolby_vision` 3.4 would abort on are refused with an error, and a
+multi-file run continues; E15.2 extends the guard past the mapping.
+
 ### 2026-11-05: P15.3 `mkvdovi manifest <input> [--out] [--work-dir]` (PR #96)
 
 Step: - [P15.3][corpus] `mkvdovi manifest <input> [--out] [--work-dir]`; never muxes or deletes.
