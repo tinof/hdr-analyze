@@ -341,6 +341,13 @@ fn reusable_pair(
     identity: &FileIdentity,
 ) -> Option<(L1Sidecar, Pair)> {
     if !(paths.measurements.exists() && paths.sidecar.exists() && paths.au_table.exists()) {
+        if paths.measurements.exists() {
+            // For example a conversion's measurements: they are measured again, with the table.
+            progress::print_info(&format!(
+                "'{}' has no AU table; analyzing again to write one (it replaces these measurements).",
+                paths.measurements.display()
+            ));
+        }
         return None;
     }
     let input = Path::new(input_file);
