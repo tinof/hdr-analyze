@@ -38,7 +38,31 @@ pub fn parse_source_rpu_file(path: &Path) -> Result<Vec<DoviRpu>> {
     parse_rpu_file(path).context("Failed to parse Dolby Vision RPU")
 }
 
-/// An error naming the first RPU (0-based, in file order) that would abort the crate's parser.
+/// The guard's refusal: RPU `index` (0-based, in file order) would abort the crate's parser.
+/// A caller tells it apart from other parse failures with [`is_unparseable`]: the file does
+/// carry Dolby Vision RPUs, so it must not be handled as if it had none.
+#[derive(Debug)]
+pub struct UnparseableRpu {
+    index: usize,
+    unreadable: Unreadable,
+}
+
+impl std::fmt::Display for UnparseableRpu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RPU {}: {}", self.index, self.unreadable)
+    }
+}
+
+impl std::error::Error for UnparseableRpu {}
+
+/// Whether `error` (or one of its causes) is the guard's [`UnparseableRpu`].
+pub fn is_unparseable(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<UnparseableRpu>().is_some())
+}
+
+/// An [`UnparseableRpu`] error for the first RPU that would abort the crate's parser.
 pub fn check_parseable(bytes: &[u8]) -> Result<()> {
     for (index, nal) in split_nals(bytes).enumerate() {
         // The crate refuses these bytes with an error before it reads any field.
@@ -47,7 +71,7 @@ pub fn check_parseable(bytes: &[u8]) -> Result<()> {
         };
         let payload = clear_start_code_emulation_prevention_3_byte(trimmed);
         if let Some(unreadable) = scan(&mut BitReader::new(&payload)).flatten() {
-            anyhow::bail!("RPU {index}: {unreadable}");
+            return Err(UnparseableRpu { index, unreadable }.into());
         }
     }
     Ok(())

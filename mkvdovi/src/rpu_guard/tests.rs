@@ -309,3 +309,17 @@ fn the_committed_fixture_is_the_linear_interpolation_rpu() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/linear_interp_RPU.bin");
     assert_eq!(fs::read(path).unwrap(), linear_interp_rpu_bin());
 }
+
+#[test]
+fn is_unparseable_tells_the_guards_refusal_from_other_parse_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let refused = write(dir.path(), "refused.bin", &linear_interp_rpu_bin());
+    let error = parse_source_rpu_file(&refused)
+        .context("classify")
+        .unwrap_err();
+    assert!(is_unparseable(&error), "{error:#}");
+
+    let empty = write(dir.path(), "empty.bin", &[]);
+    let error = parse_source_rpu_file(&empty).unwrap_err();
+    assert!(!is_unparseable(&error), "{error:#}");
+}
