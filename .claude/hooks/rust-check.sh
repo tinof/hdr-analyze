@@ -12,12 +12,34 @@
 #
 # State: ${TMPDIR:-/tmp}/claude-rust-check/<session_id>/{files,blocks}
 # No touched files -> the Stop hook exits immediately without starting cargo.
+#
+# Portable to macOS /bin/bash 3.2: no mapfile, no associative arrays, and every expansion of
+# an array that can be empty uses ${a[@]+"${a[@]}"} (bash < 4.4 calls an empty "${a[@]}"
+# unbound under set -u). Regexes live in variables so [[ =~ ]] parses the same in 3.2 and 5.
 set -uo pipefail
 
 MAX_BLOCKS=3
 MAX_LINES=40
 CLIPPY_TIMEOUT=540
 NVCC_TIMEOUT=60
+
+# Stock macOS has no timeout(1); Homebrew coreutils may install only gtimeout. Without either,
+# run unbounded: the hook's own timeout in settings.json (600 s) still stops a hung run.
+if command -v timeout >/dev/null 2>&1; then
+    with_timeout() { timeout "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+    with_timeout() { gtimeout "$@"; }
+else
+    with_timeout() { shift; "$@"; }
+fi
+
+# contains <needle> [items...]: exit 0 when needle equals one of the items.
+contains() {
+    local needle="$1" item
+    shift
+    for item in "$@"; do [ "$item" = "$needle" ] && return 0; done
+    return 1
+}
 
 mode="${1:-}"
 input="$(cat)"
@@ -50,15 +72,19 @@ blocks="$(cat "$state/blocks" 2>/dev/null || echo 0)"
 # Past the cap: stay quiet until the next Rust edit resets the counter.
 [ "$blocks" -gt "$MAX_BLOCKS" ] 2>/dev/null && exit 0
 
-mapfile -t touched <"$state/files"
+touched=()
+while IFS= read -r f || [ -n "$f" ]; do
+    [ -n "$f" ] && touched+=("$f")
+done <"$state/files"
 
 # Group touched files by repository root (works in worktrees too).
-declare -A roots=()
-for f in "${touched[@]}"; do
+roots=()
+for f in ${touched[@]+"${touched[@]}"}; do
     dir="$(dirname -- "$f")"
     [ -d "$dir" ] || continue
     root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || continue
-    [ -f "$root/Cargo.toml" ] && roots["$root"]=1
+    [ -f "$root/Cargo.toml" ] || continue
+    contains "$root" ${roots[@]+"${roots[@]}"} || roots+=("$root")
 done
 if [ "${#roots[@]}" -eq 0 ]; then
     rm -rf -- "$state"
@@ -73,16 +99,20 @@ infra_error=""
 nvcc="$(command -v nvcc 2>/dev/null)"
 [ -n "$nvcc" ] || { [ -x /usr/local/cuda/bin/nvcc ] && nvcc=/usr/local/cuda/bin/nvcc; }
 
-for root in "${!roots[@]}"; do
+clippy_re='^([^:[:space:]][^:]*):[0-9]+:[0-9]+: (error|warning)(\[[^]]*\])?: '
+tool_re='^(tools/[^/]+)/'
+nvcc_re='^[^[:space:]].*\([0-9]+\): (catastrophic )?(error|warning)'
+
+for root in "${roots[@]}"; do
     # Repo-relative touched paths for this root.
     rel=()
-    for f in "${touched[@]}"; do
+    for f in ${touched[@]+"${touched[@]}"}; do
         case "$f" in "$root"/*) rel+=("${f#"$root"/}") ;; esac
     done
 
     # 1. Format touched .rs files without reporting anything (rustfmt.toml is picked up).
     fmt=()
-    for r in "${rel[@]}"; do
+    for r in ${rel[@]+"${rel[@]}"}; do
         [[ "$r" == *.rs && -f "$root/$r" ]] && fmt+=("$root/$r")
     done
     [ "${#fmt[@]}" -gt 0 ] && rustfmt --quiet -- "${fmt[@]}" >/dev/null 2>&1
@@ -90,14 +120,12 @@ for root in "${!roots[@]}"; do
     # 2. Clippy: the workspace, plus any excluded tools/<crate> that was touched.
     #    Each entry is "<path prefix to prepend>|<manifest path or empty>".
     runs=("|")
-    declare -A tool_seen=()
-    for r in "${rel[@]}"; do
-        if [[ "$r" =~ ^(tools/[^/]+)/ ]] && [ -f "$root/${BASH_REMATCH[1]}/Cargo.toml" ]; then
+    for r in ${rel[@]+"${rel[@]}"}; do
+        if [[ "$r" =~ $tool_re ]] && [ -f "$root/${BASH_REMATCH[1]}/Cargo.toml" ]; then
             t="${BASH_REMATCH[1]}"
-            [ -n "${tool_seen[$t]:-}" ] || { tool_seen[$t]=1; runs+=("$t/|$t/Cargo.toml"); }
+            contains "$t/|$t/Cargo.toml" "${runs[@]}" || runs+=("$t/|$t/Cargo.toml")
         fi
     done
-    unset tool_seen
 
     for run in "${runs[@]}"; do
         prefix="${run%%|*}"
@@ -105,13 +133,13 @@ for root in "${!roots[@]}"; do
         args=(clippy --all-targets --message-format=short --color=never)
         if [ -n "$manifest" ]; then args+=(--manifest-path "$manifest"); else args+=(--workspace); fi
 
-        out="$(cd "$root" && timeout "$CLIPPY_TIMEOUT" cargo "${args[@]}" 2>&1)"
+        out="$(cd "$root" && with_timeout "$CLIPPY_TIMEOUT" cargo "${args[@]}" 2>&1)"
         status=$?
         [ "$status" -eq 124 ] && { infra_error="cargo clippy timed out after ${CLIPPY_TIMEOUT}s in $root"; continue; }
 
         diag_count=0
         while IFS= read -r line; do
-            [[ "$line" =~ ^([^:[:space:]][^:]*):[0-9]+:[0-9]+:\ (error|warning)(\[[^]]*\])?:\  ]] || continue
+            [[ "$line" =~ $clippy_re ]] || continue
             diag_count=$((diag_count + 1))
             path="${prefix}${BASH_REMATCH[1]}"
             kind="${BASH_REMATCH[2]}"
@@ -120,7 +148,7 @@ for root in "${!roots[@]}"; do
                 report+=("$line")
             else
                 hit=0
-                for r in "${rel[@]}"; do [ "$r" = "$path" ] && { hit=1; break; }; done
+                contains "$path" ${rel[@]+"${rel[@]}"} && hit=1
                 if [ "$hit" -eq 1 ]; then report+=("$line"); else extra_warnings=$((extra_warnings + 1)); fi
             fi
         done <<<"$out"
@@ -133,11 +161,11 @@ for root in "${!roots[@]}"; do
     # 3. The embedded PTX must be NVRTC 12.6's output for kernels.cu. Only report: the hook's
     #    nvcc is another compiler, so regenerating here would write the wrong file.
     ptx_touched=0
-    for r in "${rel[@]}"; do
+    for r in ${rel[@]+"${rel[@]}"}; do
         case "$r" in */kernels.cu | */kernels.ptx) ptx_touched=1 ;; esac
     done
     if [ "$ptx_touched" -eq 1 ] && [ -x "$root/scripts/gen-kernels-ptx.sh" ]; then
-        out="$(cd "$root" && timeout "$NVCC_TIMEOUT" scripts/gen-kernels-ptx.sh --check 2>&1)"
+        out="$(cd "$root" && with_timeout "$NVCC_TIMEOUT" scripts/gen-kernels-ptx.sh --check 2>&1)"
         case $? in
         0) ;;
         1)
@@ -152,14 +180,14 @@ for root in "${!roots[@]}"; do
 
     # 4. CUDA kernels: compile each touched .cu file to PTX and discard the output.
     [ -n "$nvcc" ] || continue
-    for r in "${rel[@]}"; do
+    for r in ${rel[@]+"${rel[@]}"}; do
         [[ "$r" == *.cu && -f "$root/$r" ]] || continue
-        out="$(cd "$root" && timeout "$NVCC_TIMEOUT" "$nvcc" -ptx -o /dev/null "$r" 2>&1)"
+        out="$(cd "$root" && with_timeout "$NVCC_TIMEOUT" "$nvcc" -ptx -o /dev/null "$r" 2>&1)"
         status=$?
         [ "$status" -eq 124 ] && { infra_error="nvcc timed out after ${NVCC_TIMEOUT}s on $r"; continue; }
         diag_count=0
         while IFS= read -r line; do
-            [[ "$line" =~ ^[^[:space:]].*\([0-9]+\):\ (catastrophic\ )?(error|warning) ]] || continue
+            [[ "$line" =~ $nvcc_re ]] || continue
             diag_count=$((diag_count + 1))
             report+=("$line")
         done <<<"$out"
