@@ -34,6 +34,9 @@ pub enum Error {
     /// passed: an internal failure, not bad input.
     #[error("RPU: {0}")]
     Rpu(String),
+    /// A playback manifest that does not parse or is not consistent (`manifest`).
+    #[error("playback manifest: {0}")]
+    Manifest(String),
 }
 
 impl Error {
@@ -49,6 +52,7 @@ impl Error {
             Error::Hdr10PlusParse(_) => 5,
             Error::Hdr10PlusNoPeak(_) => 6,
             Error::Rpu(_) => 7,
+            Error::Manifest(_) => 8,
         }
     }
 
@@ -75,8 +79,9 @@ mod tests {
             Error::Hdr10PlusParse(String::new()),
             Error::Hdr10PlusNoPeak("histogram"),
             Error::Rpu(String::new()),
+            Error::Manifest(String::new()),
         ];
         let codes: Vec<i32> = errors.iter().map(Error::code).collect();
-        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

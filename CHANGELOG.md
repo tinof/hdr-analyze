@@ -13,6 +13,10 @@ This document provides a historical record of completed milestones, feature impl
   video packet in decode order with its pts, size and the CRC-32 of IRAP pictures, plus the source and
   track identity, and is bound to the sidecar by its SHA-256. `--au-table-only` writes the table
   without measuring. `--help` lists the capability `au-table-v1`.
+- `dovi_rpu_builder::manifest` (P15.2): the playback manifest's schema, a strict parser that never
+  panics (`Error::Manifest`, code 8), and `AuMatcher`, which validates its manifest on
+  construction, checks each AU a player reads against the AU table and returns its shot's L1 and
+  scene refresh. RPUs built through it equal `dovi_tool` 2.3.4's fixtures byte for byte.
 
 ### Changed
 

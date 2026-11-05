@@ -182,6 +182,18 @@ carries the neutral L3 and the L254 that `CmV40DmData::default_safe()` adds. The
 (the canary turns green through the app's own conversion) uses
 `static_84_params(HlgComposer::canary())` with `STATIC_84_L1`.
 
+## Playback manifest
+
+`dovi_rpu_builder::manifest` is the playback manifest of [`PLAYBACK_MANIFEST.md`](PLAYBACK_MANIFEST.md)
+(ROADMAP P15.2): `PlaybackManifest::{parse, to_json, validate}`, the `RpuParams` `rpu` object
+(`to_manifest_json`, `from_manifest_json`), `crc32` (CRC-32/ISO-HDLC, as `java.util.zip.CRC32`), and
+`AuMatcher`. `AuMatcher::new(&manifest)` runs `validate()` first and returns `Result`, so a
+hand-built invalid manifest is `Error::Manifest`, not a panic. A player feeds
+`AuMatcher::next(pts, bytes, laced)` each AU in decode order and calls `reset()` at a seek; `AuVerdict::Inject { l1, scene_refresh, .. }` goes to `RpuBuilder::shot(l1)` and
+`ShotRpu::write(scene_refresh)`. A parse refusal is `Error::Manifest` (code 8); a matcher rejection
+carries a `RejectReason` with its own stable code. `tests/manifest_params.rs` shows that RPUs built
+through a parsed manifest equal every non-canary `dovi_tool` fixture byte for byte.
+
 ## Composers
 
 `HlgComposer::Preset` and `Bt2100` are `dovi84_composer::Composer::Preset` and `Bt2100V1`. `Canary`

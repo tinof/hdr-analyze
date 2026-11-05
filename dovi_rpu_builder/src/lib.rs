@@ -13,6 +13,8 @@
 //!   rule to frames in presentation order.
 //! - [`STATIC_84_L1`] and [`static_84_params`]: a static HLG → 8.4 RPU.
 //! - [`HlgComposer`]: preset, bt2100 (the default) and the P8 canary.
+//! - [`manifest`]: the playback manifest of measured shots (`docs/PLAYBACK_MANIFEST.md`), its
+//!   strict parser, and [`manifest::AuMatcher`], which checks each AU a player reads against it.
 //!
 //! No function here does file I/O or starts a process, and caller input never panics: every
 //! refusal is an [`Error`], including the inputs on which the `dolby_vision` crate would panic
@@ -26,6 +28,7 @@ mod builder;
 mod composer;
 mod error;
 mod hdr10plus;
+pub mod manifest;
 mod params;
 mod static_l1;
 

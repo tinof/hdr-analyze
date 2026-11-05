@@ -1,7 +1,8 @@
 # Playback manifest (P15)
 
-Status: design written 2026-11-04. The AU table is implemented (P15.1); the manifest, the matcher
-and `mkvdovi manifest` are not yet (P15.2 to P15.4). Steps: ROADMAP P15.
+Status: design written 2026-11-04. The AU table (P15.1) and the manifest schema, parser and matcher
+in `dovi_rpu_builder::manifest` (P15.2) are implemented; `mkvdovi manifest` and the `RPU.bin`
+import are not yet (P15.3, P15.4). Steps: ROADMAP P15.
 
 ## Purpose
 
@@ -105,14 +106,21 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
 - `aus`: as in the AU table.
 - `analysis`: `luminance_mapping` (`pq` or the HLG composer name), `downscale`, `sample_rate`,
   `gpu`, `no_crop`, `crop`, the peak settings and `scene`.
-- `rpu`: everything `RpuParams` needs. That is the profile, the composer, the CM version, L9 and
-  L11, the trim targets, L6, L5, `l1_avg_pq_cm_version` and the 8.1 source range. The values are
-  written and read by one symmetric pair in `dovi_rpu_builder`.
+- `rpu`: everything `RpuParams` needs, written and read by `RpuParams::{to,from}_manifest_json`:
+  - `profile`: `"8.1"` or `"8.4"`;
+  - `composer`: `"preset"` or `"bt2100"` for 8.4, null for 8.1 (the P8 canary is refused);
+  - `source_range`: `[min, max]` (12-bit PQ) or null for 8.1, null for 8.4;
+  - `cm`: `{"version": "V29"}`, or `{"version": "V40", "source_primary_index",
+    "content_type", "reference_mode", "trim_targets_nits"}`;
+  - `level6`: the four `extra.json` fields; `level5`: `{left, right, top, bottom}` or null;
+  - `l1_avg_pq_cm_version`: `"V29"` or `"V40"`.
 - `l1_policy`: `"measured"`, or `"rpu-bin"` for P15.4.
 - `shots`: parallel arrays `start[]` (presentation index in stream frames, starting at 0),
   `min[]`, `avg[]` and `max[]` (12-bit PQ, unclamped, exactly as mkvdovi's `extra.json` gets
   them).
 - `coverage`: `[{start, end, class}]`, sorted, not overlapping, within `[0, stream pictures)`.
+  Every `start` is a shot start, and every `end` is a shot start or the picture count, so no shot
+  is part covered. Pictures outside every range get no manifest L1 and are still checked.
   - `full` means sample rate 1, downscale 1, the global scene detector at mkvdovi's defaults,
     mkvdovi's default peak and denoise settings, and a passed order check.
   - `approximate` is anything else.
@@ -126,14 +134,26 @@ the RPU NAL that mkvdovi writes for the same file and settings. P15.3 tests this
 
 The schema, the strict parser and the matcher live in `dovi_rpu_builder`. That crate is pure
 Rust, builds for Android and is already linked by the fork, so the writer and the player share
-one definition. The parser never panics. It refuses:
+one definition. The parser never panics; every refusal is `Error::Manifest` (code 8).
+`AuMatcher::new` applies the same checks (`validate()`) to a manifest built in code. Unknown keys
+are ignored within version 1. It refuses:
 
-- an unknown format or version;
-- array lengths that disagree;
-- a pts that is not unique;
-- shots that are unsorted or do not start at 0;
-- bad coverage;
-- a composer whose luminance mapping differs from `analysis.luminance_mapping`.
+- an unknown format or version, or a track other than Matroska HEVC;
+- array lengths that disagree, or no AUs;
+- `non_picture` or `irap_crc32` indices that are unsorted, repeated or out of range, or an IRAP
+  entry on a non-picture AU;
+- a pts that is not unique over all AUs;
+- `leading_skipped` above the picture count, or a time base that is not positive;
+- shots that are empty, do not start at 0, do not rise, start beyond the pictures, or have an L1
+  code above 4095;
+- coverage that is empty, unsorted, overlapping, beyond the pictures, or off shot boundaries;
+- digests that are not 64 lowercase hex digits;
+- a composer whose luminance mapping differs from `analysis.luminance_mapping` (8.1 needs `pq`);
+- an `rpu` that `RpuBuilder::new` refuses, so a parsed manifest builds every shot.
+
+`check_source`, `check_track` (CodecPrivate digest, width, height, time base) and
+`check_composer` cover the candidate and track steps below. SHA-256 is not computed in the crate:
+the producer and the player compute the digests and compare hex strings.
 
 The player then follows these steps:
 
@@ -146,12 +166,15 @@ The player then follows these steps:
    - The size must match, and an IRAP AU's CRC must match.
    - While reading is continuous, the decode index must be the previous one plus 1.
    - After a seek or reset the matcher waits for an IRAP. AUs before it get no manifest L1 and
-     carry the player's fallback RPU (Media3 normally drops them). The first IRAP is validated in
-     full, and continuity applies from there on.
+     carry the player's fallback RPU (Media3 normally drops them); their pts and size are still
+     checked. The first IRAP is validated in full, and continuity applies from there on.
 4. **Shot.** The presentation index p is the pts rank. The shot is the last one with
    `start ≤ p`, and `scene_refresh` is set only when `p == start` (mkvdovi parity).
-5. **Mismatch.** Any mismatch rejects the manifest for the rest of the playback, with a reason
-   code. How the player moves to its fallback inside a shot is its own policy (fork DESIGN 2.2).
+   A non-picture AU, and a picture outside the coverage, get the fallback
+   (`AuVerdict::Fallback`); an injected AU also carries its range's quality class.
+5. **Mismatch.** Any mismatch rejects the manifest for the rest of the playback, also across
+   resets, with a stable reason code: 1 unknown pts, 2 size, 3 CRC, 4 order, 5 laced, 6 past the
+   end. How the player moves to its fallback inside a shot is its own policy (fork DESIGN 2.2).
 
 ## Not decided here
 
