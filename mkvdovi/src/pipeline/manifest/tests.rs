@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use clap::Parser;
 use dovi84_composer::Composer;
 use dovi_rpu_builder::manifest::QualityClass;
 use dovi_rpu_builder::{HlgComposer, Profile};
@@ -11,7 +12,8 @@ use super::build::{analysis, manifest, quality_class, Inputs};
 use super::identity::{
     hex, is_matroska_header, is_same_file, sha256_hex, FileIdentity, CHUNK_BYTES,
 };
-use super::Paths;
+use super::{check_sampling, Paths};
+use crate::cli::Args;
 use crate::metadata::{CmV40Config, L1Sidecar};
 use crate::pipeline::config::Settled;
 
@@ -419,6 +421,33 @@ fn the_default_analysis_is_full_and_any_other_setting_approximate() {
         );
     }
     assert!(analysis(&json!({"crop": {}}), &json!({})).is_err());
+}
+
+#[test]
+fn a_pair_is_reused_only_at_the_sampling_the_quality_asks_for() {
+    let args =
+        |quality: &str| Args::try_parse_from(["mkvdovi", "--analysis-quality", quality]).unwrap();
+    let sampled = |downscale: u32, sample_rate: u32| {
+        let mut json = sidecar_json(0, 24);
+        json["analysis"]["downscale"] = json!(downscale);
+        json["analysis"]["sample_rate"] = json!(sample_rate);
+        serde_json::from_value::<L1Sidecar>(json).unwrap()
+    };
+    // accurate measures every frame at full size; fast at half size, every third frame
+    // (docs/CLI_REFERENCE.md `--analysis-quality`).
+    assert_eq!(check_sampling(&sampled(1, 1), &args("accurate")), Ok(()));
+    assert_eq!(check_sampling(&sampled(2, 3), &args("fast")), Ok(()));
+
+    let coarse = check_sampling(&sampled(2, 3), &args("accurate")).unwrap_err();
+    assert!(coarse.contains("downscale 2 / sample-rate 3"), "{coarse}");
+    let fine = check_sampling(&sampled(1, 1), &args("fast")).unwrap_err();
+    assert!(fine.contains("downscale 1 / sample-rate 1"), "{fine}");
+
+    let mut unrecorded = sidecar_json(0, 24);
+    unrecorded.as_object_mut().unwrap().remove("analysis");
+    let unrecorded: L1Sidecar = serde_json::from_value(unrecorded).unwrap();
+    let missing = check_sampling(&unrecorded, &args("accurate")).unwrap_err();
+    assert!(missing.contains("does not record"), "{missing}");
 }
 
 fn settled(profile: &'static str) -> Settled {
