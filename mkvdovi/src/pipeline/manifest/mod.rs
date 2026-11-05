@@ -39,6 +39,9 @@ pub(super) struct Paths {
     pub(super) measurements: PathBuf,
     pub(super) sidecar: PathBuf,
     pub(super) au_table: PathBuf,
+    /// The analyzer's temp files for the sidecar and the AU table.
+    sidecar_tmp: PathBuf,
+    au_table_tmp: PathBuf,
     pub(super) log: PathBuf,
     pub(super) out: PathBuf,
     pub(super) out_tmp: PathBuf,
@@ -60,25 +63,32 @@ impl Paths {
             || work_dir.join(format!("{stem}.dvmanifest.json")),
             Path::to_path_buf,
         );
-        let mut out_tmp = out.as_os_str().to_owned();
-        out_tmp.push(".tmp");
+        let out_tmp = with_tmp_suffix(&out);
+        let sidecar = metadata::l1_sidecar_path(&measurements);
+        let au_table = au_table_path(&measurements);
         Self {
-            sidecar: metadata::l1_sidecar_path(&measurements),
-            au_table: au_table_path(&measurements),
+            sidecar_tmp: with_tmp_suffix(&sidecar),
+            au_table_tmp: with_tmp_suffix(&au_table),
+            sidecar,
+            au_table,
             log: work_dir.join(format!("{stem}.manifest-analyzer.log")),
             measurements,
             out,
-            out_tmp: PathBuf::from(out_tmp),
+            out_tmp,
             work_dir,
         }
     }
 
-    /// Every path this run writes. The analyzer also writes the sidecar and the AU table.
-    fn written(&self) -> [&Path; 6] {
+    /// Every path this run writes. The analyzer also writes the sidecar and the AU table, each
+    /// through a `.tmp` file it creates with truncation (`hdr_analyzer_mvp` `l1_sidecar.rs`,
+    /// `au_table.rs`).
+    fn written(&self) -> [&Path; 8] {
         [
             &self.measurements,
             &self.sidecar,
+            &self.sidecar_tmp,
             &self.au_table,
+            &self.au_table_tmp,
             &self.log,
             &self.out,
             &self.out_tmp,
@@ -91,6 +101,13 @@ impl Paths {
             .into_iter()
             .find(|path| is_same_file(path, input))
     }
+}
+
+/// `path` with `.tmp` appended, the temp name of a write through a rename.
+fn with_tmp_suffix(path: &Path) -> PathBuf {
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    PathBuf::from(temp)
 }
 
 /// Runs `mkvdovi manifest`. `Ok(false)`: refused, with the reason printed.

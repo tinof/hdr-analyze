@@ -376,6 +376,30 @@ fn paths_default_to_the_input_directory_and_refuse_the_input() {
 }
 
 #[test]
+fn an_analyzer_temp_file_that_is_the_input_is_refused() {
+    // The analyzer writes the sidecar and the AU table through `<path>.tmp` with
+    // `File::create` (hdr_analyzer_mvp/src/l1_sidecar.rs, au_table.rs), which truncates.
+    for temp_name in [
+        "clip_measurements.bin.l1.json.tmp",
+        "clip_measurements.bin.au.json.tmp",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("clip.mkv");
+        std::fs::write(&input, b"x").unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let link = work.join(temp_name);
+        std::fs::hard_link(&input, &link).unwrap();
+        let paths = Paths::new(input.to_str().unwrap(), Some(&work), None);
+        assert_eq!(
+            paths.aliasing_input(&input),
+            Some(link.as_path()),
+            "{temp_name}"
+        );
+    }
+}
+
+#[test]
 fn the_default_analysis_is_full_and_any_other_setting_approximate() {
     let pair = good_pair(0, 24);
     let full = analysis(&pair.sidecar, &pair.table.scene).unwrap();
