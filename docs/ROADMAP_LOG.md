@@ -6,6 +6,33 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-05: E15.2 Extend the guard past the mapping (PR #98)
+
+Step: - [E15.2][desk] Extend the guard (`mkvdovi/src/rpu_guard.rs`) past the mapping: the crate allocates
+  `num_ext_blocks` (CM v2.9, v4.0) before it reads the blocks. Gate: such RPUs get an error where
+  the crate aborts; Profile 7 NLQ data is walked. Needs: E15.1.
+
+Gate evidence: PR #98. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (only
+allowed skips). The walk now follows the Profile 7 NLQ data and the DM payload (compressed or
+full, CM v2.9 then v4.0), also under `use_prev_vdr_rpu_flag`, up to the last non-zero byte as the
+crate reads it. Fixtures come from the crate's own writer (real CRC): P8.1 CM v2.9 and v4.0,
+Profile 7 with non-zero NLQ data, compressed DM and a reused mapping. A `catch_unwind` on the crate
+proves each refused case panics: `an_extension_block_count_is_an_error_where_the_crate_panics`
+(2^62 blocks in each CM version of each layout) and
+`a_block_length_the_crate_cannot_read_is_an_error_where_it_panics` (L8 26, L9 18, L10 22 bytes:
+`unreachable!` in `required_bits`). `valid_dm_payloads_pass_and_the_walk_ends_at_the_crc` shows the
+walk ends at the CRC on every layout, the Profile 7 NLQ one included. Counts above a ninth of the
+bits left are refused; counts and cut-short blocks the crate errors on stay its error. Mutations
+of the DM walk, the NLQ walk, the reuse path, the trailing-zero trim, the length check and the
+count bound each fail a test.
+
+Review: the pre-PR panel found the L8/L9/L10 length abort (P1, fixed) and the loose count bound
+(P3, fixed). Codex exec and Codex's GitHub review: LGTM. The crate's reserved-block allocation is
+unreachable in 3.4.0 (`ensure!(false)` first), so the step no longer names it.
+
+Resolution: source RPUs whose DM payload `dolby_vision` 3.4 would abort on are refused with the
+E15.1 error; E15 has no step left.
+
 ### 2026-11-05: E15.1 Pre-scan source RPUs for the unparseable piece (PR #97)
 
 Step: - [E15.1][desk] Pre-scan each source RPU's data mapping for that piece before `parse_rpu_file` in the

@@ -53,15 +53,12 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-05 at main@7ec5c49)
-<!-- roadmap-next: rev=3 scope=P15.4 config=b3103c892048 probes=gpu:ok,corpus:ok ready=0f8e51d85a64 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.14,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
+<!-- roadmap-next: rev=3 scope=P15.4 config=b3103c892048 probes=gpu:ok,corpus:ok ready=2d03768ac2d5 skip=P9.4,P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.14,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
 
 Scoped ranking of P15.4 (owner request). P15.4 needs E15.2 (E15.1 merged, #97). Codex agreed:
 E15.2, then P15.4, then P15.5.
 
-1. **E15.2 Extend the RPU guard past the data mapping** (E15, P15.4's prerequisite). Gate: in
-   E15. Why: the one step between P15.4 and a start. Branch: `fix/e15-2-dm-payload-guard`.
-   Release: patch
-2. **P15.5 Manifest for an FFmpeg-cut open-GOP file** (P15). Gate: in P15. Why: same item; may
+1. **P15.5 Manifest for an FFmpeg-cut open-GOP file** (P15). Gate: in P15. Why: same item; may
    pin the refusal. Branch: `fix/p15-5-open-gop-manifest`. Release: minor
 
 **Reassess:** new-defect (P15.3, PR #96): P15.5, an FFmpeg-cut open-GOP file is refused.
@@ -864,11 +861,9 @@ The detailed gap table and validation method live in
 
 ### E15: abort-safe RPU parsing
 
-- **Status:** Open. E15.1, the guard for the data mapping (`mkvdovi/src/rpu_guard.rs`), is done
-  ([log](docs/ROADMAP_LOG.md)); open: E15.2, the allocations in the DM payload.
-- [E15.2][desk] Extend the guard (`mkvdovi/src/rpu_guard.rs`) past the mapping: the crate allocates
-  `num_ext_blocks` (CM v2.9, v4.0) before it reads the blocks. Gate: such RPUs get an error where
-  the crate aborts; Profile 7 NLQ data is walked. Needs: E15.1.
+- **Status:** Done, no step open: E15.1 and E15.2 guard source RPUs through the DM payload
+  (`mkvdovi/src/rpu_guard.rs`, [log](docs/ROADMAP_LOG.md)); kept because
+  `docs/MKVDOVI_PIPELINE.md` cites ROADMAP E15.
 - **Checked 2026-11-05 @7ec5c49:** callers use `parse_source_rpu_file` (`mkvdovi/src/rpu_check.rs:335`,
   `:450`, `:467`). In `dolby_vision` 3.4.0 the reserved-block allocation is unreachable (`ensure!(false)`
   first, `cmv29.rs:57`, `cmv40.rs:57`); the count is `extension_metadata/mod.rs:114`. The crate reads
