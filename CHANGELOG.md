@@ -24,6 +24,13 @@ This document provides a historical record of completed milestones, feature impl
   non-Matroska input before any analysis, and reuses a measurement pair only when it is bound to
   the file as it is now. `dovi_rpu_builder::VERSION` names the builder in the manifest.
 
+### Fixed
+
+- A source whose Dolby Vision RPU has a mapping piece the `dolby_vision` 3.4 parser cannot read
+  (a linear-interpolation polynomial piece, or more pivots or pieces than the RPU holds) no longer
+  aborts mkvdovi and the rest of a multi-file run (ROADMAP E15.1). The file is refused with a
+  warning naming the parse error, and the run continues with the next file.
+
 ### Changed
 
 - The L1 sidecar is written through a temp file and a rename, so an interrupted run leaves none.
