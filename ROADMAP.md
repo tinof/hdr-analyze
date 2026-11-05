@@ -53,21 +53,19 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-05 at main@cd44e61)
-<!-- roadmap-next: rev=3 scope=E13.15:-split config=b3103c892048 probes=gpu:ok,corpus:ok ready=a2ee206db8e8 skip=E13.6,E13.7,E13.9,E13.10,E13.13 -->
+<!-- roadmap-next: rev=3 scope=E13.15:-split config=b3103c892048 probes=gpu:ok,corpus:ok ready=7f382b9b1e15 skip=E13.6,E13.7,E13.9,E13.10,E13.13 -->
 
-Scoped ranking of E13 (the owner asked for E13.15). E13.15 is the last open prerequisite of P15.3,
-which the owner direction of 2026-11-04 puts ahead of the earlier Next up (E7.1, P6.2, P12.1).
+Scoped ranking of E13 (the owner asked for E13.15, closed by PR #95). It was the last open
+prerequisite of P15.3, which the owner direction of 2026-11-04 puts ahead of the earlier Next up
+(E7.1, P6.2, P12.1).
 
-1. **E13.15 Split `prepare_configuration` by phase** (priority 11). Gate: the mkvdovi gate. Why:
-   P15.3 needs it; P15.1 and P15.2 are merged. Branch: `refactor/e13-15-split-prepare-configuration`.
-   Release: none
-2. **E13.12 Split `convert_file` by phase** (priority 11). Gate: the mkvdovi gate. Why: P15.3's
+1. **E13.12 Split `convert_file` by phase** (priority 11). Gate: the mkvdovi gate. Why: P15.3's
    subcommand follows its phase order. Branch: `refactor/e13-12-split-convert-file`. Release: none
-3. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
+2. **E13.14 Split `acquire_measurements` by phase** (priority 11). Gate: the mkvdovi gate. Why:
    P15.3 measures without the mux. Branch: `refactor/e13-14-split-acquire-measurements`. Release: none
 
 Passed over: E13.6, E13.9, E13.10 (analyzer, CUDA parity, no P15 link), E13.7 (chore), E13.13
-(verify, no P15 link). After E13.15, P15.3 comes before both alternates.
+(verify, no P15 link). P15.3 comes before both entries.
 
 ### Waiting for the owner
 
@@ -740,9 +738,9 @@ The detailed gap table and validation method live in
 
 ### E13: module size refactor
 
-- **Status:** Partial. Steps 2-5 and E13.11 done, no production file over the 800-line
-  limit; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E13.6-E13.10 and
-  E13.12-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
+- **Status:** Partial. Steps 2-5, E13.11 and E13.15 done, no production file over the 800-line
+  limit; history in [the log](docs/ROADMAP_LOG.md). Open: E13.6-E13.10, E13.12-E13.14 and
+  E13.16-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
 - **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
@@ -779,8 +777,6 @@ The detailed gap table and validation method live in
 - [E13.13][corpus] Split `verify_post_mux_with_options` (`mkvdovi/src/verify.rs`, 256 lines) by
   phase. Gate: the mkvdovi gate.
 - [E13.14][corpus] Split `acquire_measurements` (`mkvdovi/src/pipeline/measure.rs`, 221 lines) by
-  phase. Gate: the mkvdovi gate.
-- [E13.15][corpus] Split `prepare_configuration` (`mkvdovi/src/pipeline/config.rs`, 211 lines) by
   phase. Gate: the mkvdovi gate.
 - [E13.16][corpus] Split mkvdovi's `main` (`mkvdovi/src/main.rs`, 188 lines) by phase. Gate: the
   mkvdovi gate.
