@@ -22,6 +22,7 @@ Thumbs.db
 *.bin
 # dovi_tool output the dovi_rpu_builder tests compare against (a few KB).
 !dovi_rpu_builder/tests/fixtures/*.bin
+!mkvdovi/tests/fixtures/*.bin
 *.mkv
 *.mp4
 *.mov

@@ -13,6 +13,7 @@ mod pipeline;
 mod progress;
 mod resume;
 mod rpu_check;
+mod rpu_guard;
 mod verify;
 
 use cli::{Args, SubCmd};
