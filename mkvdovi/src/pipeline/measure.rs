@@ -583,6 +583,20 @@ fn run_fresh_analysis(
         },
     );
 
+    let Some(extra_args) = fresh_analysis_args(args, hlg, hlg_composer) else {
+        return Ok(None);
+    };
+    run_hdr_analyzer(input_file, temp_dir, &extra_args, args)
+}
+
+/// The analyzer flags of a fresh measurement besides the sampling: the optimizer profile, and for
+/// HLG the transfer and the composer. `None` when the analyzer cannot measure through the
+/// composer (printed).
+pub(super) fn fresh_analysis_args(
+    args: &Args,
+    hlg: bool,
+    hlg_composer: Option<Composer>,
+) -> Option<Vec<String>> {
     let mut extra_args = Vec::new();
     if args.boost_experimental {
         progress::print_info("Experimental boost: using 'aggressive' optimizer.");
@@ -610,9 +624,9 @@ fn run_fresh_analysis(
                 composer.cli_name(),
                 composer.luminance_mapping()
             ));
-            return Ok(None);
+            return None;
         }
         extra_args.extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
     }
-    run_hdr_analyzer(input_file, temp_dir, &extra_args, args)
+    Some(extra_args)
 }
