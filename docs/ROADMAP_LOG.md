@@ -6,6 +6,36 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-05: P15.3 `mkvdovi manifest <input> [--out] [--work-dir]` (PR #96)
+
+Step: - [P15.3][corpus] `mkvdovi manifest <input> [--out] [--work-dir]`; never muxes or deletes.
+Gate: VFR, non-zero start and open-GOP accepted; builder RPUs from the manifest equal the
+`--keep-source` output byte for byte for 8.4 bt2100 and 8.1; a different encode and a
+mismatched composer rejected; `extra.json` goldens and RPU baselines unchanged. Needs: P15.1,
+P15.2, E13.15.
+
+Gate evidence: PR #96. Local gates: fmt, workspace clippy, `scripts/ci/test-gate.sh` (583 tests,
+only allowed skips), `clippy-cuda`, `l1-regression`, `tool:rpu_builder_check` and
+`scripts/cuda-parity.sh` (PASS) on the RTX 4070 host. `mkvdovi/tests/playback_manifest.rs` builds
+the player's RPUs from the manifest and compares them with the `--keep-source` conversion:
+`variable_frame_rate_matches_the_conversion`, `non_zero_start_matches_the_conversion`,
+`open_gop_cut_matches_the_conversion`, `hlg_bt2100_matches_the_conversion_and_a_preset_pair_is_not_reused`
+(8.4 bt2100; the mismatched composer), `pq_with_b_frames_matches_the_conversion_and_rejects_another_encode`
+(8.1; a different encode) and `cm_v29_trims_l5_and_measured_light_levels_match_the_conversion`;
+the `extra.json` goldens pass unchanged. Real content
+(`~/mkvdovi-work/rpu-baseline/p15-3-b6e7ea6/RESULT.md`): all 16 RPU captures equal
+`~/mkvdovi-work/rpu-baseline/0.8.0/` (`compare --require-identical-l1` exit 0, `RPU.bin`
+byte-identical), and manifest RPUs equal the conversion's byte for byte on five development cuts
+(8.1, HLG bt2100 and preset). Review: Codex exec found two defects, both fixed with tests (an
+analyzer temp file that is the input; a concurrent writer's manifest temp file); Codex's GitHub
+review LGTM with the first one as a P2.
+
+Resolution: `mkvdovi manifest` (`mkvdovi/src/pipeline/manifest/`) measures with the AU table,
+reuses a pair only for the same input bytes, composer and sampling, and writes
+`<stem>.dvmanifest.json`. Open: a dev cut made by an FFmpeg stream copy, whose two RASL pictures
+have negative MKV timestamps, gets no pts and is refused while its conversion works (new step
+P15.5); the mux drops the source's video timestamps (new step E7.3).
+
 ### 2026-11-05: E13.15 Split `prepare_configuration` by phase (PR #95)
 
 Step: - [E13.15][corpus] Split `prepare_configuration` (`mkvdovi/src/pipeline/config.rs`, 211 lines) by

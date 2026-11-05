@@ -299,6 +299,7 @@ Profile 7 file is MEL or FEL. The plan for FEL input is in [FEL_PLAN.md](FEL_PLA
 | Command | Description |
 |---------|-------------|
 | `mkvdovi inspect <INPUT>` | Extract the complete RPU and report suspicious/static/clipped L1 patterns |
+| `mkvdovi manifest <INPUT> [--out <FILE>] [--work-dir <DIR>]` | Write the playback manifest `<stem>.dvmanifest.json` of an HDR10 or HLG MKV for the NuvioTV fork: measured per-shot L1 and the AU table ([PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)). Takes `--hlg-composer`, `--cm-version`, `--content-type`, `--reference-mode`, `--source-primaries`, `--trim-targets`, `--analysis-quality` and `--hwaccel` as a conversion does. Never converts, muxes or deletes; needs `mediainfo`, `dovi_tool` and an analyzer with `au-table-v1` |
 
 ### Examples
 
@@ -309,6 +310,7 @@ mkvdovi "input.mkv" --content-type sport      # high-motion content
 mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9 (L1, L5, L6 only)
 mkvdovi "input.mkv" --source-primaries 0      # force P3-D65
 mkvdovi inspect "input.DV.mkv"                 # inspect source RPU metadata
+mkvdovi manifest "input.mkv" --work-dir ~/m    # playback manifest; measurements in ~/m
 mkvdovi "input.DV.mkv" --mdfix                 # write input.mdfix.DV.mkv
 ```
 

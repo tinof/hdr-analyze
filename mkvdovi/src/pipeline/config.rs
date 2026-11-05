@@ -25,6 +25,16 @@ pub(super) struct Configured {
     pub(super) source_range: Option<(u16, u16)>,
 }
 
+/// The RPU inputs the configuration settles: what `extra.json` and the playback manifest's `rpu`
+/// are built from.
+pub(super) struct Settled {
+    pub(super) dv_profile: &'static str,
+    pub(super) static_meta: HashMap<String, f64>,
+    pub(super) cm_v40_config: Option<metadata::CmV40Config>,
+    pub(super) level5_offsets: Option<Level5Offsets>,
+    pub(super) source_range: Option<(u16, u16)>,
+}
+
 /// Writes `extra.json` for `dovi_tool generate`. Settles which L1 sidecar the RPU carries
 /// (`measured.l1_sidecar`). `None`: the phase printed why; `convert_file` returns `Ok(false)`.
 pub(super) fn prepare_configuration(
@@ -36,6 +46,45 @@ pub(super) fn prepare_configuration(
     measured: &mut Measured,
     level5_offsets: Option<Level5Offsets>,
 ) -> Result<Option<Configured>> {
+    let Some(settled) =
+        settle_configuration(input_file, args, hlg_composer, measured, level5_offsets)
+    else {
+        return Ok(None);
+    };
+
+    // Generate extra.json
+    let extra_json_path = temp_dir.join("extra.json");
+    // Validated in main before any file is processed.
+    let final_trims = args.trim_targets_nits().unwrap_or_default();
+    // Withdrawn before `extra.json` changes: an interruption between the two must not leave the
+    // new configuration beside an RPU built from the old one.
+    let next_config = temp_dir.join("extra.json.next");
+    metadata::generate_extra_json(
+        &next_config,
+        settled.dv_profile,
+        &settled.static_meta,
+        &final_trims,
+        settled.cm_v40_config.as_ref(),
+        settled.level5_offsets,
+        measured.l1_sidecar.as_ref(),
+    )?;
+    commit_config(temp_dir, &next_config, &extra_json_path, resume_enabled)?;
+    progress::print_info("Configuration written.");
+
+    Ok(Some(Configured {
+        source_range: settled.source_range,
+    }))
+}
+
+/// Static metadata, CM v4.0, the L1 sidecar, L5, the profile and the source range: everything the
+/// RPU parameters need. `None`: refused, the phase printed why.
+pub(super) fn settle_configuration(
+    input_file: &str,
+    args: &Args,
+    hlg_composer: Option<Composer>,
+    measured: &mut Measured,
+    level5_offsets: Option<Level5Offsets>,
+) -> Option<Settled> {
     // Static Metadata
     // MaxCLL / MaxFALL are resolved after the L1 sidecar is loaded: measured values fill what the
     // source does not state.
@@ -49,35 +98,19 @@ pub(super) fn prepare_configuration(
     // Each step below may take the HDR10+ metadata path instead (`fall_back_to_hdr10plus`), so
     // everything after them reads `measured` afresh.
     if !load_fresh_sidecar(args, hlg_composer, measured) || !combine_hybrid(args, measured) {
-        return Ok(None);
+        return None;
     }
     let level5_offsets = sidecar_level5(measured, level5_offsets);
-    let Some(dv_profile) = choose_profile(measured, args) else {
-        return Ok(None);
-    };
+    let dv_profile = choose_profile(measured, args)?;
     // `None` is not a refusal: dovi_tool then derives the source range from L6.
     let source_range = resolve_source_range(&mut static_meta, measured, dv_profile, hlg_source);
-
-    // Generate extra.json
-    let extra_json_path = temp_dir.join("extra.json");
-    // Validated in main before any file is processed.
-    let final_trims = args.trim_targets_nits().unwrap_or_default();
-    // Withdrawn before `extra.json` changes: an interruption between the two must not leave the
-    // new configuration beside an RPU built from the old one.
-    let next_config = temp_dir.join("extra.json.next");
-    metadata::generate_extra_json(
-        &next_config,
+    Some(Settled {
         dv_profile,
-        &static_meta,
-        &final_trims,
-        cm_v40_config.as_ref(),
+        static_meta,
+        cm_v40_config,
         level5_offsets,
-        measured.l1_sidecar.as_ref(),
-    )?;
-    commit_config(temp_dir, &next_config, &extra_json_path, resume_enabled)?;
-    progress::print_info("Configuration written.");
-
-    Ok(Some(Configured { source_range }))
+        source_range,
+    })
 }
 
 /// The CM v4.0 configuration (L9 primaries, L11 content type), or `None` under `--cm-version v29`.

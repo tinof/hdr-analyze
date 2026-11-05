@@ -6,6 +6,98 @@ use dovi84_composer::Composer;
 pub enum SubCmd {
     /// Inspect Dolby Vision RPU metadata and report suspicious L1 patterns.
     Inspect(InspectArgs),
+    /// Write the playback manifest (`<stem>.dvmanifest.json`) of an HDR10 or HLG MKV: its
+    /// measured per-shot L1 and the AU table a player checks it against
+    /// (docs/PLAYBACK_MANIFEST.md). Never muxes, converts or deletes anything.
+    Manifest(ManifestArgs),
+}
+
+/// `mkvdovi manifest`. The flags after `--work-dir` are the conversion's flags that change the
+/// measured L1 or the RPU, with the same defaults, so the manifest describes the RPUs a
+/// conversion with the same flags writes.
+#[derive(Parser, Debug, Clone)]
+pub struct ManifestArgs {
+    /// Input MKV (HDR10 or HLG, one HEVC video track).
+    pub input: String,
+
+    /// Manifest file to write. Default: `<work dir>/<input stem>.dvmanifest.json`.
+    #[arg(long)]
+    pub out: Option<std::path::PathBuf>,
+
+    /// Directory for the measurements (`<stem>_measurements.bin`, its `.l1.json` and `.au.json`)
+    /// and the analyzer log; created when missing, never removed. Default: the input's directory.
+    /// Use it when the input is on a read-only mount.
+    #[arg(long)]
+    pub work_dir: Option<std::path::PathBuf>,
+
+    /// As for conversion.
+    #[arg(
+        long,
+        value_parser = PossibleValuesParser::new(Composer::ALL.map(Composer::cli_name))
+            .map(|name| Composer::from_cli_name(&name).expect("restricted to Composer::ALL")),
+        default_value = Composer::Bt2100V1.cli_name()
+    )]
+    pub hlg_composer: Composer,
+
+    /// As for conversion.
+    #[arg(long, value_enum, default_value_t = CmVersion::V40)]
+    pub cm_version: CmVersion,
+
+    /// As for conversion.
+    #[arg(long, value_enum, default_value_t = ContentType::Movies)]
+    pub content_type: ContentType,
+
+    /// As for conversion.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
+    pub reference_mode: bool,
+
+    /// As for conversion.
+    #[arg(long)]
+    pub source_primaries: Option<u8>,
+
+    /// As for conversion.
+    #[arg(long, default_value = "100,600,1000")]
+    pub trim_targets: String,
+
+    /// As for conversion. The coverage class is `full` only for accurate (the default).
+    #[arg(long, value_enum, default_value_t = AnalysisQuality::Auto)]
+    pub analysis_quality: AnalysisQuality,
+
+    /// As for conversion.
+    #[arg(long, value_enum, default_value_t = HwAccel::Auto)]
+    pub hwaccel: HwAccel,
+
+    /// Verbose mode: show raw command output.
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    /// Quiet mode: minimal output.
+    #[arg(short, long)]
+    pub quiet: bool,
+}
+
+impl ManifestArgs {
+    /// The conversion arguments these settings stand for: the conversion's defaults with this
+    /// command's flags, so the pipeline phases shared with `convert_file` read them unchanged.
+    pub fn conversion_args(&self) -> Args {
+        let mut args = Args::try_parse_from(["mkvdovi"]).expect("the defaults parse");
+        args.input = vec![self.input.clone()];
+        args.hlg_composer = self.hlg_composer;
+        args.cm_version = self.cm_version;
+        args.content_type = self.content_type;
+        args.reference_mode = self.reference_mode;
+        args.source_primaries = self.source_primaries;
+        args.trim_targets = self.trim_targets.clone();
+        args.analysis_quality = self.analysis_quality;
+        args.hwaccel = self.hwaccel;
+        args.verbose = self.verbose;
+        args.quiet = self.quiet;
+        // dovi_tool takes no part in a manifest; `raw` keeps `resolve_auto_settings` quiet about it.
+        args.dovi_input = DoviInput::Raw;
+        // Never deleted: the manifest command has no deletion step, and this says so twice.
+        args.keep_source = true;
+        args
+    }
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -259,6 +351,74 @@ mod tests {
             other => panic!("expected inspect subcommand, got {other:?}"),
         }
         assert!(args.input.is_empty());
+    }
+
+    #[test]
+    fn manifest_subcommand_parses_its_paths_and_flags() {
+        let args = Args::try_parse_from([
+            "mkvdovi",
+            "manifest",
+            "movie.mkv",
+            "--out",
+            "m.json",
+            "--work-dir",
+            "/tmp/w",
+            "--hlg-composer",
+            "preset",
+            "--cm-version",
+            "v29",
+        ])
+        .unwrap();
+        let Some(SubCmd::Manifest(manifest)) = args.subcmd else {
+            panic!("expected the manifest subcommand");
+        };
+        assert_eq!(manifest.input, "movie.mkv");
+        assert_eq!(
+            manifest.out.as_deref(),
+            Some(std::path::Path::new("m.json"))
+        );
+        assert_eq!(
+            manifest.work_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/w"))
+        );
+        let converted = manifest.conversion_args();
+        assert_eq!(converted.hlg_composer, Composer::Preset);
+        assert_eq!(converted.cm_version, CmVersion::V29);
+        assert!(args.input.is_empty());
+        // Conversion-only flags are not manifest flags.
+        for flag in ["--mdfix", "--legacy-madvr-l1", "--verify", "--keep-source"] {
+            assert!(
+                Args::try_parse_from(["mkvdovi", "manifest", "movie.mkv", flag]).is_err(),
+                "{flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_defaults_are_the_conversion_defaults() {
+        let Some(SubCmd::Manifest(manifest)) =
+            Args::try_parse_from(["mkvdovi", "manifest", "a.mkv"])
+                .unwrap()
+                .subcmd
+        else {
+            panic!("expected the manifest subcommand");
+        };
+        let ours = manifest.conversion_args();
+        let convert = Args::try_parse_from(["mkvdovi", "a.mkv"]).unwrap();
+        assert_eq!(ours.hlg_composer, convert.hlg_composer);
+        assert_eq!(ours.cm_version, convert.cm_version);
+        assert_eq!(ours.content_type, convert.content_type);
+        assert_eq!(ours.reference_mode, convert.reference_mode);
+        assert_eq!(ours.source_primaries, convert.source_primaries);
+        assert_eq!(ours.trim_targets, convert.trim_targets);
+        assert_eq!(ours.analysis_quality, convert.analysis_quality);
+        assert_eq!(ours.hwaccel, convert.hwaccel);
+        assert_eq!(ours.input, convert.input);
+        // Settings the manifest does not offer keep the conversion's defaults.
+        assert_eq!(ours.optimizer_profile, convert.optimizer_profile);
+        assert_eq!(ours.peak_source, convert.peak_source);
+        assert!(!ours.boost && !ours.boost_experimental && !ours.mdfix && !ours.legacy_madvr_l1);
+        assert_eq!(ours.hdr10plus_l1, None);
     }
 
     #[test]

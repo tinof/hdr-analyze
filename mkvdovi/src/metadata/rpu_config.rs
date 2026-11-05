@@ -75,6 +75,31 @@ pub fn generate_extra_json(
     level5_offsets: Option<Level5Offsets>,
     l1_sidecar: Option<&L1Sidecar>,
 ) -> Result<()> {
+    let params = rpu_params(
+        profile,
+        metadata,
+        trim_targets,
+        cm_v40_config,
+        level5_offsets,
+        l1_sidecar.is_some(),
+    )?;
+    let shots = l1_sidecar.map(sidecar_shots);
+
+    let file = File::create(output_path)?;
+    serde_json::to_writer_pretty(file, &params.extra_json(shots.as_ref()))?;
+    Ok(())
+}
+
+/// The RPU parameters of `extra.json`, also the playback manifest's `rpu` (which then names the
+/// 8.4 composer). `measured_l1`: the shots come from an L1 sidecar.
+pub fn rpu_params(
+    profile: &str,
+    metadata: &HashMap<String, f64>,
+    trim_targets: &[u32],
+    cm_v40_config: Option<&CmV40Config>,
+    level5_offsets: Option<Level5Offsets>,
+    measured_l1: bool,
+) -> Result<RpuParams> {
     let required = |key| {
         metadata
             .get(key)
@@ -109,12 +134,12 @@ pub fn generate_extra_json(
     // the CM v4.0 anchor 1229) so CM v2.9-only displays receive the true scene average instead of
     // a placeholder. dovi_tool still clamps to spec limits. Without a sidecar (HDR10+) the floor
     // is the CM version's, `dovi_tool`'s default.
-    let l1_avg_pq_cm_version = if l1_sidecar.is_some() {
+    let l1_avg_pq_cm_version = if measured_l1 {
         CmVersion::V29
     } else {
         cm.cm_version()
     };
-    let params = RpuParams {
+    Ok(RpuParams {
         profile,
         cm,
         level6: Level6::from_nits(min_dml, max_dml, max_cll, max_fall),
@@ -125,18 +150,13 @@ pub fn generate_extra_json(
             bottom: offsets.bottom,
         }),
         l1_avg_pq_cm_version,
-    };
-    let shots = l1_sidecar.map(sidecar_shots);
-
-    let file = File::create(output_path)?;
-    serde_json::to_writer_pretty(file, &params.extra_json(shots.as_ref()))?;
-    Ok(())
+    })
 }
 
 /// The sidecar's scenes as `extra.json` shots in stream frames. Undecodable leading pictures come
 /// first in presentation order, so every scene moves back by their count and the first scene also
 /// covers them (they are never displayed).
-fn sidecar_shots(sidecar: &L1Sidecar) -> ExtraShots {
+pub fn sidecar_shots(sidecar: &L1Sidecar) -> ExtraShots {
     let leading = sidecar.leading_frames();
     let shots = sidecar
         .scenes
