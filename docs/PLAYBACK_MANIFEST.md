@@ -134,7 +134,8 @@ the RPU NAL that mkvdovi writes for the same file and settings. P15.3 tests this
 
 The schema, the strict parser and the matcher live in `dovi_rpu_builder`. That crate is pure
 Rust, builds for Android and is already linked by the fork, so the writer and the player share
-one definition. The parser never panics; every refusal is `Error::Manifest` (code 8). Unknown keys
+one definition. The parser never panics; every refusal is `Error::Manifest` (code 8).
+`AuMatcher::new` applies the same checks (`validate()`) to a manifest built in code. Unknown keys
 are ignored within version 1. It refuses:
 
 - an unknown format or version, or a track other than Matroska HEVC;
