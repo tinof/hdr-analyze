@@ -1,23 +1,26 @@
 //! Abort-safe parsing of source `RPU.bin` files (E15.1, E15.2).
 //!
 //! `dolby_vision` 3.4's parser calls `unimplemented!` on a polynomial reshaping piece with
-//! `poly_order_minus1 == 0` and `linear_interp_flag` set (`rpu_data_mapping.rs:415`), and it
+//! `poly_order_minus1 == 0` and `linear_interp_flag` set (`rpu_data_mapping.rs:415`) and
+//! `unreachable!` on a CM v4.0 level 8, 9 or 10 block of a length it does not know
+//! (`required_bits` in `blocks/level8.rs:181`, `level9.rs:154`, `level10.rs:135`), and it
 //! allocates a curve's pivots and pieces, and the extension blocks of the CM v2.9 and v4.0 DM
 //! metadata (`extension_metadata/mod.rs:114`), before it reads them. Release builds use
 //! `panic = "abort"`, so either one ends the whole mkvdovi run, including the files queued after
 //! the one that carries it. [`parse_source_rpu_file`] first walks every RPU's header, data
 //! mapping, Profile 7 NLQ data and DM payload with the same bit reads as the crate and returns an
-//! error at such a piece, or at a pivot or extension-block count larger than the RPU, before
-//! `parse_rpu_file` sees the file.
+//! error at such a piece or block, or at a pivot or extension-block count larger than the RPU,
+//! before `parse_rpu_file` sees the file.
 //!
 //! The walk stops without an error where the crate itself returns one (a read past the end, a
 //! value it refuses), so it never rejects a file the crate parses. It steps over an extension
-//! block by its declared length without the crate's per-level length check: for a block the
-//! crate refuses, the walk may go on and refuse a later count, but only in a file the crate
-//! refuses too. Re-check it against the crate's `RpuDataHeader::parse`, `RpuDataMapping::parse`,
+//! block by its declared length; a fixed-length level the crate refuses with an error when the
+//! length differs, so for such a block the walk may go on and refuse a later count or block, but
+//! only in a file the crate refuses too. Re-check it against the crate's `RpuDataHeader::parse`, `RpuDataMapping::parse`,
 //! `RpuDataNlq::parse` and `vdr_dm_data_payload` whenever `dolby_vision` is bumped; the tests
-//! `the_crate_still_panics_on_a_linear_interpolation_piece` and
-//! `the_crate_still_panics_on_an_extension_block_count` fail once the crate stops aborting.
+//! `the_crate_still_panics_on_a_linear_interpolation_piece`,
+//! `the_crate_still_panics_on_an_extension_block_count` and
+//! `the_crate_still_panics_on_a_block_length` fail once the crate stops aborting.
 //!
 //! Use this for every RPU that mkvdovi did not generate itself (extracted from a source or
 //! imported). RPUs that `dovi_tool generate` or `dovi_rpu_builder` wrote never carry the piece.
@@ -128,8 +131,10 @@ enum Unreadable {
     LinearInterpolation { component: usize, piece: u64 },
     /// More pivots or pieces than the RPU has bits: the crate allocates them before reading.
     PivotCount { component: usize, pivots: u128 },
-    /// More extension blocks than the RPU has bits: the crate allocates them before reading.
+    /// More extension blocks than the RPU can hold: the crate allocates them before reading.
     ExtBlockCount { dm_version: DmVersion, count: u64 },
+    /// A CM v4.0 level 8, 9 or 10 block of a length the crate has no field layout for.
+    BlockLength { level: u64, length: u64 },
 }
 
 /// The DM metadata versions in the order the crate reads them.
@@ -177,6 +182,11 @@ impl std::fmt::Display for Unreadable {
                 f,
                 "the {dm_version} DM metadata declares {count} extension blocks, more than the \
                  RPU holds (the dolby_vision parser would abort mkvdovi allocating them)"
+            ),
+            Self::BlockLength { level, length } => write!(
+                f,
+                "a level {level} DM metadata block declares {length} bytes, a length the \
+                 dolby_vision parser cannot read (it would abort mkvdovi)"
             ),
         }
     }
@@ -351,8 +361,8 @@ fn scan_dm(r: &mut BitReader<'_>, header: &Header) -> Option<Option<Unreadable>>
 fn scan_ext_blocks(r: &mut BitReader<'_>, dm_version: DmVersion) -> Option<Option<Unreadable>> {
     let count = r.ue()?;
     // Each block takes at least nine bits (its length and level), so the crate cannot read
-    // more blocks than bits.
-    if count > r.remaining() as u64 {
+    // more blocks than a ninth of the bits left.
+    if count > r.remaining() as u64 / 9 {
         return Some(Some(Unreadable::ExtBlockCount { dm_version, count }));
     }
     while r.pos % 8 != 0 {
@@ -362,14 +372,43 @@ fn scan_ext_blocks(r: &mut BitReader<'_>, dm_version: DmVersion) -> Option<Optio
     }
     for _ in 0..count {
         let length = r.ue()?;
-        if !dm_version.allows(r.bits(8)?) {
+        let level = r.bits(8)?;
+        if !dm_version.allows(level) {
             return None;
+        }
+        if let Some(bits) = unknown_length_reads(level, length) {
+            // The crate reads these fields before it reaches `required_bits`; a read past
+            // the end stops it with an error first.
+            return (bits <= r.remaining() as u64)
+                .then_some(Some(Unreadable::BlockLength { level, length }));
         }
         // The level's fields and its ext_dm_alignment_zero_bits fill exactly `length` bytes
         // in every block the crate accepts.
         r.skip(length.checked_mul(8)?)?;
     }
     Some(None)
+}
+
+/// Levels 8, 9 and 10 take their length from the block: `parse` reads the fields the length
+/// gates, then `required_bits` calls `unreachable!` for a length outside the crate's set. The
+/// bits that `parse` reads for such a length; `None` for a length the crate knows, or any other
+/// level (a fixed-length level refuses a different length with an error).
+fn unknown_length_reads(level: u64, length: u64) -> Option<u64> {
+    let over = |limit: u64, bits: u64| if length > limit { bits } else { 0 };
+    let (known, bits): (&[u64], u64) = match level {
+        // Index (8) and six 12-bit trims; mid contrast, clip trim, then six 8-bit saturation
+        // and six 8-bit hue fields.
+        8 => (
+            &[10, 12, 13, 19, 25],
+            80 + over(10, 12) + over(12, 12) + over(13, 48) + over(19, 48),
+        ),
+        // Primary index; then eight 16-bit primaries.
+        9 => (&[1, 17], 8 + over(1, 128)),
+        // Index, max and min PQ, primary index (8, 12, 12, 8); then eight 16-bit primaries.
+        10 => (&[5, 21], 40 + over(5, 128)),
+        _ => return None,
+    };
+    (!known.contains(&length)).then_some(bits)
 }
 
 /// `DoviPolynomialCurve::parse`; `Some(true)` at the piece it cannot parse.

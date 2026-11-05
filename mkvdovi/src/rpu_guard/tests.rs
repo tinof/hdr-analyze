@@ -1,6 +1,9 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
+use dolby_vision::rpu::extension_metadata::blocks::{
+    ExtMetadataBlock, ExtMetadataBlockLevel10, ExtMetadataBlockLevel8, ExtMetadataBlockLevel9,
+};
 use dolby_vision::rpu::extension_metadata::{DmData, WithExtMetadataBlocks};
 use dolby_vision::rpu::generate::{GenerateConfig, GenerateProfile, VideoShot};
 use dolby_vision::rpu::rpu_data_mapping::DoviNlqMethod;
@@ -562,4 +565,198 @@ fn trailing_zero_bytes_do_not_open_the_cm_v40_metadata() {
         assert_eq!(parse_rpu_file(&path).unwrap().len(), 1, "{crc_lead}");
         check_parseable(&bytes).unwrap_or_else(|error| panic!("{crc_lead}: {error:#}"));
     }
+}
+
+/// A CM v4.0 RPU written by the crate with an L8, L9 and L10 block of their longest lengths.
+fn with_variable_blocks() -> Vec<u8> {
+    crate_written(CmVersion::V40, |rpu| {
+        let dm = rpu.vdr_dm_data.as_mut().unwrap();
+        let Some(DmData::V40(blocks)) = dm.cmv40_metadata.as_mut() else {
+            unreachable!()
+        };
+        for level in [8, 9, 10] {
+            blocks.remove_level(level);
+        }
+        let added = [
+            ExtMetadataBlock::Level8(ExtMetadataBlockLevel8 {
+                length: 25,
+                ..Default::default()
+            }),
+            // Custom primaries (index 255, every coordinate set), as the crate requires.
+            ExtMetadataBlock::Level9(ExtMetadataBlockLevel9 {
+                length: 17,
+                source_primary_index: 255,
+                source_primary_red_x: 1,
+                source_primary_red_y: 2,
+                source_primary_green_x: 3,
+                source_primary_green_y: 4,
+                source_primary_blue_x: 5,
+                source_primary_blue_y: 6,
+                source_primary_white_x: 7,
+                source_primary_white_y: 8,
+            }),
+            ExtMetadataBlock::Level10(ExtMetadataBlockLevel10 {
+                length: 21,
+                target_display_index: 2, // not a preset display
+                target_max_pq: 3079,
+                target_min_pq: 62,
+                target_primary_index: 255,
+                target_primary_red_x: 1,
+                target_primary_red_y: 2,
+                target_primary_green_x: 3,
+                target_primary_green_y: 4,
+                target_primary_blue_x: 5,
+                target_primary_blue_y: 6,
+                target_primary_white_x: 7,
+                target_primary_white_y: 8,
+            }),
+        ];
+        for block in added {
+            blocks.add_block(block).unwrap();
+        }
+    })
+}
+
+/// The bit position, in `payload`, of the `ext_block_length` of the first DM block of `level`.
+fn block_length_at(payload: &[u8], level: u64) -> usize {
+    let mut r = BitReader::new(payload);
+    r.bits(8).unwrap();
+    let header = read_header(&mut r).unwrap();
+    scan_mapping(&mut r, &header).unwrap();
+    for _ in 0..3 {
+        r.ue().unwrap(); // the DM ids
+    }
+    r.skip(DM_FIXED_BITS).unwrap();
+    loop {
+        let count = r.ue().unwrap();
+        while r.pos % 8 != 0 {
+            r.bit().unwrap();
+        }
+        for _ in 0..count {
+            let at = r.pos;
+            let length = r.ue().unwrap();
+            if r.bits(8).unwrap() == level {
+                return at;
+            }
+            r.skip(length * 8).unwrap();
+        }
+    }
+}
+
+/// `nal` with the `ue(v)` length of its first `level` block one larger. The lengths used here
+/// (25, 17, 21) have an even code number, so `ue(length + 1)` differs only in its last bit.
+fn length_plus_one(nal: &[u8], level: u64) -> Vec<u8> {
+    let mut payload = clear_start_code_emulation_prevention_3_byte(&nal[2..]);
+    let at = block_length_at(&payload, level);
+    let mut r = BitReader::new(&payload);
+    r.skip(at as u64).unwrap();
+    let length = r.ue().unwrap();
+    assert_eq!((length + 1) % 2, 0, "level {level}: length {length}");
+    let last = r.pos - 1;
+    payload[last / 8] |= 0x80 >> (last % 8);
+    dolby_vision::utils::add_start_code_emulation_prevention_3_byte(&mut payload);
+    let mut patched = nal[..2].to_vec();
+    patched.extend(payload);
+    patched
+}
+
+#[test]
+fn the_crate_still_panics_on_a_block_length() {
+    // When this fails, `dolby_vision` reads an L9 block of 18 bytes: re-check
+    // `unknown_length_reads` (module docs) and whether that part of E15.2's guard is needed.
+    let nal = length_plus_one(&with_variable_blocks(), 9);
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "RPU.bin", &bin_of_nals(&[nal]));
+    assert!(crate_panics(&path));
+}
+
+#[test]
+fn a_block_length_the_crate_cannot_read_is_an_error_where_it_panics() {
+    let good = with_variable_blocks();
+    let dir = tempfile::tempdir().unwrap();
+    // The written blocks are read: the crate parses the file and the guard lets it through.
+    let path = write(
+        dir.path(),
+        "good.bin",
+        &bin_of_nals(std::slice::from_ref(&good)),
+    );
+    assert!(parse_rpu_file(&path).is_ok());
+    assert!(parse_source_rpu_file(&path).is_ok());
+
+    for (level, length) in [(8, 26), (9, 18), (10, 22)] {
+        let bad = length_plus_one(&good, level);
+        let bytes = bin_of_nals(&[good.clone(), bad, good.clone()]);
+        let path = write(dir.path(), "RPU.bin", &bytes);
+        assert!(
+            crate_panics(&path),
+            "level {level}: the fixture must reach the panic"
+        );
+
+        let error = parse_source_rpu_file(&path).unwrap_err();
+        assert!(is_unparseable(&error), "level {level}: {error:#}");
+        let error = format!("{error:#}");
+        assert!(error.contains("RPU 1:"), "level {level}: {error}");
+        assert!(
+            error.contains(&format!(
+                "a level {level} DM metadata block declares {length} bytes"
+            )),
+            "level {level}: {error}"
+        );
+    }
+}
+
+#[test]
+fn a_block_cut_short_is_left_to_the_crates_error() {
+    // The L9 block of 18 bytes, but the RPU ends inside its primaries: the crate's read fails
+    // before `required_bits`, so the walk stops with it.
+    let nal = length_plus_one(&with_variable_blocks(), 9);
+    let payload = clear_start_code_emulation_prevention_3_byte(&nal[2..]);
+    let fields = block_length_at(&payload, 9) + 9 + 8; // ue(18) and the level
+    assert!(scan(&mut BitReader::new(&payload)).flatten().is_some());
+    assert_eq!(
+        scan(&mut BitReader::new(&payload[..(fields + 64) / 8])),
+        None
+    );
+}
+
+#[test]
+fn the_crate_reads_these_bits_for_a_length_it_does_not_know() {
+    // The field reads of `ExtMetadataBlockLevel{8,9,10}::parse`, by length threshold.
+    let cases = [
+        (8, 9, Some(80)),
+        (8, 11, Some(92)),
+        (8, 14, Some(152)),
+        (8, 26, Some(200)),
+        (8, 25, None),
+        (9, 0, Some(8)),
+        (9, 2, Some(136)),
+        (9, 17, None),
+        (10, 4, Some(40)),
+        (10, 6, Some(168)),
+        (10, 5, None),
+        (11, 5, None),
+        (254, 3, None),
+    ];
+    for (level, length, bits) in cases {
+        assert_eq!(
+            unknown_length_reads(level, length),
+            bits,
+            "L{level} {length}"
+        );
+    }
+}
+
+#[test]
+fn a_count_above_one_block_per_nine_bits_is_refused() {
+    // The whole payload has fewer bits than the count times nine (a block's length and level),
+    // so the crate cannot read that many blocks: refused, though the allocation would succeed.
+    let probe = crate_written(CmVersion::V29, |_| {});
+    let total_bits = clear_start_code_emulation_prevention_3_byte(&probe[2..]).len() as u64 * 8;
+    let count = total_bits / 9 + 1;
+    let nal = crate_written(CmVersion::V29, |rpu| declare_blocks(rpu, false, count));
+    let error = format!("{:#}", check_parseable(&bin_of_nals(&[nal])).unwrap_err());
+    assert!(
+        error.contains(&format!("declares {count} extension blocks")),
+        "{error}"
+    );
 }
