@@ -12,7 +12,7 @@ use dolby_vision::rpu::extension_metadata::blocks::{
 use dolby_vision::rpu::rpu_data_nlq::DoviELType;
 
 use crate::external::{self, run_command_live, run_command_with_spinner};
-use crate::rpu_guard::parse_source_rpu_file;
+use crate::rpu_guard::{is_unparseable, parse_source_rpu_file};
 
 const CEILING_EPSILON_PQ: u16 = 6;
 const CLIPPED_FRAME_RATIO: f64 = 0.01;
@@ -313,6 +313,17 @@ pub fn record_authored_levels(acc: &mut AuthoredLevels, rpus: &[DoviRpu]) {
 /// not dominated by dark openings (studio logos, title cards).
 pub fn sample_rpu_windows(input: &str, temp_dir: &Path) -> Result<SampledRpu> {
     let offsets = window_offsets(probe_duration_secs(input));
+    sample_extracted_windows(
+        offsets
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, offset)| extract_rpu_window(input, temp_dir, *offset, idx)),
+    )
+}
+
+/// The per-window parse of [`sample_rpu_windows`], over the `RPU.bin` of each window that
+/// could be extracted.
+fn sample_extracted_windows(rpu_paths: impl IntoIterator<Item = PathBuf>) -> Result<SampledRpu> {
     let mut l1_frames = Vec::new();
     let mut mastering_peak_pq = None;
     let mut level5 = None;
@@ -320,12 +331,14 @@ pub fn sample_rpu_windows(input: &str, temp_dir: &Path) -> Result<SampledRpu> {
     let mut authored = AuthoredLevels::default();
     let mut parse_error = None;
 
-    for (idx, offset) in offsets.iter().enumerate() {
-        let Some(rpu_path) = extract_rpu_window(input, temp_dir, *offset, idx) else {
-            continue;
-        };
+    for rpu_path in rpu_paths {
         let rpus = match parse_source_rpu_file(&rpu_path) {
             Ok(rpus) => rpus,
+            // The source carries RPUs mkvdovi cannot read: a sample of the other windows would
+            // hide that, so the whole sample fails with the guard's reason.
+            Err(error) if is_unparseable(&error) => {
+                anyhow::bail!("A sampled Dolby Vision RPU cannot be parsed: {error:#}")
+            }
             Err(error) => {
                 parse_error.get_or_insert(error);
                 continue;
@@ -1012,6 +1025,38 @@ mod tests {
             let path = write_rpu_bin(dir.path(), name, &rpus);
             assert_eq!(classify_rpu_format(&path).unwrap(), expected, "{name}");
         }
+    }
+
+    /// One window the guard refuses makes the whole sample an error, even when another window
+    /// has L1: a partial sample would hide the unparseable RPU. Other parse failures only drop
+    /// their window, as before.
+    #[test]
+    fn a_refused_window_fails_the_sample_even_beside_a_good_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = write_rpu_bin(
+            dir.path(),
+            "good.bin",
+            &generated(RpuCmVersion::V40, vec![vec![]]),
+        );
+        let refused = dir.path().join("refused.bin");
+        fs::write(
+            &refused,
+            crate::rpu_guard::fixtures::linear_interp_rpu_bin(),
+        )
+        .unwrap();
+        let garbage = dir.path().join("garbage.bin");
+        fs::write(&garbage, [0x19u8; 64]).unwrap();
+
+        for windows in [
+            [good.clone(), refused.clone()],
+            [refused.clone(), good.clone()],
+        ] {
+            let error = format!("{:#}", sample_extracted_windows(windows).unwrap_err());
+            assert!(error.contains("linear interpolation"), "{error}");
+        }
+        let sample = sample_extracted_windows([good.clone(), garbage]).unwrap();
+        assert_eq!(sample.windows_sampled, 1);
+        assert_eq!(sample.l1_frames.len(), 2);
     }
 
     /// E15.1: on the parent commit both functions abort the process (`unimplemented!` in
