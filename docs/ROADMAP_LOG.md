@@ -6,6 +6,35 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-06: P15.4 `mkvdovi manifest --rpu` import (PR #99)
+
+Step: - [P15.4][gpu] `mkvdovi manifest --rpu`: an imported `RPU.bin`, accepted only when it rebuilds
+  byte for byte from the manifest. Gate: a good file accepted; a wrong composer, a wrong count
+  and per-frame trims refused, naming the first differing AU. Needs: P15.3, E15.1, E15.2.
+
+Gate evidence: PR #99. Local gates: fmt, workspace clippy, `scripts/ci/test-gate.sh` (only
+allowed skips) and `tool:rpu_builder_check`. `mkvdovi/tests/playback_manifest_rpu.rs` imports the
+`dovi_tool extract-rpu` output of real `--keep-source` conversions. A PQ source with B-frames, a
+letterbox with CM v2.9 and with other trims, L9 and L11, and HLG under bt2100 and preset are each
+accepted. The player's path over each manifest rebuilds the conversion's RPUs AU for AU, and the
+parameters equal those of a measured manifest of the same source. The same test refuses a missing
+or extra RPU, a per-frame L2 trim, a per-frame L1, a changed L6 and a wrong HLG composer, naming
+the picture and its AU (decode index from ffprobe's packet order), plus the E15.1 abort fixture
+without an abort. `mkvdovi/src/pipeline/manifest/import/tests.rs` covers the presentation-to-decode
+map past a non-picture AU, the first differing picture, both RPU.bin forms (with and without the
+`7C 01` NAL header), zero bytes before a start code, the V29/V40 average floors and the generator
+clamp range. Each of these tests fails on the mutant it guards.
+
+Owner decisions (2026-11-05): the parameters come from the RPU itself (the analyzer runs
+`--au-table-only`), and the coverage class is `approximate`. Found while building: `dovi_tool`
+writes RPUs without the `7C 01` NAL header. Review: an ad hoc 3-lens panel found that the guard
+skipped NAL-header RPUs (P1, fixed: the guard now checks the parsed slice), plus four test gaps
+(fixed). The pre-PR panel found a misleading clamp diagnostic (P3, fixed). Codex exec and Codex's
+GitHub review: LGTM (both first hit usage limits and were rerun).
+
+Resolution: `mkvdovi manifest --rpu` writes an `rpu-bin` manifest (`producer.rpu_bin_sha256`,
+null sidecar fields) only for an RPU.bin it reproduces byte for byte; P15.5 stays open.
+
 ### 2026-11-05: E15.2 Extend the guard past the mapping (PR #98)
 
 Step: - [E15.2][desk] Extend the guard (`mkvdovi/src/rpu_guard.rs`) past the mapping: the crate allocates

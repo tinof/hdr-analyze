@@ -17,12 +17,15 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   block length the crate does not know (L8 10/12/13/19/25, L9 1/17, L10 5/21), where
   `dolby_vision` 3.4 would abort the process under `panic = "abort"` (ROADMAP E15). The format
   sniff refuses such a file as unsupported with a warning instead of detecting it as HDR10.
+  `parse_source_rpu_bytes` applies the same guard to an `RPU.bin` already in memory and returns
+  each RPU with the exact slice it parsed; it is stricter (bytes before the first start code, an
+  empty file and any refused RPU are errors). The `manifest --rpu` import uses it.
 - `external.rs`: tool checks and invocation.
 - `metadata/`: `CmV40Config`, L2/L5/L9/L11 generation; submodules `format`, `probe`, `rpu_config`,
   `sidecar`, `static_metadata`.
 - `pipeline/`: `convert_file` in `mod.rs`; by phase `temp_dir`, `measure`, `config`, `deliver`;
   plus `analyzer`, `dovi_steps`, `hdr10plus`, and `manifest/` (`mkvdovi manifest`: the AU table
-  reader, the manifest build, no temp dir; [PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)).
+  reader, the manifest build, `import.rs` for `--rpu`, no temp dir; [PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)).
 - `verify.rs`, `progress.rs`.
 
 ## External tools

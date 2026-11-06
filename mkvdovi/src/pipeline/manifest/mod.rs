@@ -1,13 +1,15 @@
 //! `mkvdovi manifest`: the playback manifest of an HDR10 or HLG MKV (ROADMAP P15.3,
 //! `docs/PLAYBACK_MANIFEST.md`). It measures the input with the AU table (or reuses a pair the
 //! analyzer wrote for this file), settles the RPU parameters with the conversion's own phases, and
-//! writes `<stem>.dvmanifest.json`. It never creates a temp directory, muxes, converts or deletes:
+//! writes `<stem>.dvmanifest.json`. With `--rpu` it takes the shots and parameters from an
+//! imported `RPU.bin` instead (`import`, P15.4). It never creates a temp directory, muxes, converts or deletes:
 //! the only files it writes are the measurements, the analyzer log and the manifest, none of which
 //! may be the input.
 
 mod au_table;
 mod build;
 mod identity;
+mod import;
 #[cfg(test)]
 mod tests;
 
@@ -95,11 +97,34 @@ impl Paths {
         ]
     }
 
-    /// The first written path that is the input itself, under any name.
-    pub(super) fn aliasing_input(&self, input: &Path) -> Option<&Path> {
+    /// The paths of an `RPU.bin` import: the AU table is `<stem>.rpu-import.au.json` (the
+    /// analyzer's `-o` is `<stem>.rpu-import`, which `--au-table-only` never writes), so a
+    /// measured pair's `.au.json` in the same directory is never replaced.
+    pub(super) fn for_rpu_import(
+        input_file: &str,
+        work_dir: Option<&Path>,
+        out: Option<&Path>,
+    ) -> Self {
+        let mut paths = Self::new(input_file, work_dir, out);
+        let stem = Path::new(input_file)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        paths.measurements = paths.work_dir.join(format!("{stem}.rpu-import"));
+        paths.sidecar = metadata::l1_sidecar_path(&paths.measurements);
+        paths.sidecar_tmp = with_tmp_suffix(&paths.sidecar);
+        paths.au_table = au_table_path(&paths.measurements);
+        paths.au_table_tmp = with_tmp_suffix(&paths.au_table);
+        paths
+    }
+
+    /// The first written path that is `file` (the input, or an imported `RPU.bin`) under any
+    /// name.
+    pub(super) fn aliasing(&self, file: &Path) -> Option<&Path> {
         self.written()
             .into_iter()
-            .find(|path| is_same_file(path, input))
+            .find(|path| is_same_file(path, file))
     }
 }
 
@@ -132,17 +157,42 @@ pub fn manifest_file(manifest_args: &ManifestArgs) -> Result<bool> {
     let Some((hdr_type, hlg_composer)) = admit_input(input_file, &args)? else {
         return Ok(false);
     };
-    let paths = Paths::new(
-        input_file,
-        manifest_args.work_dir.as_deref(),
-        manifest_args.out.as_deref(),
-    );
-    if let Some(alias) = paths.aliasing_input(input) {
+    let rpu_file = manifest_args.rpu.as_deref();
+    let paths = match rpu_file {
+        Some(_) => Paths::for_rpu_import(
+            input_file,
+            manifest_args.work_dir.as_deref(),
+            manifest_args.out.as_deref(),
+        ),
+        None => Paths::new(
+            input_file,
+            manifest_args.work_dir.as_deref(),
+            manifest_args.out.as_deref(),
+        ),
+    };
+    if let Some(alias) = paths.aliasing(input) {
         progress::print_error(&format!(
             "'{}' is the input file; choose another --out or --work-dir.",
             alias.display()
         ));
         return Ok(false);
+    }
+    if let Some(rpu_file) = rpu_file {
+        if !rpu_file.is_file() {
+            progress::print_error(&format!("RPU file not found: {}", rpu_file.display()));
+            return Ok(false);
+        }
+        if is_same_file(rpu_file, input) {
+            progress::print_error("The --rpu file is the input file.");
+            return Ok(false);
+        }
+        if let Some(alias) = paths.aliasing(rpu_file) {
+            progress::print_error(&format!(
+                "'{}' is the --rpu file, which this run would overwrite; choose another --out or --work-dir.",
+                alias.display()
+            ));
+            return Ok(false);
+        }
     }
     fs::create_dir_all(&paths.work_dir).with_context(|| {
         format!(
@@ -153,6 +203,16 @@ pub fn manifest_file(manifest_args: &ManifestArgs) -> Result<bool> {
 
     let identity =
         FileIdentity::of(input).with_context(|| format!("cannot read {}", input.display()))?;
+    if let Some(rpu_file) = rpu_file {
+        return import::manifest_from_rpu(import::Request {
+            input_file,
+            rpu_file,
+            args: &args,
+            hlg_composer,
+            paths: &paths,
+            identity,
+        });
+    }
     let Some((mut measured, pair)) =
         acquire_pair(input_file, &args, hdr_type, hlg_composer, &paths, &identity)?
     else {

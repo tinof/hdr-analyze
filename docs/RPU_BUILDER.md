@@ -193,6 +193,8 @@ hand-built invalid manifest is `Error::Manifest`, not a panic. A player feeds
 `ShotRpu::write(scene_refresh)`. A parse refusal is `Error::Manifest` (code 8); a matcher rejection
 carries a `RejectReason` with its own stable code. `tests/manifest_params.rs` shows that RPUs built
 through a parsed manifest equal every non-canary `dovi_tool` fixture byte for byte.
+`Producer` has `rpu_bin_sha256` (P15.4): set, with null sidecar fields, exactly when `l1_policy` is
+`rpu-bin`; a measured manifest omits the key, and `validate()` refuses any other combination.
 
 ## Composers
 

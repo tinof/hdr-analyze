@@ -1,8 +1,8 @@
 # Playback manifest (P15)
 
 Status: design written 2026-11-04. The AU table (P15.1), the manifest schema, parser and matcher
-in `dovi_rpu_builder::manifest` (P15.2) and `mkvdovi manifest` (P15.3) are implemented; the
-`RPU.bin` import is not yet (P15.4). Steps: ROADMAP P15.
+in `dovi_rpu_builder::manifest` (P15.2), `mkvdovi manifest` (P15.3) and its `RPU.bin` import
+(`--rpu`, P15.4) are implemented. Steps: ROADMAP P15.
 
 ## Purpose
 
@@ -47,9 +47,9 @@ starts any analysis. That is the same pattern as `l1-sidecar-frame-peak`.
   its leading RASL pictures can carry negative Matroska timestamps, and FFmpeg's demuxer gives
   them no pts. An open-GOP file whose leading pictures carry valid timestamps (tested on an x265 cut
   muxed by mkvmerge) is accepted.
-- Imported `RPU.bin` files (P15.4) are accepted only when they are reproducible from the manifest's
-  parameters and shot list, byte for byte for every AU. Storing arbitrary per-AU RPU payloads is
-  a question for a version 2.
+- Imported `RPU.bin` files (P15.4, "`RPU.bin` import" below) are accepted only when they are
+  reproducible from the manifest's parameters and shot list, byte for byte for every AU. Storing
+  arbitrary per-AU RPU payloads is a question for a version 2.
 
 ## AU table (`.au.json`, version 1)
 
@@ -103,7 +103,9 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
 
 - `format`: `"hdr-analyze.playback-manifest"`, and `version`: 1.
 - `producer`: mkvdovi version, analyzer version (with `+cuda`), sidecar version, AU table version,
-  `dovi_rpu_builder` version, and `sidecar_sha256`.
+  `dovi_rpu_builder` version, and `sidecar_sha256`. Under `l1_policy` `rpu-bin` the two sidecar
+  fields are null and `rpu_bin_sha256` names the imported file; a measured manifest has no
+  `rpu_bin_sha256` key. `validate()` refuses any other combination.
 - `source`: as in the AU table, plus `lookup_key` = SHA-256 of (size as a big-endian u64 ‖ head
   digest ‖ tail digest), where the digests are their 32 raw bytes, not the hex text: 72 bytes are
   hashed. A plain HTTP folder can serve `<lookup_key>.dvmanifest.json`. The player computes the
@@ -122,7 +124,7 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
     "content_type", "reference_mode", "trim_targets_nits"}`;
   - `level6`: the four `extra.json` fields; `level5`: `{left, right, top, bottom}` or null;
   - `l1_avg_pq_cm_version`: `"V29"` or `"V40"`.
-- `l1_policy`: `"measured"`, or `"rpu-bin"` for P15.4.
+- `l1_policy`: `"measured"`, or `"rpu-bin"` for an imported `RPU.bin` (P15.4).
 - `shots`: parallel arrays `start[]` (presentation index in stream frames, starting at 0),
   `min[]`, `avg[]` and `max[]` (12-bit PQ, unclamped, exactly as mkvdovi's `extra.json` gets
   them).
@@ -174,6 +176,35 @@ change L1 or the RPU, with the conversion's defaults: `--hlg-composer`, `--cm-ve
   rate 1, `no_crop` false, scene `global`/`hist`/3.0/12, peak domain `max-rgb`, estimator and
   source `max`, percentile 99.99, minimum percentile 0.1 and denoise `off` (the analyzer defaults
   mkvdovi runs with); otherwise `approximate`.
+
+### `RPU.bin` import (`--rpu`, P15.4)
+
+`mkvdovi manifest <input> --rpu <RPU.bin>` makes the manifest from an RPU file instead of a
+measurement. Code: `mkvdovi/src/pipeline/manifest/import.rs`.
+
+- The file is read once. The parse goes through the source-RPU guard (`rpu_guard`, ROADMAP E15), and
+  the compared bytes and `producer.rpu_bin_sha256` come from the same buffer. The file is in display
+  order with one RPU per picture, each behind a 4-byte start code, with or without the `7C 01` NAL
+  header (`dovi_tool` writes it without).
+- The parameters come from the first picture's RPU: CM version, L2 trim targets (the roundest whole
+  nits with the same PQ code), L9, L11, L6, L5 (all zero is none) and the 8.1 source range.
+  `l1_avg_pq_cm_version` is V29, whose floor reproduces both generator settings. The profile comes from
+  the input. For HLG, `--hlg-composer` names the composer the file must carry.
+- The shots start at picture 0 and at every picture whose RPU sets `scene_refresh_flag`. Each shot
+  has that RPU's L1, already clamped.
+- The analyzer runs with `--au-table-only` into `<stem>.rpu-import.au.json`, so a measured pair is
+  never replaced. Nothing is measured, and the table is written afresh on every run.
+- Accepted only when the builder rebuilds every picture's RPU byte for byte. Otherwise the refusal
+  names the first picture, its AU in decode order, and what differs: the HLG composer, the
+  scene-refresh flag, L1 (per-frame L1), L2 (per-frame or authored trims), another level, or the
+  header or DM fields. A shot whose L1 lies outside the range `dovi_tool generate` writes is
+  named as such, since no manifest can carry it. A count that differs from the pictures is refused
+  before that.
+- `analysis` states only `luminance_mapping`, and the coverage is `approximate`. The flags that shape
+  the RPU or the measurement (`--cm-version`, `--content-type`, `--reference-mode`,
+  `--source-primaries`, `--trim-targets`, `--analysis-quality`) cannot be given with `--rpu`.
+- No path this run writes may be the input or the RPU file. Hard links are recognised only on Unix,
+  as for the input.
 
 ## Matching rule (`dovi_rpu_builder::manifest`)
 

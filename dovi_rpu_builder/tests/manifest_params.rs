@@ -58,10 +58,11 @@ fn manifest_for(case: &cases::ShotCase) -> PlaybackManifest {
         producer: Producer {
             mkvdovi_version: "test".into(),
             analyzer_version: "test".into(),
-            sidecar_version: 6,
+            sidecar_version: Some(6),
             au_table_version: 1,
             rpu_builder_version: "test".into(),
-            sidecar_sha256: DIGEST.into(),
+            sidecar_sha256: Some(DIGEST.into()),
+            rpu_bin_sha256: None,
         },
         source: Source {
             file_name: format!("{}.mkv", case.name),

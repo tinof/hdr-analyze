@@ -1,15 +1,17 @@
 //! Assembling the [`PlaybackManifest`] from a checked pair, the settled RPU inputs and the source
-//! identity, and the coverage class.
+//! identity, and the coverage class; or, for an imported `RPU.bin`, from the AU table and what
+//! the file was proven to carry.
 
 use anyhow::{bail, Context, Result};
 use dovi84_composer::Composer;
 use dovi_rpu_builder::manifest::{
     Aus, Coverage, L1Policy, ManifestShot, PlaybackManifest, Producer, QualityClass, Source, Track,
+    PQ_MAPPING,
 };
 use dovi_rpu_builder::{Profile, RpuParams};
 use serde_json::{Map, Value};
 
-use super::au_table::{Pair, AU_TABLE_VERSION};
+use super::au_table::{AuTable, Pair, AU_TABLE_VERSION};
 use super::identity::FileIdentity;
 use crate::metadata::{self, L1Sidecar};
 use crate::pipeline::config::Settled;
@@ -76,21 +78,95 @@ pub(super) fn manifest(inputs: &Inputs<'_>) -> Result<PlaybackManifest> {
         .collect();
     let analysis = analysis(&inputs.pair.sidecar, &table.scene)?;
     let class = quality_class(&analysis);
+    assemble(Parts {
+        file_name: &inputs.file_name,
+        identity: &inputs.identity,
+        table,
+        sidecar: Some((
+            u64::from(inputs.sidecar.version),
+            inputs.pair.sidecar_sha256.clone(),
+        )),
+        rpu_bin_sha256: None,
+        analysis,
+        rpu,
+        shots,
+        class,
+    })
+}
+
+/// Everything an imported `RPU.bin` manifest is built from (ROADMAP P15.4): the shots and the
+/// parameters read from the file, which the caller has proven reproduce it byte for byte.
+pub(super) struct Imported<'a> {
+    pub(super) file_name: String,
+    pub(super) identity: FileIdentity,
+    pub(super) table: &'a AuTable,
+    pub(super) rpu_bin_sha256: String,
+    pub(super) rpu: RpuParams,
+    pub(super) shots: Vec<ManifestShot>,
+    /// The composer an 8.4 file carries; `None` for 8.1.
+    pub(super) hlg_composer: Option<Composer>,
+}
+
+/// The `rpu-bin` manifest: no sidecar, so `analysis` states only the luminance mapping the
+/// parameters imply, and the coverage is `approximate` (how the L1 was measured is unknown).
+pub(super) fn imported(inputs: Imported<'_>) -> Result<PlaybackManifest> {
+    let mapping = inputs
+        .hlg_composer
+        .map_or(PQ_MAPPING, Composer::luminance_mapping);
+    let mut analysis = Map::new();
+    analysis.insert("luminance_mapping".to_owned(), Value::from(mapping));
+    assemble(Parts {
+        file_name: &inputs.file_name,
+        identity: &inputs.identity,
+        table: inputs.table,
+        sidecar: None,
+        rpu_bin_sha256: Some(inputs.rpu_bin_sha256),
+        analysis,
+        rpu: inputs.rpu,
+        shots: inputs.shots,
+        class: QualityClass::Approximate,
+    })
+}
+
+/// What differs between a measured and an imported manifest; the rest comes from the table and
+/// the source identity.
+struct Parts<'a> {
+    file_name: &'a str,
+    identity: &'a FileIdentity,
+    table: &'a AuTable,
+    /// The L1 sidecar's version and digest, for measured shots.
+    sidecar: Option<(u64, String)>,
+    rpu_bin_sha256: Option<String>,
+    analysis: Map<String, Value>,
+    rpu: RpuParams,
+    shots: Vec<ManifestShot>,
+    class: QualityClass,
+}
+
+fn assemble(parts: Parts<'_>) -> Result<PlaybackManifest> {
+    let table = parts.table;
+    let l1_policy = if parts.rpu_bin_sha256.is_some() {
+        L1Policy::RpuBin
+    } else {
+        L1Policy::Measured
+    };
+    let (sidecar_version, sidecar_sha256) = parts.sidecar.unzip();
     let manifest = PlaybackManifest {
         producer: Producer {
             mkvdovi_version: env!("CARGO_PKG_VERSION").to_owned(),
             analyzer_version: table.analyzer_version.clone(),
-            sidecar_version: u64::from(inputs.sidecar.version),
+            sidecar_version,
             au_table_version: AU_TABLE_VERSION,
             rpu_builder_version: dovi_rpu_builder::VERSION.to_owned(),
-            sidecar_sha256: inputs.pair.sidecar_sha256.clone(),
+            sidecar_sha256,
+            rpu_bin_sha256: parts.rpu_bin_sha256,
         },
         source: Source {
-            file_name: inputs.file_name.clone(),
-            size_bytes: inputs.identity.size_bytes,
+            file_name: parts.file_name.to_owned(),
+            size_bytes: parts.identity.size_bytes,
             head_sha256: table.source.head_sha256.clone(),
             tail_sha256: table.source.tail_sha256.clone(),
-            lookup_key: inputs.identity.lookup_key(),
+            lookup_key: parts.identity.lookup_key(),
         },
         track: Track {
             container: table.track.container.clone(),
@@ -107,14 +183,14 @@ pub(super) fn manifest(inputs: &Inputs<'_>) -> Result<PlaybackManifest> {
             irap_crc32: table.aus.irap_crc32.clone(),
         },
         leading_skipped: table.leading_skipped,
-        analysis,
-        rpu,
-        l1_policy: L1Policy::Measured,
-        shots,
+        analysis: parts.analysis,
+        rpu: parts.rpu,
+        l1_policy,
+        shots: parts.shots,
         coverage: vec![Coverage {
             start: 0,
-            end: pictures,
-            class,
+            end: table.aus.picture_count(),
+            class: parts.class,
         }],
     };
     manifest

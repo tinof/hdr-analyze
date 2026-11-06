@@ -56,6 +56,41 @@ pub fn parse_source_rpu_file(path: &Path) -> Result<Vec<DoviRpu>> {
     parse_rpu_file(path).context("Failed to parse Dolby Vision RPU")
 }
 
+/// One RPU of a source `RPU.bin` as the file holds it.
+#[derive(Debug)]
+pub struct SourceRpu<'a> {
+    /// The bytes after the start code, without the zero bytes before the next one. `dovi_tool`
+    /// writes them without the HEVC NAL header (`7C 01`) that `dovi_rpu_builder` writes; the
+    /// crate parses either form.
+    pub data: &'a [u8],
+    pub rpu: DoviRpu,
+}
+
+/// Every RPU of an `RPU.bin` already in memory, behind the same guard as
+/// [`parse_source_rpu_file`]: the parsed RPUs and their bytes come from one read of the file.
+/// Stricter than `parse_rpu_file`, which keeps the RPUs before the first one it cannot parse:
+/// bytes before the first start code, an empty file and any RPU the crate refuses are errors.
+pub fn parse_source_rpu_bytes(bytes: &[u8]) -> Result<Vec<SourceRpu<'_>>> {
+    if !bytes.starts_with(&START_CODE) {
+        anyhow::bail!("the file does not start with an Annex B start code (00 00 00 01)");
+    }
+    split_nals(bytes)
+        .enumerate()
+        .map(|(index, unit)| {
+            let mut data = &unit[START_CODE.len()..];
+            while let [rest @ .., 0] = data {
+                data = rest;
+            }
+            // Guarded on the very slice the parser reads (a file whose RPUs carry the NAL
+            // header would pass a check of the slice with its start code unscanned).
+            check_rpu(index, data)?;
+            let rpu = DoviRpu::parse_unspec62_nalu(data)
+                .with_context(|| format!("RPU {index} does not parse"))?;
+            Ok(SourceRpu { data, rpu })
+        })
+        .collect()
+}
+
 /// The guard's refusal: RPU `index` (0-based, in file order) would abort the crate's parser.
 /// A caller tells it apart from other parse failures with [`is_unparseable`]: the file does
 /// carry Dolby Vision RPUs, so it must not be handled as if it had none.
@@ -82,26 +117,33 @@ pub fn is_unparseable(error: &anyhow::Error) -> bool {
 
 /// An [`UnparseableRpu`] error for the first RPU that would abort the crate's parser.
 pub fn check_parseable(bytes: &[u8]) -> Result<()> {
-    for (index, nal) in split_nals(bytes).enumerate() {
-        // The crate refuses these bytes with an error before it reads any field.
-        let Ok(trimmed) = DoviRpu::validated_trimmed_data(nal) else {
-            continue;
-        };
-        let payload = clear_start_code_emulation_prevention_3_byte(trimmed);
-        // `DoviRpu::parse` reads up to the last non-zero byte and refuses an RPU shorter than
-        // seven bytes or one that does not end in 0x80 before it reads any field.
-        let end = payload
-            .iter()
-            .rposition(|&byte| byte != 0)
-            .map_or(0, |i| i + 1);
-        if end < 7 || payload[end - 1] != FINAL_BYTE {
-            continue;
-        }
-        if let Some(unreadable) = scan(&mut BitReader::new(&payload[..end])).flatten() {
-            return Err(UnparseableRpu { index, unreadable }.into());
-        }
+    split_nals(bytes)
+        .enumerate()
+        .try_for_each(|(index, nal)| check_rpu(index, nal))
+}
+
+/// The guard for one RPU, given exactly as it goes to `DoviRpu::parse_unspec62_nalu`: with or
+/// without its start code and `7C 01` NAL header. The crate strips either prefix
+/// (`validated_trimmed_data`), so the walk must see the same bytes the parser reads.
+fn check_rpu(index: usize, nal: &[u8]) -> Result<()> {
+    // The crate refuses these bytes with an error before it reads any field.
+    let Ok(trimmed) = DoviRpu::validated_trimmed_data(nal) else {
+        return Ok(());
+    };
+    let payload = clear_start_code_emulation_prevention_3_byte(trimmed);
+    // `DoviRpu::parse` reads up to the last non-zero byte and refuses an RPU shorter than
+    // seven bytes or one that does not end in 0x80 before it reads any field.
+    let end = payload
+        .iter()
+        .rposition(|&byte| byte != 0)
+        .map_or(0, |i| i + 1);
+    if end < 7 || payload[end - 1] != FINAL_BYTE {
+        return Ok(());
     }
-    Ok(())
+    match scan(&mut BitReader::new(&payload[..end])).flatten() {
+        Some(unreadable) => Err(UnparseableRpu { index, unreadable }.into()),
+        None => Ok(()),
+    }
 }
 
 /// The NAL units of an `RPU.bin`, each starting at its start code, as `parse_rpu_file` cuts

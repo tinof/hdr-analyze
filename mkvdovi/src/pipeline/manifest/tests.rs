@@ -358,12 +358,9 @@ fn paths_default_to_the_input_directory_and_refuse_the_input() {
     let input = dir.path().join("clip.mkv");
     std::fs::write(&input, b"x").unwrap();
     let input_file = input.to_str().unwrap();
-    assert_eq!(
-        Paths::new(input_file, None, None).aliasing_input(&input),
-        None
-    );
+    assert_eq!(Paths::new(input_file, None, None).aliasing(&input), None);
     let paths = Paths::new(input_file, None, Some(&input));
-    assert_eq!(paths.aliasing_input(&input), Some(input.as_path()));
+    assert_eq!(paths.aliasing(&input), Some(input.as_path()));
     // The temp file of `--out x` is `x.tmp`: an input of that name is refused too.
     let tmp_named = dir.path().join("m.json.tmp");
     std::fs::write(&tmp_named, b"x").unwrap();
@@ -372,7 +369,96 @@ fn paths_default_to_the_input_directory_and_refuse_the_input() {
         None,
         Some(&dir.path().join("m.json")),
     );
-    assert_eq!(paths.aliasing_input(&tmp_named), Some(tmp_named.as_path()));
+    assert_eq!(paths.aliasing(&tmp_named), Some(tmp_named.as_path()));
+}
+
+/// The import's table (`--au-table-only`, no sidecar) gets the version, structure and source
+/// checks of a bound one.
+#[test]
+fn an_unbound_table_is_read_with_the_checks_of_a_bound_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("clip.rpu-import.au.json");
+    let mut table = table_json(b"{}", 24, 0);
+    table["sidecar_sha256"] = Value::Null;
+    std::fs::write(&path, serde_json::to_vec(&table).unwrap()).unwrap();
+    let read = AuTable::read_unbound(&path).unwrap();
+    assert_eq!(read.aus.picture_count(), 24);
+    assert_eq!(read.sidecar_sha256, None);
+
+    let input = dir.path().join("clip.mkv");
+    std::fs::write(&input, vec![0u8; 1000]).unwrap();
+    let identity = FileIdentity::of(&input).unwrap();
+    // The fixture's digests are not this file's.
+    let error = read.check_source(&input, &identity).unwrap_err();
+    assert!(error.contains("size or chunk digests differ"), "{error}");
+    let other = dir.path().join("other.mkv");
+    std::fs::write(&other, vec![0u8; 1000]).unwrap();
+    let error = read.check_source(&other, &identity).unwrap_err();
+    assert!(
+        error.contains("describes 'clip.mkv', not 'other.mkv'"),
+        "{error}"
+    );
+    let mut matching = table.clone();
+    matching["source"]["head_sha256"] = json!(hex(&identity.head));
+    matching["source"]["tail_sha256"] = json!(hex(&identity.tail));
+    std::fs::write(&path, serde_json::to_vec(&matching).unwrap()).unwrap();
+    AuTable::read_unbound(&path)
+        .unwrap()
+        .check_source(&input, &identity)
+        .unwrap();
+
+    let refused = |table: &Value, needle: &str| {
+        std::fs::write(&path, serde_json::to_vec(table).unwrap()).unwrap();
+        let error = AuTable::read_unbound(&path).unwrap_err();
+        assert!(error.contains(needle), "'{needle}' not in: {error}");
+    };
+    let mut later = table.clone();
+    later["version"] = json!(2);
+    refused(&later, "the AU table is version 2");
+    let mut empty = table.clone();
+    empty["aus"]["count"] = json!(0);
+    refused(&empty, "the AU table has no AUs");
+    // A structure the matcher would refuse: two AUs with one pts.
+    let mut twins = table;
+    twins["aus"]["pts_delta"][3] = json!(0);
+    refused(&twins, "have pts");
+}
+
+#[test]
+fn an_rpu_import_writes_its_own_au_table_and_never_its_rpu_file() {
+    let paths = Paths::for_rpu_import("clip.mkv", Some(Path::new("/w")), None);
+    assert_eq!(paths.au_table, Path::new("/w/clip.rpu-import.au.json"));
+    assert_eq!(
+        paths.au_table_tmp,
+        Path::new("/w/clip.rpu-import.au.json.tmp")
+    );
+    assert_eq!(paths.out, Path::new("/w/clip.dvmanifest.json"));
+    assert_eq!(paths.log, Path::new("/w/clip.manifest-analyzer.log"));
+    // A measured pair beside it is not one of the written paths.
+    assert!(!paths
+        .written()
+        .contains(&Path::new("/w/clip_measurements.bin.au.json")));
+
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("clip.mkv");
+    let rpu = dir.path().join("RPU.bin");
+    std::fs::write(&input, b"x").unwrap();
+    std::fs::write(&rpu, b"y").unwrap();
+    let input_file = input.to_str().unwrap();
+    assert_eq!(
+        Paths::for_rpu_import(input_file, None, None).aliasing(&rpu),
+        None
+    );
+    let paths = Paths::for_rpu_import(input_file, None, Some(&rpu));
+    assert_eq!(paths.aliasing(&rpu), Some(rpu.as_path()));
+    let paths = Paths::for_rpu_import(input_file, None, Some(&dir.path().join("RPU")));
+    assert_eq!(paths.aliasing(&rpu), None);
+    std::fs::rename(&rpu, dir.path().join("RPU.tmp")).unwrap();
+    assert_eq!(
+        paths.aliasing(&dir.path().join("RPU.tmp")),
+        Some(dir.path().join("RPU.tmp").as_path()),
+        "the manifest's temp file"
+    );
 }
 
 #[test]
@@ -391,11 +477,7 @@ fn an_analyzer_temp_file_that_is_the_input_is_refused() {
         let link = work.join(temp_name);
         std::fs::hard_link(&input, &link).unwrap();
         let paths = Paths::new(input.to_str().unwrap(), Some(&work), None);
-        assert_eq!(
-            paths.aliasing_input(&input),
-            Some(link.as_path()),
-            "{temp_name}"
-        );
+        assert_eq!(paths.aliasing(&input), Some(link.as_path()), "{temp_name}");
     }
 }
 
@@ -526,9 +608,13 @@ fn shots_move_back_by_the_leading_pictures_and_the_producer_is_named() {
     assert_eq!(built.shots[1].l1.max_pq, 3100);
     assert_eq!(built.coverage.len(), 1);
     assert_eq!((built.coverage[0].start, built.coverage[0].end), (0, 27));
-    assert_eq!(built.producer.sidecar_sha256, pair.sidecar_sha256);
+    assert_eq!(
+        built.producer.sidecar_sha256.as_deref(),
+        Some(pair.sidecar_sha256.as_str())
+    );
+    assert_eq!(built.producer.rpu_bin_sha256, None);
     assert_eq!(built.producer.au_table_version, 1);
-    assert_eq!(built.producer.sidecar_version, 6);
+    assert_eq!(built.producer.sidecar_version, Some(6));
     assert_eq!(
         built.producer.rpu_builder_version,
         dovi_rpu_builder::VERSION
