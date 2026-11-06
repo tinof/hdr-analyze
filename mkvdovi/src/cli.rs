@@ -30,6 +30,27 @@ pub struct ManifestArgs {
     #[arg(long)]
     pub work_dir: Option<std::path::PathBuf>,
 
+    /// Take the shots and the RPU parameters from this `RPU.bin` (display order, as
+    /// `dovi_tool generate` writes it and `dovi_tool extract-rpu` returns it) instead of
+    /// measuring. Accepted only when the manifest rebuilds every RPU of the file byte for byte;
+    /// the first picture that differs is named. Measures nothing (the analyzer writes only the
+    /// AU table, `<stem>.rpu-import.au.json`), so the flags that shape the RPU or the
+    /// measurement cannot be given with it; `--hlg-composer` names the composer the file must
+    /// carry. The coverage class is `approximate`.
+    #[arg(
+        long,
+        value_name = "RPU.bin",
+        conflicts_with_all = [
+            "cm_version",
+            "content_type",
+            "reference_mode",
+            "source_primaries",
+            "trim_targets",
+            "analysis_quality",
+        ]
+    )]
+    pub rpu: Option<std::path::PathBuf>,
+
     /// As for conversion.
     #[arg(
         long,
@@ -391,6 +412,44 @@ mod tests {
                 Args::try_parse_from(["mkvdovi", "manifest", "movie.mkv", flag]).is_err(),
                 "{flag}"
             );
+        }
+    }
+
+    #[test]
+    fn manifest_rpu_refuses_the_flags_it_reads_from_the_file() {
+        let parse = |extra: &[&str]| {
+            let mut argv = vec!["mkvdovi", "manifest", "movie.mkv", "--rpu", "RPU.bin"];
+            argv.extend(extra);
+            Args::try_parse_from(argv)
+        };
+        let Some(SubCmd::Manifest(manifest)) = parse(&[]).unwrap().subcmd else {
+            panic!("expected the manifest subcommand");
+        };
+        assert_eq!(
+            manifest.rpu.as_deref(),
+            Some(std::path::Path::new("RPU.bin"))
+        );
+        // The composer the file must carry, the decoder and the paths stay.
+        for allowed in [
+            &["--hlg-composer", "preset"][..],
+            &["--hwaccel", "none"],
+            &["--out", "m.json", "--work-dir", "/tmp/w"],
+        ] {
+            assert!(parse(allowed).is_ok(), "{allowed:?}");
+        }
+        for refused in [
+            &["--cm-version", "v29"][..],
+            &["--content-type", "game"],
+            &["--reference-mode", "true"],
+            &["--source-primaries", "0"],
+            &["--trim-targets", "100"],
+            &["--analysis-quality", "fast"],
+        ] {
+            assert!(parse(refused).is_err(), "{refused:?}");
+            // Without --rpu they are manifest flags.
+            let mut argv = vec!["mkvdovi", "manifest", "movie.mkv"];
+            argv.extend(refused);
+            assert!(Args::try_parse_from(argv).is_ok(), "{refused:?}");
         }
     }
 

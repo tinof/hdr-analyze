@@ -82,6 +82,67 @@ impl TableAus {
     pub(super) fn picture_count(&self) -> u64 {
         self.count.saturating_sub(self.non_picture.len() as u64)
     }
+
+    /// The decode index of each picture, by presentation index: the pictures (AUs not in
+    /// `non_picture`) ranked by pts, the rank `AuMatcher` uses. The pts are unique once
+    /// [`check_structure`] passed.
+    pub(super) fn decode_index_by_presentation(&self) -> Vec<u64> {
+        let pts = self.pts();
+        let mut pictures: Vec<u64> = (0..self.count)
+            .filter(|index| self.non_picture.binary_search(index).is_err())
+            .collect();
+        pictures.sort_by_key(|&index| pts[index as usize]);
+        pictures
+    }
+}
+
+impl AuTable {
+    /// Reads a table that need not be bound to a sidecar (`--au-table-only`, for an imported
+    /// `RPU.bin`), with the version and structure checks of a bound one.
+    pub(super) fn read_unbound(path: &Path) -> Result<Self, String> {
+        let bytes = std::fs::read(path)
+            .map_err(|error| format!("{} cannot be read ({error})", path.display()))?;
+        let table = Self::parse(&bytes)?;
+        check_structure(&table)?;
+        Ok(table)
+    }
+
+    /// The version first, so a later layout is named as such rather than as a parse error.
+    fn parse(bytes: &[u8]) -> Result<Self, String> {
+        let raw: Value = serde_json::from_slice(bytes)
+            .map_err(|error| format!("the AU table is not JSON ({error})"))?;
+        match raw.get("version").and_then(Value::as_u64) {
+            Some(AU_TABLE_VERSION) => {}
+            Some(version) => {
+                return Err(format!(
+                "the AU table is version {version}; this mkvdovi reads version {AU_TABLE_VERSION}"
+            ))
+            }
+            None => return Err("the AU table has no version".into()),
+        }
+        serde_json::from_value(raw)
+            .map_err(|error| format!("the AU table does not parse ({error})"))
+    }
+
+    /// The table describes `input` as it is now: its file name, size and both chunk digests.
+    pub(super) fn check_source(&self, input: &Path, identity: &FileIdentity) -> Result<(), String> {
+        let source = &self.source;
+        let name = input.file_name().map(|name| name.to_string_lossy());
+        if name.as_deref() != Some(source.file_name.as_str()) {
+            return Err(format!(
+                "the AU table describes '{}', not '{}'",
+                source.file_name,
+                name.unwrap_or_default()
+            ));
+        }
+        if source.size_bytes != identity.size_bytes
+            || source.head_sha256 != hex(&identity.head)
+            || source.tail_sha256 != hex(&identity.tail)
+        {
+            return Err("the input's size or chunk digests differ from the AU table's".into());
+        }
+        Ok(())
+    }
 }
 
 /// An AU table and the bytes of the L1 sidecar it names by digest.
@@ -111,20 +172,7 @@ impl Pair {
         sidecar_bytes: &[u8],
         sidecar: Value,
     ) -> Result<Self, String> {
-        // The version first, so a later layout is named as such rather than as a parse error.
-        let raw: Value = serde_json::from_slice(table_bytes)
-            .map_err(|error| format!("the AU table is not JSON ({error})"))?;
-        match raw.get("version").and_then(Value::as_u64) {
-            Some(AU_TABLE_VERSION) => {}
-            Some(version) => {
-                return Err(format!(
-                "the AU table is version {version}; this mkvdovi reads version {AU_TABLE_VERSION}"
-            ))
-            }
-            None => return Err("the AU table has no version".into()),
-        }
-        let table: AuTable = serde_json::from_value(raw)
-            .map_err(|error| format!("the AU table does not parse ({error})"))?;
+        let table = AuTable::parse(table_bytes)?;
         let Some(bound) = table.sidecar_sha256.as_deref() else {
             return Err(
                 "the AU table names no sidecar (written by --au-table-only), so its measurements cannot be bound to it"
@@ -145,24 +193,9 @@ impl Pair {
         })
     }
 
-    /// The table describes `input` as it is now: its file name, size and both chunk digests.
+    /// [`AuTable::check_source`] of the pair's table.
     pub(super) fn check_source(&self, input: &Path, identity: &FileIdentity) -> Result<(), String> {
-        let source = &self.table.source;
-        let name = input.file_name().map(|name| name.to_string_lossy());
-        if name.as_deref() != Some(source.file_name.as_str()) {
-            return Err(format!(
-                "the AU table describes '{}', not '{}'",
-                source.file_name,
-                name.unwrap_or_default()
-            ));
-        }
-        if source.size_bytes != identity.size_bytes
-            || source.head_sha256 != hex(&identity.head)
-            || source.tail_sha256 != hex(&identity.tail)
-        {
-            return Err("the input's size or chunk digests differ from the AU table's".into());
-        }
-        Ok(())
+        self.table.check_source(input, identity)
     }
 
     /// The table and the loaded sidecar count the same pictures and leading pictures.

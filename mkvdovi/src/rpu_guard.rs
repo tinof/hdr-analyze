@@ -56,6 +56,39 @@ pub fn parse_source_rpu_file(path: &Path) -> Result<Vec<DoviRpu>> {
     parse_rpu_file(path).context("Failed to parse Dolby Vision RPU")
 }
 
+/// One RPU of a source `RPU.bin` as the file holds it.
+#[derive(Debug)]
+pub struct SourceRpu<'a> {
+    /// The bytes after the start code, without the zero bytes before the next one. `dovi_tool`
+    /// writes them without the HEVC NAL header (`7C 01`) that `dovi_rpu_builder` writes; the
+    /// crate parses either form.
+    pub data: &'a [u8],
+    pub rpu: DoviRpu,
+}
+
+/// Every RPU of an `RPU.bin` already in memory, behind the same guard as
+/// [`parse_source_rpu_file`]: the parsed RPUs and their bytes come from one read of the file.
+/// Stricter than `parse_rpu_file`, which keeps the RPUs before the first one it cannot parse:
+/// bytes before the first start code, an empty file and any RPU the crate refuses are errors.
+pub fn parse_source_rpu_bytes(bytes: &[u8]) -> Result<Vec<SourceRpu<'_>>> {
+    if !bytes.starts_with(&START_CODE) {
+        anyhow::bail!("the file does not start with an Annex B start code (00 00 00 01)");
+    }
+    check_parseable(bytes)?;
+    split_nals(bytes)
+        .enumerate()
+        .map(|(index, unit)| {
+            let mut data = &unit[START_CODE.len()..];
+            while let [rest @ .., 0] = data {
+                data = rest;
+            }
+            let rpu = DoviRpu::parse_unspec62_nalu(data)
+                .with_context(|| format!("RPU {index} does not parse"))?;
+            Ok(SourceRpu { data, rpu })
+        })
+        .collect()
+}
+
 /// The guard's refusal: RPU `index` (0-based, in file order) would abort the crate's parser.
 /// A caller tells it apart from other parse failures with [`is_unparseable`]: the file does
 /// carry Dolby Vision RPUs, so it must not be handled as if it had none.

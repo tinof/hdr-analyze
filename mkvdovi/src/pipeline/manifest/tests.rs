@@ -358,12 +358,9 @@ fn paths_default_to_the_input_directory_and_refuse_the_input() {
     let input = dir.path().join("clip.mkv");
     std::fs::write(&input, b"x").unwrap();
     let input_file = input.to_str().unwrap();
-    assert_eq!(
-        Paths::new(input_file, None, None).aliasing_input(&input),
-        None
-    );
+    assert_eq!(Paths::new(input_file, None, None).aliasing(&input), None);
     let paths = Paths::new(input_file, None, Some(&input));
-    assert_eq!(paths.aliasing_input(&input), Some(input.as_path()));
+    assert_eq!(paths.aliasing(&input), Some(input.as_path()));
     // The temp file of `--out x` is `x.tmp`: an input of that name is refused too.
     let tmp_named = dir.path().join("m.json.tmp");
     std::fs::write(&tmp_named, b"x").unwrap();
@@ -372,7 +369,44 @@ fn paths_default_to_the_input_directory_and_refuse_the_input() {
         None,
         Some(&dir.path().join("m.json")),
     );
-    assert_eq!(paths.aliasing_input(&tmp_named), Some(tmp_named.as_path()));
+    assert_eq!(paths.aliasing(&tmp_named), Some(tmp_named.as_path()));
+}
+
+#[test]
+fn an_rpu_import_writes_its_own_au_table_and_never_its_rpu_file() {
+    let paths = Paths::for_rpu_import("clip.mkv", Some(Path::new("/w")), None);
+    assert_eq!(paths.au_table, Path::new("/w/clip.rpu-import.au.json"));
+    assert_eq!(
+        paths.au_table_tmp,
+        Path::new("/w/clip.rpu-import.au.json.tmp")
+    );
+    assert_eq!(paths.out, Path::new("/w/clip.dvmanifest.json"));
+    assert_eq!(paths.log, Path::new("/w/clip.manifest-analyzer.log"));
+    // A measured pair beside it is not one of the written paths.
+    assert!(!paths
+        .written()
+        .contains(&Path::new("/w/clip_measurements.bin.au.json")));
+
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("clip.mkv");
+    let rpu = dir.path().join("RPU.bin");
+    std::fs::write(&input, b"x").unwrap();
+    std::fs::write(&rpu, b"y").unwrap();
+    let input_file = input.to_str().unwrap();
+    assert_eq!(
+        Paths::for_rpu_import(input_file, None, None).aliasing(&rpu),
+        None
+    );
+    let paths = Paths::for_rpu_import(input_file, None, Some(&rpu));
+    assert_eq!(paths.aliasing(&rpu), Some(rpu.as_path()));
+    let paths = Paths::for_rpu_import(input_file, None, Some(&dir.path().join("RPU")));
+    assert_eq!(paths.aliasing(&rpu), None);
+    std::fs::rename(&rpu, dir.path().join("RPU.tmp")).unwrap();
+    assert_eq!(
+        paths.aliasing(&dir.path().join("RPU.tmp")),
+        Some(dir.path().join("RPU.tmp").as_path()),
+        "the manifest's temp file"
+    );
 }
 
 #[test]
@@ -391,11 +425,7 @@ fn an_analyzer_temp_file_that_is_the_input_is_refused() {
         let link = work.join(temp_name);
         std::fs::hard_link(&input, &link).unwrap();
         let paths = Paths::new(input.to_str().unwrap(), Some(&work), None);
-        assert_eq!(
-            paths.aliasing_input(&input),
-            Some(link.as_path()),
-            "{temp_name}"
-        );
+        assert_eq!(paths.aliasing(&input), Some(link.as_path()), "{temp_name}");
     }
 }
 
