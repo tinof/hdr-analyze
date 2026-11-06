@@ -334,6 +334,19 @@ pub(super) fn check_reproduced(
         let mut built = builder
             .shot(shot.l1)
             .map_err(|error| format!("the L1 of picture {start} cannot be built ({error})"))?;
+        // The rebuild clamps L1 as the generator does, so a shot's own L1 outside that range
+        // makes its first picture differ: name that, not a per-frame change.
+        let clamped = built.l1();
+        if clamped != shot.l1 {
+            let l1 = shot.l1;
+            return Err(format!(
+                "picture {start}{} starts a shot whose L1 (min {}, avg {}, max {}) lies outside the range `dovi_tool generate` writes (min <= 12, max >= 2081, avg from 819 to below max), so no manifest can carry it",
+                au(start),
+                l1.min_pq,
+                l1.avg_pq,
+                l1.max_pq,
+            ));
+        }
         for (picture, source) in rpus.iter().enumerate().take(end).skip(start) {
             let rebuilt = built
                 .write(picture == start)

@@ -390,6 +390,27 @@ fn a_change_outside_l1_and_l2_is_refused_at_its_picture() {
 }
 
 #[test]
+fn a_shot_l1_outside_the_generator_range_is_named_as_such() {
+    // Picture 5 starts the second shot (AU 6). An average of 700 is below the lowest floor (819),
+    // so no manifest can carry it: the builder would clamp it.
+    let mut nals = nals(&custom_81(), &shots(), 10);
+    for picture in 5..10 {
+        nals[picture] = edited(&nals[picture], |dm| {
+            dm.replace_metadata_block(ExtMetadataBlock::Level1(ExtMetadataBlockLevel1::new(
+                10, 3200, 700,
+            )))
+            .unwrap();
+        });
+    }
+    let error = refusal(&file(&nals), None);
+    assert!(
+        error.contains("picture 5 (AU 6 in decode order)")
+            && error.contains("lies outside the range `dovi_tool generate` writes"),
+        "{error}"
+    );
+}
+
+#[test]
 fn picture_0_must_start_a_scene() {
     let mut nals = nals(&custom_81(), &shots(), 10);
     nals[0] = edited(&nals[0], |dm| dm.set_scene_cut(false));
