@@ -23,6 +23,14 @@ This document provides a historical record of completed milestones, feature impl
   same flags, AU for AU. It never converts, muxes or deletes; it refuses HDR10+, Dolby Vision and
   non-Matroska input before any analysis, and reuses a measurement pair only when it is bound to
   the file as it is now. `dovi_rpu_builder::VERSION` names the builder in the manifest.
+- `mkvdovi manifest --rpu <RPU.bin>` (P15.4) makes the manifest from an imported `RPU.bin`
+  (display order, as `dovi_tool generate` writes it and `extract-rpu` returns it) instead of a
+  measurement: the shots and RPU parameters come from the file, and the analyzer writes only the
+  AU table. The file is accepted only when the manifest rebuilds every RPU byte for byte; a wrong
+  composer, a wrong count, per-frame trims or L1, or any other difference is refused, naming the
+  first picture and its AU. The manifest has `l1_policy` `rpu-bin`, coverage `approximate`, and
+  `producer.rpu_bin_sha256` in place of the (null) sidecar fields; a measured manifest is written
+  as before. The flags that shape the RPU or the measurement cannot be given with `--rpu`.
 
 ### Fixed
 

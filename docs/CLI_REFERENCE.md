@@ -299,7 +299,7 @@ Profile 7 file is MEL or FEL. The plan for FEL input is in [FEL_PLAN.md](FEL_PLA
 | Command | Description |
 |---------|-------------|
 | `mkvdovi inspect <INPUT>` | Extract the complete RPU and report suspicious/static/clipped L1 patterns |
-| `mkvdovi manifest <INPUT> [--out <FILE>] [--work-dir <DIR>]` | Write the playback manifest `<stem>.dvmanifest.json` of an HDR10 or HLG MKV for the NuvioTV fork: measured per-shot L1 and the AU table ([PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)). Takes `--hlg-composer`, `--cm-version`, `--content-type`, `--reference-mode`, `--source-primaries`, `--trim-targets`, `--analysis-quality` and `--hwaccel` as a conversion does. Never converts, muxes or deletes; needs `mediainfo`, `dovi_tool` and an analyzer with `au-table-v1` |
+| `mkvdovi manifest <INPUT> [--out <FILE>] [--work-dir <DIR>]` | Write the playback manifest `<stem>.dvmanifest.json` of an HDR10 or HLG MKV for the NuvioTV fork: measured per-shot L1 and the AU table ([PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)). Takes `--hlg-composer`, `--cm-version`, `--content-type`, `--reference-mode`, `--source-primaries`, `--trim-targets`, `--analysis-quality` and `--hwaccel` as a conversion does. `--rpu <RPU.bin>` takes the shots and RPU parameters from an imported `RPU.bin` instead of measuring (the analyzer writes only `<stem>.rpu-import.au.json`); it is accepted only when every RPU rebuilds byte for byte, else the first differing picture and its AU are named, and it cannot be combined with the RPU-shaping or sampling flags (`--hlg-composer` names the composer the file must carry). Never converts, muxes or deletes; needs `mediainfo`, `dovi_tool` and an analyzer with `au-table-v1` |
 
 ### Examples
 
@@ -311,6 +311,7 @@ mkvdovi "input.mkv" --cm-version v29          # legacy CM v2.9 (L1, L5, L6 only)
 mkvdovi "input.mkv" --source-primaries 0      # force P3-D65
 mkvdovi inspect "input.DV.mkv"                 # inspect source RPU metadata
 mkvdovi manifest "input.mkv" --work-dir ~/m    # playback manifest; measurements in ~/m
+mkvdovi manifest "input.mkv" --rpu RPU.bin     # playback manifest from an imported RPU.bin
 mkvdovi "input.DV.mkv" --mdfix                 # write input.mdfix.DV.mkv
 ```
 
