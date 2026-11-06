@@ -197,7 +197,9 @@ measurement. Code: `mkvdovi/src/pipeline/manifest/import.rs`.
 - Accepted only when the builder rebuilds every picture's RPU byte for byte. Otherwise the refusal
   names the first picture, its AU in decode order, and what differs: the HLG composer, the
   scene-refresh flag, L1 (per-frame L1), L2 (per-frame or authored trims), another level, or the
-  header or DM fields. A count that differs from the pictures is refused before that.
+  header or DM fields. A shot whose L1 lies outside the range `dovi_tool generate` writes is
+  named as such, since no manifest can carry it. A count that differs from the pictures is refused
+  before that.
 - `analysis` states only `luminance_mapping`, and the coverage is `approximate`. The flags that shape
   the RPU or the measurement (`--cm-version`, `--content-type`, `--reference-mode`,
   `--source-primaries`, `--trim-targets`, `--analysis-quality`) cannot be given with `--rpu`.
