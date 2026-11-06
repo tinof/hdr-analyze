@@ -372,6 +372,58 @@ fn paths_default_to_the_input_directory_and_refuse_the_input() {
     assert_eq!(paths.aliasing(&tmp_named), Some(tmp_named.as_path()));
 }
 
+/// The import's table (`--au-table-only`, no sidecar) gets the version, structure and source
+/// checks of a bound one.
+#[test]
+fn an_unbound_table_is_read_with_the_checks_of_a_bound_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("clip.rpu-import.au.json");
+    let mut table = table_json(b"{}", 24, 0);
+    table["sidecar_sha256"] = Value::Null;
+    std::fs::write(&path, serde_json::to_vec(&table).unwrap()).unwrap();
+    let read = AuTable::read_unbound(&path).unwrap();
+    assert_eq!(read.aus.picture_count(), 24);
+    assert_eq!(read.sidecar_sha256, None);
+
+    let input = dir.path().join("clip.mkv");
+    std::fs::write(&input, vec![0u8; 1000]).unwrap();
+    let identity = FileIdentity::of(&input).unwrap();
+    // The fixture's digests are not this file's.
+    let error = read.check_source(&input, &identity).unwrap_err();
+    assert!(error.contains("size or chunk digests differ"), "{error}");
+    let other = dir.path().join("other.mkv");
+    std::fs::write(&other, vec![0u8; 1000]).unwrap();
+    let error = read.check_source(&other, &identity).unwrap_err();
+    assert!(
+        error.contains("describes 'clip.mkv', not 'other.mkv'"),
+        "{error}"
+    );
+    let mut matching = table.clone();
+    matching["source"]["head_sha256"] = json!(hex(&identity.head));
+    matching["source"]["tail_sha256"] = json!(hex(&identity.tail));
+    std::fs::write(&path, serde_json::to_vec(&matching).unwrap()).unwrap();
+    AuTable::read_unbound(&path)
+        .unwrap()
+        .check_source(&input, &identity)
+        .unwrap();
+
+    let refused = |table: &Value, needle: &str| {
+        std::fs::write(&path, serde_json::to_vec(table).unwrap()).unwrap();
+        let error = AuTable::read_unbound(&path).unwrap_err();
+        assert!(error.contains(needle), "'{needle}' not in: {error}");
+    };
+    let mut later = table.clone();
+    later["version"] = json!(2);
+    refused(&later, "the AU table is version 2");
+    let mut empty = table.clone();
+    empty["aus"]["count"] = json!(0);
+    refused(&empty, "the AU table has no AUs");
+    // A structure the matcher would refuse: two AUs with one pts.
+    let mut twins = table;
+    twins["aus"]["pts_delta"][3] = json!(0);
+    refused(&twins, "have pts");
+}
+
 #[test]
 fn an_rpu_import_writes_its_own_au_table_and_never_its_rpu_file() {
     let paths = Paths::for_rpu_import("clip.mkv", Some(Path::new("/w")), None);

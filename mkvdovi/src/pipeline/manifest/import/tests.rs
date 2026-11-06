@@ -76,7 +76,8 @@ fn custom_81() -> RpuParams {
             top: 16,
             bottom: 24,
         }),
-        l1_avg_pq_cm_version: IMPORT_L1_AVG_CM_VERSION,
+        // What a measured conversion writes (mkvdovi uses V29 for measured L1).
+        l1_avg_pq_cm_version: CmVersion::V29,
     }
 }
 
@@ -96,7 +97,7 @@ fn hlg(composer: Composer) -> RpuParams {
         cm: CmMetadata::mkvdovi_default(),
         level6: Level6::mkvdovi_default(),
         level5: None,
-        l1_avg_pq_cm_version: IMPORT_L1_AVG_CM_VERSION,
+        l1_avg_pq_cm_version: CmVersion::V29,
     }
 }
 
@@ -230,6 +231,41 @@ fn an_rpu_clamped_under_the_v40_average_floor_is_reproduced() {
 }
 
 #[test]
+fn an_average_between_the_v29_and_v40_floors_is_reproduced() {
+    // 900 is above V29's floor (819) and below V40's (1229): a measured conversion writes it as
+    // it is, and a rebuild under the V40 floor would write 1229.
+    let shots = vec![ManifestShot {
+        start: 0,
+        l1: L1::new(0, 900, 2600),
+    }];
+    let bytes = file(&nals(&custom_81(), &shots, 10));
+    let rpus = parse_source_rpu_bytes(&bytes).unwrap();
+    assert_eq!(shots_from_rpus(&rpus).unwrap(), shots);
+    assert!(import(&bytes, None).is_ok());
+}
+
+#[test]
+fn zero_bytes_before_a_start_code_are_not_part_of_the_rpu() {
+    // trailing_zero_8bits: `00 00 00 00 01` between RPUs, and zeros at the end of the file.
+    let nals = nals(&custom_81(), &shots(), 10);
+    let mut bytes: Vec<u8> = nals
+        .iter()
+        .flat_map(|nal| {
+            START_CODE
+                .iter()
+                .chain(&nal[RPU_NAL_HEADER.len()..])
+                .chain(&[0, 0])
+                .copied()
+        })
+        .collect();
+    bytes.push(0);
+    let rpus = parse_source_rpu_bytes(&bytes).unwrap();
+    assert_eq!(rpus.len(), 10);
+    assert_eq!(rpus[9].data, &nals[9][RPU_NAL_HEADER.len()..]);
+    assert_eq!(import(&bytes, None), Ok(custom_81()));
+}
+
+#[test]
 fn trim_targets_read_back_as_the_roundest_whole_nits() {
     for nits in [100, 400, 600, 1000, 4000] {
         let code = u16::try_from(nits_to_pq_code(nits)).unwrap();
@@ -309,6 +345,21 @@ fn per_frame_trims_and_l1_are_refused_at_their_picture() {
         "{error}"
     );
     assert!(import(&file(&good), None).is_ok());
+}
+
+#[test]
+fn the_first_differing_picture_in_presentation_order_is_named() {
+    // Picture 1 is AU 2, picture 4 is AU 1: decode order meets picture 4 first, presentation
+    // order picture 1, and the refusal names the first in presentation order.
+    let mut nals = nals(&custom_81(), &shots(), 10);
+    for picture in [1, 4] {
+        nals[picture] = edited(&nals[picture], |dm| dm.source_max_pq = 3500);
+    }
+    let error = refusal(&file(&nals), None);
+    assert!(
+        error.contains("picture 1 (AU 2 in decode order)"),
+        "{error}"
+    );
 }
 
 #[test]
