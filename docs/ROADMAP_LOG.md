@@ -6,6 +6,35 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-06: P15.5 Manifest for an FFmpeg-cut open-GOP file (PR #100)
+
+Step: - [P15.5][corpus] An FFmpeg stream-copy open-GOP cut whose RASL pictures have negative MKV
+  timestamps gets no pts, so `mkvdovi manifest` refuses it; the conversion accepts it. Gate:
+  such a cut gets a manifest whose RPUs equal the conversion's, or a test pins the refusal as
+  decided in `docs/PLAYBACK_MANIFEST.md`. Needs: P15.3.
+
+Owner decision (2026-11-06): keep the refusal and name a remedy, rather than add a Matroska
+block-timestamp reader to the analyzer. Gate evidence: PR #100. Local gates: fmt, workspace clippy,
+`scripts/ci/test-gate.sh` (only allowed skips) and `l1-regression`. Two new tests use an FFmpeg
+stream copy of an open-GOP x265 cut with one RASL picture:
+`ffmpeg_open_gop_cut_is_refused_and_its_mkvmerge_remux_matches_the_conversion`
+(`mkvdovi/tests/playback_manifest.rs`) and
+`an_ffmpeg_open_gop_cut_is_refused_on_import_and_its_remux_imports`
+(`mkvdovi/tests/playback_manifest_rpu.rs`). They pin the refusal and its remedy on the measured
+and `--rpu` paths, and check that the measured run keeps the `.bin` and sidecar but writes no AU
+table. The `mkvmerge -o` remux keeps every packet payload in decode order, and its manifest rebuilds
+the cut's conversion RPUs AU for AU. The measured test fails on the parent's message. Real content:
+the remux of the dev cut d3 (FFmpeg-made, 2 RASL pictures at -42 and -41 ms) got a manifest
+(18 shots over 1445 pictures). On synthetic cuts with two or three RASL pictures, FFmpeg n9.0.2
+writes two of them with one timestamp, so the remux is refused for a duplicate pts. The message
+then names a new `mkvmerge --split` cut. A pre-PR skeptic reproduced the one-RASL fixture with
+Ubuntu's FFmpeg 6.1.1 and x265 3.5, the CI toolchain. Review: the pre-PR panel found no defect
+(two P3 claims refuted); Codex exec and Codex's GitHub review: LGTM.
+
+Resolution: the analyzer's no-pts refusal (`au_table.rs` `AuRecorder::observe_packet`) names the
+cause, the mkvmerge remux and the `--split` fallback; P15 has no open step. Open idea, not a step:
+refuse before the measurement pass, which today runs in full before the refusal.
+
 ### 2026-11-06: P15.4 `mkvdovi manifest --rpu` import (PR #99)
 
 Step: - [P15.4][gpu] `mkvdovi manifest --rpu`: an imported `RPU.bin`, accepted only when it rebuilds

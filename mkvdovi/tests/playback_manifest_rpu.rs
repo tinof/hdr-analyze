@@ -200,6 +200,34 @@ fn check_import(dir: &Path, source: &Path, flags: &[&str], import_flags: &[&str]
     rpu
 }
 
+/// ROADMAP P15.5 on the `--au-table-only` path: the FFmpeg-cut open-GOP file is refused with the
+/// remedy and writes no AU table, and the conversion's `RPU.bin` imports on its mkvmerge remux.
+#[test]
+fn an_ffmpeg_open_gop_cut_is_refused_on_import_and_its_remux_imports() {
+    require_tools!();
+    let dir = tempfile::tempdir().unwrap();
+    let cut = ffmpeg_open_gop_cut(dir.path());
+    let converted = convert(dir.path(), &[]);
+    let rpu = dir.path().join("RPU.bin");
+    extract_rpu(&converted, &rpu);
+
+    let (ok, log, work) = import(dir.path(), "work", &rpu, &[]);
+    assert!(!ok, "the cut must be refused:\n{log}");
+    assert!(log.contains("video packet 1 has no pts"), "{log}");
+    assert!(
+        log.contains("Remux the file with `mkvmerge -o <new>.mkv <input>`"),
+        "{log}"
+    );
+    assert!(!work.join(MANIFEST).exists(), "a refusal wrote a manifest");
+    assert!(!work.join("clip.rpu-import.au.json").exists());
+
+    let remux_dir = dir.path().join("remux");
+    let remux = mkvmerge_remux(&cut, &remux_dir);
+    let (manifest, _) = accepted(&remux_dir, "work", &rpu, &[]);
+    assert_eq!(manifest.leading_skipped, 1);
+    assert_rpus_equal_the_conversion(&manifest, &remux, &converted);
+}
+
 #[test]
 fn a_conversion_rpu_with_b_frames_is_imported_and_its_edits_are_refused() {
     require_tools!();

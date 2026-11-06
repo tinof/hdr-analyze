@@ -161,6 +161,14 @@ pub fn read_json(path: &Path) -> Value {
 /// `(pts, bytes)` of every video packet in decode order, as FFmpeg demuxes them (the bytes the
 /// AU table describes).
 pub fn packets(mkv: &Path) -> Vec<(i64, Vec<u8>)> {
+    packets_with_optional_pts(mkv)
+        .into_iter()
+        .map(|(pts, data)| (pts.expect("every MKV packet has a pts"), data))
+        .collect()
+}
+
+/// As [`packets`], with `None` for a packet FFmpeg gives no pts.
+pub fn packets_with_optional_pts(mkv: &Path) -> Vec<(Option<i64>, Vec<u8>)> {
     let output = run(Command::new("ffprobe")
         .args(["-v", "error", "-select_streams", "v:0", "-show_data"])
         .args(["-show_entries", "packet=pts,data", "-of", "json"])
@@ -171,10 +179,58 @@ pub fn packets(mkv: &Path) -> Vec<(i64, Vec<u8>)> {
         .unwrap()
         .iter()
         .map(|packet| {
-            let pts = packet["pts"].as_i64().expect("every MKV packet has a pts");
-            (pts, hexdump_bytes(packet["data"].as_str().unwrap()))
+            (
+                packet["pts"].as_i64(),
+                hexdump_bytes(packet["data"].as_str().unwrap()),
+            )
         })
         .collect()
+}
+
+/// `<dir>/clip.mkv` as an FFmpeg stream copy of an open-GOP cut (ROADMAP P15.5): an x265 clip
+/// with one B-frame, so one RASL picture per CRA, split by mkvmerge at the CRA of frame 24, then
+/// copied by FFmpeg, which gives the RASL picture a negative Matroska timestamp. FFmpeg's demuxer
+/// reads it as no pts. One RASL picture keeps the remux's timestamps distinct: with three,
+/// FFmpeg n9.0.2 writes two of them with one timestamp, and no remux can recover them
+/// (docs/PLAYBACK_MANIFEST.md). Returns the path.
+pub fn ffmpeg_open_gop_cut(dir: &Path) -> PathBuf {
+    let raw = encode(
+        dir,
+        "open",
+        STEP_40,
+        96,
+        &format!("keyint=24:min-keyint=24:open-gop=1:bframes=1:b-adapt=0:{PQ_TAGS}:{MASTERING}"),
+    );
+    let full = mux(dir, "full.mkv", &raw, &[]);
+    let part = dir.join("part.mkv");
+    run(Command::new("mkvmerge")
+        .arg("-q")
+        .arg("-o")
+        .arg(&part)
+        .args(["--split", "parts:00:00:01-00:00:10"])
+        .arg(&full));
+    let source = dir.join(SOURCE);
+    run(Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(&part)
+        .args(["-map", "0:v:0", "-c", "copy", "-y"])
+        .arg(&source));
+    for path in [raw, full, part] {
+        std::fs::remove_file(path).unwrap();
+    }
+    source
+}
+
+/// The remedy the refusal names: `mkvmerge -o <dir>/clip.mkv <source>`. Returns the path.
+pub fn mkvmerge_remux(source: &Path, dir: &Path) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    let out = dir.join(SOURCE);
+    run(Command::new("mkvmerge")
+        .arg("-q")
+        .arg("-o")
+        .arg(&out)
+        .arg(source));
+    out
 }
 
 /// The bytes of ffprobe's `-show_data` dump: lines of `%08x: ` and 16 bytes as hex pairs (a space
