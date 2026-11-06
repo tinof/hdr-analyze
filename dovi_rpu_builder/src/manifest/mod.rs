@@ -25,8 +25,8 @@ use dovi84_composer::Composer;
 use serde_json::{json, Map, Value};
 
 use self::json::{
-    array_at, check_digest, check_rising, digest_at, fail, field, i64_at, object, str_at, u64_at,
-    uint_at, uints,
+    array_at, check_digest, check_rising, digest_at, fail, field, i64_at, nullable, object,
+    optional, str_at, u64_at, uint_at, uints,
 };
 use crate::builder::{RpuBuilder, L1};
 use crate::composer::HlgComposer;
@@ -45,11 +45,17 @@ pub const PQ_MAPPING: &str = "pq";
 pub struct Producer {
     pub mkvdovi_version: String,
     pub analyzer_version: String,
-    pub sidecar_version: u64,
+    /// The L1 sidecar's version: set for [`L1Policy::Measured`], `None` (JSON null) for
+    /// [`L1Policy::RpuBin`].
+    pub sidecar_version: Option<u64>,
     pub au_table_version: u64,
     pub rpu_builder_version: String,
-    /// SHA-256 of the L1 sidecar the shots come from.
-    pub sidecar_sha256: String,
+    /// SHA-256 of the L1 sidecar the shots come from: set for [`L1Policy::Measured`], `None`
+    /// (JSON null) for [`L1Policy::RpuBin`].
+    pub sidecar_sha256: Option<String>,
+    /// SHA-256 of the imported `RPU.bin` the shots come from: set for [`L1Policy::RpuBin`] only;
+    /// a measured manifest has no such key.
+    pub rpu_bin_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,9 +96,13 @@ impl Aus {
     }
 }
 
+/// Where the shots' L1 comes from, and so which digest `producer` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum L1Policy {
+    /// Measured by the analyzer: `producer` names the L1 sidecar.
     Measured,
+    /// Read from an imported `RPU.bin` that the builder reproduces byte for byte: `producer`
+    /// names that file and no sidecar.
     RpuBin,
 }
 
@@ -210,14 +220,56 @@ impl PlaybackManifest {
                 track.container, track.codec
             ));
         }
+        self.validate_producer()?;
         for (digest, path) in [
-            (&self.producer.sidecar_sha256, "producer.sidecar_sha256"),
             (&self.source.head_sha256, "source.head_sha256"),
             (&self.source.tail_sha256, "source.tail_sha256"),
             (&self.source.lookup_key, "source.lookup_key"),
             (&track.codec_private_sha256, "track.codec_private_sha256"),
         ] {
             check_digest(digest, path)?;
+        }
+        Ok(())
+    }
+
+    /// The provenance `l1_policy` calls for: the sidecar's version and digest for measured L1,
+    /// the imported file's digest (and no sidecar) for `rpu-bin`.
+    fn validate_producer(&self) -> Result<()> {
+        let producer = &self.producer;
+        let digests = [
+            (&producer.sidecar_sha256, "producer.sidecar_sha256"),
+            (&producer.rpu_bin_sha256, "producer.rpu_bin_sha256"),
+        ];
+        for (digest, path) in digests {
+            if let Some(digest) = digest {
+                check_digest(digest, path)?;
+            }
+        }
+        let sidecar = (
+            producer.sidecar_version.is_some(),
+            producer.sidecar_sha256.is_some(),
+        );
+        match self.l1_policy {
+            L1Policy::Measured => {
+                if sidecar != (true, true) {
+                    return fail(
+                        "l1_policy measured needs producer.sidecar_version and producer.sidecar_sha256",
+                    );
+                }
+                if producer.rpu_bin_sha256.is_some() {
+                    return fail("l1_policy measured has no producer.rpu_bin_sha256");
+                }
+            }
+            L1Policy::RpuBin => {
+                if producer.rpu_bin_sha256.is_none() {
+                    return fail("l1_policy rpu-bin needs producer.rpu_bin_sha256");
+                }
+                if sidecar != (false, false) {
+                    return fail(
+                        "l1_policy rpu-bin names no sidecar (producer.sidecar_version and producer.sidecar_sha256 are null)",
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -381,17 +433,22 @@ impl PlaybackManifest {
             .windows(2)
             .map(|pair| pair[1].wrapping_sub(pair[0]))
             .collect();
+        let mut producer = json!({
+            "mkvdovi_version": self.producer.mkvdovi_version,
+            "analyzer_version": self.producer.analyzer_version,
+            "sidecar_version": self.producer.sidecar_version,
+            "au_table_version": self.producer.au_table_version,
+            "rpu_builder_version": self.producer.rpu_builder_version,
+            "sidecar_sha256": self.producer.sidecar_sha256,
+        });
+        // A measured manifest is written as before the key existed.
+        if let Some(digest) = &self.producer.rpu_bin_sha256 {
+            producer["rpu_bin_sha256"] = json!(digest);
+        }
         Ok(json!({
             "format": MANIFEST_FORMAT,
             "version": MANIFEST_VERSION,
-            "producer": {
-                "mkvdovi_version": self.producer.mkvdovi_version,
-                "analyzer_version": self.producer.analyzer_version,
-                "sidecar_version": self.producer.sidecar_version,
-                "au_table_version": self.producer.au_table_version,
-                "rpu_builder_version": self.producer.rpu_builder_version,
-                "sidecar_sha256": self.producer.sidecar_sha256,
-            },
+            "producer": producer,
             "source": {
                 "file_name": self.source.file_name,
                 "size_bytes": self.source.size_bytes,
@@ -451,10 +508,11 @@ fn read_producer(value: &Value) -> Result<Producer> {
     Ok(Producer {
         mkvdovi_version: str_at(map, "mkvdovi_version", path)?.to_owned(),
         analyzer_version: str_at(map, "analyzer_version", path)?.to_owned(),
-        sidecar_version: u64_at(map, "sidecar_version", path)?,
+        sidecar_version: nullable(map, "sidecar_version", path, u64_at)?,
         au_table_version: u64_at(map, "au_table_version", path)?,
         rpu_builder_version: str_at(map, "rpu_builder_version", path)?.to_owned(),
-        sidecar_sha256: digest_at(map, "sidecar_sha256", path)?,
+        sidecar_sha256: nullable(map, "sidecar_sha256", path, digest_at)?,
+        rpu_bin_sha256: optional(map, "rpu_bin_sha256", path, digest_at)?,
     })
 }
 

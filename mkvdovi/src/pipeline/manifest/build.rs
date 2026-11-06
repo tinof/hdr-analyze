@@ -80,10 +80,11 @@ pub(super) fn manifest(inputs: &Inputs<'_>) -> Result<PlaybackManifest> {
         producer: Producer {
             mkvdovi_version: env!("CARGO_PKG_VERSION").to_owned(),
             analyzer_version: table.analyzer_version.clone(),
-            sidecar_version: u64::from(inputs.sidecar.version),
+            sidecar_version: Some(u64::from(inputs.sidecar.version)),
             au_table_version: AU_TABLE_VERSION,
             rpu_builder_version: dovi_rpu_builder::VERSION.to_owned(),
-            sidecar_sha256: inputs.pair.sidecar_sha256.clone(),
+            sidecar_sha256: Some(inputs.pair.sidecar_sha256.clone()),
+            rpu_bin_sha256: None,
         },
         source: Source {
             file_name: inputs.file_name.clone(),

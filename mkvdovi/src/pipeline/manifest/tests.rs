@@ -526,9 +526,13 @@ fn shots_move_back_by_the_leading_pictures_and_the_producer_is_named() {
     assert_eq!(built.shots[1].l1.max_pq, 3100);
     assert_eq!(built.coverage.len(), 1);
     assert_eq!((built.coverage[0].start, built.coverage[0].end), (0, 27));
-    assert_eq!(built.producer.sidecar_sha256, pair.sidecar_sha256);
+    assert_eq!(
+        built.producer.sidecar_sha256.as_deref(),
+        Some(pair.sidecar_sha256.as_str())
+    );
+    assert_eq!(built.producer.rpu_bin_sha256, None);
     assert_eq!(built.producer.au_table_version, 1);
-    assert_eq!(built.producer.sidecar_version, 6);
+    assert_eq!(built.producer.sidecar_version, Some(6));
     assert_eq!(
         built.producer.rpu_builder_version,
         dovi_rpu_builder::VERSION
