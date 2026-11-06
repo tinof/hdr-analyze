@@ -47,6 +47,16 @@ starts any analysis. That is the same pattern as `l1-sidecar-frame-peak`.
   its leading RASL pictures can carry negative Matroska timestamps, and FFmpeg's demuxer gives
   them no pts. An open-GOP file whose leading pictures carry valid timestamps (tested on an x265 cut
   muxed by mkvmerge) is accepted.
+- **Decided (P15.5): such a cut stays refused**, measured and `--rpu` alike, and its conversion
+  works as before. Reading the raw Matroska block timestamps in the analyzer was rejected. The
+  refusal names the remedy: `mkvmerge -o <new>.mkv <input>` makes the timestamps non-negative and
+  keeps every packet. The remux works only when the cut's negative timestamps are distinct. On a
+  dev cut with two RASL pictures FFmpeg wrote -42 ms and -41 ms, and the remux was accepted. On
+  synthetic cuts with two or three RASL pictures, FFmpeg n9.0.2 wrote two of them with one
+  timestamp. Their remux is refused (two video packets with one pts), and only a new cut with
+  `mkvmerge --split` helps. `mkvdovi/tests/playback_manifest.rs` and `playback_manifest_rpu.rs`
+  pin the refusal and the remedy on a one-RASL cut. Both tests check that the remux's manifest
+  rebuilds the cut's conversion RPUs byte for byte.
 - Imported `RPU.bin` files (P15.4, "`RPU.bin` import" below) are accepted only when they are
   reproducible from the manifest's parameters and shot list, byte for byte for every AU. Storing
   arbitrary per-AU RPU payloads is a question for a version 2.

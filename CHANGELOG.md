@@ -22,7 +22,10 @@ This document provides a historical record of completed milestones, feature impl
   the AU table a player checks it against. Its RPUs equal a `--keep-source` conversion's with the
   same flags, AU for AU. It never converts, muxes or deletes; it refuses HDR10+, Dolby Vision and
   non-Matroska input before any analysis, and reuses a measurement pair only when it is bound to
-  the file as it is now. `dovi_rpu_builder::VERSION` names the builder in the manifest.
+  the file as it is now. `dovi_rpu_builder::VERSION` names the builder in the manifest. An
+  open-GOP cut made by an FFmpeg stream copy, whose leading pictures have negative timestamps,
+  is refused; the message names the `mkvmerge -o <new>.mkv <input>` remux that fixes it, and a
+  new `mkvmerge --split` cut when the remux is refused too (P15.5).
 - `mkvdovi manifest --rpu <RPU.bin>` (P15.4) makes the manifest from an imported `RPU.bin`
   (display order, as `dovi_tool generate` writes it and `extract-rpu` returns it) instead of a
   measurement: the shots and RPU parameters come from the file, and the analyzer writes only the

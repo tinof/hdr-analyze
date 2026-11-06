@@ -208,6 +208,60 @@ fn open_gop_cut_matches_the_conversion() {
     assert_eq!(manifest.shots[1].start, 40 - 24 + 3);
 }
 
+/// ROADMAP P15.5, as decided in docs/PLAYBACK_MANIFEST.md: an FFmpeg-cut open-GOP file is
+/// refused with the mkvmerge remux as the remedy, its conversion works, and the remux gets a
+/// manifest whose RPUs equal that conversion's, AU for AU.
+#[test]
+fn ffmpeg_open_gop_cut_is_refused_and_its_mkvmerge_remux_matches_the_conversion() {
+    require_tools!();
+    let dir = tempfile::tempdir().unwrap();
+    let cut = ffmpeg_open_gop_cut(dir.path());
+    let cut_packets = packets_with_optional_pts(&cut);
+    let without_pts = cut_packets.iter().filter(|(pts, _)| pts.is_none()).count();
+    assert_eq!(
+        without_pts, 1,
+        "the fixture no longer gives its RASL picture a negative timestamp"
+    );
+
+    // Refused after the measurement: the .bin and the sidecar stay, no AU table, no manifest.
+    let work = dir.path().join("work");
+    let output = mkvdovi_cmd()
+        .current_dir(dir.path())
+        .args(["manifest", SOURCE, "--work-dir"])
+        .arg(&work)
+        .args(["--hwaccel", "none"])
+        .output()
+        .unwrap();
+    let log = log_of(&output);
+    assert!(!output.status.success(), "the cut must be refused:\n{log}");
+    assert!(log.contains("video packet 1 has no pts"), "{log}");
+    assert!(
+        log.contains("Remux the file with `mkvmerge -o <new>.mkv <input>`"),
+        "{log}"
+    );
+    assert!(!work.join(MANIFEST).exists(), "a refusal wrote a manifest");
+    assert!(!work.join("clip_measurements.bin.au.json").exists());
+    let measurements = std::fs::metadata(work.join("clip_measurements.bin")).unwrap();
+    assert!(measurements.len() > 0);
+    let sidecar = read_json(&work.join("clip_measurements.bin.l1.json"));
+    assert_eq!(sidecar["source"]["leading_skipped_frames"], 1);
+    assert_eq!(sidecar["source"]["stream_frames"], cut_packets.len());
+
+    let converted = convert(dir.path(), &[]);
+
+    let remux = mkvmerge_remux(&cut, &dir.path().join("remux"));
+    // `packets` also asserts that every packet of the remux has a pts.
+    let remux_payloads: Vec<Vec<u8>> = packets(&remux).into_iter().map(|(_, d)| d).collect();
+    let cut_payloads: Vec<Vec<u8>> = cut_packets.into_iter().map(|(_, d)| d).collect();
+    assert!(
+        remux_payloads == cut_payloads,
+        "the remux must keep every packet, in decode order"
+    );
+    let outcome = write_manifest(&dir.path().join("remux"), &[]);
+    assert_eq!(outcome.manifest.leading_skipped, 1);
+    assert_rpus_equal_the_conversion(&outcome.manifest, &remux, &converted);
+}
+
 #[test]
 fn cm_v29_trims_l5_and_measured_light_levels_match_the_conversion() {
     require_tools!();
