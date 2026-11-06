@@ -392,3 +392,28 @@ fn the_file_is_parsed_strictly_and_behind_the_guard() {
     let error = parse_source_rpu_bytes(&fixture).unwrap_err();
     assert!(is_unparseable(&error), "{error:#}");
 }
+
+/// The guard checks the bytes the parser reads, in either form: with the `7C 01` NAL header
+/// after each start code, the abort fixture is refused as well.
+#[test]
+fn the_guard_also_covers_rpus_with_nal_headers() {
+    let fixture = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/linear_interp_RPU.bin"),
+    )
+    .unwrap();
+    // Each unit's bytes after its start code, behind START_CODE + 7C 01.
+    let starts: Vec<usize> = fixture
+        .windows(4)
+        .enumerate()
+        .filter_map(|(index, window)| (window == START_CODE).then_some(index))
+        .collect();
+    let mut with_headers = Vec::new();
+    for (n, &start) in starts.iter().enumerate() {
+        let end = starts.get(n + 1).copied().unwrap_or(fixture.len());
+        with_headers.extend(START_CODE);
+        with_headers.extend(RPU_NAL_HEADER);
+        with_headers.extend(&fixture[start + START_CODE.len()..end]);
+    }
+    let error = parse_source_rpu_bytes(&with_headers).unwrap_err();
+    assert!(is_unparseable(&error), "{error:#}");
+}
