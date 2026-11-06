@@ -53,15 +53,15 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-05 at main@16a4dab)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=6fab20d2553f skip=P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.14,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=96358280c47f skip=P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.14,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
 
-P15 ranks first by owner direction (Priorities), ahead of the `skip=` steps; E15.1 (#97) and
-E15.2 (#98) are merged.
+P15 ranked first by owner direction (Priorities); its last step, P15.5, closed in PR #100.
 
-1. **P15.5 Manifest for an FFmpeg-cut open-GOP file** (P15). Gate: in P15. Why: same item; may
-   pin the refusal. Branch: `fix/p15-5-open-gop-manifest`. Release: minor
-2. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: first numbered startable step.
+1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: first numbered startable step.
    Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
+
+**Reassess:** owner-decision (P15.5, PR #100): the owner kept the refusal of an FFmpeg-cut open-GOP
+file (remedy: mkvmerge remux); P15 has no open step, so Next up holds one entry.
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
@@ -341,13 +341,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P15: playback manifest for the NuvioTV fork
 
-- **Status:** In progress. P15.1 to P15.4 (AU table, manifest crate, `mkvdovi manifest`, its
-  `--rpu` import) are done ([log](docs/ROADMAP_LOG.md)); P15.5 is open. Design, scope and the
-  fork's use: [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md).
-- [P15.5][corpus] An FFmpeg stream-copy open-GOP cut whose RASL pictures have negative MKV
-  timestamps gets no pts, so `mkvdovi manifest` refuses it; the conversion accepts it. Gate:
-  such a cut gets a manifest whose RPUs equal the conversion's, or a test pins the refusal as
-  decided in `docs/PLAYBACK_MANIFEST.md`. Needs: P15.3.
+- **Status:** Core complete: P15.1 to P15.5 are done ([log](docs/ROADMAP_LOG.md)), no step is
+  open; it stays because the code, [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md) and
+  the Release plan cite P15.
 
 ## `cm_analyze` parity
 
