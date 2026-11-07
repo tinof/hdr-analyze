@@ -105,9 +105,16 @@ fn packet_nal_units(packet: &[u8]) -> Vec<&[u8]> {
     units
 }
 
-/// The output's video packets carry the source's pts, decode index for decode index, and each
-/// one, without its RPU NAL unit (type 62), ends with the source packet's NAL units unchanged
-/// (FFmpeg's base-layer extraction repeats the parameter sets before an IRAP picture).
+/// The HEVC NAL unit type of a NAL unit.
+fn nal_type(unit: &[u8]) -> u8 {
+    (unit[0] >> 1) & 0x3f
+}
+
+/// The output's video packets carry the source's pts, decode index for decode index. Each one,
+/// without its access unit delimiter (type 35) and RPU (type 62), carries the source packet's NAL
+/// units unchanged and in order, the same slices, and adds only copies of the source packet's
+/// units: FFmpeg's base-layer extraction repeats the parameter sets of an IRAP picture, at the
+/// start of the access unit (FFmpeg 9) or just before its slice (FFmpeg 6.1, CI).
 fn assert_timing_and_slices_kept(source: &Path, output: &Path) {
     let (source_packets, output_packets) = (packets(source), packets(output));
     assert_eq!(output_packets.len(), source_packets.len());
@@ -117,12 +124,31 @@ fn assert_timing_and_slices_kept(source: &Path, output: &Path) {
         assert_eq!(output_pts, source_pts, "pts of packet {index}");
         let kept: Vec<&[u8]> = packet_nal_units(output_data)
             .into_iter()
-            .filter(|unit| (unit[0] >> 1) & 0x3f != 62)
+            .filter(|unit| !matches!(nal_type(unit), 35 | 62))
             .collect();
         let original = packet_nal_units(source_data);
+        let mut rest = kept.iter();
         assert!(
-            kept.ends_with(&original),
-            "packet {index}: the source's NAL units are not carried unchanged"
+            original
+                .iter()
+                .all(|unit| rest.any(|carried| carried == unit)),
+            "packet {index}: the source's NAL units are not carried unchanged and in order"
+        );
+        assert!(
+            kept.iter().all(|unit| original.contains(unit)),
+            "packet {index}: the output adds a NAL unit that the source packet does not carry"
+        );
+        let slices = |units: &[&[u8]]| -> Vec<Vec<u8>> {
+            units
+                .iter()
+                .filter(|unit| nal_type(unit) < 32)
+                .map(|unit| unit.to_vec())
+                .collect()
+        };
+        assert_eq!(
+            slices(&kept),
+            slices(&original),
+            "packet {index}: the slices differ"
         );
     }
     // The same times as mkvextract reads them (frames and the end of the last one), and the
