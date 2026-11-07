@@ -203,7 +203,10 @@ Thresholds are fixed before each scored run.
    within the fixed tolerance on every cut; then FEL is handled like MEL and (d) is the feature.
 3. **Device feasibility of a non-identity mapping in Profile 8.1** on the target player, with a
    synthetic stream whose mapping has a known visible effect. Stop for b and c: the device ignores
-   or misrenders the mapping, or the stream fails profile validation.
+   or misrenders the mapping, or the stream fails profile validation. Evidence for the LG OLED C9
+   (2026-11-04, P14 in [`ROADMAP_LOG.md`](ROADMAP_LOG.md)): an 8.1 canary with both chroma constants
+   shifted turned the picture green in Wholphin and Nuvio over Jellyfin, so the C9 applies a
+   non-identity 8.1 mapping. The precision of an arbitrary mapping is not shown, and the hold stays.
 4. **(b) against (a)**. Stop for b and c: (b) is not closer to the reference than (a), or it is
    worse in any important scene.
 5. **(c) over (b)**. Stop for c: the refit explains little of the remaining error, or the gain

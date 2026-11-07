@@ -6,6 +6,90 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-07: Direction after two outside reviews; ST 2094-10 reduced-set spike (no PR)
+
+Why: the owner had two outside models review the project (Gemini 4 Argon, then GPT-6 Astra on
+Gemini's answer) and asked which of their ideas belong in the plan, and how the licensed
+`cm_analyze` can help. Every claim was checked against the repo and primary sources (four
+verification agents, an Opus refuter on the draft; the Codex second opinion did not run, usage
+limit). Evidence and the full recommendation: `~/mkvdovi-work/st2094-reduced-set-spike-2026-11-07/`
+(`DIRECTION.md`, `results/`).
+
+- **Standard.** SMPTE ST 2094-10:2021 §6.1.2 (normative, free at pub.smpte.org): L1 min, average
+  and max are taken over a "reduced pixel set": non-overlapping 2×2 blocks from the processing
+  window's top-left, each the component-by-component average of its pixels (partial blocks at the
+  edge average only the pixels inside). §6.1.3: the minimum should be the lowest PQ minRGB. Neither
+  ST 2094-10 nor ST 2094-1:2016 (§4.11 maxRGB) says whether the average is taken in linear light or
+  on PQ codes; §4.1 PQ-encodes maxRGB after forming it, and Annex B.3 (informative) takes linear-light
+  input. ETSI TS 103 572 V1.3.1 §4.3: the L5 offsets "specify the selected pixels"; L4 is a
+  temporally filtered mean and spread of PQ max-RGB that resets at scene cuts. The analyzer
+  measures single pixels (`hdr_analyzer_mvp/src/analysis/frame/mod.rs:333-407`). The 2026-10-03
+  spatial tests (WS1 below) tried minima and a prefilter, never the standard's 2×2 mean.
+- **Spike.** Control: the recomputed per-pixel max-RGB matches analyzer 0.8.0 framestats within
+  5e-5 code on every frame of four retail cuts (Alita ×2, Skyfall ×2; P7 MEL, CM v2.9 RPUs; no
+  `cm_analyze` output opened) and reproduces `l1_diff`'s per-shot bias. Over 82 shots, per-shot L1
+  max against retail L1, mean signed / MAE: raw +127.4 / 147.1; 2×2 mean on PQ codes (A)
+  +54.3 / 86.1; 2×2 mean in linear light (B) +56.8 / 88.0. Floored at 2081 like the generator: raw
+  +135.6 / 138.9, A +64.4 / 76.0, B +66.7 / 78.1. Shots below retail, floored: raw 5, A and B 9
+  (largest −131 codes); unfloored 7 and 11. Per cut, floored, under B the bias falls 148→54,
+  162→84, 162→86, 108→58; the rest stays unexplained.
+  With quad-shared chroma A is exactly the mean of per-pixel max-RGB, so it leaves the average
+  unchanged. Synthetic highlights: aligned 2×2, 8×8, 32×32 and flashes keep 3534 under A and B; a
+  2×2 specular off the block grid reads about 2111 (A) or 3225 (B). Grain: the dark twin's excess
+  falls from 107 to 66–69 codes; the snow twin's clean side clips, so it does not inform.
+- **Open observation, no step.** On the unfloored shots of Iron City and the Shanghai fight (15
+  each) the retail average sits on average 191 (Shanghai) and 238 (Iron City) codes above the
+  analyzer's mean (both CM v2.9; the
+  shot lists come from scene-refresh flags and are unchecked); HotD matched `cm_analyze` v2 within
+  +16.5.
+- **Lead for the rest of the over-read.** Retail L1 is measured on the master, before the 4:2:0
+  encode, whose ringing raises the base layer's peak. Chroma reconstruction is ruled out
+  (VALIDATION §7: 9 to 11 codes); shot-aggregation rules were rejected in WS2.
+- **Owner decisions.** (1) L1 max targets the ST 2094-10 statistic, averaged in linear light (B):
+  it fits retail as well as A (within 3 codes pooled) and loses about 300 instead of 1400 codes on
+  an off-grid speck; this amends the 2026-10-17 WS1 rule (synthetic truth is the standard's value).
+  (2) `cm_analyze` stays score-only: holdouts without retail Dolby Vision, and a report-only score
+  of a frozen estimator; never a choice between variants. Holdout confirmation uses retail L1
+  (unseen Skyfall and Joker cuts), as P9 did. (3) E7.3, then E7.2, go ahead of P9.4; a failed
+  frame-count or timestamp check keeps the source. (4) L1 min splits from P10.3 into P10.5 with an
+  owner gate after WS6.11, since libplacebo does not read L1 min.
+- **Roadmap changes.** New: WS1.5 (opt-in estimator), WS1.6 (default), P10.5. Changed: the WS1
+  gate and WS1.1/WS1.3 wording, the E7 gate (3) and E7.2/E7.3 gates, P10.3, WS8.4, the WS2 L4
+  note, Priorities (owner direction, "Kept by decision", entries 3 and 9), the Release plan.
+- **Notes, no step.** FEL_PLAN gate 3 gets the P14 canary as C9 evidence (the hold stays).
+  ColorVideoVDP-tm (Chen et al., SIGGRAPH 2026) adapts the metric to tone mapping, but its code
+  needs the unreleased cvvdp 0.6.0 and has no licence; WS7.2 uses the released 0.5.7 (MIT).
+  Dolby's metadata page (2026-10-17) names CM4+ / Dolby Vision 2 levels (L15, L18, L11x) and calls
+  the RPU format proprietary; field layouts exist only in community code citing a non-public Dolby
+  spec, so the non-goal stands. Dolby's WO2021247670A1 family (granted in US, JP, KR, CN) claims
+  smoothing and half-size decimation before metadata in an editing pipeline; ST 2094-10 carries
+  Dolby and InterDigital patent statements; no freedom-to-operate review (PROVENANCE).
+- **Assessed, not adopted.** Fitting anything to `cm_analyze` output (PROVENANCE). 4×4 tile order
+  statistics with "zero loss" (a 2×2 mean already loses 300 to 1400 codes off-grid). IPT/LMS peak
+  domain (the standard defines maxRGB). L4 as an L1 damper (L1 is shot-constant in the retail
+  RPUs). A rewrite of linear-interpolation pieces (the E15.1 refusal stays). Automatic L2/L8/L10
+  trims (WS4 stays deferred; Dolby calls trims optional). Per-shot XML (WS5, with R2). CameraVDP
+  (needs a calibrated camera rig). A learned shot detector in the analyzer (TransNet V2 and AutoShot
+  are MIT, at most an offline baseline). A Wasserstein/CDF scene distance (the bins are unequal).
+  P14 secant chroma (a comparison only, if P14.1 is built). Already planned: E4.1, E4.3, E4.4, E2.2,
+  P3.1, WS7.1 (ST 2094-10 curve), WS2.2, E7.1, E7.3; the CUDA decode overlap is noted in
+  `docs/CUDA_PIPELINE.md` "Possible next steps".
+- **Moved from the roadmap (budget).** P9: both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL
+  0 on every frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on
+  Alita) and the average are present. A peak taken from MaxSCL is unusable on such sources, so the
+  pixel fallback is required, not optional; whether the percentiles can stand in is open. WS6
+  (Checked 2026-10-25 @3c0c913): `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
+  (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
+  evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there
+  keeps the PR docs-only (touching `dovi84_composer/src/` adds CUDA parity and the L1 gate).
+  Pre-register the fit's residual limit and an inconclusive outcome (the intercepts differ by one
+  code); fix the picture mode (ladder Cinema, canaries Cinema Home; log 2026-10-22). No `spotread`
+  in WSL. WS6, the `code / 1023` question (2026-10-06, answered 2026-10-29): do devices evaluate the
+  8.4 composer at `code / 1023` (as libplacebo and the `bt2100` fit) or at the spec's `code / 1024`?
+  Under the latter `bt2100` is 5.9 codes off neutral, probably too little to see on a neutral ramp,
+  so the test needs a pattern that separates the two. A `code / 1024` answer means a refit (new
+  composer and RPU). The P8 canary test (2026-10-13) does not answer it.
+
 ### 2026-11-06: P15.5 Manifest for an FFmpeg-cut open-GOP file (PR #100)
 
 Step: - [P15.5][corpus] An FFmpeg stream-copy open-GOP cut whose RASL pictures have negative MKV

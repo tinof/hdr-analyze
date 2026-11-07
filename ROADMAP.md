@@ -60,8 +60,8 @@ P15 ranked first by owner direction (Priorities); its last step, P15.5, closed i
 1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: first numbered startable step.
    Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
 
-**Reassess:** owner-decision (P15.5, PR #100): the owner kept the refusal of an FFmpeg-cut open-GOP
-file (remedy: mkvmerge remux); P15 has no open step, so Next up holds one entry.
+**Reassess:** owner-decision (E7.3, no PR): owner direction (2026-11-07) puts E7.3 and E7.2 ahead of P9.4
+(Priorities); WS1 targets the ST 2094-10 reduced set (WS1.5, WS1.6); L1 min split out as P10.5.
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
@@ -81,6 +81,8 @@ hardware after a startable step has prepared it, a gate not stated, and steps ti
 - **E13.19: `feat/dev-corpus` cannot land.** The step, and the `l1_diff` part of E13.20, wait for that
   branch, but it is local-only behind a pre-push guard (`docs/TESTING.md` §7). The owner restates the
   condition, for example "rebase the branch after the move" (found 2026-11-01).
+- **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
+  C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
 
 ### Metered tests (later)
 
@@ -105,8 +107,8 @@ zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1, P6.2, E15.1 and E15.2 | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); P15 (new analyzer `--help` contract and `mkvdovi manifest`) | MINOR |
+| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1, E7.2, E7.3, P6.2, E15.1 and E15.2 | PATCH, batched (`docs/RELEASING.md` rule 2) |
+| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); P15 (new analyzer `--help` contract and `mkvdovi manifest`); WS1.5 (opt-in estimator), WS1.6 (default estimator change) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Priorities
@@ -130,8 +132,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    (PR #84). Gate: met; the owner decides whether this priority ends. **Prerequisite:** E13.5 before the
    sidecar v6 step P9.2 (met 2026-10-17, #59).
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
-   landed 2026-10-04; open: decide whether to write L1 in-process (P10.3). Gate: the WS7 simulator
-   decides (owner, 2026-10-17).
+   landed 2026-10-04; open: write L1 in-process (P10.3, max) and the measured minimum (P10.5).
+   Gate: the WS7 simulator decides P10.3 (owner, 2026-10-17); the owner states P10.5's after WS6.11.
 4. **Narrow code defects** (E8, E9, P6, E7): histogram percentile reader, `--pre-denoise`
    values (the three L6 defects found 2026-10-07 were fixed 2026-10-11; the CPU
    default was decided in P1.1, 2026-11-02). Gate: unit tests for the reader and the option (E8.1,
@@ -149,9 +151,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    2026-10-05. Gate: per item in WS8.
 8. **Scene detection** (WS2.1, E4): second signal for whole-picture motion; strong cuts closer than
    12 frames. Gate: precision and recall against authored shot lists, no loss on the other cuts.
-9. **Research, default unchanged** (WS1, WS2.2, WS2.4, WS4): grain-robust peak; per-frame L1 inside detected
-   transitions; L4; automatic trims. Each stays opt-in or unbuilt until its gate is met. Gate: per
-   item (WS4: blinded A/B on a device; WS1.2, WS1.3 and WS2.2–WS2.4: in the items).
+9. **Research, default unchanged** (WS1, WS2.2, WS2.4, WS4): ST 2094-10 reduced-set and grain-robust
+   peak; per-frame L1 inside detected transitions; L4; automatic trims. Each stays opt-in or unbuilt
+   until its gate is met. Gate: per item (WS4: blinded A/B on a device; WS1 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL: placeholder** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); on hold by the
     owner (2026-10-13). Gate: none until the hold is lifted.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, P5, WS0, WS6): the
@@ -165,13 +167,16 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   the current Next up; its steps rank in their own order (P15.1, P15.2, then P15.3, P15.4).
   E15.1 ranks with P15, as P15.4's prerequisite (owner, 2026-11-05); its review added E15.2,
   P15.4's other prerequisite.
+- **Owner direction (2026-11-07):** E7.3, then E7.2, go ahead of P9.4: E7.3 delivers wrong video
+  timing, and the source is then deleted.
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
   remaining steps E13.6–E13.21 are behaviour-neutral PRs, not moves.
 - **Conditional** (R2, WS5): Profile 5 through an established encoder, only if matched playback
   tests justify it.
-- **Kept by decision:** a successful conversion deletes a non-DV source (source retention).
+- **Kept by decision:** a successful conversion deletes a non-DV source (source retention); with
+  E7.2 and E7.3, only after their checks pass (E7 gate (3), owner, 2026-11-07).
   The WS6 corpus and playback procedure grow alongside items 1 to 3, which
   each need a playback check.
 - **Deferred:** display-target optimizers (P4), automatic creative trims (WS4, behind the WS7 gate),
@@ -245,10 +250,6 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 - **Status:** Core complete: hybrid is the HDR10+ default ([log](docs/ROADMAP_LOG.md), PR #84).
   Open: P9.4.
-- **Finding for the fallback:** both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL 0 on every
-  frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on Alita) and
-  the average are present. A peak taken from MaxSCL is unusable on such sources, so the pixel
-  fallback is required, not optional; whether the percentiles can stand in is open.
 - **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
   panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
   retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
@@ -261,15 +262,18 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 - **Status:** Partial. Steps 1 and 2 (2026-10-04) and step 4 (2026-10-17) done; history in
   [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P10.3, which waits for WS7.1 (owner,
-  2026-10-17: WS7 first, no playback test).
+  2026-10-17: WS7 first, no playback test), and P10.5 (L1 minimum, owner gate).
 - `dovi_tool generate` clamps L1 (minimum ≤ 12, maximum ≥ 2081, average ≥ 819). Numbers:
   [`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md).
-- **Gate:** the P10.3 gate (priority 3). Step 4's gate, done 2026-10-17: a blinded A/B on the LG
-  OLED C9 of `ms_weight` 2048 against 512; no visible difference closes the step with 2048
-  unchanged.
-- [P10.3][corpus] Decide whether to write L1 in-process so the measured minimum and sub-100-nit
-  maxima reach the RPU; raising the average floor to 1229 is not planned. Gate: the WS7 simulator
+- **Gate:** the P10.3 and P10.5 gates (priority 3). Step 4's gate, done 2026-10-17: a blinded
+  A/B on the LG OLED C9 of `ms_weight` 2048 against 512; no visible difference closes the step
+  with 2048 unchanged.
+- [P10.3][corpus] Decide whether to write L1 in-process so sub-100-nit maxima reach the RPU (the
+  minimum is P10.5); raising the average floor to 1229 is not planned. Gate: the WS7 simulator
   shows that unclamped L1 is better (owner, 2026-10-17: WS7 first, no playback test). Needs: WS7.1.
+- [P10.5][owner] Decide whether the measured L1 minimum reaches the RPU (`dovi_tool generate` writes
+  at most 12). WS7 cannot judge it: libplacebo does not read L1 min (split from P10.3, owner,
+  2026-11-07). Gate: TODO(owner). Needs: WS6.11.
 
 ### P12: `--mdfix` ignores the source RPU's L6
 
@@ -362,8 +366,9 @@ The detailed gap table and validation method live in
 
 ### WS1: grain-robust peak
 
-- **Status:** Partial. Measurement core, per-scene minimum (clamped by the generator, P10) and the
-  max-RGB-mean average domain have shipped. HLG max-RGB shipped in v0.5.0.
+- **Status:** Partial. Measurement core, per-scene minimum (clamped by the generator, P10), the
+  max-RGB-mean average domain and HLG max-RGB have shipped. Open: the ST 2094-10 reduced-set
+  estimator (WS1.5, WS1.6) and a grain-robust peak.
 - A grain-robust peak is missing. Raw max-RGB reads hot against `cm_analyze` v2
   ([VALIDATION.md §7](docs/VALIDATION.md)). The current opt-in `robust` rule
   ([TECHNICAL_REFERENCE.md §2.4](docs/TECHNICAL_REFERENCE.md)) removes part of the grain bias but
@@ -374,23 +379,43 @@ The detailed gap table and validation method live in
   computer-generated) and +88 and +162 on Skyfall (both Profile 7 MEL). Grain does not explain
   that. Find what does (for example the reference's spatial or temporal treatment of small
   highlights) before more grain-estimator work.
+- **Half explained (2026-11-07):** SMPTE ST 2094-10 §6.1.2 takes L1 over 2×2 block averages, the
+  analyzer over single pixels. On 82 retail shots (Alita, Skyfall) that cuts the floored per-shot
+  MAE from 138.9 to 78.1 codes; shots below retail rise from 5 to 9
+  ([parity](docs/CM_ANALYZE_PARITY.md)). Lead for the rest: retail L1 is measured before the encode.
+- **Target (owner, 2026-11-07):** L1 max is the ST 2094-10 statistic, 2×2 blocks averaged in linear
+  light; synthetic truth is the standard's value (for an off-grid 2×2 specular ~300 codes below
+  its pixel peak).
 - **Rules for a new estimator:** identical output on CPU and CUDA (see
   [`docs/CUDA_PIPELINE.md`](docs/CUDA_PIPELINE.md)); its frozen synthetic gate includes a small
   specular, a one-frame flash, a highlight on the first or last frame of a shot, a 2–3 frame
   specular and a fade.
-- **Gate:** (owner, 2026-10-17) a new estimator becomes the default only if, on the development
-  tier, its pooled per-shot peak MAE against retail L1 is lower than `max`'s; no case of the
-  frozen synthetic gate is worse than `max` by more than 1 code; CPU = CUDA; and the result is
-  confirmed on unseen holdout cuts. Step (1) closes with a written explanation of the clean-source
-  over-read that a test reproduces. Do not enable the robust estimator by default before this.
-- [WS1.1][corpus] Explain the clean-source over-read. Gate: a written explanation of the
-  clean-source over-read that a test reproduces.
+- **Gate:** (owner, 2026-10-17; target 2026-11-07) a new estimator becomes the default only if, on
+  the development tier, its pooled per-shot peak MAE against retail L1 is lower than the default's;
+  no case of the frozen synthetic gate is more than 1 code further from the standard's value than
+  the default; CPU = CUDA; and the result is confirmed on unseen holdout cuts. Step (1) closes
+  with a written explanation of the clean-source over-read that a test reproduces. Do not enable
+  the robust estimator by default before this.
+- [WS1.1][corpus] Explain the clean-source over-read; the reduced set explains about half
+  (2026-11-07). Gate: a written explanation of the clean-source over-read that a test reproduces.
 - [WS1.2][corpus] The display-unit scale (WS7). Gate: the peak errors of `max` and `robust`
   reported in WS7 simulator units (displayed-luminance change, 1000-nit panel) beside the code
   errors on the development tier (owner, 2026-10-17). Needs: WS7.1.
-- [WS1.3][gpu][corpus] A grain-robust peak. Gate: the item gate (beats `max` on pooled per-shot
-  peak MAE against retail on the development tier, no frozen synthetic case worse by more than
-  1 code, CPU = CUDA, confirmed on unseen holdout cuts). Needs: WS1.1.
+- [WS1.3][gpu][corpus] A grain-robust peak. Gate: the item gate (beats the default on pooled
+  per-shot peak MAE against retail on the development tier, no frozen synthetic case more than
+  1 code further from the standard's value, CPU = CUDA, confirmed on unseen holdout cuts).
+  Needs: WS1.1.
+- [WS1.5][gpu][corpus] Opt-in ST 2094-10 reduced-set estimator, PQ path (HLG later): 2×2 blocks
+  from the crop's top-left, partial at an odd edge, components averaged in linear light (one PQ
+  EOTF table, same f32 arithmetic on CPU and CUDA), min per §6.1.3 as a diagnostic; sidecar
+  `peak_estimator` value, `tools/l1_diff`. Gate: a test reproduces the 2026-11-07 per-shot numbers
+  of the four Alita and Skyfall cuts within 1 code; an odd-anchor case; CPU = CUDA; default `.bin`
+  unchanged (L1 gate without `--update`).
+- [WS1.6][gpu][corpus][reassess] Make the WS1.5 estimator the default; mkvdovi's hybrid path then
+  accepts it (`mkvdovi/src/pipeline/hybrid.rs:163` takes only `max`). Gate: the item gate, the
+  definition frozen before the run on the unseen Skyfall and Joker holdout cuts (retail L1); shots
+  below retail, the largest under-read and the WS7 display-unit cost beside the MAE.
+  Needs: WS1.5, WS7.1, WS8.1.
 
 ### WS2: shots and scene averages
 
@@ -413,7 +438,8 @@ The detailed gap table and validation method live in
   frame-to-frame steps (no pumping); opt-in only. Needs: WS8.3, WS7.1, P9.2 (code).
 - Step 3, deferred (no step line, like the deferred items): L4 emission, until something can
   validate it (no open renderer reads L4). Reopen when an open renderer or a tested device reads
-  L4 (owner, 2026-10-17); it then becomes WS2.3.
+  L4 (owner, 2026-10-17); it then becomes WS2.3. ETSI TS 103 572 §4.3 defines L4 publicly: a
+  temporally filtered mean and spread of PQ max-RGB, reset at scene cuts.
 - [WS2.4][gpu][corpus] Robust aggregation (investigated with WS1.3). Gate: the WS1 gate. Needs:
   WS1.1.
 
@@ -467,17 +493,6 @@ The detailed gap table and validation method live in
   Plex show. Gate: libplacebo pulses on L1 max and avg and is steady on the control.
 - [WS6.11][owner][reassess] View the pulse files on the LG OLED C9. Gate: pulse or steady per
   level, recorded in the log. Needs: WS6.10.
-- **Checked 2026-10-25 @3c0c913:** `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
-  (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
-  evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there
-  keeps the PR docs-only (touching `dovi84_composer/src/` adds CUDA parity and the L1 gate).
-  Pre-register the fit's residual limit and an inconclusive outcome (the intercepts differ by one
-  code); fix the picture mode (ladder Cinema, canaries Cinema Home; log 2026-10-22). No `spotread` in WSL.
-- **The `code / 1023` question (2026-10-06):** do devices evaluate the 8.4 composer at `code / 1023` (as
-  libplacebo and the `bt2100` fit) or at the spec's `code / 1024`? Under the latter `bt2100` is
-  5.9 codes off neutral, probably too little to see on a neutral ramp, so the test needs a pattern
-  that separates the two. A `code / 1024` answer means a refit (new composer and RPU). The P8
-  canary test (2026-10-13) does not answer it.
 
 ### WS7: evaluation in displayed-picture units
 
@@ -516,8 +531,9 @@ The detailed gap table and validation method live in
   in linear light) with their intervals as truth, and retail cuts with authored transitions. Gate:
   the item gate.
 - [WS8.4][desk] A held-out split: synthetic references and open implementations for development,
-  licensed reference output for scoring only ([`docs/PROVENANCE.md`](docs/PROVENANCE.md)). Gate:
-  the item gate.
+  licensed reference output for scoring only ([`docs/PROVENANCE.md`](docs/PROVENANCE.md)): it
+  scores holdouts that have no retail Dolby Vision, and a frozen estimator report-only, never a
+  choice between variants (owner, 2026-11-07). Gate: the item gate.
 
 ## Dolby Vision profile work
 
@@ -637,16 +653,18 @@ The detailed gap table and validation method live in
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
-  per file measured and reported.
+  per file measured and reported. (3) (owner, 2026-11-07) a failed check of (2) or of E7.3 fails
+  the run and keeps the source, tested.
 - [E7.1][desk] Direct-MKV `dovi_tool` steps still accept exit status plus non-empty output. Gate:
   the item's gate (1).
-- [E7.2][corpus] An always-on frame-count check. Gate: the item's gate (2) (the added time per file
-  is measured on real files).
+- [E7.2][corpus] An always-on frame-count check. Gate: the item's gates (2) and (3) (the added
+  time per file is measured on real files).
 - [E7.3][desk] `mux_output` muxes the Annex B stream without the source's video timestamps
   (`mkvdovi/src/pipeline/deliver.rs:176`): a VFR source comes out at a constant rate, and a video
   start of 2000 ms moves to 0 while the audio keeps its own (found by P15.3's tests). Gate: tests
   with a VFR source and a non-zero video start show the output's video pts equal the source's,
-  and the bitstream stays bit-identical.
+  and the bitstream stays bit-identical; an always-on check of the output's video start and
+  duration against the source's meets the item's gate (3).
 
 ### E8: histogram percentile reader
 
