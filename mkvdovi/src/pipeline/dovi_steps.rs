@@ -13,6 +13,7 @@ use crate::progress;
 use crate::resume;
 
 use super::finish_success;
+use super::timing::{self, Delivery, MuxTiming};
 
 pub const DOVI_TOOL_MKV_INPUT_MIN: ToolVersion = (2, 3, 4);
 
@@ -198,13 +199,15 @@ pub(super) fn extract_clean_base_layer(
     }
 }
 
+/// Converts the MEL RPU to Profile 8.1, discards the EL and muxes the result with the source's
+/// video timing (ROADMAP E7.3).
 pub(super) fn convert_mel_to_profile81(
     input_file: &str,
     temp_dir: &Path,
     output_file: &Path,
     args: &Args,
     resume_enabled: bool,
-) -> Result<bool> {
+) -> Result<Delivery> {
     let raw_hevc = temp_dir.join("DV_raw.hevc");
     let converted_hevc = temp_dir.join("P81_discard.hevc");
 
@@ -238,18 +241,27 @@ pub(super) fn convert_mel_to_profile81(
         )?;
 
         if !success {
-            return Ok(false);
+            return Ok(Delivery::Failed);
         }
         resume::mark_done(&converted_hevc)?;
     }
 
-    mux_hevc_with_original(
+    timing::deliver(
         input_file,
-        &converted_hevc,
         output_file,
         temp_dir,
-        args,
         resume_enabled,
+        &mut |timing| {
+            mux_hevc_with_original(
+                input_file,
+                &converted_hevc,
+                output_file,
+                temp_dir,
+                args,
+                resume_enabled,
+                timing,
+            )
+        },
     )
 }
 
@@ -260,6 +272,7 @@ fn mux_hevc_with_original(
     temp_dir: &Path,
     args: &Args,
     resume_enabled: bool,
+    timing: &MuxTiming,
 ) -> Result<bool> {
     let marker = temp_dir.join("mux.done");
     if resume_enabled && output_file.exists() && marker.exists() {
@@ -275,7 +288,11 @@ fn mux_hevc_with_original(
     if args.drop_chapters {
         command.arg("--no-chapters");
     }
-    command.arg(hevc_file).arg("--no-video").arg(input_file);
+    command
+        .args(timing.mkvmerge_args())
+        .arg(hevc_file)
+        .arg("--no-video")
+        .arg(input_file);
 
     let total = fs::metadata(input_file).ok().map(|metadata| metadata.len());
     let success = run_command_with_progress(
@@ -370,8 +387,9 @@ pub(super) fn convert_mel_fast_path(
     file_start: Instant,
 ) -> Result<bool> {
     progress::print_info("Converting Profile 7 MEL to Profile 8.1 without rebuilding metadata.");
-    let success =
+    let delivery =
         convert_mel_to_profile81(input_file, temp_dir, output_file, args, resume_enabled)?;
+    let success = delivery != Delivery::Failed;
     if success && args.verify {
         progress::print_info("Running post-mux verification (--verify)...");
         if !crate::verify::verify_post_mux(input_file, output_file, None, temp_dir) {
@@ -387,6 +405,7 @@ pub(super) fn convert_mel_fast_path(
             args,
             original_hdr_type,
             file_start,
+            delivery == Delivery::Checked,
         );
     }
     Ok(success)

@@ -21,6 +21,7 @@ mod manifest;
 mod mdfix_notice;
 mod measure;
 mod temp_dir;
+mod timing;
 
 pub use self::analyzer::{analyzer_executable, resolve_auto_settings};
 use self::config::{prepare_configuration, Configured};
@@ -33,6 +34,7 @@ use self::measure::{
     resolve_hdr10plus_mode, total_steps_for, Hdr10PlusMode,
 };
 use self::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
+use self::timing::Delivery;
 
 /// Error for Profile 7 FEL inputs. The BL+EL compositor and its re-encode were removed; FEL is
 /// refused until a design that keeps the base layer bit-exact exists (docs/FEL_PLAN.md).
@@ -315,14 +317,24 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // --- Mux ---
     current_step += 1;
     progress::print_step(current_step, total_steps, "Muxing final MKV...");
-    if !mux_output(
+    let delivery = timing::deliver(
         input_file,
-        &bl_rpu_hevc,
         &output_file,
         &temp_dir,
         resume_enabled,
-        args,
-    )? {
+        &mut |timing| {
+            mux_output(
+                input_file,
+                &bl_rpu_hevc,
+                &output_file,
+                &temp_dir,
+                resume_enabled,
+                args,
+                timing,
+            )
+        },
+    )?;
+    if delivery == Delivery::Failed {
         return Ok(false);
     }
 
@@ -363,6 +375,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         args,
         original_hdr_type,
         file_start,
+        delivery == Delivery::Checked,
     );
     Ok(true)
 }
@@ -445,6 +458,8 @@ fn add_optimizer_args(args_vec: &mut Vec<String>, args: &Args) {
     args_vec.push(args.optimizer_profile.to_string());
 }
 
+/// Removes the temp dir and deletes a non-DV source, but only when `timing_checked`: the output's
+/// video timing was checked against the source's (ROADMAP E7 gate (3)).
 fn finish_success(
     input_file: &str,
     output_file: &Path,
@@ -452,6 +467,7 @@ fn finish_success(
     args: &Args,
     original_hdr_type: HdrFormat,
     started_at: Instant,
+    timing_checked: bool,
 ) {
     let _ = fs::remove_dir_all(temp_dir);
 
@@ -461,6 +477,8 @@ fn finish_success(
         if !args.keep_source {
             progress::print_info("Keeping source file (Dolby Vision/--mdfix safety default).");
         }
+    } else if !timing_checked {
+        progress::print_info("Keeping source file: the output's video timing was not checked.");
     } else {
         let display_name = Path::new(input_file)
             .file_name()
