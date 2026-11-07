@@ -53,17 +53,18 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-07 at main@3c65cdd)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=7f8bffd9932c -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=a1799309d57d -->
 
 Order: owner direction of 2026-11-07 (Priorities).
 
-1. **E7.3 Keep the source's video timestamps in the mux** (priority 4). Gate: in E7. Why: owner
-   direction; both mux sites (E7 Checked). Branch: `fix/e7-3-mux-video-timestamps`. Release: patch
-2. **E7.2 Always-on frame-count check** (priority 4). Gate: in E7. Why: owner direction, after
+1. **E7.2 Always-on frame-count check** (priority 4). Gate: in E7. Why: owner direction, after
    E7.3. Branch: `fix/e7-2-always-on-frame-count`. Release: patch
-3. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
+2. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
    order. Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
 
+- Recheck before E7.2: since E7.3 every mux reads the output's video packets with ffprobe and
+  fails the run on a frame-count or timing mismatch with the source
+  (`mkvdovi/src/pipeline/timing.rs:149`).
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
 ### Waiting for the owner
@@ -650,8 +651,8 @@ The detailed gap table and validation method live in
 
 ### E7: completeness
 
-- **Status:** Partial. `--verify` checks the RPU frame count against the muxed track and the
-  sidecar; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E7.1 to E7.3.
+- **Status:** Partial. `--verify` checks the RPU frame count, and every mux keeps and checks the
+  source's video timing (E7.3); history in [the log](docs/ROADMAP_LOG.md). Open: E7.1, E7.2.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
@@ -661,15 +662,6 @@ The detailed gap table and validation method live in
   the item's gate (1).
 - [E7.2][corpus] An always-on frame-count check. Gate: the item's gates (2) and (3) (the added
   time per file is measured on real files).
-- [E7.3][desk] `mux_output` muxes the Annex B stream without the source's video timestamps
-  (`mkvdovi/src/pipeline/deliver.rs:176`): a VFR source comes out at a constant rate, and a video
-  start of 2000 ms moves to 0 while the audio keeps its own (found by P15.3's tests). Gate: tests
-  with a VFR source and a non-zero video start show the output's video pts equal the source's,
-  and the bitstream stays bit-identical; an always-on check of the output's video start and
-  duration against the source's meets the item's gate (3).
-- **Checked 2026-11-07 @3c65cdd:** E7.3 has a second mux site of the same shape (no
-  `--timestamps`): the MEL fast path's `mux_hevc_with_original`
-  (`mkvdovi/src/pipeline/dovi_steps.rs:255-292`), beside `deliver.rs:167-176`; fix both.
 
 ### E8: histogram percentile reader
 
