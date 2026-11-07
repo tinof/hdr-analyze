@@ -229,7 +229,7 @@ fn deliver_with(
 }
 
 /// mkvmerge muxes of one x265 clip: (CFR from 0 ms, the same from 2000 ms, VFR from 0 ms).
-/// `None` (after a skip message) when ffmpeg with libx265 or mkvmerge is missing.
+/// `None` (after a skip message) when ffmpeg with libx265, ffprobe or mkvmerge is missing.
 fn clips(dir: &Path, test: &str) -> Option<[PathBuf; 3]> {
     let tools = [
         ("ffmpeg", "-version"),
@@ -241,6 +241,14 @@ fn clips(dir: &Path, test: &str) -> Option<[PathBuf; 3]> {
         .any(|(tool, arg)| Command::new(tool).arg(arg).output().is_err())
     {
         println!("Skipping {test}: ffmpeg, ffprobe or mkvmerge not found in PATH");
+        return None;
+    }
+    let encoders = Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .unwrap();
+    if !String::from_utf8_lossy(&encoders.stdout).contains("libx265") {
+        println!("Skipping {test}: ffmpeg has no libx265 encoder");
         return None;
     }
     let raw = dir.join("clip.hevc");
