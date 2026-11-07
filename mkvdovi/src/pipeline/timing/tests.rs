@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::fmt::Write as _;
 
 use serde_json::json;
 
