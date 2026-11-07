@@ -24,7 +24,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `metadata/`: `CmV40Config`, L2/L5/L9/L11 generation; submodules `format`, `probe`, `rpu_config`,
   `sidecar`, `static_metadata`.
 - `pipeline/`: `convert_file` in `mod.rs`; by phase `temp_dir`, `measure`, `config`, `deliver`;
-  plus `analyzer`, `dovi_steps`, `hdr10plus`, and `manifest/` (`mkvdovi manifest`: the AU table
+  plus `analyzer`, `dovi_steps`, `hdr10plus`, `timing` (the source's video timestamps in the mux
+  and the check of the output's, ROADMAP E7.3), and `manifest/` (`mkvdovi manifest`: the AU table
   reader, the manifest build, `import.rs` for `--rpu`, no temp dir; [PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)).
 - `verify.rs`, `progress.rs`.
 
@@ -59,6 +60,22 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   `.DV.mkv`. Explicit `--mdfix` allows a DV input and writes a distinct `*.mdfix.DV.mkv` candidate.
 - **A successful conversion deletes the source input by default**; `--keep-source` prevents it.
   All DV and repair inputs keep their source by default.
+  A non-DV source is also kept when the output's video timing was not checked
+  (`finish_success` `timing_checked` in `pipeline/mod.rs`).
+- **Video timestamps (`pipeline/timing.rs`, E7.3).** Both mux sites (`deliver::mux_output` and the
+  MEL fast path's `mux_hevc_with_original` in `dovi_steps.rs`) go through `timing::deliver`. It
+  reads the source's video frame times with ffprobe, Matroska only (mkvmerge may read another
+  container's start differently). A constant-rate source is muxed with the stream's timing and a
+  late start kept by `--sync`; a variable-rate source gets `--timestamps` with a timestamps v2 file
+  (`video.timestamps.txt`) whose on-grid frames sit at exact times on the source's frame-rate grid
+  (ffprobe `avg_frame_rate`). mkvmerge takes the default duration from the file's first intervals
+  and `--default-duration` does not override it, so whole milliseconds would turn 23.976 fps into
+  42 ms (23.81 fps). The output's frame times are then checked against the source's (1 ms
+  tolerance, `TOLERANCE_MS`); a mismatch removes the output, and a constant-rate mux is retried
+  once with the timestamps file; a mismatch with the timestamps file fails the run, so the source
+  is kept. A reused mux of an interrupted run is checked too, and remuxed with the chosen timing
+  when it fails. When the source's times cannot be read (no
+  ffprobe, not Matroska, unreadable), the mux uses the stream's timing, warns and is not checked.
 - **mkvdovi never encodes video.** Every path copies the video stream bit-exactly. There is no
   compositor, no `composite-pipe`, no `--fel-*`/`--encoder` flag and no Modal/NVENC/libx265/
   VideoToolbox encode; do not add one back.

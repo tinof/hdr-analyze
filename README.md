@@ -45,6 +45,7 @@ Install these tools separately and put them on `PATH`. `mkvdovi` checks for all 
 | `mkvmerge` (MKVToolNix) | final MKV packaging |
 | [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases) 2.3.2 or newer | RPU generation and injection (2.3.4+ reads MKV directly) |
 | `mediainfo` (recommended) or `ffprobe` | stream inspection. MediaInfo supplies the L6 and L9 source values; with `ffprobe` alone they fall back to defaults. |
+| `ffprobe` (ships with FFmpeg) | the check that the output keeps the source's video timestamps. Without it a conversion still runs, warns, and keeps the source. |
 | [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) | HDR10+ input. An HDR10+ file fails if the tool is missing. |
 
 HDR10+ conversions also run `hdr_analyzer_mvp`, which ships with `mkvdovi`. Without a current analyzer they take L1 from the HDR10+ metadata alone, with a warning.

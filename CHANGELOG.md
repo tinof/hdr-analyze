@@ -45,9 +45,19 @@ This document provides a historical record of completed milestones, feature impl
   blocks than the RPU holds, which the parser allocated before reading, or a CM v4.0 level 8, 9 or
   10 block of a length the parser does not know, including Profile 7 RPUs and RPUs that reuse the
   previous mapping (ROADMAP E15.2).
+- mkvdovi keeps the source's video timestamps in the output (ROADMAP E7.3). A variable-rate
+  source is muxed with its own frame times (an mkvmerge timestamps file on the source's frame-rate
+  grid), and a late video start is kept (`--sync`); both used to be retimed from 0 at the stream's
+  frame rate. This covers the normal mux and the Profile 7 MEL fast path.
+- Every mux is checked: the output's video frame times must equal the source's within 1 ms. A
+  constant-rate mux that misses is retried once with the timestamps file; a mismatch after the
+  timestamps file fails the run and keeps the source.
 
 ### Changed
 
+- When mkvdovi cannot read the source's video frame times (no `ffprobe` on `PATH`, an input that
+  is not Matroska, such as MP4 or TS, or an unreadable file), it muxes with the stream's own
+  timing, warns, and skips the timing check; a non-DV source is then kept, not deleted.
 - The L1 sidecar is written through a temp file and a rename, so an interrupted run leaves none.
 
 ## [0.8.0] - 2026-11-04
