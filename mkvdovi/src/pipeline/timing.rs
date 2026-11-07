@@ -2,9 +2,10 @@
 //!
 //! mkvmerge times a raw HEVC stream from the stream's frame rate, starting at 0. So the mux
 //! shifts a late start with `--sync`, and gives a variable-rate source its own timestamps with
-//! `--timestamps`. A constant-rate source never gets the timestamps file: with it, mkvmerge rounds
-//! the track's default duration to whole milliseconds (42 ms for 23.976 fps, which players read
-//! as 23.81 fps), and `--default-duration` does not override that (mkvmerge v82).
+//! `--timestamps`. mkvmerge takes the track's default duration from the timestamps file's first
+//! frame intervals, and `--default-duration` does not override it (mkvmerge v82). So the file
+//! puts every frame that lies on the source's frame-rate grid at its exact grid time: in whole
+//! milliseconds, 23.976 fps would get 42 ms, which players read as 23.81 fps.
 //!
 //! Every mux is then checked: the output's video frame times must equal the source's, which
 //! also fixes the start and the duration. A mismatch retries once with the timestamps file and
@@ -30,6 +31,11 @@ pub(super) const TIMESTAMPS_FILE: &str = "video.timestamps.txt";
 
 /// The mux's completion sentinel in the temp dir (`deliver::mux_output`, the MEL fast path).
 const MUX_MARKER: &str = "mux.done";
+
+/// Largest distance from a frame time to its frame-rate grid time that [`on_rate_grid`] closes.
+/// Below half a millisecond, with a margin for the file's six decimals, the output's whole
+/// millisecond is still the source frame's own (mkvmerge rounds 500.5 up to 501).
+const GRID_SNAP_MS: f64 = 0.499;
 
 /// How the mux times the video track.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,12 +65,15 @@ impl MuxTiming {
     }
 }
 
-/// The frame times of a file's first video track in milliseconds, in presentation order, and
-/// the end of the last frame when the container gives its duration.
+/// The frame times of a file's first video track in milliseconds, in presentation order, the
+/// end of the last frame when the container gives its duration, and the track's frame duration
+/// when the container gives a frame rate (ffprobe's `avg_frame_rate`; Matroska's default
+/// duration).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct VideoTimes {
     pub(super) frames: Vec<f64>,
     pub(super) end: Option<f64>,
+    pub(super) frame_ms: Option<f64>,
 }
 
 /// What the mux delivered.
@@ -118,7 +127,7 @@ pub(super) fn deliver(
         }
     };
     // A finished mux of an earlier run is checked as well; when it fails, the chosen timing is
-    // muxed afresh before the timestamps file, which costs a constant-rate track its rate.
+    // muxed afresh before the timestamps file.
     let reused = resume_enabled && output_file.exists() && temp_dir.join(MUX_MARKER).exists();
     let mut plan = vec![chosen.clone()];
     if reused {
@@ -130,7 +139,7 @@ pub(super) fn deliver(
 
     for (attempt, timing) in plan.iter().enumerate() {
         if let MuxTiming::File(path) = timing {
-            fs::write(path, timestamps_v2(&source))
+            fs::write(path, timestamps_v2(&on_rate_grid(&source)))
                 .context("Failed to write the video timestamps file")?;
         }
         if !mux(timing)? {
@@ -170,7 +179,7 @@ pub(super) fn read_video_times(file: &Path) -> Result<VideoTimes, String> {
     let mut command = Command::new("ffprobe");
     command
         .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
-        .arg("packet=pts,duration:stream=time_base:format=format_name")
+        .arg("packet=pts,duration:stream=time_base,avg_frame_rate:format=format_name")
         .args(["-of", "json"])
         .arg(file);
     let output = external::get_command_output(&mut command)
@@ -190,6 +199,12 @@ pub(super) fn video_times_from_ffprobe(json: &Value) -> Result<VideoTimes, Strin
     if !format.split(',').any(|name| name == "matroska") {
         return Err(format!("the file is not Matroska ({format})"));
     }
+    // `24000/1001` frames per second is 1001/24000 s per frame; ffprobe writes `0/0` for none.
+    let frame_ms = json
+        .pointer("/streams/0/avg_frame_rate")
+        .and_then(Value::as_str)
+        .and_then(|rate| rate.split_once('/'))
+        .and_then(|(num, den)| ms_per_tick(&format!("{den}/{num}")));
     let ms_per_tick = json
         .pointer("/streams/0/time_base")
         .and_then(Value::as_str)
@@ -218,7 +233,11 @@ pub(super) fn video_times_from_ffprobe(json: &Value) -> Result<VideoTimes, Strin
     let end = last
         .filter(|&(_, duration)| duration > 0)
         .map(|(pts, duration)| (pts + duration) as f64 * ms_per_tick);
-    Ok(VideoTimes { frames, end })
+    Ok(VideoTimes {
+        frames,
+        end,
+        frame_ms,
+    })
 }
 
 /// Milliseconds per tick of an ffprobe time base such as `1/1000`.
@@ -282,6 +301,33 @@ pub(super) fn compare(source: &[f64], output: &[f64]) -> Result<(), String> {
         span(output),
         span(source)
     ))
+}
+
+/// `times` with every frame (and the end, as frame `frames.len()`) that lies within
+/// [`GRID_SNAP_MS`] of its frame-rate grid time, `frames[0] + k * frame_ms`, moved onto it. The
+/// other frames keep their times; without a frame duration nothing moves.
+pub(super) fn on_rate_grid(times: &VideoTimes) -> VideoTimes {
+    let (Some(frame_ms), Some(&first)) = (times.frame_ms, times.frames.first()) else {
+        return times.clone();
+    };
+    let snap = |k: usize, time: f64| {
+        let grid = first + k as f64 * frame_ms;
+        if (time - grid).abs() <= GRID_SNAP_MS {
+            grid
+        } else {
+            time
+        }
+    };
+    VideoTimes {
+        frames: times
+            .frames
+            .iter()
+            .enumerate()
+            .map(|(k, &time)| snap(k, time))
+            .collect(),
+        end: times.end.map(|end| snap(times.frames.len(), end)),
+        frame_ms: times.frame_ms,
+    }
 }
 
 /// A timestamps v2 file for mkvmerge `--timestamps`: one line per frame in presentation order,

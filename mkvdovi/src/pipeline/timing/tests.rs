@@ -123,6 +123,7 @@ fn timestamps_v2_lists_every_frame_then_the_end_of_the_last() {
     let times = VideoTimes {
         frames: vec![2000.0, 2041.708333, 2083.0],
         end: Some(2125.0),
+        frame_ms: None,
     };
     assert_eq!(
         timestamps_v2(&times),
@@ -133,9 +134,55 @@ fn timestamps_v2_lists_every_frame_then_the_end_of_the_last() {
         let times = VideoTimes {
             frames: vec![0.0, 42.0],
             end,
+            frame_ms: None,
         };
         assert_eq!(timestamps_v2(&times), "# timestamp format v2\n0\n42\n");
     }
+}
+
+#[test]
+fn ffprobe_frame_rate_gives_the_frame_duration() {
+    let mut json = ffprobe_json(&[(0, 42)]);
+    json["streams"][0]["avg_frame_rate"] = json!("24000/1001");
+    let frame_ms = video_times_from_ffprobe(&json).unwrap().frame_ms.unwrap();
+    assert!((frame_ms - 41.708_333_333).abs() < 1e-9, "{frame_ms}");
+    // ffprobe writes 0/0 when the container gives no rate.
+    json["streams"][0]["avg_frame_rate"] = json!("0/0");
+    assert_eq!(video_times_from_ffprobe(&json).unwrap().frame_ms, None);
+}
+
+#[test]
+fn on_rate_grid_moves_whole_millisecond_frames_onto_the_frame_rate_grid() {
+    // mkvmerge's 23.976 fps frame times (k * 41708333 ns, whole ms); frame 12 is at 500.499996.
+    let frames = [0, 42, 83, 125, 167, 209, 250, 292, 334, 375, 417, 459, 500];
+    let times = VideoTimes {
+        frames: frames.iter().map(|&ms| f64::from(ms)).collect(),
+        end: Some(542.0),
+        frame_ms: Some(1001.0 / 24.0),
+    };
+    // k * 1001/24 to six decimals. Frame 12's grid time is 500.5, which mkvmerge would round
+    // up to 501, so it keeps its own 500.
+    assert_eq!(
+        timestamps_v2(&on_rate_grid(&times)),
+        "# timestamp format v2\n0\n41.708333\n83.416667\n125.125\n166.833333\n208.541667\n\
+         250.25\n291.958333\n333.666667\n375.375\n417.083333\n458.791667\n500\n542.208333\n"
+    );
+    // A frame off the grid keeps its time; the grid starts at the first frame.
+    let times = VideoTimes {
+        frames: vec![2000.0, 2042.0, 2090.0],
+        end: None,
+        frame_ms: Some(1001.0 / 24.0),
+    };
+    assert_eq!(
+        on_rate_grid(&times).frames,
+        [2000.0, 2000.0 + 1001.0 / 24.0, 2090.0]
+    );
+    // Without a frame rate nothing moves.
+    let times = VideoTimes {
+        frame_ms: None,
+        ..times
+    };
+    assert_eq!(on_rate_grid(&times), times);
 }
 
 #[test]
@@ -301,6 +348,72 @@ fn deliver_retries_with_the_timestamps_file_then_fails_and_removes_the_output() 
     assert_eq!(calls.len(), 2);
     assert!(!output.exists());
     assert!(!temp.join(MUX_MARKER).exists());
+}
+
+/// The default duration (ns) that mkvmerge reports for a file's video track.
+fn default_duration(mkv: &Path) -> Option<u64> {
+    let output = Command::new("mkvmerge")
+        .arg("-J")
+        .arg(mkv)
+        .output()
+        .unwrap();
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    json["tracks"]
+        .as_array()?
+        .iter()
+        .find(|track| track["type"] == "video")?["properties"]["default_duration"]
+        .as_u64()
+}
+
+#[test]
+fn deliver_retry_with_the_timestamps_file_keeps_the_sources_frame_rate() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some([cfr, late, _]) = clips(
+        dir.path(),
+        "deliver_retry_with_the_timestamps_file_keeps_the_sources_frame_rate",
+    ) else {
+        return;
+    };
+    let (temp, output) = (dir.path().join("temp"), dir.path().join("out.mkv"));
+    fs::create_dir(&temp).unwrap();
+    let raw = dir.path().join("clip.hevc");
+    let mut calls = Vec::new();
+    let delivery = deliver(
+        late.to_str().unwrap(),
+        &output,
+        &temp,
+        false,
+        &mut |timing| {
+            calls.push(timing.clone());
+            if calls.len() == 1 {
+                // A mux that loses the late start, so the timestamps file is muxed next.
+                fs::copy(&cfr, &output).unwrap();
+                return Ok(true);
+            }
+            let status = Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(&output)
+                .args(timing.mkvmerge_args())
+                .arg(&raw)
+                .status()
+                .unwrap();
+            Ok(status.success())
+        },
+    )
+    .unwrap();
+    assert_eq!(delivery, Delivery::Checked);
+    assert_eq!(
+        calls,
+        [
+            MuxTiming::Stream { sync_ms: 2000 },
+            MuxTiming::File(temp.join(TIMESTAMPS_FILE))
+        ]
+    );
+    // 41708333 ns (23.976 fps) as in the source, not the 42 ms of a whole-millisecond file.
+    let source = default_duration(&late);
+    assert!(source.is_some());
+    assert_eq!(default_duration(&output), source);
 }
 
 #[test]
