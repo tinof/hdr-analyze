@@ -14,6 +14,7 @@ use super::measure::{
     total_steps_for, Measured,
 };
 use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
+use super::timing::{Delivery, MuxTiming};
 use super::*;
 use crate::cli::{AnalysisQuality, DoviInput, HwAccel, PeakSource};
 use clap::Parser;
@@ -574,6 +575,15 @@ fn run_finish_success(
     format: HdrFormat,
     create_source: bool,
 ) -> (bool, bool, bool) {
+    run_finish_success_with_timing(flags, format, create_source, true)
+}
+
+fn run_finish_success_with_timing(
+    flags: &[&str],
+    format: HdrFormat,
+    create_source: bool,
+    timing_checked: bool,
+) -> (bool, bool, bool) {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("in.mkv");
     let output = dir.path().join("in.DV.mkv");
@@ -595,8 +605,19 @@ fn run_finish_success(
         &args,
         format,
         Instant::now(),
+        timing_checked,
     );
     (source.exists(), temp.exists(), output.exists())
+}
+
+#[test]
+fn finish_success_keeps_a_non_dv_source_whose_output_timing_was_not_checked() {
+    for format in ALL_HDR_FORMATS.into_iter().filter(|f| !dv_format(*f)) {
+        let (source, temp, output) = run_finish_success_with_timing(&[], format, true, false);
+        assert!(source, "source should be kept for {format:?}");
+        assert!(!temp, "temp dir should be removed for {format:?}");
+        assert!(output, "output must stay for {format:?}");
+    }
 }
 
 #[test]
@@ -1396,6 +1417,7 @@ fn mux_output_reuses_a_finished_mux_when_resuming() {
         &temp,
         true,
         &args,
+        &MuxTiming::Stream { sync_ms: 0 },
     )
     .unwrap();
     assert!(muxed);
@@ -1602,6 +1624,7 @@ fn run_mel_to_profile81(fake: &FakeTools, mode: DoviInput, resume: bool) -> bool
         resume,
     )
     .unwrap()
+        != Delivery::Failed
 }
 
 #[cfg(unix)]
@@ -2146,6 +2169,7 @@ fn mux_output_is_reused_only_with_resume_output_and_marker() {
             &fake.temp,
             resume_enabled,
             &args,
+            &MuxTiming::Stream { sync_ms: 0 },
         )
         .unwrap();
         let case = format!("resume {resume_enabled}, output {output}, marker {marker}");
@@ -2167,7 +2191,60 @@ fn mux_output_failure_returns_false_without_a_mux_marker() {
     fs::write(&bl_rpu, b"bl+rpu").unwrap();
     fake.script("mkvmerge", FAILS);
     let args = Args::try_parse_from(["mkvdovi"]).unwrap();
-    let muxed = mux_output(fake.input(), &bl_rpu, &fake.output, &fake.temp, true, &args).unwrap();
+    let muxed = mux_output(
+        fake.input(),
+        &bl_rpu,
+        &fake.output,
+        &fake.temp,
+        true,
+        &args,
+        &MuxTiming::Stream { sync_ms: 0 },
+    )
+    .unwrap();
     assert!(!muxed);
     assert!(!fake.temp.join("mux.done").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn mux_output_passes_the_timing_before_the_video_file() {
+    for (timing, expected) in [
+        (MuxTiming::Stream { sync_ms: 0 }, None),
+        (MuxTiming::Stream { sync_ms: 2000 }, Some("--sync 0:2000")),
+        (
+            MuxTiming::File(PathBuf::from("/t/video.timestamps.txt")),
+            Some("--timestamps 0:/t/video.timestamps.txt"),
+        ),
+    ] {
+        let Some(fake) = FakeTools::new("mux_output_passes_the_timing_before_the_video_file")
+        else {
+            return;
+        };
+        let bl_rpu = fake.temp.join("BL_RPU.hevc");
+        fs::write(&bl_rpu, b"bl+rpu").unwrap();
+        fake.script("mkvmerge", &writes("muxed"));
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        let muxed = mux_output(
+            fake.input(),
+            &bl_rpu,
+            &fake.output,
+            &fake.temp,
+            false,
+            &args,
+            &timing,
+        )
+        .unwrap();
+        assert!(muxed);
+        let calls = fake.calls("mkvmerge");
+        let video_then_source = format!("{} --no-video {}", bl_rpu.display(), fake.input());
+        let tail = match expected {
+            Some(option) => format!("{option} {video_then_source}"),
+            None => video_then_source.clone(),
+        };
+        assert_eq!(calls.len(), 1, "{timing:?}");
+        assert!(calls[0].ends_with(&tail), "{timing:?}: {}", calls[0]);
+        if expected.is_none() {
+            assert!(!calls[0].contains("--sync") && !calls[0].contains("--timestamps"));
+        }
+    }
 }

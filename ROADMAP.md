@@ -52,17 +52,19 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-05 at main@16a4dab)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=96358280c47f skip=P6.2,P6.3,P6.4,E7.2,E7.3,E8.1,E9.1,P12.1,WS7.1,WS8.1,WS8.2,WS8.3,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1,P3.1,P5.1,WS6.1,WS6.10,E1.2,E1.3,E2.1,E2.2,E3.1,E6.1,E11.1,E12.2,E12.3,E13.6,E13.7,E13.9,E13.10,E13.12,E13.13,E13.14,E13.16,E13.17,E13.18,E13.20,E13.21,E14.3,E14.5,E14.6,E17.1,E17.2 -->
+### Next up (checked 2026-11-07 at main@3c65cdd)
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=a1799309d57d -->
 
-P15 ranked first by owner direction (Priorities); its last step, P15.5, closed in PR #100.
+Order: owner direction of 2026-11-07 (Priorities).
 
-1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: first numbered startable step.
-   Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
+1. **E7.2 Always-on frame-count check** (priority 4). Gate: in E7. Why: owner direction, after
+   E7.3. Branch: `fix/e7-2-always-on-frame-count`. Release: patch
+2. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
+   order. Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
 
-**Reassess:** owner-decision (E7.3, no PR): owner direction (2026-11-07) puts E7.3 and E7.2 ahead of P9.4
-(Priorities); WS1 targets the ST 2094-10 reduced set (WS1.5, WS1.6); L1 min split out as P10.5.
-
+- Recheck before E7.2: since E7.3 every mux reads the output's video packets with ffprobe and
+  fails the run on a frame-count or timing mismatch with the source
+  (`mkvdovi/src/pipeline/timing.rs:149`).
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
 ### Waiting for the owner
@@ -102,13 +104,14 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 E12.1). `v0.8.0-rc.1` was published 2026-11-03 and passed the Windows test on 2026-11-04: the Windows
 zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ and one HLG clip.
 
-**Next release point:** the next patch, batched (`docs/RELEASING.md` rule 2).
+**Next release point:** v0.9.0, a minor: P15's analyzer `--help` contract (`au-table-v1`) is on
+`main`; rule 1 puts it about a week after #91 (2026-11-04). Checked 2026-11-07.
 
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next patch | P12.1 `--mdfix` source L6 (PATCH-class fix; not merged before the v0.7.0 release PR); E12.2 NVDEC + CPU analysis fix (not merged before rc.1); E7.1, E7.2, E7.3, P6.2, E15.1 and E15.2 | PATCH, batched (`docs/RELEASING.md` rule 2) |
-| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); P15 (new analyzer `--help` contract and `mkvdovi manifest`); WS1.5 (opt-in estimator), WS1.6 (default estimator change) | MINOR |
+| next minor (v0.9.0) | P15, E15.1, E15.2 (merged); PATCH-class fixes merged before it: P12.1 `--mdfix` source L6, E12.2 NVDEC + CPU analysis, E7.1, E7.2, E7.3, P6.2 | MINOR, about 2026-11-11 (rule 1); owner decision |
+| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); WS1.5 (opt-in estimator), WS1.6 (default estimator change) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
 ## Priorities
@@ -648,8 +651,8 @@ The detailed gap table and validation method live in
 
 ### E7: completeness
 
-- **Status:** Partial. `--verify` checks the RPU frame count against the muxed track and the
-  sidecar; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E7.1 to E7.3.
+- **Status:** Partial. `--verify` checks the RPU frame count, and every mux keeps and checks the
+  source's video timing (E7.3); history in [the log](docs/ROADMAP_LOG.md). Open: E7.1, E7.2.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
@@ -659,12 +662,6 @@ The detailed gap table and validation method live in
   the item's gate (1).
 - [E7.2][corpus] An always-on frame-count check. Gate: the item's gates (2) and (3) (the added
   time per file is measured on real files).
-- [E7.3][desk] `mux_output` muxes the Annex B stream without the source's video timestamps
-  (`mkvdovi/src/pipeline/deliver.rs:176`): a VFR source comes out at a constant rate, and a video
-  start of 2000 ms moves to 0 while the audio keeps its own (found by P15.3's tests). Gate: tests
-  with a VFR source and a non-zero video start show the output's video pts equal the source's,
-  and the bitstream stays bit-identical; an always-on check of the output's video start and
-  duration against the source's meets the item's gate (3).
 
 ### E8: histogram percentile reader
 

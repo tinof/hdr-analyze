@@ -6,6 +6,39 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-07: E7.3 Keep the source's video timestamps in the mux (PR #101)
+
+Step: - [E7.3][desk] `mux_output` muxes the Annex B stream without the source's video timestamps
+  (`mkvdovi/src/pipeline/deliver.rs:176`): a VFR source comes out at a constant rate, and a video
+  start of 2000 ms moves to 0 while the audio keeps its own (found by P15.3's tests). Gate: tests
+  with a VFR source and a non-zero video start show the output's video pts equal the source's,
+  and the bitstream stays bit-identical; an always-on check of the output's video start and
+  duration against the source's meets the item's gate (3).
+
+Checked 2026-11-07 @3c65cdd (moved from the item): E7.3 has a second mux site of the same shape (no
+`--timestamps`): the MEL fast path's `mux_hevc_with_original`
+(`mkvdovi/src/pipeline/dovi_steps.rs:255-292`), beside `deliver.rs:167-176`; fix both.
+
+Gate evidence: PR #101. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (657
+passed, only allowed skips). `mkvdovi/tests/mux_timing.rs` converts a VFR source (24 then 30 fps
+after a 500 ms gap), a source whose video starts at 2000 ms and a Profile 7 MEL source from
+2000 ms. The output's video pts equal the source's packet for packet, and its slice NAL units
+equal the source's. A late start keeps the source's default duration, and its non-DV source is
+deleted only after the check passed. An mkvmerge shim that drops `--sync` and `--timestamps`
+makes the run fail, removes the output and keeps the source (gate (3)). A failed ffprobe timing
+query gives an unchecked run that keeps the source. All five fail on `main` (video at 0 ms against
+the source's 2000 ms; a VFR frame at 1000 ms against 1500 ms). The check compares every frame time,
+so the start, the frame count and the span; the last frame's own duration is not compared (Gemini
+P2 note). Review: the pre-PR panel found three P3 defects, all fixed: a whole-millisecond
+timestamps file gave 23.976 fps a 42 ms default duration (now snapped to the source's frame-rate
+grid, 41708333 ns), a missing libx265 skip and an untested source-kept branch. Cold review: Gemini
+alone, LGTM, in place of Codex (quota paused, owner direction).
+
+Resolution: `pipeline/timing.rs` `deliver` muxes both sites with `--sync` (constant rate) or a
+timestamps v2 file (variable rate), checks the output's frame times against the source's within
+1 ms, retries a constant-rate miss once with the file, and fails the run on a mismatch; a source
+whose times cannot be read (no ffprobe, not Matroska) is muxed unchecked and kept.
+
 ### 2026-11-07: Direction after two outside reviews; ST 2094-10 reduced-set spike (no PR)
 
 Why: the owner had two outside models review the project (Gemini 4 Argon, then GPT-6 Astra on

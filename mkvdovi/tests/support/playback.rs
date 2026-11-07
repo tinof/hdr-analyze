@@ -391,8 +391,8 @@ pub fn assert_rpus_equal_the_conversion(
     converted: &Path,
 ) {
     let source_packets = packets(source);
-    // Compared by decode index: the conversion copies the bitstream in decode order, but its mux
-    // takes the timestamps from the elementary stream, not from the source (ROADMAP E7.3).
+    // Compared by decode index: the conversion copies the bitstream in decode order. Its pts
+    // equal the source's since E7.3 (`mux_timing.rs`), but the index needs no timestamps.
     let converted_rpus = rpu_per_access_unit(converted);
     assert_eq!(converted_rpus.len(), source_packets.len());
 
