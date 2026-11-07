@@ -336,3 +336,47 @@ fn a_mux_that_loses_the_timing_fails_the_run_and_keeps_the_source() {
     assert!(!output.exists(), "the mistimed output must be removed");
     assert!(!log.contains("Deleting source file"), "{log}");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_source_whose_timing_cannot_be_read_is_converted_and_kept() {
+    use std::os::unix::fs::PermissionsExt;
+
+    require_tools!(MKVEXTRACT);
+    let dir = tempfile::tempdir().unwrap();
+    let source = pq_source(dir.path(), &[]);
+    // An ffprobe that fails the video packet query of the timing check and runs the real one
+    // for every other query, ahead of it on PATH.
+    let real = run(Command::new("sh").arg("-c").arg("command -v ffprobe"));
+    let real = String::from_utf8_lossy(&real.stdout).trim().to_owned();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let shim = bin.join("ffprobe");
+    std::fs::write(
+        &shim,
+        format!("#!/bin/sh\ncase \"$*\" in *packet=pts,duration*) exit 1 ;; esac\nexec '{real}' \"$@\"\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    // No --keep-source: the unchecked timing alone keeps this PQ source.
+    let (run, copy, output) = convert_copy(dir.path(), &source, &[], Some(&path));
+    let log = log_of(&run);
+    assert!(run.status.success(), "mkvdovi failed:\n{log}");
+    assert!(
+        log.contains("The source's video timestamps could not be read"),
+        "{log}"
+    );
+    assert!(
+        log.contains("Keeping source file: the output's video timing was not checked"),
+        "{log}"
+    );
+    assert!(copy.exists(), "the source must be kept");
+    assert!(output.exists(), "the unchecked output is delivered");
+    assert!(!log.contains("Deleting source file"), "{log}");
+}
