@@ -81,8 +81,9 @@ pub(super) struct VideoTimes {
 pub(super) enum Delivery {
     /// mkvmerge failed, or the output's video timing differs from the source's (reported).
     Failed,
-    /// The output's video frame times equal the source's.
-    Checked,
+    /// The output's video frame times equal the source's; it has `video_frames` frames, which
+    /// the RPU count check (ROADMAP E7.2) takes from here.
+    Checked { video_frames: usize },
     /// The source's timing could not be read, so the output was not checked (reported).
     Unchecked,
 }
@@ -148,7 +149,11 @@ pub(super) fn deliver(
         progress::print_info("Checking the output's video timestamps against the source's...");
         let mismatch = match read_video_times(output_file) {
             Ok(output) => match compare(&source.frames, &output.frames) {
-                Ok(()) => return Ok(Delivery::Checked),
+                Ok(()) => {
+                    return Ok(Delivery::Checked {
+                        video_frames: output.frames.len(),
+                    })
+                }
                 Err(mismatch) => mismatch,
             },
             Err(reason) => format!("the output's video timestamps could not be read: {reason}"),
@@ -168,7 +173,8 @@ pub(super) fn deliver(
     Ok(Delivery::Failed)
 }
 
-fn discard_output(output_file: &Path, temp_dir: &Path) {
+/// Removes the output and its mux sentinel, so a resumed run muxes afresh.
+pub(super) fn discard_output(output_file: &Path, temp_dir: &Path) {
     let _ = fs::remove_file(output_file);
     let _ = fs::remove_file(temp_dir.join(MUX_MARKER));
 }

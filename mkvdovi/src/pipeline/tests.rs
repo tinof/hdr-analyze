@@ -1995,7 +1995,7 @@ fn mel_fast_path_without_verify_finishes_and_never_runs_verification() {
     else {
         return;
     };
-    fake.script("dovi_tool", &writes("p81"));
+    script_counts(&fake, 3, 3);
     fake.script("mkvmerge", &writes("muxed"));
     // Verification starts by extracting the muxed video with ffmpeg; make that fail.
     fake.script("ffmpeg", FAILS);
@@ -2014,12 +2014,125 @@ fn mel_fast_path_with_failed_verification_reports_failure_and_keeps_the_temp_dir
     ) else {
         return;
     };
-    fake.script("dovi_tool", &writes("p81"));
+    script_counts(&fake, 3, 3);
     fake.script("mkvmerge", &writes("muxed"));
     fake.script("ffmpeg", FAILS);
     assert!(!run_mel_fast_path(&fake, true));
     assert!(called_with(&fake.calls("ffmpeg"), "verify_video.hevc"));
     assert!(fake.temp.exists());
+    assert!(fake.input.exists());
+}
+
+/// Scripts ffprobe (every file has `frames` video frames, 42 ms apart) and dovi_tool, whose
+/// `extract-rpu` writes `rpus` RPUs and whose every other call writes `p81`.
+#[cfg(unix)]
+fn script_counts(fake: &FakeTools, frames: usize, rpus: usize) {
+    let packets: Vec<String> = (0..frames)
+        .map(|frame| format!("{{\"pts\":{},\"duration\":42}}", frame * 42))
+        .collect();
+    let json = format!(
+        "{{\"packets\":[{}],\"streams\":[{{\"time_base\":\"1/1000\"}}],\
+         \"format\":{{\"format_name\":\"matroska,webm\"}}}}",
+        packets.join(",")
+    );
+    fake.script("ffprobe", &format!("printf '%s' '{json}'\nexit 0\n"));
+    fake.script(
+        "dovi_tool",
+        &format!(
+            "case \"$1\" in extract-rpu)\n  printf '{}' > \"$OUT\"\n  exit 0 ;;\nesac\n{}",
+            "\\000\\000\\000\\001\\031\\200".repeat(rpus),
+            writes("p81")
+        ),
+    );
+}
+
+/// Leaves a finished MEL conversion and mux of an earlier run, and an `output_rpu.bin` of
+/// `stale_rpus` RPUs that must not stand in for the output's count.
+#[cfg(unix)]
+fn leave_reusable_mux(fake: &FakeTools, stale_rpus: usize) {
+    fake.leave(&fake.temp.join("P81_discard.hevc"), b"p81", true);
+    fs::write(&fake.output, b"muxed").unwrap();
+    fs::write(fake.temp.join("mux.done"), b"").unwrap();
+    let stale = b"\0\0\0\x01\x19\x80".repeat(stale_rpus);
+    fs::write(fake.temp.join(rpu_count::RPU_FILE), stale).unwrap();
+}
+
+/// A reused mux with fewer RPUs than frames fails the run (ROADMAP E7.2): both reads count 2
+/// RPUs for 3 frames, the output and its sentinel are removed, the source is kept.
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_counts_a_reused_output_and_removes_it_when_rpus_are_missing() {
+    let Some(fake) =
+        FakeTools::new("mel_fast_path_counts_a_reused_output_and_removes_it_when_rpus_are_missing")
+    else {
+        return;
+    };
+    script_counts(&fake, 3, 2);
+    fake.script("mkvmerge", FAILS);
+    fake.script("ffmpeg", &writes("video"));
+    leave_reusable_mux(&fake, 3);
+    assert!(!run_mel_fast_path(&fake, false));
+    assert!(fake.calls("mkvmerge").is_empty(), "the mux is reused");
+    let counts = fake.calls("dovi_tool");
+    assert!(called_with(&counts, "extract-rpu -i ") && called_with(&counts, "in.DV.mkv"));
+    assert!(called_with(&counts, "output_video.hevc"));
+    assert!(called_with(&fake.calls("ffmpeg"), "output_video.hevc"));
+    assert!(!fake.output.exists(), "the output is removed");
+    assert!(
+        !fake.temp.join("mux.done").exists(),
+        "the next run muxes again"
+    );
+    assert!(fake.temp.exists(), "a failed run keeps the temp dir");
+    let converted = fake.temp.join("P81_discard.hevc");
+    assert!(
+        !converted.exists() && !resume::marker_path(&converted).exists(),
+        "the converted stream is withdrawn, so the next run converts again"
+    );
+    assert!(fake.input.exists());
+}
+
+/// More RPUs than video frames fail the run as well: both reads count 4 RPUs for 3 frames.
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_fails_when_the_output_has_more_rpus_than_frames() {
+    let Some(fake) =
+        FakeTools::new("mel_fast_path_fails_when_the_output_has_more_rpus_than_frames")
+    else {
+        return;
+    };
+    script_counts(&fake, 3, 4);
+    fake.script("mkvmerge", &writes("muxed"));
+    fake.script("ffmpeg", &writes("video"));
+    assert!(!run_mel_fast_path(&fake, false));
+    assert!(called_with(&fake.calls("ffmpeg"), "output_video.hevc"));
+    assert!(!fake.output.exists());
+    assert!(!fake.temp.join("mux.done").exists());
+    assert!(fake.input.exists());
+}
+
+/// RPUs that cannot be counted fail the run too; the stale `output_rpu.bin`, which holds the
+/// right count, does not stand in.
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_fails_when_the_output_rpus_cannot_be_counted() {
+    let Some(fake) = FakeTools::new("mel_fast_path_fails_when_the_output_rpus_cannot_be_counted")
+    else {
+        return;
+    };
+    script_counts(&fake, 3, 3);
+    fake.script(
+        "dovi_tool",
+        &format!(
+            "case \"$1\" in extract-rpu) echo 'Error: Invalid input' >&2; exit 1 ;; esac\n{}",
+            writes("p81")
+        ),
+    );
+    fake.script("mkvmerge", FAILS);
+    fake.script("ffmpeg", &writes("video"));
+    leave_reusable_mux(&fake, 3);
+    assert!(!run_mel_fast_path(&fake, false));
+    assert!(!fake.output.exists());
+    assert!(!fake.temp.join("mux.done").exists());
     assert!(fake.input.exists());
 }
 

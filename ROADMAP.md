@@ -53,18 +53,13 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-07 at main@3c65cdd)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=a1799309d57d -->
+<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=0e32181ec0a6 -->
 
 Order: owner direction of 2026-11-07 (Priorities).
 
-1. **E7.2 Always-on frame-count check** (priority 4). Gate: in E7. Why: owner direction, after
-   E7.3. Branch: `fix/e7-2-always-on-frame-count`. Release: patch
-2. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
+1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
    order. Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
 
-- Recheck before E7.2: since E7.3 every mux reads the output's video packets with ffprobe and
-  fails the run on a frame-count or timing mismatch with the source
-  (`mkvdovi/src/pipeline/timing.rs:149`).
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
 ### Waiting for the owner
@@ -651,8 +646,8 @@ The detailed gap table and validation method live in
 
 ### E7: completeness
 
-- **Status:** Partial. `--verify` checks the RPU frame count, and every mux keeps and checks the
-  source's video timing (E7.3); history in [the log](docs/ROADMAP_LOG.md). Open: E7.1, E7.2.
+- **Status:** Partial. Every conversion checks the output's RPU count (E7.2) and video timing
+  (E7.3); history in [the log](docs/ROADMAP_LOG.md). Open: E7.1.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
@@ -660,8 +655,6 @@ The detailed gap table and validation method live in
   the run and keeps the source, tested.
 - [E7.1][desk] Direct-MKV `dovi_tool` steps still accept exit status plus non-empty output. Gate:
   the item's gate (1).
-- [E7.2][corpus] An always-on frame-count check. Gate: the item's gates (2) and (3) (the added
-  time per file is measured on real files).
 
 ### E8: histogram percentile reader
 

@@ -25,7 +25,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   `sidecar`, `static_metadata`.
 - `pipeline/`: `convert_file` in `mod.rs`; by phase `temp_dir`, `measure`, `config`, `deliver`;
   plus `analyzer`, `dovi_steps`, `hdr10plus`, `timing` (the source's video timestamps in the mux
-  and the check of the output's, ROADMAP E7.3), and `manifest/` (`mkvdovi manifest`: the AU table
+  and the check of the output's, ROADMAP E7.3), `rpu_count` (the output's RPU count against its
+  video frames, E7.2), and `manifest/` (`mkvdovi manifest`: the AU table
   reader, the manifest build, `import.rs` for `--rpu`, no temp dir; [PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)).
 - `verify.rs`, `progress.rs`.
 
@@ -76,6 +77,18 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   is kept. A reused mux of an interrupted run is checked too, and remuxed with the chosen timing
   when it fails. When the source's times cannot be read (no
   ffprobe, not Matroska, unreadable), the mux uses the stream's timing, warns and is not checked.
+- **RPU count (`pipeline/rpu_count.rs`, E7.2).** After `timing::deliver`, both mux sites call
+  `rpu_count::check`: the output must carry one RPU per video frame. The frame count comes from the
+  timing check's packet read, else ffprobe or MediaInfo on the output. The RPUs are extracted with
+  `dovi_tool extract-rpu` into `output_rpu.bin` and counted by start code (`rpu_guard::count_rpus`),
+  never parsed. Under `--dovi-input mkv` the direct read of the output decides only when it matches;
+  otherwise, and under `raw`, the output's video stream is extracted by ffmpeg
+  (`output_video.hevc`, removed after the count) and that count decides. dovi_tool's "No RPU was
+  found" is a count of 0. The check fails closed: a differing or unreadable count removes the
+  output and `mux.done` (`timing::discard_output`) and fails the run, so the source is kept. It also
+  withdraws the stream the mux took (`BL_RPU.hevc`, or the MEL path's `P81_discard.hevc`): its
+  `.done` sentinel and the file, only inside the temp dir. A resumed run rebuilds that stream,
+  muxes and counts again. `--verify` still makes its own count.
 - **mkvdovi never encodes video.** Every path copies the video stream bit-exactly. There is no
   compositor, no `composite-pipe`, no `--fel-*`/`--encoder` flag and no Modal/NVENC/libx265/
   VideoToolbox encode; do not add one back.
