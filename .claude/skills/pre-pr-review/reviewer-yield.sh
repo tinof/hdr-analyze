@@ -9,13 +9,14 @@
 #   --min-runs  runs a reviewer needs before it gets a verdict; default 10.
 #   --dir       records directory; default <git common dir>/pre-pr-review.
 #
-# Per reviewer: runs (records whose `reviewers` list it with ran=true), findings it is a finder of,
+# Per reviewer: runs (records whose `reviewers` list it with ran=true; for gemini and codex-focused,
+# records with geminiPass or codexFocusedPass "done"), findings it is a finder of,
 # confirmed (verdict fixed or deferred), refuted or rejected, and beyond-Opus: confirmed findings
 # that no Opus lens (correctness, contracts, tests-and-gates, spec, move-integrity) also reported,
 # split by priority. Then each beyond-Opus finding (record, where, priority, all finders), so the
 # main session can judge whether it mattered.
 #
-# Verdict, for the observed reviewers (sonnet, fable), once runs >= --min-runs:
+# Verdict, for the observed reviewers (sonnet, fable, gemini), once runs >= --min-runs:
 #   keep                   at least one beyond-Opus finding at P0-P2
 #   candidate for removal  none at P0-P2 (P3-only catches do not pay for a reviewer)
 # Below --min-runs: "observing (k of N runs)". The owner decides; this script never edits the panel.
@@ -29,7 +30,7 @@ while [ $# -gt 0 ]; do
         --since) since=${2:?--since needs a date}; shift 2 ;;
         --min-runs) min_runs=${2:?--min-runs needs a number}; shift 2 ;;
         --dir) dir=${2:?--dir needs a path}; shift 2 ;;
-        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+        -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "reviewer-yield.sh: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -50,7 +51,7 @@ if [ -d "$dir" ]; then
 fi
 echo "reviewer yield since $since: ${#files[@]} record(s) in $dir"
 if [ "${#files[@]}" -eq 0 ]; then
-    echo "no records yet; observing sonnet and fable."
+    echo "no records yet; observing sonnet, fable and gemini."
     exit 0
 fi
 
@@ -64,7 +65,13 @@ done
 jq -rn --argjson min "$min_runs" '
   def opus: ["correctness", "contracts", "tests-and-gates", "spec", "move-integrity"];
   def confirmed: .verdict == "fixed" or .verdict == "deferred";
-  [inputs | {head: ((.head // input_filename) | tostring | .[0:8]), reviewers: (.reviewers // []), findings: (.findings // [])}] as $recs
+  # gemini and codex-focused run outside the workflow, so its `reviewers` list never names them;
+  # their runs come from the record'"'"'s geminiPass and codexFocusedPass.
+  [inputs | {head: ((.head // input_filename) | tostring | .[0:8]),
+             reviewers: ((.reviewers // [])
+               + (if .geminiPass == "done" then [{key: "gemini", ran: true}] else [] end)
+               + (if .codexFocusedPass == "done" then [{key: "codex-focused", ran: true}] else [] end)),
+             findings: (.findings // [])}] as $recs
   | ([$recs[].findings[].finders[]?] + [$recs[].reviewers[] | select(.ran == true) | .key] | unique) as $names
   | ($names | map(. as $n | {
       name: $n,
@@ -82,7 +89,7 @@ jq -rn --argjson min "$min_runs" '
     ([$recs[] | .head as $h | .findings[] | select(confirmed and ((.finders // []) - opus | length) == ((.finders // []) | length)) | "  \($h) \(.priority // "?") \(.where // "?") [\((.finders // []) | join(", "))]"] | if length == 0 then ["  none"] else . end | .[]),
     "",
     "verdicts:",
-    (["sonnet", "fable"][] as $n
+    (["sonnet", "fable", "gemini"][] as $n
       | ($rows | map(select(.name == $n)) | .[0] // {runs: 0, beyond: []}) as $r
       | if $r.runs < $min then "  \($n): observing (\($r.runs) of \($min) runs)"
         elif ([$r.beyond[] | select(.priority == "P0" or .priority == "P1" or .priority == "P2")] | length) > 0 then "  \($n): keep (\($r.beyond | length) beyond-Opus finding(s) in \($r.runs) runs)"

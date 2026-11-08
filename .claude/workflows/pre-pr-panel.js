@@ -58,7 +58,7 @@ log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'non
 if (a.gatesOnly) return { gatesOnly: true, requiredGates }
 
 // Pure move (a module-size split with a passing line-exact move proof): one move-integrity lens
-// replaces the three lenses and Fable. The skill selects it only after rerunning the proof on HEAD;
+// replaces the three lenses, the spec lens, Sonnet and Fable. The skill selects it only after rerunning the proof on HEAD;
 // without a proof path here the full panel runs. Gates stay as computed above.
 // Every non-Markdown file in scope must be one the split touches (moveFiles), so an unrelated edit
 // on the same branch never escapes the full panel.

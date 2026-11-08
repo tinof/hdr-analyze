@@ -170,8 +170,8 @@ run the full panel.
   The proof does not check `mod` lines, so a dropped `mod tests;` would otherwise lose tests
   silently.
 
-The mode replaces only the reviewers: one move-integrity lens instead of the three lenses and
-Fable. The gates and the item's acceptance checks (`rpu-baseline compare
+The mode replaces only the reviewers: one move-integrity lens instead of the three lenses, the
+spec lens, Sonnet and Fable. The gates and the item's acceptance checks (`rpu-baseline compare
 --require-identical-l1`, the L1 gate without `--update`) still apply.
 
 ## 4. Verify and fix
@@ -223,6 +223,7 @@ that list and step 3's list. Do the same after every later fix round, and run th
 | `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml` |
 | `gemini-harness` | `.claude/workflows/tests/pre-pr-gemini-test.sh` (fake agy; about 1 minute) |
 | `pre-pr-record` | `.claude/skills/pre-pr-review/tests/clear-record-test.sh` (a throwaway repo; seconds) |
+| `reviewer-yield` | `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh` (hand-made records; seconds) |
 
 The `test` gate is `scripts/ci/test-gate.sh`, the same script the `gate` of `.claude/workflow.md`
 runs. It builds the current analyzer next to the debug mkvdovi the integration tests run, writes the
@@ -271,7 +272,8 @@ commit or reason), gate results (standalone mode), blockers, docs changed.
 
 **Reviewer yield.** The Sonnet reviewer is on the panel on an assumption (owner, 2026-11-08):
 it catches defects the Opus lenses miss. Fable is paused meanwhile (`FABLE_PAUSED` in the
-workflow), so its verdict stays at "observing" until it runs again. Run
+workflow), so its verdict stays at "observing" until it runs again. Gemini gets the same verdict,
+its runs counted from `geminiPass`; the Codex focused pass gets a run count but no verdict. Run
 `.claude/skills/pre-pr-review/reviewer-yield.sh` here and put its table, its beyond-Opus list and
 its verdicts in the report. It counts the records written so far; this review's own record follows
 in step 8, and its findings table already shows what Sonnet found this time. A beyond-Opus finding is a confirmed
