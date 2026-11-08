@@ -6,6 +6,36 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-08: E7.2 An always-on frame-count check (PR #103)
+
+Step: - [E7.2][corpus] An always-on frame-count check. Gate: the item's gates (2) and (3) (the added
+  time per file is measured on real files).
+
+Gate evidence: PR #103. Local gates: fmt, workspace clippy (also rustc 1.99.1) and
+`scripts/ci/test-gate.sh` (673 passed, only allowed skips). Gate (2), both sides:
+`mkvdovi/tests/rpu_count.rs` converts a 48-frame PQ source and a Profile 7 MEL source and logs
+`RPU count: 48 RPUs for 48 video frames`, checked against a per-AU read of the output; a run with
+`--dovi-input raw` counts through the extracted stream. Gate (3): a `dovi_tool` shim that injects no
+RPU (0 for 48), one that cuts the 48th RPU from every count (47 for 48), and a reused output without
+RPUs each fail the run, remove the output and keep the source; the fake-tool tests add more RPUs
+than frames and an uncountable output. All 8 integration tests fail on `main`. Added time per file
+(release build, `~/mkvdovi-work/e7-2-rpu-count-2026-11-08/RESULT.md`): a one-hour UHD HLG episode,
+8.29 GB and 86,275 frames, took 20 s with dovi_tool 2.3.4 reading the MKV directly (3.5 % of a run
+with fresh CUDA analysis) and 66 s under `--dovi-input raw`, 40 s of it ffmpeg's 8.3 GB temp copy of
+the video; a 1.85 GB, 300-frame dev cut took under 1 s (output in the page cache). Review: the
+pre-PR panel found five P3 defects, all fixed: a failed count kept the sealed stream the mux took,
+so a resumed run muxed the same bytes into the same failure (now withdrawn; a third-run test proves
+the recovery), one untested side of the comparison, an untested MediaInfo frame count, the raw-path
+timing and a missing TESTING.md skip entry. Codex plan check: three P2 concerns, applied (fail
+closed, MEL tests, resume tests). Cold review: Codex exec and Codex GitHub, both LGTM.
+
+Resolution: `pipeline/rpu_count.rs` runs after `timing::deliver` on both mux paths. It takes the
+frame count from the timing check's packet read (else ffprobe, else MediaInfo) and counts the
+output's RPUs by start code. The direct MKV read decides only when it matches; otherwise the
+extracted video stream decides. A differing or unreadable count removes the output, withdraws the
+mux input and fails the run. The direct-read-then-ffmpeg fallback is the pattern E7.1 asks of the
+input-side steps.
+
 ### 2026-11-07: E7.3 Keep the source's video timestamps in the mux (PR #101)
 
 Step: - [E7.3][desk] `mux_output` muxes the Annex B stream without the source's video timestamps
