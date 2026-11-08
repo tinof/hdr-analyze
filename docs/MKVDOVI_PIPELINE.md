@@ -85,8 +85,10 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   otherwise, and under `raw`, the output's video stream is extracted by ffmpeg
   (`output_video.hevc`, removed after the count) and that count decides. dovi_tool's "No RPU was
   found" is a count of 0. The check fails closed: a differing or unreadable count removes the
-  output and `mux.done` (`timing::discard_output`) and fails the run, so the source is kept and a
-  resumed run muxes and counts again. `--verify` still makes its own count.
+  output and `mux.done` (`timing::discard_output`) and fails the run, so the source is kept. It also
+  withdraws the stream the mux took (`BL_RPU.hevc`, or the MEL path's `P81_discard.hevc`): its
+  `.done` sentinel and the file, only inside the temp dir. A resumed run rebuilds that stream,
+  muxes and counts again. `--verify` still makes its own count.
 - **mkvdovi never encodes video.** Every path copies the video stream bit-exactly. There is no
   compositor, no `composite-pipe`, no `--fel-*`/`--encoder` flag and no Modal/NVENC/libx265/
   VideoToolbox encode; do not add one back.
