@@ -1,10 +1,10 @@
 export const meta = {
   name: 'pre-pr-panel',
-  description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort plus Fable on high-risk diffs, each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
-  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone, or as the /ship step 3b self-check). args: {base, files, item, acceptanceGate, scopeFile, kind?, moveProof?, moveFiles?}; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; only pre-pr-review step 5 (standalone) calls it that way, to recompute gates after fixes. /ship no longer calls gatesOnly: it reads the same path rules from .claude/workflow.md.',
+  description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort, a spec lens when the step text is handed over, a Sonnet whole-diff reviewer (Fable paused), each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
+  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone, or as the /ship step 3b self-check). args: {base, files, item, acceptanceGate, scopeFile, specFile?, kind?, moveProof?, moveFiles?}; specFile (the roadmap step text, or the /ship spec file) adds the spec lens; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; only pre-pr-review step 5 (standalone) calls it that way, to recompute gates after fixes. /ship no longer calls gatesOnly: it reads the same path rules from .claude/workflow.md.',
   phases: [
-    { title: 'Review', detail: 'correctness, repo contracts, tests and gates (Opus, high); whole diff (Fable, medium) on high-risk paths; or one move-integrity lens (Opus, high) on a pure move' },
-    { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder' },
+    { title: 'Review', detail: 'correctness, repo contracts, tests and gates, spec when a specFile is given (Opus, high); whole diff (Sonnet, high) on every diff; Fable paused; or one move-integrity lens (Opus, high) on a pure move' },
+    { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder; refutes only an impossible failure, re-ranks the rest' },
   ],
 }
 
@@ -14,7 +14,7 @@ if (typeof a === 'string') {
 }
 if (!a || !Array.isArray(a.files) || a.files.length === 0 || !a.base) {
   log('no scope handed over: nothing reviewed')
-  return { started: false, reason: 'pre-pr-panel needs args {base, files[], item, acceptanceGate, scopeFile}' }
+  return { started: false, reason: 'pre-pr-panel needs args {base, files[], item, acceptanceGate, scopeFile, specFile?}' }
 }
 
 const files = a.files.map(f => String(f).replace(/^\.\//, ''))
@@ -49,14 +49,16 @@ if (any(/^dovi_rpu_builder\//)) gates.add('tool:rpu_builder_check')
 if (any(/^\.claude\/workflows\/(pre-pr-gemini\.|tests\/)|^\.agents\/agents\/pre-pr-reviewer\.md$/)) gates.add('gemini-harness')
 // The record cleanup of /pre-pr-review step 1.2 and its test.
 if (any(/^\.claude\/skills\/pre-pr-review\/(clear-record\.sh$|tests\/)/)) gates.add('pre-pr-record')
+// The reviewer-yield observer of /pre-pr-review step 7 and its test.
+if (any(/^\.claude\/skills\/pre-pr-review\/(reviewer-yield\.sh$|tests\/)/)) gates.add('reviewer-yield')
 const requiredGates = [...gates]
-log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass or record-cleanup paths touched)'))
+log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass, record-cleanup or reviewer-yield paths touched)'))
 // Gate list only, no reviewers: lets the skills recompute gates for a file list that grew after
 // fixes, without a second copy of the path rules.
 if (a.gatesOnly) return { gatesOnly: true, requiredGates }
 
 // Pure move (a module-size split with a passing line-exact move proof): one move-integrity lens
-// replaces the three lenses and Fable. The skill selects it only after rerunning the proof on HEAD;
+// replaces the three lenses, the spec lens, Sonnet and Fable. The skill selects it only after rerunning the proof on HEAD;
 // without a proof path here the full panel runs. Gates stay as computed above.
 // Every non-Markdown file in scope must be one the split touches (moveFiles), so an unrelated edit
 // on the same branch never escapes the full panel.
@@ -69,7 +71,7 @@ if (a.kind === 'pure-move' && !pureMove) {
     'not in moveFiles: ' + uncovered.join(', ')) + '): running the full panel')
 }
 
-// High-risk diffs add the Fable reviewer: the paths that require CUDA parity or the L1 regression
+// High-risk diffs add the Fable reviewer (while FABLE_PAUSED is false): the paths that require CUDA parity or the L1 regression
 // gate, plus the cross-binary contract modules named in CLAUDE.md. A module counts as a file or as
 // a directory of submodules (metadata.rs or metadata/), so a split never drops the reviewer.
 const highRisk = !pureMove && (cuda || measurement ||
@@ -80,6 +82,7 @@ const SCOPE = [
   `named in ${a.scopeFile || 'the file list below'} (\`git diff HEAD -- <file>\` or Read for untracked ones). `,
   `Files in scope: ${files.join(', ')}. Roadmap item and step: ${a.item || 'unknown'}. `,
   `Its acceptance gate: ${a.acceptanceGate || 'not stated'}. `,
+  a.specFile ? `The specification (the roadmap step text) is in ${a.specFile}; read it. ` : '',
   'Review only this scope; read other code only to judge it. Do not edit files. ',
   'Report only real defects you can point at: file:line, a concrete failure scenario, a fix. No style notes. ',
   'Return an empty list if you find nothing.',
@@ -112,6 +115,8 @@ const VERDICT = {
   properties: {
     refuted: { type: 'boolean' },
     reason: { type: 'string' },
+    // Only for a finding that stands: the priority the skeptic gives it after tracing the code.
+    priority: { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] },
   },
   required: ['refuted', 'reason'],
 }
@@ -137,29 +142,53 @@ const LENSES = pureMove ? [MOVE_LENS] : [
   },
   {
     key: 'contracts', model: 'opus', effort: 'high',
-    prompt: 'Lens: repo contracts from CLAUDE.md. The L1 sidecar schema and version on both sides (hdr_analyzer_mvp/src/l1_sidecar.rs, mkvdovi metadata::L1_SIDECAR_MAX_VERSION, tools/l1_diff), the +cuda version probe, luminance_mapping names, --help option probes (external::analyzer_lists_option), resume_settings for artifact-affecting flags, CPU/CUDA bit-identical arithmetic and buffer layouts (kernels.cu vs gpu.rs), mkvdovi never re-encodes video, no silent clamp, HLG colour contract.',
+    prompt: 'Lens: repo contracts. Check the diff against the documented rules: CLAUDE.md sections "Cross-binary contracts", "Real entrypoints and boundaries" (with the CUDA rules), "mkvdovi operational gotchas", "Testing quirks", "Lint/style policy" and "Module size", and the "Code Review Rules" section of AGENTS.md. For a cross-binary contract, check every side the rule names (rg -w each side; LSP does not link them). Cite the rule in each finding: file, section and the rule in a few words. Skip what fmt and clippy already enforce.',
   },
   {
     key: 'tests-and-gates', model: 'opus', effort: 'high',
     prompt: `Lens: tests and gates. Does the change carry tests for what it changes? Would a test skip silently on this host (missing tool, missing sibling analyzer)? If L1 moves, are the tools/l1_diff/corpus references updated on purpose with the reason stated? The gates computed for this diff are: ${requiredGates.join(', ') || 'none'}; name a gate that is missing for this change. Is there evidence for the item's acceptance gate, or is the step being marked done without it?`,
   },
 ]
-if (highRisk) {
+// Model diversity (owner decision 2026-11-08): a Sonnet whole-diff reviewer on every full review,
+// on the assumption that it catches defects the Opus lenses miss. The 2026-11-08 pilot
+// (~/mkvdovi-work/review-eval/2026-11-08-model-ab/RESULT.md) found one such defect in three
+// cases; .claude/skills/pre-pr-review/reviewer-yield.sh checks the assumption on later records.
+if (!pureMove) {
+  LENSES.push({
+    key: 'sonnet', model: 'sonnet', effort: 'high',
+    prompt: 'Whole-diff review, no fixed lens: correctness, the repo contracts, tests, and whether the change does what the specification asks.',
+  })
+}
+
+// Spec axis: does the diff do what the step asks, and only that? Runs only with the step text.
+if (!pureMove && a.specFile) {
+  LENSES.push({
+    key: 'spec', model: 'opus', effort: 'high',
+    prompt: 'Lens: specification. Read the specification file named below, then the diff. Report (a) a requirement or acceptance criterion of the step that the diff leaves out or covers only in part, ' +
+      '(b) behaviour the step did not ask for that changes an output, a flag, a file format or a contract (scope creep), (c) a requirement implemented in a way that contradicts the step. ' +
+      'Quote the spec line in the summary. Skip work the step itself defers to a later step.',
+  })
+}
+
+// Fable is paused (owner, 2026-11-08) while the Sonnet reviewer's yield is observed alone; set
+// FABLE_PAUSED to false to bring it back on high-risk diffs.
+const FABLE_PAUSED = true
+if (highRisk && !FABLE_PAUSED) {
   LENSES.push({
     key: 'fable', model: 'fable', effort: 'medium',
-    prompt: 'Whole-diff review, no fixed lens. Three narrow reviewers already cover correctness, the repo contracts in CLAUDE.md, and tests and gates. Look for what narrow lenses miss: a design or specification error, an interaction between two changed files, an assumption that holds in the tests but not on real media, a contract changed on one side only. Report only real defects.',
+    prompt: 'Whole-diff review, no fixed lens. Narrow reviewers already cover correctness, the repo contracts in CLAUDE.md, tests and gates, and (when the step text is handed over) the specification. Look for what narrow lenses miss: a design or specification error, an interaction between two changed files, an assumption that holds in the tests but not on real media, a contract changed on one side only. Report only real defects.',
   })
 } else {
-  log(pureMove ? 'pure move: one move-integrity lens, no Fable' : 'fable reviewer skipped: no high-risk path in this diff')
+  log(pureMove ? 'pure move: one move-integrity lens, no Fable' : FABLE_PAUSED ? 'fable reviewer paused (owner, 2026-11-08)' : 'fable reviewer skipped: no high-risk path in this diff')
 }
 
 
 const ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 }
 const MAX_VERIFY = 8
-// The skeptic always has a different lens than the finder; Fable findings are checked by Opus.
+// The skeptic always has a different lens than the finder; Sonnet and Fable findings are checked by Opus.
 // Gemini runs outside this workflow (pre-pr-gemini.sh, started by the skill), so the panel never
 // waits for it; the skill checks its findings itself, like Codex's.
-const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness', fable: 'contracts', 'move-integrity': 'contracts' }
+const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness', spec: 'correctness', sonnet: 'contracts', fable: 'contracts', 'move-integrity': 'contracts' }
 
 const results = await pipeline(
   LENSES,
@@ -176,8 +205,14 @@ const reviewers = LENSES.map(l => (failedLenses.includes(l.key)
   : { key: l.key, model: l.model, effort: l.effort, ran: true }))
 if (pureMove) {
   for (const key of ['correctness', 'contracts', 'tests-and-gates']) reviewers.push({ key, model: 'opus', effort: 'high', ran: false, reason: 'pure move: replaced by move-integrity' })
+  reviewers.push({ key: 'spec', model: 'opus', effort: 'high', ran: false, reason: 'pure move' })
+  reviewers.push({ key: 'sonnet', model: 'sonnet', effort: 'high', ran: false, reason: 'pure move' })
   reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'pure move' })
-} else if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
+} else {
+  if (!a.specFile) reviewers.push({ key: 'spec', model: 'opus', effort: 'high', ran: false, reason: 'no specFile handed over' })
+  if (FABLE_PAUSED) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'paused (owner, 2026-11-08): Sonnet trial' })
+  else if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
+}
 
 // Barrier on purpose: cap the verification count, highest priority first. No dedupe here: two
 // findings at one location may be two different defects, and dropping one costs more than
@@ -192,10 +227,19 @@ const verified = await parallel(toVerify.map(f => () =>
   agent(
     `Try to refute this review finding. Lens: ${verifyLens[f.lens] || 'correctness'}. ` +
     `Finding [${f.priority}] ${f.file}:${f.line}: ${f.summary}. Scenario: ${f.scenario}. ` +
-    `Open the code, trace the scenario, and decide whether it really fails. Default to refuted=true ` +
-    `if the scenario cannot happen or the code already handles it. ${SCOPE}`,
+    `Open the code, trace the scenario, and decide whether it really fails. Set refuted=true only when the failure ` +
+    `cannot happen: the scenario is impossible, or the code already handles it. If it can happen, keep refuted=false ` +
+    `even when it looks minor, intended or out of scope: say so in reason and set priority to the priority you would ` +
+    `give it. Intent and severity are for the main session to weigh, not grounds to refute. ${SCOPE}`,
     { label: `verify:${f.file}:${f.line}`, phase: 'Verify', schema: VERDICT, model: 'opus', effort: 'medium' },
-  ).then(v => ({ ...f, verdict: v ? (v.refuted ? 'refuted' : 'confirmed') : 'unverified', verdictReason: v ? v.reason : 'verifier failed' }))
+  ).then(v => ({
+    ...f,
+    // A confirmed finding takes the skeptic's priority; the finder's stays in finderPriority.
+    priority: v && !v.refuted && v.priority ? v.priority : f.priority,
+    finderPriority: f.priority,
+    verdict: v ? (v.refuted ? 'refuted' : 'confirmed') : 'unverified',
+    verdictReason: v ? v.reason : 'verifier failed',
+  }))
 ))
 
 // A verifier that threw leaves null in its slot: keep that finding, marked unverified.

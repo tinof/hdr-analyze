@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Sonnet 5.5 whole-diff reviewer; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
 ---
@@ -53,6 +53,9 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
    authored shot lists, a playback test).
 5. Write `<scratchpad>/prepr-scope.md`: base, diff command, file list, item, step, acceptance
    gate. Every reviewer, Claude or Codex, gets this same scope.
+6. Write `<scratchpad>/prepr-spec.md`: the item's section from `ROADMAP.md` verbatim (heading,
+   status, the step being closed, its acceptance gate). The panel's spec lens reviews the diff
+   against it. With `/ship --step none`, use `<scratch>/ship-spec.md` itself as the spec file.
 
 ## 2. External passes (standalone mode only)
 
@@ -118,7 +121,8 @@ bypass or auto mode each call, its resume and each `gatesOnly` recompute ask for
 
 ```json
 {"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
- "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md"}
+ "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md",
+ "specFile": "<scratchpad>/prepr-spec.md"}
 ```
 
 Keep these args: step 4 resumes with them.
@@ -129,8 +133,10 @@ is a transcript, not that JSON, so do not parse it. If the result is missing, em
 unexpected, read the `{"type":"result",…}` lines of `journal.jsonl` in the transcript directory
 the launch result names. Each line is one agent's actual return value.
 
-It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Fable runs only on
-high-risk paths), `findings` (each verified by an independent Opus skeptic), `refuted` (claims a
+It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Sonnet runs on every
+full review, the spec lens only with a `specFile`), `findings` (each verified by an independent
+Opus skeptic; a skeptic refutes only a failure that cannot happen and otherwise re-ranks it, so
+`priority` is the skeptic's and `finderPriority` the finder's), `refuted` (claims a
 skeptic refuted; they go into the step 8 record), `unverified` and
 `requiredGates` (computed in code from the file list). Do not choose the gates by judgment; use
 that list. In self-check mode ignore it: `/ship` takes its gates from `.claude/workflow.md`.
@@ -164,8 +170,8 @@ run the full panel.
   The proof does not check `mod` lines, so a dropped `mod tests;` would otherwise lose tests
   silently.
 
-The mode replaces only the reviewers: one move-integrity lens instead of the three lenses and
-Fable. The gates and the item's acceptance checks (`rpu-baseline compare
+The mode replaces only the reviewers: one move-integrity lens instead of the three lenses, the
+spec lens, Sonnet and Fable. The gates and the item's acceptance checks (`rpu-baseline compare
 --require-identical-l1`, the L1 gate without `--update`) still apply.
 
 ## 4. Verify and fix
@@ -182,11 +188,15 @@ Fable. The gates and the item's acceptance checks (`rpu-baseline compare
    defect; distinct defects at the same file:line stay separate. Merge the workflow's `refuted`
    list the same way: a refuted claim that describes the same defect as another finding adds its
    lens to that entry's `finders` and is not a row of its own. Only an unmatched refuted claim
-   becomes a `refuted` entry in the step 8 record.
+   becomes a `refuted` entry in the step 8 record. A refuted claim whose finders are only
+   `sonnet` or `fable` was refuted by an Opus skeptic, which may share the blind spot those
+   reviewers are there to cover: read the code for it yourself and keep or reject it with a
+   reason, like an `unverified` one.
    **Pure move:** a confirmed move-integrity finding of a change that is not a move voids the mode.
    Rerun the workflow without `kind` (a fresh run, not a resume) before you fix anything.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
-   reason that cites code) / deferred (real, out of scope). A deferred or rejected P0/P1 is not a
+   reason that cites code) / deferred (real, out of scope). Settle the priority yourself too: when
+   `priority` and `finderPriority` differ, the skeptic's `verdictReason` says why. A deferred or rejected P0/P1 is not a
    blocker here: it goes into the record and the report, for the owner to see before the merge.
 4. Call the `advisor` tool once with the merged list before you settle on the fixes.
 5. Fix the confirmed findings; add a regression test where the defect is testable. In
@@ -213,6 +223,7 @@ that list and step 3's list. Do the same after every later fix round, and run th
 | `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml` |
 | `gemini-harness` | `.claude/workflows/tests/pre-pr-gemini-test.sh` (fake agy; about 1 minute) |
 | `pre-pr-record` | `.claude/skills/pre-pr-review/tests/clear-record-test.sh` (a throwaway repo; seconds) |
+| `reviewer-yield` | `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh` (hand-made records; seconds) |
 
 The `test` gate is `scripts/ci/test-gate.sh`, the same script the `gate` of `.claude/workflow.md`
 runs. It builds the current analyzer next to the debug mkvdovi the integration tests run, writes the
@@ -259,12 +270,19 @@ Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort,
 `reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finders, verdict, fix
 commit or reason), gate results (standalone mode), blockers, docs changed.
 
-**Reviewer yield.** The `findings` list in step 8 (and `/ship`'s PR comment) is what decides
-whether a reviewer stays. When the records of 5 more code PRs since 2026-10-07 exist, and a finder
-(Gemini, or Fable on paths outside the CUDA-parity and L1 gates) has no confirmed finding whose
-`finders` is that finder alone, say so in the report as a candidate for removal. For Gemini,
-give its cost next to its yield: the records' `geminiCost` summed (seconds, attempts, thinking
-tokens; say when any of them is `partial`). The owner decides; do not remove it here.
+**Reviewer yield.** The Sonnet reviewer is on the panel on an assumption (owner, 2026-11-08):
+it catches defects the Opus lenses miss. Fable is paused meanwhile (`FABLE_PAUSED` in the
+workflow), so its verdict stays at "observing" until it runs again. Gemini gets the same verdict,
+its runs counted from `geminiPass`; the Codex focused pass gets a run count but no verdict. Run
+`.claude/skills/pre-pr-review/reviewer-yield.sh` here and put its table, its beyond-Opus list and
+its verdicts in the report. It counts the records written so far; this review's own record follows
+in step 8, and its findings table already shows what Sonnet found this time. A beyond-Opus finding is a confirmed
+one that no Opus lens also reported. Say in one line per new beyond-Opus finding whether it
+mattered (recorded priorities can understate it). At "candidate for removal" (10 runs, no
+beyond-Opus finding at P0-P2), name it in the report and in `/ship`'s handoff; the owner decides,
+do not remove it here. Its test: `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh`.
+For Gemini, give its cost next to its yield: the records' `geminiCost` summed (seconds, attempts,
+thinking tokens; say when any of them is `partial`).
 
 ## 8. Record
 
@@ -324,8 +342,8 @@ Then write the echoed path with the Write tool:
   gates. In self-check mode `gatedCommit` is `null`, `requiredGates` is `[]` and `gateResults`
   is `{}`: `/ship` runs and records the gates.
 - `findings` has one entry per defect after the duplicate merge in step 4.2, with **every**
-  reviewer that reported it in `finders` (`correctness`, `contracts`, `tests-and-gates`,
-  `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
+  reviewer that reported it in `finders` (`correctness`, `contracts`, `tests-and-gates`, `spec`,
+  `sonnet`, `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
   claims (verdict `refuted`) and the ones you rejected, so a finder's false alarms count too.
 - `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass`, `geminiReason` and `geminiCost` are informational and do not affect reuse. `geminiCost` comes from the Gemini result: `seconds`, the length of `attempts`, and `usage` (`thinking_tokens`, `output_tokens`, `partial`); omit it when the pass was skipped.
 - `deferredP0P1` and `rejectedP0P1` do not block reuse. The owner sees them in the report.
