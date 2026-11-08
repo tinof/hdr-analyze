@@ -52,6 +52,11 @@ This document provides a historical record of completed milestones, feature impl
 - Every mux is checked: the output's video frame times must equal the source's within 1 ms. A
   constant-rate mux that misses is retried once with the timestamps file; a mismatch after the
   timestamps file fails the run and keeps the source.
+- Every conversion also counts the output's RPUs against its video frames (ROADMAP E7.2), which
+  only `--verify` did before. A count that differs, or one that cannot be read, removes the output
+  and fails the run, so the source is kept and the next run muxes again. The count reads the
+  output with `dovi_tool extract-rpu` and, when that read disagrees or under `--dovi-input raw`,
+  from the output's video stream extracted by ffmpeg. It took 20 s on an 8.3 GB one-hour episode.
 
 ### Changed
 

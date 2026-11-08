@@ -298,12 +298,12 @@ fn deliver_shifts_a_late_start_and_checks_it() {
     let (temp, output) = (dir.path().join("temp"), dir.path().join("out.mkv"));
     fs::create_dir(&temp).unwrap();
     let (delivery, calls) = deliver_with(&late, &temp, &output, false, &[&late]);
-    assert_eq!(delivery, Delivery::Checked);
+    assert_eq!(delivery, Delivery::Checked { video_frames: 12 });
     assert_eq!(calls, [MuxTiming::Stream { sync_ms: 2000 }]);
     assert!(!temp.join(TIMESTAMPS_FILE).exists());
 
     let (delivery, calls) = deliver_with(&cfr, &temp, &dir.path().join("out2.mkv"), false, &[&cfr]);
-    assert_eq!(delivery, Delivery::Checked);
+    assert_eq!(delivery, Delivery::Checked { video_frames: 12 });
     assert_eq!(calls, [MuxTiming::Stream { sync_ms: 0 }]);
 }
 
@@ -319,7 +319,7 @@ fn deliver_gives_a_variable_rate_source_its_timestamps() {
     let (temp, output) = (dir.path().join("temp"), dir.path().join("out.mkv"));
     fs::create_dir(&temp).unwrap();
     let (delivery, calls) = deliver_with(&vfr, &temp, &output, false, &[&vfr]);
-    assert_eq!(delivery, Delivery::Checked);
+    assert_eq!(delivery, Delivery::Checked { video_frames: 12 });
     assert_eq!(calls, [MuxTiming::File(temp.join(TIMESTAMPS_FILE))]);
     let written = fs::read_to_string(temp.join(TIMESTAMPS_FILE)).unwrap();
     assert!(
@@ -341,7 +341,7 @@ fn deliver_retries_with_the_timestamps_file_then_fails_and_removes_the_output() 
     fs::create_dir(&temp).unwrap();
     // A mux that loses the late start; the retry with the timestamps file is right.
     let (delivery, calls) = deliver_with(&late, &temp, &output, false, &[&cfr, &late]);
-    assert_eq!(delivery, Delivery::Checked);
+    assert_eq!(delivery, Delivery::Checked { video_frames: 12 });
     assert_eq!(
         calls,
         [
@@ -409,7 +409,7 @@ fn deliver_retry_with_the_timestamps_file_keeps_the_sources_frame_rate() {
         },
     )
     .unwrap();
-    assert_eq!(delivery, Delivery::Checked);
+    assert_eq!(delivery, Delivery::Checked { video_frames: 12 });
     assert_eq!(
         calls,
         [
@@ -438,7 +438,7 @@ fn deliver_remuxes_a_reused_wrong_mux_with_the_chosen_timing_first() {
     fs::copy(&cfr, &output).unwrap();
     fs::write(temp.join(MUX_MARKER), b"").unwrap();
     let (delivery, calls) = deliver_with(&late, &temp, &output, true, &[&cfr, &late]);
-    assert_eq!(delivery, Delivery::Checked);
+    assert_eq!(delivery, Delivery::Checked { video_frames: 12 });
     // Reused, then muxed afresh with --sync; the timestamps file is never needed.
     assert_eq!(
         calls,

@@ -146,6 +146,12 @@ fn check_rpu(index: usize, nal: &[u8]) -> Result<()> {
     }
 }
 
+/// How many RPUs an `RPU.bin` holds: its start codes, as `parse_rpu_file` cuts the file. No RPU
+/// is parsed, so the count also covers RPUs the crate cannot parse.
+pub fn count_rpus(bytes: &[u8]) -> usize {
+    split_nals(bytes).count()
+}
+
 /// The NAL units of an `RPU.bin`, each starting at its start code, as `parse_rpu_file` cuts
 /// them (it also drops a zero byte before a following start code; the walk trims trailing
 /// zeros as the crate does).

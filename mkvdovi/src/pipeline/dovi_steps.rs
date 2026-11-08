@@ -13,6 +13,7 @@ use crate::progress;
 use crate::resume;
 
 use super::finish_success;
+use super::rpu_count;
 use super::timing::{self, Delivery, MuxTiming};
 
 pub const DOVI_TOOL_MKV_INPUT_MIN: ToolVersion = (2, 3, 4);
@@ -389,7 +390,8 @@ pub(super) fn convert_mel_fast_path(
     progress::print_info("Converting Profile 7 MEL to Profile 8.1 without rebuilding metadata.");
     let delivery =
         convert_mel_to_profile81(input_file, temp_dir, output_file, args, resume_enabled)?;
-    let success = delivery != Delivery::Failed;
+    let success =
+        delivery != Delivery::Failed && rpu_count::check(output_file, temp_dir, delivery, args);
     if success && args.verify {
         progress::print_info("Running post-mux verification (--verify)...");
         if !crate::verify::verify_post_mux(input_file, output_file, None, temp_dir) {
@@ -405,7 +407,7 @@ pub(super) fn convert_mel_fast_path(
             args,
             original_hdr_type,
             file_start,
-            delivery == Delivery::Checked,
+            matches!(delivery, Delivery::Checked { .. }),
         );
     }
     Ok(success)
