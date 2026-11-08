@@ -42,6 +42,7 @@ review-surfaces: exec github
 - `tool:rpu_builder_check`: `cargo fmt --manifest-path tools/rpu_builder_check/Cargo.toml -- --check && cargo clippy --manifest-path tools/rpu_builder_check/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/rpu_builder_check/Cargo.toml`; paths `'tools/rpu_builder_check/*.rs'` `'tools/rpu_builder_check/*Cargo.toml'` `'tools/rpu_builder_check/*Cargo.lock'` `'dovi_rpu_builder/'`; where `local`.
 - `gemini-harness`: `.claude/workflows/tests/pre-pr-gemini-test.sh`; paths `'.claude/workflows/pre-pr-gemini.*'` `'.claude/workflows/tests/'` `'.agents/agents/pre-pr-reviewer.md'`; where `local`.
 - `pre-pr-record`: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`; paths `'.claude/skills/pre-pr-review/clear-record.sh'` `'.claude/skills/pre-pr-review/tests/'`; where `local`.
+- `reviewer-yield`: `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh`; paths `'.claude/skills/pre-pr-review/reviewer-yield.sh'` `'.claude/skills/pre-pr-review/tests/'`; where `local`.
 
 ## Tier 2 paths
 

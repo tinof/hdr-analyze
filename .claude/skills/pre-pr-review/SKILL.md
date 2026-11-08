@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Sonnet 5.5 whole-diff reviewer, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
 ---
@@ -133,8 +133,8 @@ is a transcript, not that JSON, so do not parse it. If the result is missing, em
 unexpected, read the `{"type":"result",…}` lines of `journal.jsonl` in the transcript directory
 the launch result names. Each line is one agent's actual return value.
 
-It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Fable runs only on
-high-risk paths, the spec lens only with a `specFile`), `findings` (each verified by an independent
+It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Sonnet runs on every
+full review, Fable only on high-risk paths, the spec lens only with a `specFile`), `findings` (each verified by an independent
 Opus skeptic; a skeptic refutes only a failure that cannot happen and otherwise re-ranks it, so
 `priority` is the skeptic's and `finderPriority` the finder's), `refuted` (claims a
 skeptic refuted; they go into the step 8 record), `unverified` and
@@ -188,7 +188,10 @@ Fable. The gates and the item's acceptance checks (`rpu-baseline compare
    defect; distinct defects at the same file:line stay separate. Merge the workflow's `refuted`
    list the same way: a refuted claim that describes the same defect as another finding adds its
    lens to that entry's `finders` and is not a row of its own. Only an unmatched refuted claim
-   becomes a `refuted` entry in the step 8 record.
+   becomes a `refuted` entry in the step 8 record. A refuted claim whose finders are only
+   `sonnet` or `fable` was refuted by an Opus skeptic, which may share the blind spot those
+   reviewers are there to cover: read the code for it yourself and keep or reject it with a
+   reason, like an `unverified` one.
    **Pure move:** a confirmed move-integrity finding of a change that is not a move voids the mode.
    Rerun the workflow without `kind` (a fresh run, not a resume) before you fix anything.
 3. Check every finding against the code yourself. Classify it as confirmed / rejected (with a
@@ -266,12 +269,17 @@ Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort,
 `reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finders, verdict, fix
 commit or reason), gate results (standalone mode), blockers, docs changed.
 
-**Reviewer yield.** The `findings` list in step 8 (and `/ship`'s PR comment) is what decides
-whether a reviewer stays. When the records of 5 more code PRs since 2026-10-07 exist, and a finder
-(Gemini, or Fable on paths outside the CUDA-parity and L1 gates) has no confirmed finding whose
-`finders` is that finder alone, say so in the report as a candidate for removal. For Gemini,
-give its cost next to its yield: the records' `geminiCost` summed (seconds, attempts, thinking
-tokens; say when any of them is `partial`). The owner decides; do not remove it here.
+**Reviewer yield.** The Sonnet and Fable reviewers are on the panel on an assumption (owner,
+2026-11-08): they catch defects the Opus lenses miss. Run
+`.claude/skills/pre-pr-review/reviewer-yield.sh` here and put its table, its beyond-Opus list and
+its verdicts in the report. It counts the records written so far; this review's own record follows
+in step 8, and its findings table already shows what Sonnet and Fable found this time. A beyond-Opus finding is a confirmed
+one that no Opus lens also reported. Say in one line per new beyond-Opus finding whether it
+mattered (recorded priorities can understate it). At "candidate for removal" (10 runs, no
+beyond-Opus finding at P0-P2), name it in the report and in `/ship`'s handoff; the owner decides,
+do not remove it here. Its test: `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh`.
+For Gemini, give its cost next to its yield: the records' `geminiCost` summed (seconds, attempts,
+thinking tokens; say when any of them is `partial`).
 
 ## 8. Record
 
@@ -332,7 +340,7 @@ Then write the echoed path with the Write tool:
   is `{}`: `/ship` runs and records the gates.
 - `findings` has one entry per defect after the duplicate merge in step 4.2, with **every**
   reviewer that reported it in `finders` (`correctness`, `contracts`, `tests-and-gates`, `spec`,
-  `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
+  `sonnet`, `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
   claims (verdict `refuted`) and the ones you rejected, so a finder's false alarms count too.
 - `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass`, `geminiReason` and `geminiCost` are informational and do not affect reuse. `geminiCost` comes from the Gemini result: `seconds`, the length of `attempts`, and `usage` (`thinking_tokens`, `output_tokens`, `partial`); omit it when the pass was skipped.
 - `deferredP0P1` and `rejectedP0P1` do not block reuse. The owner sees them in the report.
