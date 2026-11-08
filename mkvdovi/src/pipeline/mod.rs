@@ -335,7 +335,9 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
             )
         },
     )?;
-    if delivery == Delivery::Failed || !rpu_count::check(&output_file, &temp_dir, delivery, args) {
+    if delivery == Delivery::Failed
+        || !rpu_count::check(&output_file, &temp_dir, &bl_rpu_hevc, delivery, args)
+    {
         return Ok(false);
     }
 

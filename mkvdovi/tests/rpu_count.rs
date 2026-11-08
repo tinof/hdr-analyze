@@ -223,14 +223,17 @@ fn a_reused_output_is_counted_again() {
     std::fs::copy(&copy, &output).unwrap();
 
     // The same run again on the same copy: a fresh copy would not resume the temp dir.
-    let second = mkvdovi_cmd()
-        .current_dir(dir.path().join("run"))
-        .arg(SOURCE)
-        .args(["--hwaccel", "none"])
-        .args(flags)
-        .env("PATH", &path)
-        .output()
-        .unwrap();
+    let rerun = || {
+        mkvdovi_cmd()
+            .current_dir(dir.path().join("run"))
+            .arg(SOURCE)
+            .args(["--hwaccel", "none"])
+            .args(flags)
+            .env("PATH", &path)
+            .output()
+            .unwrap()
+    };
+    let second = rerun();
     assert!(
         log_of(&second).contains("Reusing muxed output"),
         "{}",
@@ -246,6 +249,18 @@ fn a_reused_output_is_counted_again() {
         !temp.join("mux.done").exists(),
         "the next run must mux again"
     );
+    assert!(
+        !temp.join("BL_RPU.hevc").exists() && !temp.join("BL_RPU.hevc.done").exists(),
+        "the stream the mux took is withdrawn"
+    );
+
+    // The next run rebuilds that stream instead of muxing the same bytes again, and its count
+    // passes (the run then stops at --verify again).
+    let third = rerun();
+    let log = log_of(&third);
+    assert!(!log.contains("Reusing RPU-injected base layer"), "{log}");
+    assert!(log.contains(&count_line(FRAMES)), "{log}");
+    assert!(output.exists(), "{log}");
 }
 
 #[test]

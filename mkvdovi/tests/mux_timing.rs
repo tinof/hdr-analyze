@@ -301,6 +301,11 @@ fn a_source_whose_timing_cannot_be_read_is_converted_and_kept() {
         log.contains("Keeping source file: the output's video timing was not checked"),
         "{log}"
     );
+    // Without the packet read the RPU count (E7.2) takes the frame count from MediaInfo.
+    assert!(
+        log.contains("RPU count: 48 RPUs for 48 video frames"),
+        "{log}"
+    );
     assert!(copy.exists(), "the source must be kept");
     assert!(output.exists(), "the unchecked output is delivered");
     assert!(!log.contains("Deleting source file"), "{log}");

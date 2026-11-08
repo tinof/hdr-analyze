@@ -2083,6 +2083,30 @@ fn mel_fast_path_counts_a_reused_output_and_removes_it_when_rpus_are_missing() {
         "the next run muxes again"
     );
     assert!(fake.temp.exists(), "a failed run keeps the temp dir");
+    let converted = fake.temp.join("P81_discard.hevc");
+    assert!(
+        !converted.exists() && !resume::marker_path(&converted).exists(),
+        "the converted stream is withdrawn, so the next run converts again"
+    );
+    assert!(fake.input.exists());
+}
+
+/// More RPUs than video frames fail the run as well: both reads count 4 RPUs for 3 frames.
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_fails_when_the_output_has_more_rpus_than_frames() {
+    let Some(fake) =
+        FakeTools::new("mel_fast_path_fails_when_the_output_has_more_rpus_than_frames")
+    else {
+        return;
+    };
+    script_counts(&fake, 3, 4);
+    fake.script("mkvmerge", &writes("muxed"));
+    fake.script("ffmpeg", &writes("video"));
+    assert!(!run_mel_fast_path(&fake, false));
+    assert!(called_with(&fake.calls("ffmpeg"), "output_video.hevc"));
+    assert!(!fake.output.exists());
+    assert!(!fake.temp.join("mux.done").exists());
     assert!(fake.input.exists());
 }
 

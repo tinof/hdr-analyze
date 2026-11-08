@@ -18,6 +18,9 @@ use super::timing::{self, Delivery, MuxTiming};
 
 pub const DOVI_TOOL_MKV_INPUT_MIN: ToolVersion = (2, 3, 4);
 
+/// The MEL fast path's converted Profile 8.1 stream in the temp dir, which its mux takes.
+const MEL_CONVERTED_HEVC: &str = "P81_discard.hevc";
+
 pub(super) fn resolve_dovi_input(requested: DoviInput, version: Option<ToolVersion>) -> DoviInput {
     match requested {
         DoviInput::Auto => {
@@ -210,7 +213,7 @@ pub(super) fn convert_mel_to_profile81(
     resume_enabled: bool,
 ) -> Result<Delivery> {
     let raw_hevc = temp_dir.join("DV_raw.hevc");
-    let converted_hevc = temp_dir.join("P81_discard.hevc");
+    let converted_hevc = temp_dir.join(MEL_CONVERTED_HEVC);
 
     if resume_enabled && resume::is_complete(&converted_hevc) {
         progress::print_info("Reusing converted Profile 8.1 HEVC from a previous run.");
@@ -390,8 +393,14 @@ pub(super) fn convert_mel_fast_path(
     progress::print_info("Converting Profile 7 MEL to Profile 8.1 without rebuilding metadata.");
     let delivery =
         convert_mel_to_profile81(input_file, temp_dir, output_file, args, resume_enabled)?;
-    let success =
-        delivery != Delivery::Failed && rpu_count::check(output_file, temp_dir, delivery, args);
+    let success = delivery != Delivery::Failed
+        && rpu_count::check(
+            output_file,
+            temp_dir,
+            &temp_dir.join(MEL_CONVERTED_HEVC),
+            delivery,
+            args,
+        );
     if success && args.verify {
         progress::print_info("Running post-mux verification (--verify)...");
         if !crate::verify::verify_post_mux(input_file, output_file, None, temp_dir) {

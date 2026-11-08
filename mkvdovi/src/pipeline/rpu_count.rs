@@ -10,8 +10,10 @@
 //! accepted only when it equals the video's. Any other result is counted again from the output's
 //! video stream extracted by ffmpeg, the reading `--verify` uses, and that count decides; so does
 //! it alone under `--dovi-input raw`. The check fails closed: a count that differs, or one that
-//! cannot be read, removes the output and fails the run, so the source is kept and the next run
-//! muxes and counts again.
+//! cannot be read, removes the output and fails the run, so the source is kept. It also withdraws
+//! the stream the mux took (`BL_RPU.hevc`, or the MEL path's converted stream) from the temp dir,
+//! so a resumed run rebuilds that stream, muxes it and counts again instead of muxing the same
+//! bytes into the same failure.
 
 use std::fs;
 use std::path::Path;
@@ -22,6 +24,7 @@ use crate::cli::{Args, DoviInput};
 use crate::external::{self, run_command_with_progress, run_command_with_spinner};
 use crate::metadata;
 use crate::progress;
+use crate::resume;
 use crate::rpu_guard;
 
 use super::timing::{self, Delivery};
@@ -36,10 +39,17 @@ const NO_RPU: &str = "No RPU was found";
 /// A count, or why it could not be read.
 type Count = Result<usize, String>;
 
-/// Checks that `output_file` carries one RPU per video frame. `delivery` is what the timing check
-/// found; without its frame count the output's frames are read here. False: the counts differ
-/// or could not be read; the output was removed and the error reported.
-pub(super) fn check(output_file: &Path, temp_dir: &Path, delivery: Delivery, args: &Args) -> bool {
+/// Checks that `output_file` carries one RPU per video frame. `mux_input` is the stream the mux
+/// took from `temp_dir`; `delivery` is what the timing check found, and without its frame count
+/// the output's frames are read here. False: the counts differ or could not be read; the output
+/// and `mux_input` were removed and the error reported.
+pub(super) fn check(
+    output_file: &Path,
+    temp_dir: &Path,
+    mux_input: &Path,
+    delivery: Delivery,
+    args: &Args,
+) -> bool {
     let started = Instant::now();
     progress::print_info("Checking the output's RPU count against its video frames...");
     let video_frames = match video_frames(output_file, delivery) {
@@ -48,6 +58,7 @@ pub(super) fn check(output_file: &Path, temp_dir: &Path, delivery: Delivery, arg
             return fail(
                 output_file,
                 temp_dir,
+                mux_input,
                 &format!("The output's video frames could not be counted ({reason})"),
             )
         }
@@ -65,20 +76,30 @@ pub(super) fn check(output_file: &Path, temp_dir: &Path, delivery: Delivery, arg
         Ok(rpus) => fail(
             output_file,
             temp_dir,
+            mux_input,
             &format!("The output carries {rpus} RPUs for its {video_frames} video frames"),
         ),
         Err(reason) => fail(
             output_file,
             temp_dir,
+            mux_input,
             &format!("The output's RPUs could not be counted ({reason})"),
         ),
     }
 }
 
-fn fail(output_file: &Path, temp_dir: &Path, problem: &str) -> bool {
+/// Removes the output and its mux sentinel, and withdraws `mux_input` (its sentinel and the file)
+/// when it lies in `temp_dir`, so the next run rebuilds it. A stream outside the temp dir is
+/// never touched.
+fn fail(output_file: &Path, temp_dir: &Path, mux_input: &Path, problem: &str) -> bool {
     timing::discard_output(output_file, temp_dir);
+    if mux_input.starts_with(temp_dir) {
+        let _ = resume::invalidate(mux_input);
+        let _ = fs::remove_file(mux_input);
+    }
     progress::print_error(&format!(
-        "{problem}. The output was removed and the source kept."
+        "{problem}. The output was removed and the source kept; the next run rebuilds the stream \
+         it muxed."
     ));
     false
 }

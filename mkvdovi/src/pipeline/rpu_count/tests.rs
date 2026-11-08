@@ -46,18 +46,38 @@ fn the_timing_checks_frame_count_is_used_without_reading_the_output() {
     assert!(video_frames(&missing, Delivery::Unchecked).is_err());
 }
 
-/// A check that cannot count fails closed: the output and its mux sentinel are removed, so the
-/// next run muxes and counts again.
+/// A check that cannot count fails closed: the output and its mux sentinel are removed, and the
+/// stream the mux took from the temp dir is withdrawn, so the next run rebuilds it, muxes and
+/// counts again.
 #[test]
-fn an_output_whose_frames_cannot_be_counted_is_removed() {
+fn an_output_whose_frames_cannot_be_counted_is_removed_with_its_mux_input() {
     let dir = tempfile::tempdir().unwrap();
     let (temp, output) = (dir.path().join("temp"), dir.path().join("out.DV.mkv"));
     fs::create_dir(&temp).unwrap();
     fs::write(&output, b"not a Matroska file").unwrap();
     fs::write(temp.join("mux.done"), b"").unwrap();
     fs::write(temp.join(RPU_FILE), rpus(48)).unwrap();
+    let muxed = temp.join("BL_RPU.hevc");
+    fs::write(&muxed, b"stream").unwrap();
+    resume::mark_done(&muxed).unwrap();
     let args = Args::try_parse_from(["mkvdovi"]).unwrap();
-    assert!(!check(&output, &temp, Delivery::Unchecked, &args));
+    assert!(!check(&output, &temp, &muxed, Delivery::Unchecked, &args));
     assert!(!output.exists());
     assert!(!temp.join("mux.done").exists());
+    assert!(!muxed.exists() && !resume::marker_path(&muxed).exists());
+}
+
+/// A mux input outside the temp dir (a source stream) is never removed.
+#[test]
+fn a_mux_input_outside_the_temp_dir_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let (temp, output) = (dir.path().join("temp"), dir.path().join("out.DV.mkv"));
+    fs::create_dir(&temp).unwrap();
+    fs::write(&output, b"not a Matroska file").unwrap();
+    let outside = dir.path().join("source.hevc");
+    fs::write(&outside, b"stream").unwrap();
+    let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+    assert!(!check(&output, &temp, &outside, Delivery::Unchecked, &args));
+    assert!(!output.exists());
+    assert!(outside.exists());
 }
