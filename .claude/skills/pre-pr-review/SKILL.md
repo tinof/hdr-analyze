@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Sonnet 5.5 whole-diff reviewer, Fable 5.1 on high-risk diffs; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Sonnet 5.5 whole-diff reviewer; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
 ---
@@ -134,7 +134,7 @@ unexpected, read the `{"type":"result",…}` lines of `journal.jsonl` in the tra
 the launch result names. Each line is one agent's actual return value.
 
 It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Sonnet runs on every
-full review, Fable only on high-risk paths, the spec lens only with a `specFile`), `findings` (each verified by an independent
+full review, the spec lens only with a `specFile`), `findings` (each verified by an independent
 Opus skeptic; a skeptic refutes only a failure that cannot happen and otherwise re-ranks it, so
 `priority` is the skeptic's and `finderPriority` the finder's), `refuted` (claims a
 skeptic refuted; they go into the step 8 record), `unverified` and
@@ -269,11 +269,12 @@ Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort,
 `reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finders, verdict, fix
 commit or reason), gate results (standalone mode), blockers, docs changed.
 
-**Reviewer yield.** The Sonnet and Fable reviewers are on the panel on an assumption (owner,
-2026-11-08): they catch defects the Opus lenses miss. Run
+**Reviewer yield.** The Sonnet reviewer is on the panel on an assumption (owner, 2026-11-08):
+it catches defects the Opus lenses miss. Fable is paused meanwhile (`FABLE_PAUSED` in the
+workflow), so its verdict stays at "observing" until it runs again. Run
 `.claude/skills/pre-pr-review/reviewer-yield.sh` here and put its table, its beyond-Opus list and
 its verdicts in the report. It counts the records written so far; this review's own record follows
-in step 8, and its findings table already shows what Sonnet and Fable found this time. A beyond-Opus finding is a confirmed
+in step 8, and its findings table already shows what Sonnet found this time. A beyond-Opus finding is a confirmed
 one that no Opus lens also reported. Say in one line per new beyond-Opus finding whether it
 mattered (recorded priorities can understate it). At "candidate for removal" (10 runs, no
 beyond-Opus finding at P0-P2), name it in the report and in `/ship`'s handoff; the owner decides,

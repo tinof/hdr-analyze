@@ -1,9 +1,9 @@
 export const meta = {
   name: 'pre-pr-panel',
-  description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort, a spec lens when the step text is handed over, a Sonnet whole-diff reviewer, Fable on high-risk diffs, each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
+  description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort, a spec lens when the step text is handed over, a Sonnet whole-diff reviewer (Fable paused), each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
   whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone, or as the /ship step 3b self-check). args: {base, files, item, acceptanceGate, scopeFile, specFile?, kind?, moveProof?, moveFiles?}; specFile (the roadmap step text, or the /ship spec file) adds the spec lens; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; only pre-pr-review step 5 (standalone) calls it that way, to recompute gates after fixes. /ship no longer calls gatesOnly: it reads the same path rules from .claude/workflow.md.',
   phases: [
-    { title: 'Review', detail: 'correctness, repo contracts, tests and gates, spec when a specFile is given (Opus, high); whole diff (Sonnet, high) on every diff and (Fable, medium) on high-risk paths; or one move-integrity lens (Opus, high) on a pure move' },
+    { title: 'Review', detail: 'correctness, repo contracts, tests and gates, spec when a specFile is given (Opus, high); whole diff (Sonnet, high) on every diff; Fable paused; or one move-integrity lens (Opus, high) on a pure move' },
     { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder; refutes only an impossible failure, re-ranks the rest' },
   ],
 }
@@ -71,7 +71,7 @@ if (a.kind === 'pure-move' && !pureMove) {
     'not in moveFiles: ' + uncovered.join(', ')) + '): running the full panel')
 }
 
-// High-risk diffs add the Fable reviewer: the paths that require CUDA parity or the L1 regression
+// High-risk diffs add the Fable reviewer (while FABLE_PAUSED is false): the paths that require CUDA parity or the L1 regression
 // gate, plus the cross-binary contract modules named in CLAUDE.md. A module counts as a file or as
 // a directory of submodules (metadata.rs or metadata/), so a split never drops the reviewer.
 const highRisk = !pureMove && (cuda || measurement ||
@@ -170,13 +170,16 @@ if (!pureMove && a.specFile) {
   })
 }
 
-if (highRisk) {
+// Fable is paused (owner, 2026-11-08) while the Sonnet reviewer's yield is observed alone; set
+// FABLE_PAUSED to false to bring it back on high-risk diffs.
+const FABLE_PAUSED = true
+if (highRisk && !FABLE_PAUSED) {
   LENSES.push({
     key: 'fable', model: 'fable', effort: 'medium',
     prompt: 'Whole-diff review, no fixed lens. Narrow reviewers already cover correctness, the repo contracts in CLAUDE.md, tests and gates, and (when the step text is handed over) the specification. Look for what narrow lenses miss: a design or specification error, an interaction between two changed files, an assumption that holds in the tests but not on real media, a contract changed on one side only. Report only real defects.',
   })
 } else {
-  log(pureMove ? 'pure move: one move-integrity lens, no Fable' : 'fable reviewer skipped: no high-risk path in this diff')
+  log(pureMove ? 'pure move: one move-integrity lens, no Fable' : FABLE_PAUSED ? 'fable reviewer paused (owner, 2026-11-08)' : 'fable reviewer skipped: no high-risk path in this diff')
 }
 
 
@@ -207,7 +210,8 @@ if (pureMove) {
   reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'pure move' })
 } else {
   if (!a.specFile) reviewers.push({ key: 'spec', model: 'opus', effort: 'high', ran: false, reason: 'no specFile handed over' })
-  if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
+  if (FABLE_PAUSED) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'paused (owner, 2026-11-08): Sonnet trial' })
+  else if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
 }
 
 // Barrier on purpose: cap the verification count, highest priority first. No dedupe here: two
