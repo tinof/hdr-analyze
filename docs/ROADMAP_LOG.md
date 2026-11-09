@@ -6,6 +6,39 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-09: WS1.5 Opt-in ST 2094-10 reduced-set estimator (PR #105)
+
+Step: - [WS1.5][gpu][corpus] Opt-in ST 2094-10 reduced-set estimator, PQ path (HLG later): 2×2 blocks
+  from the crop's top-left, partial at an odd edge, components averaged in linear light (one PQ
+  EOTF table, same f32 arithmetic on CPU and CUDA), min per §6.1.3 as a diagnostic; sidecar
+  `peak_estimator` value, `tools/l1_diff`. Gate: a test reproduces the 2026-11-07 per-shot numbers
+  of the four Alita and Skyfall cuts within 1 code; an odd-anchor case; CPU = CUDA; default `.bin`
+  unchanged (L1 gate without `--update`).
+
+Gate evidence, PR #105:
+- Per-shot reproduction: `reproduce.py` in `~/mkvdovi-work/ws1-5-reduced-set-2026-11-09/` (run by
+  `run.sh`; `RESULT.md`, `RESULT.json`). It fails when any per-shot value is more than 1 code from
+  the 2026-11-07 spike (variant B, linear light). It ran on a clean tree at the PR's analyzer
+  commit, with `--peak-estimator st2094-10 --peak-source max --no-crop --downscale 1`, CPU and
+  CUDA. The four cuts matched: largest per-shot difference 0.0003 code, per frame 0.0004 code. The
+  pooled floored per-shot max vs retail L1 over 82 shots was +66.7 signed, MAE 78.1 (default `max`
+  138.9) and 9 under-reads, equal to the spike. The script stays local because its media and
+  reference data are corpus-only.
+- Odd-anchor case and CPU = CUDA:
+  - `analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops` covers odd
+    anchors and sizes, planar and P010, and consecutive frames. `scripts/cuda-parity.sh` runs it
+    and requires exactly one passed test.
+  - The `cuda_parity` st2094-10 cases passed on the RTX 4070.
+  - On real content every reduced max, min and selected value matched on all 5,841 frames of the
+    four cuts.
+- Default `.bin` unchanged: the L1 regression gate passed without `--update`. The new estimator
+  runs as its own pass and kernel with its own result words.
+- Synthetic frozen cases, against an f64 reference: `hdr_analyzer_mvp/tests/reduced_set.rs`.
+
+Resolution: `--peak-estimator st2094-10` measures the ST 2094-10 statistic on PQ input (max-RGB
+domain, `--downscale 1` only; anything else is refused). It halves the clean-source L1 max
+over-read on the four retail cuts. WS1.6 decides whether it becomes the default.
+
 ### 2026-11-09: WS0.2 Retail baseline of the delivered 8.1 RPU (PR #104)
 
 Step: - [WS0.2][corpus] Retail baseline of the delivered 8.1 RPU on main 271b066: the DV- and
