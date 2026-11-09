@@ -52,13 +52,15 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-07 at main@3c65cdd)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=0e32181ec0a6 -->
+### Next up (checked 2026-11-09 at main@cf96b20)
+<!-- roadmap-next: rev=3 scope=WS1.5 config=760f5c5efe83 probes=gpu:ok,corpus:ok ready=0e32181ec0a6 -->
 
-Order: owner direction of 2026-11-07 (Priorities).
+Order: the owner named WS1.5 (2026-11-09); scoped to WS1, so P9.4 (priority 2) stays next after it.
 
-1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
-   order. Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
+1. **WS1.5 Opt-in ST 2094-10 reduced-set estimator** (priority 9). Gate: in WS1.5. Why: owner
+   pick; WS0.2 is its baseline. Branch: `feat/ws1-5-st2094-reduced-set`. Release: minor
+2. **WS1.1 Explain the clean-source over-read** (priority 9). Gate: in WS1.1. Why: the other
+   startable WS1 step. Branch: `docs/ws1-1-over-read`. Release: none
 
 **Reassess:** plan-changed (WS0.2, PR #104): delivered L1 max reads +144 codes high per shot
 (the WS1.5 baseline), and retail L1 min is a constant 0 or 12 on all 8 cuts, so it is no
