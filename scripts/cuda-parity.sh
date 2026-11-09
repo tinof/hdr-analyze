@@ -92,9 +92,17 @@ echo "PQ clip:  $PQ_CLIP"
 echo "HLG clip: $HLG_CLIP"
 
 # Debug profile on purpose: target/release holds the installed binaries.
+# libtest exits 0 when the filter matches nothing, so require exactly one passed test.
+RS_LOG="$WORK/reduced_set_odd_crops.log"
 HDR_ANALYZE_CUDA_PARITY_REQUIRED=1 \
     cargo test -p hdr_analyzer_mvp --features cuda --bin hdr_analyzer_mvp \
-    analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops -- --exact --nocapture
+    analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops -- --exact --nocapture \
+    > "$RS_LOG" 2>&1 || { command cat "$RS_LOG"; exit 1; }
+command cat "$RS_LOG"
+if ! grep -q 'test result: ok\. 1 passed' "$RS_LOG"; then
+    echo "CUDA parity: the odd-crop reduced-set test did not run exactly once" >&2
+    exit 1
+fi
 HDR_ANALYZE_CUDA_PARITY_REQUIRED=1 \
 HDR_ANALYZE_CUDA_PARITY_PQ="$PQ_CLIP" \
 HDR_ANALYZE_CUDA_PARITY_HLG="$HLG_CLIP" \
