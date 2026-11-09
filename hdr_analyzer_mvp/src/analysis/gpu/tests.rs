@@ -346,14 +346,12 @@ fn driver_version_refuses_older_than_cuda_12_6() {
 #[cfg(feature = "cuda")]
 #[test]
 fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
-    use ffmpeg_next::format::Pixel;
-
     use crate::analysis::frame::analyze_native_frame_cropped;
     use crate::analysis::hlg::ChromaSiting;
     use crate::cli::{PeakDomain, PeakEstimator};
 
-    const WIDTH: u32 = 64;
-    const HEIGHT: u32 = 48;
+    const WIDTH: u32 = REDUCED_SET_TEST_WIDTH;
+    const HEIGHT: u32 = REDUCED_SET_TEST_HEIGHT;
     let mut gpu = match GpuAnalyzer::new(TransferFunction::Pq, Composer::Preset) {
         Ok(gpu) => gpu,
         Err(error) => {
@@ -365,71 +363,8 @@ fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
             return;
         }
     };
-    // Chromatic content; `level` sets the luma range above `lift`, the darkest luma, so later
-    // frames have a lower peak and a higher minimum.
-    let codes = |level: u16, lift: u16| {
-        // 64 steps over [lift, lift + level]; every 16x16 window holds all of them, so each
-        // crop wider than one pixel spans most of the frame's range.
-        let luma =
-            move |x: u32, y: u32| (lift + ((x * 7 + y * 13) % 64) as u16 * level / 63).min(1019);
-        // Moderate chroma: the first frame still clips (R' above 1, B' below 0), the later
-        // ones do not, so their reduced-set minimum rises above the clipped zero.
-        let chroma = |cx: u32, cy: u32| match (cx + 2 * cy) % 4 {
-            0 => (512, 592),
-            1 => (592, 432),
-            2 => (432, 512),
-            _ => (500 + (cx % 7) as u16, 530),
-        };
-        (luma, chroma)
-    };
-    let planar = |level: u16, lift: u16| {
-        let (luma, chroma) = codes(level, lift);
-        let mut frame = frame::Video::new(Pixel::YUV420P10LE, WIDTH, HEIGHT);
-        for plane in 0..3 {
-            let stride = frame.stride(plane);
-            let (w, h) = if plane == 0 {
-                (WIDTH, HEIGHT)
-            } else {
-                (WIDTH / 2, HEIGHT / 2)
-            };
-            let data = frame.data_mut(plane);
-            for y in 0..h {
-                for x in 0..w {
-                    let code = match plane {
-                        0 => luma(x, y),
-                        1 => chroma(x, y).0,
-                        _ => chroma(x, y).1,
-                    };
-                    let offset = y as usize * stride + x as usize * 2;
-                    data[offset..offset + 2].copy_from_slice(&code.to_le_bytes());
-                }
-            }
-        }
-        frame
-    };
-    let p010 = |level: u16, lift: u16| {
-        let (luma, chroma) = codes(level, lift);
-        let mut frame = frame::Video::new(Pixel::P010LE, WIDTH, HEIGHT);
-        let stride = frame.stride(0);
-        let data = frame.data_mut(0);
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let offset = y as usize * stride + x as usize * 2;
-                data[offset..offset + 2].copy_from_slice(&(luma(x, y) << 6).to_le_bytes());
-            }
-        }
-        let stride = frame.stride(1);
-        let data = frame.data_mut(1);
-        for y in 0..HEIGHT / 2 {
-            for x in 0..WIDTH / 2 {
-                let (cb, cr) = chroma(x, y);
-                let offset = y as usize * stride + x as usize * 4;
-                data[offset..offset + 2].copy_from_slice(&(cb << 6).to_le_bytes());
-                data[offset + 2..offset + 4].copy_from_slice(&(cr << 6).to_le_bytes());
-            }
-        }
-        frame
-    };
+    let planar = |level: u16, lift: u16| reduced_set_test_frame(false, level, lift);
+    let p010 = |level: u16, lift: u16| reduced_set_test_frame(true, level, lift);
     let options = FrameAnalysisOptions {
         denoise_mode: "none",
         transfer_function: TransferFunction::Pq,
@@ -507,4 +442,88 @@ fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
         panic!("a sampling stride must be refused");
     };
     assert!(error.to_string().contains("--downscale 1"), "{error}");
+}
+
+#[cfg(feature = "cuda")]
+const REDUCED_SET_TEST_WIDTH: u32 = 64;
+#[cfg(feature = "cuda")]
+const REDUCED_SET_TEST_HEIGHT: u32 = 48;
+
+/// A 10-bit test frame for `reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops`, planar or P010.
+#[cfg(feature = "cuda")]
+fn reduced_set_test_frame(p010_layout: bool, level: u16, lift: u16) -> frame::Video {
+    use ffmpeg_next::format::Pixel;
+
+    const WIDTH: u32 = REDUCED_SET_TEST_WIDTH;
+    const HEIGHT: u32 = REDUCED_SET_TEST_HEIGHT;
+    // Chromatic content; `level` sets the luma range above `lift`, the darkest luma, so later
+    // frames have a lower peak and a higher minimum.
+    let codes = |level: u16, lift: u16| {
+        // 64 steps over [lift, lift + level]; every 16x16 window holds all of them, so each
+        // crop wider than one pixel spans most of the frame's range.
+        let luma =
+            move |x: u32, y: u32| (lift + ((x * 7 + y * 13) % 64) as u16 * level / 63).min(1019);
+        // Moderate chroma: the first frame still clips (R' above 1, B' below 0), the later
+        // ones do not, so their reduced-set minimum rises above the clipped zero.
+        let chroma = |cx: u32, cy: u32| match (cx + 2 * cy) % 4 {
+            0 => (512, 592),
+            1 => (592, 432),
+            2 => (432, 512),
+            _ => (500 + (cx % 7) as u16, 530),
+        };
+        (luma, chroma)
+    };
+    let planar = |level: u16, lift: u16| {
+        let (luma, chroma) = codes(level, lift);
+        let mut frame = frame::Video::new(Pixel::YUV420P10LE, WIDTH, HEIGHT);
+        for plane in 0..3 {
+            let stride = frame.stride(plane);
+            let (w, h) = if plane == 0 {
+                (WIDTH, HEIGHT)
+            } else {
+                (WIDTH / 2, HEIGHT / 2)
+            };
+            let data = frame.data_mut(plane);
+            for y in 0..h {
+                for x in 0..w {
+                    let code = match plane {
+                        0 => luma(x, y),
+                        1 => chroma(x, y).0,
+                        _ => chroma(x, y).1,
+                    };
+                    let offset = y as usize * stride + x as usize * 2;
+                    data[offset..offset + 2].copy_from_slice(&code.to_le_bytes());
+                }
+            }
+        }
+        frame
+    };
+    let p010 = |level: u16, lift: u16| {
+        let (luma, chroma) = codes(level, lift);
+        let mut frame = frame::Video::new(Pixel::P010LE, WIDTH, HEIGHT);
+        let stride = frame.stride(0);
+        let data = frame.data_mut(0);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let offset = y as usize * stride + x as usize * 2;
+                data[offset..offset + 2].copy_from_slice(&(luma(x, y) << 6).to_le_bytes());
+            }
+        }
+        let stride = frame.stride(1);
+        let data = frame.data_mut(1);
+        for y in 0..HEIGHT / 2 {
+            for x in 0..WIDTH / 2 {
+                let (cb, cr) = chroma(x, y);
+                let offset = y as usize * stride + x as usize * 4;
+                data[offset..offset + 2].copy_from_slice(&(cb << 6).to_le_bytes());
+                data[offset + 2..offset + 4].copy_from_slice(&(cr << 6).to_le_bytes());
+            }
+        }
+        frame
+    };
+    if p010_layout {
+        p010(level, lift)
+    } else {
+        planar(level, lift)
+    }
 }

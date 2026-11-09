@@ -290,11 +290,21 @@ fn check_parity(
             "{label}: CPU and CUDA AU tables differ"
         );
     }
-    // Peak candidates and grain statistics per frame. With the robust estimator every column
-    // must be equal: sigma and the effective tail count come from the cross-quad difference
-    // histogram, so this proves the kernel counts like the CPU. Without it the GPU does not
-    // gather that histogram and reports neutral grain statistics. With st2094-10 the
-    // reduced-set columns must be equal too: they come from their own kernel.
+    check_frame_stats(label, &cpu, &gpu, frame_count, extra_args);
+    eprintln!(
+        "{label}: identical ({frame_count} frames, {} bytes)",
+        cpu.bin.len()
+    );
+    cpu.bin
+}
+
+/// Compares the `--dump-frame-stats` CSVs of a CPU and a CUDA run.
+// Peak candidates and grain statistics per frame. With the robust estimator every column
+// must be equal: sigma and the effective tail count come from the cross-quad difference
+// histogram, so this proves the kernel counts like the CPU. Without it the GPU does not
+// gather that histogram and reports neutral grain statistics. With st2094-10 the
+// reduced-set columns must be equal too: they come from their own kernel.
+fn check_frame_stats(label: &str, cpu: &Run, gpu: &Run, frame_count: usize, extra_args: &[&str]) {
     let robust = extra_args.contains(&"robust");
     let reduced_set = extra_args.contains(&"st2094-10");
     if robust || reduced_set {
@@ -390,11 +400,6 @@ fn check_parity(
             }
         }
     }
-    eprintln!(
-        "{label}: identical ({frame_count} frames, {} bytes)",
-        cpu.bin.len()
-    );
-    cpu.bin
 }
 
 // One test for all cases: parallel tests would run several CUDA processes at once.
