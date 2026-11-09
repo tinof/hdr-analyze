@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use ffmpeg_next::{format, util::color};
 
-use crate::analysis::frame::FrameAnalysisOptions;
+use crate::analysis::frame::{check_reduced_set_options, FrameAnalysisOptions};
 use crate::analysis::hlg::PQ_MAPPING;
 use crate::au_table::{
     au_table_path, file_sha256, remove_stale_au_table, write_au_table, AuRecorder,
@@ -29,6 +29,7 @@ fn peak_estimator_name(estimator: PeakEstimator) -> &'static str {
         PeakEstimator::Max => "max",
         PeakEstimator::Percentile => "percentile",
         PeakEstimator::Robust => "robust",
+        PeakEstimator::ReducedSet => "st2094-10",
     }
 }
 
@@ -130,6 +131,18 @@ pub fn run(
     }
 
     let downscale = effective_downscale(cli.downscale);
+    let analysis_options = FrameAnalysisOptions {
+        denoise_mode: &cli.pre_denoise,
+        transfer_function: video_info.transfer_function,
+        hlg_composer: cli.hlg_composer,
+        chroma_siting,
+        peak_domain,
+        min_percentile: cli.min_percentile,
+        peak_estimator: cli.peak_estimator,
+        peak_percentile: cli.peak_percentile,
+        dump_max_rgb: max_rgb_dump_dir().is_some(),
+    };
+    check_reduced_set_options(&analysis_options, downscale)?;
     if cli.peak_estimator == PeakEstimator::Robust && downscale > 1 {
         eprintln!(
             "Warning: --peak-estimator robust is specified for --downscale 1. With --downscale {downscale} \
@@ -216,17 +229,7 @@ pub fn run(
         &mut input_context,
         downscale,
         initial_crop,
-        &FrameAnalysisOptions {
-            denoise_mode: &cli.pre_denoise,
-            transfer_function: video_info.transfer_function,
-            hlg_composer: cli.hlg_composer,
-            chroma_siting,
-            peak_domain,
-            min_percentile: cli.min_percentile,
-            peak_estimator: cli.peak_estimator,
-            peak_percentile: cli.peak_percentile,
-            dump_max_rgb: max_rgb_dump_dir().is_some(),
-        },
+        &analysis_options,
         &mut au_recorder,
     )?;
 

@@ -10,7 +10,9 @@
 # bt2100, each with its sidecar luminance_mapping), and the PQ clip also with
 # --hlg-composer bt2100, which must leave PQ output unchanged. It fails closed: a missing tool,
 # a missing GPU or a CPU fallback is an error. MKV clips also get --au-table, and the CPU and
-# CUDA AU tables must be equal apart from the sidecar digest (P15.1).
+# CUDA AU tables must be equal apart from the sidecar digest (P15.1). Before the clips it runs
+# the in-crate GPU test of --peak-estimator st2094-10 on crops crop detection never produces
+# (odd anchor and size, planar and P010, consecutive frames; ROADMAP WS1.5).
 #
 # Usage:
 #   scripts/cuda-parity.sh [--pq <file>] [--hlg <file>]
@@ -90,6 +92,9 @@ echo "PQ clip:  $PQ_CLIP"
 echo "HLG clip: $HLG_CLIP"
 
 # Debug profile on purpose: target/release holds the installed binaries.
+HDR_ANALYZE_CUDA_PARITY_REQUIRED=1 \
+    cargo test -p hdr_analyzer_mvp --features cuda --bin hdr_analyzer_mvp \
+    analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops -- --exact --nocapture
 HDR_ANALYZE_CUDA_PARITY_REQUIRED=1 \
 HDR_ANALYZE_CUDA_PARITY_PQ="$PQ_CLIP" \
 HDR_ANALYZE_CUDA_PARITY_HLG="$HLG_CLIP" \

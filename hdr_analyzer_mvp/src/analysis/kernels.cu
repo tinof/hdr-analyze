@@ -1,5 +1,6 @@
 // HDR frame analysis kernels: `compose_chroma` (HLG only) composes the chroma of the Dolby
-// Vision Profile 8.4 decode at chroma resolution, then `analyze_frame` analyzes every sample.
+// Vision Profile 8.4 decode at chroma resolution, then `analyze_frame` analyzes every sample;
+// `reduced_set_extrema` (end of file) runs only for --peak-estimator st2094-10.
 //
 // One result buffer, cleared by one memset and downloaded by one copy.
 // u32 words:
@@ -309,6 +310,24 @@ struct Sample {
     int pq_bin;
 };
 
+// The PQ-path R'G'B' of one pixel: the same non-constant-luminance approximation as the CPU
+// path (frame/reduced_set.rs `pq_rgb`), mixing the PQ-encoded signal directly in Y'CbCr space.
+// The _rn intrinsics keep NVRTC from contracting multiply-adds into FMAs, so the result matches
+// the CPU bit for bit.
+__device__ __forceinline__ void pq_rgb(
+    unsigned int code, unsigned int cb_code, unsigned int cr_code,
+    float* red, float* green, float* blue
+) {
+    const float y_signal = __fdiv_rn((float)((int)code - 64), 876.0f);
+    const float cb = __fdiv_rn(__fsub_rn((float)cb_code, 512.0f), 896.0f);
+    const float cr = __fdiv_rn(__fsub_rn((float)cr_code, 512.0f), 896.0f);
+    *red = __fadd_rn(y_signal, __fmul_rn(1.4746f, cr));
+    *blue = __fadd_rn(y_signal, __fmul_rn(1.8814f, cb));
+    *green = __fdiv_rn(
+        __fsub_rn(__fsub_rn(y_signal, __fmul_rn(0.2627f, *red)), __fmul_rn(0.0593f, *blue)),
+        0.6780f);
+}
+
 __device__ __forceinline__ Sample load_sample(
     const unsigned char* y_plane,
     const unsigned char* u_plane,
@@ -343,17 +362,11 @@ __device__ __forceinline__ Sample load_sample(
             composed.centred, x, y);
         sample.rgb_peak_pq = dovi84_max_rgb_composed(dovi_params, sample.code, cb, cr);
     } else {
-        // Same non-constant-luminance approximation as the CPU path (frame.rs): mix the
-        // PQ-encoded signal directly in Y'CbCr space. The _rn intrinsics keep NVRTC from
-        // contracting multiply-adds into FMAs, so the result matches the CPU bit for bit.
-        const float y_signal = __fdiv_rn((float)((int)sample.code - 64), 876.0f);
-        const float cb = __fdiv_rn(__fsub_rn((float)sample.cb_code, 512.0f), 896.0f);
-        const float cr = __fdiv_rn(__fsub_rn((float)sample.cr_code, 512.0f), 896.0f);
-        const float red = __fadd_rn(y_signal, __fmul_rn(1.4746f, cr));
-        const float blue = __fadd_rn(y_signal, __fmul_rn(1.8814f, cb));
-        const float green = __fdiv_rn(
-            __fsub_rn(__fsub_rn(y_signal, __fmul_rn(0.2627f, red)), __fmul_rn(0.0593f, blue)),
-            0.6780f);
+        // Same non-constant-luminance approximation as the CPU path (frame.rs).
+        float red;
+        float green;
+        float blue;
+        pq_rgb(sample.code, sample.cb_code, sample.cr_code, &red, &green, &blue);
         const float peak = fmaxf(red, fmaxf(green, blue));
         sample.rgb_peak_pq = fminf(fmaxf(peak, 0.0f), 1.0f);
     }
@@ -571,5 +584,108 @@ extern "C" __global__ void analyze_frame(
         }
         atomicMax(&results[MAX_LUMA_WORD], s_max_luma);
         atomicMax(&results[MAX_RGB_WORD], s_max_rgb);
+    }
+}
+
+// --peak-estimator st2094-10: the SMPTE ST 2094-10 reduced pixel set (§6.1.2), PQ path, as
+// frame/reduced_set.rs `reduced_set_extrema`, same f32 operations in the same order. Non-
+// overlapping 2x2 blocks anchored at the crop's top-left (partial at an odd right or bottom
+// edge); each pixel's R'G'B' from its own 4:2:0 chroma sample, clamped to [0, 1], to linear light
+// through the EOTF table, averaged per block. extrema (2 u32 words, cleared before each launch):
+//   [0] highest block max-RGB, linear light (f32 bit pattern)
+//   [1] 0xffffffff minus the f32 bit pattern of the lowest block min-RGB, so atomicMax on a
+//       cleared word gives the minimum; 0 means no block
+// All values are non-negative, so their bit patterns order like the floats and the maxima
+// are order-independent.
+#define EOTF_LUT_INTERVALS 4096
+
+__device__ __forceinline__ float pq_eotf(const float* lut, float signal) {
+    const float position = __fmul_rn(signal, (float)EOTF_LUT_INTERVALS);
+    int index = (int)position;
+    if (index > EOTF_LUT_INTERVALS - 1) {
+        index = EOTF_LUT_INTERVALS - 1;
+    }
+    const float fraction = __fsub_rn(position, (float)index);
+    return __fadd_rn(lut[index], __fmul_rn(fraction, __fsub_rn(lut[index + 1], lut[index])));
+}
+
+extern "C" __global__ void reduced_set_extrema(
+    const unsigned char* y_plane,
+    const unsigned char* u_plane,
+    const unsigned char* v_plane,
+    const float* eotf_lut,
+    unsigned int* extrema,
+    int width,
+    int height,
+    int y_stride,
+    int u_stride,
+    int v_stride,
+    int crop_x,
+    int crop_y,
+    int crop_width,
+    int crop_height,
+    int layout
+) {
+    __shared__ unsigned int s_high;
+    __shared__ unsigned int s_low;
+    if (threadIdx.x == 0) {
+        s_high = 0u;
+        s_low = 0u;
+    }
+    __syncthreads();
+
+    const int x_end = min(crop_x + crop_width, width);
+    const int y_end = min(crop_y + crop_height, height);
+    const int block_columns = (x_end - crop_x + 1) / 2;
+    const int block_rows = (y_end - crop_y + 1) / 2;
+    const long long block_count =
+        block_columns > 0 && block_rows > 0 ? (long long)block_columns * block_rows : 0;
+    unsigned int t_high = 0u;
+    unsigned int t_low = 0u;
+    const long long grid_step = (long long)gridDim.x * blockDim.x;
+    for (long long index = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+         index < block_count;
+         index += grid_step) {
+        const int x0 = crop_x + 2 * (int)(index % block_columns);
+        const int y0 = crop_y + 2 * (int)(index / block_columns);
+        float sums[3] = {0.0f, 0.0f, 0.0f};
+        int count = 0;
+        for (int y = y0; y < min(y0 + 2, y_end); y++) {
+            for (int x = x0; x < min(x0 + 2, x_end); x++) {
+                const unsigned int code = load_luma_code(y_plane, x, y, y_stride, layout);
+                unsigned int cb_code;
+                unsigned int cr_code;
+                load_chroma_codes(u_plane, v_plane, x >> 1, y >> 1, u_stride, v_stride, layout,
+                    &cb_code, &cr_code);
+                float rgb[3];
+                pq_rgb(code, cb_code, cr_code, &rgb[0], &rgb[1], &rgb[2]);
+                for (int k = 0; k < 3; k++) {
+                    const float component = fminf(fmaxf(rgb[k], 0.0f), 1.0f);
+                    sums[k] = __fadd_rn(sums[k], pq_eotf(eotf_lut, component));
+                }
+                count += 1;
+            }
+        }
+        if (count != 0) {
+            const float red = __fdiv_rn(sums[0], (float)count);
+            const float green = __fdiv_rn(sums[1], (float)count);
+            const float blue = __fdiv_rn(sums[2], (float)count);
+            const float high = fmaxf(red, fmaxf(green, blue));
+            const float low = fminf(red, fminf(green, blue));
+            t_high = max(t_high, __float_as_uint(high));
+            t_low = max(t_low, 0xffffffffu - __float_as_uint(low));
+        }
+    }
+
+    t_high = warp_max_u32(t_high);
+    t_low = warp_max_u32(t_low);
+    if ((threadIdx.x & 31) == 0) {
+        atomicMax(&s_high, t_high);
+        atomicMax(&s_low, t_low);
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        atomicMax(&extrema[0], s_high);
+        atomicMax(&extrema[1], s_low);
     }
 }

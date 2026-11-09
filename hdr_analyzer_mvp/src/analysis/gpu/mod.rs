@@ -8,7 +8,9 @@
 //! (`analyze_device`); other frames are uploaded from host memory (`analyze`).
 //! For the grain-robust (`robust`) peak estimator the kernel also fills the
 //! cross-quad difference histogram, and the host applies the same estimator
-//! functions as the CPU path.
+//! functions as the CPU path. For `st2094-10` a second kernel,
+//! `reduced_set_extrema`, runs on the same stream into its own two-word buffer,
+//! cleared and downloaded per frame (`backend/reduced_set.rs`).
 
 use anyhow::{anyhow, Result};
 use dovi84_composer::Composer;

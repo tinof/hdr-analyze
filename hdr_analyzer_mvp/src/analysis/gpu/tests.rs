@@ -337,3 +337,174 @@ fn driver_version_refuses_older_than_cuda_12_6() {
     let error = check_driver_version(12_040).unwrap_err().to_string();
     assert!(error.contains("supports CUDA 12.4;"), "{error}");
 }
+
+/// `--peak-estimator st2094-10` on the GPU against the CPU path, on crops the analyzer's crop
+/// detection never produces (odd anchor, odd size, so partial edge blocks), for planar and P010
+/// input, over consecutive frames whose peak falls and whose minimum rises (the kernel's result
+/// words must be cleared per frame). Needs a CUDA device; `scripts/cuda-parity.sh` runs it with
+/// `HDR_ANALYZE_CUDA_PARITY_REQUIRED`, under which a missing device fails.
+#[cfg(feature = "cuda")]
+#[test]
+fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
+    use ffmpeg_next::format::Pixel;
+
+    use crate::analysis::frame::analyze_native_frame_cropped;
+    use crate::analysis::hlg::ChromaSiting;
+    use crate::cli::{PeakDomain, PeakEstimator};
+
+    const WIDTH: u32 = 64;
+    const HEIGHT: u32 = 48;
+    let mut gpu = match GpuAnalyzer::new(TransferFunction::Pq, Composer::Preset) {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            assert!(
+                std::env::var_os("HDR_ANALYZE_CUDA_PARITY_REQUIRED").is_none(),
+                "no CUDA device: {error}"
+            );
+            eprintln!("Skipping: no CUDA device ({error})");
+            return;
+        }
+    };
+    // Chromatic content; `level` sets the luma range above `lift`, the darkest luma, so later
+    // frames have a lower peak and a higher minimum.
+    let codes = |level: u16, lift: u16| {
+        // 64 steps over [lift, lift + level]; every 16x16 window holds all of them, so each
+        // crop wider than one pixel spans most of the frame's range.
+        let luma =
+            move |x: u32, y: u32| (lift + ((x * 7 + y * 13) % 64) as u16 * level / 63).min(1019);
+        // Moderate chroma: the first frame still clips (R' above 1, B' below 0), the later
+        // ones do not, so their reduced-set minimum rises above the clipped zero.
+        let chroma = |cx: u32, cy: u32| match (cx + 2 * cy) % 4 {
+            0 => (512, 592),
+            1 => (592, 432),
+            2 => (432, 512),
+            _ => (500 + (cx % 7) as u16, 530),
+        };
+        (luma, chroma)
+    };
+    let planar = |level: u16, lift: u16| {
+        let (luma, chroma) = codes(level, lift);
+        let mut frame = frame::Video::new(Pixel::YUV420P10LE, WIDTH, HEIGHT);
+        for plane in 0..3 {
+            let stride = frame.stride(plane);
+            let (w, h) = if plane == 0 {
+                (WIDTH, HEIGHT)
+            } else {
+                (WIDTH / 2, HEIGHT / 2)
+            };
+            let data = frame.data_mut(plane);
+            for y in 0..h {
+                for x in 0..w {
+                    let code = match plane {
+                        0 => luma(x, y),
+                        1 => chroma(x, y).0,
+                        _ => chroma(x, y).1,
+                    };
+                    let offset = y as usize * stride + x as usize * 2;
+                    data[offset..offset + 2].copy_from_slice(&code.to_le_bytes());
+                }
+            }
+        }
+        frame
+    };
+    let p010 = |level: u16, lift: u16| {
+        let (luma, chroma) = codes(level, lift);
+        let mut frame = frame::Video::new(Pixel::P010LE, WIDTH, HEIGHT);
+        let stride = frame.stride(0);
+        let data = frame.data_mut(0);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let offset = y as usize * stride + x as usize * 2;
+                data[offset..offset + 2].copy_from_slice(&(luma(x, y) << 6).to_le_bytes());
+            }
+        }
+        let stride = frame.stride(1);
+        let data = frame.data_mut(1);
+        for y in 0..HEIGHT / 2 {
+            for x in 0..WIDTH / 2 {
+                let (cb, cr) = chroma(x, y);
+                let offset = y as usize * stride + x as usize * 4;
+                data[offset..offset + 2].copy_from_slice(&(cb << 6).to_le_bytes());
+                data[offset + 2..offset + 4].copy_from_slice(&(cr << 6).to_le_bytes());
+            }
+        }
+        frame
+    };
+    let options = FrameAnalysisOptions {
+        denoise_mode: "none",
+        transfer_function: TransferFunction::Pq,
+        hlg_composer: Composer::Preset,
+        chroma_siting: ChromaSiting::Left,
+        peak_domain: PeakDomain::MaxRgb,
+        min_percentile: 0.1,
+        peak_estimator: PeakEstimator::ReducedSet,
+        peak_percentile: 99.99,
+        dump_max_rgb: false,
+    };
+    let crops = [
+        CropRect {
+            x: 0,
+            y: 0,
+            width: WIDTH,
+            height: HEIGHT,
+        },
+        CropRect {
+            x: 3,
+            y: 5,
+            width: 37,
+            height: 21,
+        },
+        CropRect {
+            x: 1,
+            y: 0,
+            width: 62,
+            height: 47,
+        },
+        CropRect {
+            x: 7,
+            y: 9,
+            width: 1,
+            height: 1,
+        },
+    ];
+    for crop in &crops {
+        let mut previous: Option<(f64, f64)> = None;
+        for (level, lift) in [(900, 120), (500, 300), (250, 400)] {
+            let cpu = analyze_native_frame_cropped(&planar(level, lift), crop, &options)
+                .expect("CPU analysis")
+                .peak_stats;
+            for (layout, frame) in [("planar", planar(level, lift)), ("p010", p010(level, lift))] {
+                let gpu_stats = gpu
+                    .analyze(&frame, crop, 1, &options)
+                    .expect("GPU analysis")
+                    .peak_stats;
+                assert_eq!(
+                    (
+                        gpu_stats.reduced_max_pq.to_bits(),
+                        gpu_stats.reduced_min_pq.to_bits()
+                    ),
+                    (cpu.reduced_max_pq.to_bits(), cpu.reduced_min_pq.to_bits()),
+                    "{layout} {crop:?} level {level}: GPU {gpu_stats:?} vs CPU {cpu:?}"
+                );
+                assert_eq!(
+                    gpu_stats.selected_peak_pq.to_bits(),
+                    cpu.reduced_max_pq.to_bits()
+                );
+            }
+            if let Some((high, low)) = previous {
+                if crop.width > 1 {
+                    assert!(
+                        cpu.reduced_max_pq < high && cpu.reduced_min_pq > low,
+                        "{crop:?} {cpu:?}"
+                    );
+                }
+            }
+            previous = Some((cpu.reduced_max_pq, cpu.reduced_min_pq));
+        }
+    }
+    // A sampling stride is refused before any CUDA work.
+    let Err(error) = gpu.analyze(&planar(900, 120), &crops[0], 2, &options) else {
+        panic!("a sampling stride must be refused");
+    };
+    assert!(error.to_string().contains("--downscale 1"), "{error}");
+}
