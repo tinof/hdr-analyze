@@ -27,8 +27,10 @@
 # model thinks (2026-10-08: 222 s in a review, 341 s in a probe); in that probe the WAL was written at
 # least every 19 s. If a hang kept writing the WAL, it would end at the total limit instead, as
 # before this watchdog. The idle limit is 480 s. The repo agent .agents/agents/pre-pr-reviewer.md
-# limits the tools to view_file, grep_search and finish (no terminal, no writes, no web); it is used
-# when present. Every attempt runs with PRE_PR_GEMINI_ATTEMPT=<token>.<N> in its environment, and
+# limits the tools to view_file, run_command and finish; its hooks file runs the read-only guard
+# ~/.gemini/hooks/review-readonly.py (tinof/antigravity-config), which refuses every command that
+# is not reading or searching inside the workspace, and refuses all of them when the guard is not
+# installed. agy 1.5 ignores grep_search. The agent is used when present. Every attempt runs with PRE_PR_GEMINI_ATTEMPT=<token>.<N> in its environment, and
 # cleanup kills each process that carries it, so a child that left agy's process group dies too.
 # Inside the attempt's session, `timeout` ends agy 60 s after the deadline even when this wrapper
 # was killed (SIGKILL runs no trap). A second signal during cleanup is ignored, so an interrupted
@@ -43,7 +45,7 @@ set -u
 base=${1:?base}
 out=${2:?out-dir}
 scope=${3:?scope-file}
-model=${PRE_PR_GEMINI_MODEL:-gemini-3.8-flash-medium}
+model=${PRE_PR_GEMINI_MODEL:-gemini-4-argon-medium}
 limit=${PRE_PR_GEMINI_TIMEOUT:-1200}
 idle=${PRE_PR_GEMINI_IDLE:-480}
 retries=${PRE_PR_GEMINI_RETRIES:-1}
@@ -144,6 +146,11 @@ newest_mtime() {
 }
 
 command -v agy > /dev/null || fail "agy (Antigravity CLI) not found on PATH"
+# The reviewer agent's run_command goes through this guard; without it every command is refused.
+if [ "$agent" != null ] && grep -q run_command "$root/.agents/agents/$agent_name.md" &&
+    [ ! -f "${PRE_PR_GEMINI_GUARD:-$HOME/.gemini/hooks/review-readonly.py}" ]; then
+    fail "read-only guard ~/.gemini/hooks/review-readonly.py is not installed: apply tinof/antigravity-config"
+fi
 [ -r "$scope" ] || fail "scope file not readable: $scope"
 
 body="$out/prepr-gemini.diff-body"
