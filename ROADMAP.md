@@ -60,6 +60,10 @@ Order: owner direction of 2026-11-07 (Priorities).
 1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
    order. Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
 
+**Reassess:** plan-changed (WS0.2, PR #104): delivered L1 max reads +144 codes high per shot
+(the WS1.5 baseline), and retail L1 min is a constant 0 or 12 on all 8 cuts, so it is no
+reference for P10.5.
+
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
 ### Waiting for the owner
@@ -356,21 +360,13 @@ The detailed gap table and validation method live in
 
 ### WS0: L1 scoring tools
 
-- **Status:** Core complete. `tools/l1_diff`, ground-truth tests and the CI L1 gate on a six-shot
-  PQ and HLG clip shipped; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: WS0.1,
-  which needs WS8.1, and WS0.2.
+- **Status:** Core complete. `tools/l1_diff`, ground-truth tests, the CI L1 gate and the WS0.2
+  retail baseline of the delivered RPU are in [the log](docs/ROADMAP_LOG.md) (2026-10-29,
+  2026-11-09). Open: WS0.1, which needs WS8.1.
 - **Gate:** the CI L1 gate covers the WS8 synthetic cases (grain on highlights, a flash, a fade, an
   aspect-ratio change), each with committed references (owner, 2026-10-17).
 - [WS0.1][desk] Grow the corpus: the WS8 synthetic cases in the CI L1 gate (this step also covers
   the former E1 step 1, which had the same gate; feeds WS6). Gate: the item gate. Needs: WS8.1 (code).
-- [WS0.2][corpus] Retail baseline of the delivered 8.1 RPU on main 271b066: the DV- and
-  HDR10+-free base layer of the eight Profile 7 MEL dev cuts through mkvdovi, the RPU read back from
-  the `.DV.mkv` and scored against retail L1; the hybrid path on the four HDR10+ cuts; HotD against
-  the 2026-07-08 cm_analyze v2 output, report-only. Gate: per-cut and pooled bias and MAE of
-  delivered and pre-clamp L1 max, avg and min against retail, per frame and per shot, over all
-  frames and, for max and avg, above the floor (min has only the ≤ 12 cap); frame counts matching
-  on every cut; 0 delivered-vs-clamp mismatches; scene-cut precision and recall; recorded in the
-  log with versions and the runner path.
 
 ### WS1: grain-robust peak
 
