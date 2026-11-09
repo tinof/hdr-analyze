@@ -216,6 +216,8 @@ def main():
             parser.error(f"--{option.replace('_', '-')} is required")
     if args.width % 2 or args.height % 2 or args.x0 % 2 or args.y0 % 2:
         parser.error("width, height, x0 and y0 must be even")
+    if args.x0 < 0 or args.y0 < 0:
+        parser.error("x0 and y0 must not be negative")
     reach_x = max(s[3] + s[5] * (s[1] - s[0]) + s[2] for s in SEGMENTS.values())
     reach_y = max(s[4] + s[2] for s in SEGMENTS.values())
     if args.x0 + reach_x + PAD > args.width or args.y0 + reach_y + PAD > args.height:
@@ -241,6 +243,10 @@ def main():
             write_frame(clean_out, clean, digests["clean"])
             write_frame(grainy_out, grainy, digests["grainy"])
             index += 1
+
+    needed = max(s[1] for s in SEGMENTS.values()) + 1
+    if index < needed:
+        raise SystemExit(f"error: the inputs hold {index} frames; the segments need {needed}")
 
     truth = {
         "generator": "scripts/corpus/make_highlight_pair.py",

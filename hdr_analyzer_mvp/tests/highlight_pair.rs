@@ -193,6 +193,54 @@ fn number(value: &serde_json::Value, key: &str) -> f64 {
         .unwrap_or_else(|| panic!("{key} in {value}"))
 }
 
+/// Runs the generator on inputs of `frames` frames with extra arguments; returns its output.
+fn run_generator_on(dir: &Path, frames: usize, extra: &[&str]) -> Output {
+    let frame = vec![0u8; W * H * 3];
+    for name in ["short-c.yuv", "short-g.yuv"] {
+        std::fs::write(dir.join(name), frame.repeat(frames)).expect("write raw input");
+    }
+    let path = |name: &str| dir.join(name).to_str().expect("utf-8").to_owned();
+    Command::new("python3")
+        .arg(generator())
+        .args([
+            "--clean",
+            &path("short-c.yuv"),
+            "--grainy",
+            &path("short-g.yuv"),
+        ])
+        .args(["--out-clean", &path("short-oc.yuv")])
+        .args(["--out-grainy", &path("short-og.yuv")])
+        .args(["--truth", &path("short-truth.json")])
+        .args(["--width", &W.to_string(), "--height", &H.to_string()])
+        .args(extra)
+        .output()
+        .expect("run python3 (required by this test)")
+}
+
+#[test]
+fn generator_refuses_short_inputs_and_negative_offsets() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let stderr = |output: &Output| String::from_utf8_lossy(&output.stderr).into_owned();
+    // One frame short of the last segment: no truth that lists unpainted frames.
+    let short = run_generator_on(dir.path(), FRAMES - 1, &["--x0", "40", "--y0", "32"]);
+    assert!(!short.status.success(), "a short input must fail");
+    assert!(
+        stderr(&short).contains("the segments need 300"),
+        "{}",
+        stderr(&short)
+    );
+    assert!(!dir.path().join("short-truth.json").exists());
+    for (x0, y0) in [("-2", "32"), ("40", "-2")] {
+        let negative = run_generator_on(dir.path(), 1, &["--x0", x0, "--y0", y0]);
+        assert!(!negative.status.success(), "--x0 {x0} --y0 {y0} must fail");
+        assert!(
+            stderr(&negative).contains("must not be negative"),
+            "{}",
+            stderr(&negative)
+        );
+    }
+}
+
 #[test]
 fn highlight_pair_carries_grain_and_matches_the_standard() {
     if !have_ffmpeg() {
