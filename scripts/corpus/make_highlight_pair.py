@@ -240,6 +240,11 @@ def main():
             if same_file(paths[output], paths[other]):
                 parser.error(f"{output} names the same file as {other}")
 
+    # The outputs may be FIFOs, so they cannot be staged: withdraw an old truth file before
+    # they change, so a failed run never leaves truth that describes other outputs.
+    if os.path.lexists(args.truth):
+        os.remove(args.truth)
+
     frame_bytes = args.width * args.height * 3
     digests = {"clean": hashlib.sha256(), "grainy": hashlib.sha256()}
     frames = []

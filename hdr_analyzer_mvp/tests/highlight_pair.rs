@@ -243,6 +243,26 @@ fn generator_refuses_an_output_that_is_an_input() {
 }
 
 #[test]
+fn failed_rerun_leaves_no_stale_truth() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let offsets = ["--x0", "40", "--y0", "32"];
+    let first = run_generator_on(dir.path(), FRAMES, &offsets);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(dir.path().join("short-truth.json").exists());
+    // The rerun overwrites the outputs with fewer frames, then fails.
+    let rerun = run_generator_on(dir.path(), FRAMES - 1, &offsets);
+    assert!(!rerun.status.success(), "a short input must fail");
+    assert!(
+        !dir.path().join("short-truth.json").exists(),
+        "the old truth no longer describes the outputs"
+    );
+}
+
+#[test]
 fn generator_refuses_short_inputs_and_negative_offsets() {
     let dir = tempfile::tempdir().expect("tempdir");
     let stderr = |output: &Output| String::from_utf8_lossy(&output.stderr).into_owned();
