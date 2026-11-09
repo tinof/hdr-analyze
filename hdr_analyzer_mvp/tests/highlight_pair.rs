@@ -218,6 +218,31 @@ fn run_generator_on(dir: &Path, frames: usize, extra: &[&str]) -> Output {
 }
 
 #[test]
+fn generator_refuses_an_output_that_is_an_input() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let input = dir.path().join("short-c.yuv");
+    let full = (FRAMES * W * H * 3) as u64;
+    let mut aliases = vec![input.clone()];
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("link-to-clean.yuv");
+        std::os::unix::fs::symlink(&input, &link).expect("symlink");
+        aliases.push(link);
+    }
+    for alias in aliases {
+        let alias = alias.to_str().expect("utf-8");
+        let output = run_generator_on(
+            dir.path(),
+            FRAMES,
+            &["--x0", "40", "--y0", "32", "--out-clean", alias],
+        );
+        assert!(!output.status.success(), "--out-clean {alias} must fail");
+        let size = std::fs::metadata(&input).expect("input").len();
+        assert_eq!(size, full, "--out-clean {alias} truncated the input");
+    }
+}
+
+#[test]
 fn generator_refuses_short_inputs_and_negative_offsets() {
     let dir = tempfile::tempdir().expect("tempdir");
     let stderr = |output: &Output| String::from_utf8_lossy(&output.stderr).into_owned();

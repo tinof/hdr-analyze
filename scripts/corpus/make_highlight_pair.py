@@ -43,6 +43,7 @@ Pure Python with integer sample arithmetic, so the outputs are identical on ever
 import argparse
 import hashlib
 import json
+import os
 import sys
 from array import array
 
@@ -195,6 +196,14 @@ def paint(index, clean, grainy, width, height, found):
     }
 
 
+def same_file(a, b):
+    """True when the two paths name one file, through links too."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:  # a path that does not exist yet
+        return os.path.realpath(a) == os.path.realpath(b)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--clean", help="clean input stream")
@@ -222,6 +231,14 @@ def main():
     reach_y = max(s[4] + s[2] for s in SEGMENTS.values())
     if args.x0 + reach_x + PAD > args.width or args.y0 + reach_y + PAD > args.height:
         parser.error(f"the highlights need {reach_x}x{reach_y} pixels from (x0, y0) plus {PAD}")
+
+    paths = {f"--{o.replace('_', '-')}": getattr(args, o) for o in
+             ("clean", "grainy", "out_clean", "out_grainy", "truth")}
+    names = list(paths)
+    for i, output in enumerate(names[2:], 2):
+        for other in names[:i]:
+            if same_file(paths[output], paths[other]):
+                parser.error(f"{output} names the same file as {other}")
 
     frame_bytes = args.width * args.height * 3
     digests = {"clean": hashlib.sha256(), "grainy": hashlib.sha256()}
