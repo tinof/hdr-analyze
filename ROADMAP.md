@@ -52,13 +52,18 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-09 at main@cf96b20)
-<!-- roadmap-next: rev=3 scope=WS1.5 config=760f5c5efe83 probes=gpu:ok,corpus:ok ready=c0cdd839997f -->
+### Next up (checked 2026-11-09 at main@01aec43)
+<!-- roadmap-next: rev=3 scope=Item-WS8.1 config=760f5c5efe83 probes=gpu:ok,corpus:ok ready=c0cdd839997f -->
 
-Order: the owner named WS1.5 (2026-11-09); scoped to WS1, so P9.4 (priority 2) stays next after it.
+Order: the owner named WS8.1 (2026-11-09); scoped to WS8, so P9.4 (priority 2) stays next after it.
 
-1. **WS1.1 Explain the clean-source over-read** (priority 9). Gate: in WS1.1. Why: the other
-   startable WS1 step. Branch: `docs/ws1-1-over-read`. Release: none
+1. **WS8.1 Grain on the synthetic highlights and odd offsets** (priority 7). Gate: the WS8 item
+   gate. Why: WS1.6 and WS0.1 need it; the D5 pair's generator is not committed. Branch:
+   `test/ws8-1-highlight-grain`. Release: none
+2. **WS8.4 Held-out split** (priority 7). Gate: the WS8 item gate. Why: fixes the split before
+   WS8.2 and WS8.3 pick real shots. Branch: `docs/ws8-4-holdout-split`. Release: none
+3. **WS8.3 Synthetic dissolves and fades** (priority 7). Gate: the WS8 item gate. Why: WS2.2 needs
+   it. Branch: `test/ws8-3-transitions`. Release: none
 
 **Reassess:** plan-changed (WS0.2, PR #104): delivered L1 max reads +144 codes high per shot
 (the WS1.5 baseline), and retail L1 min is a constant 0 or 12 on all 8 cuts, so it is no
@@ -519,6 +524,11 @@ The detailed gap table and validation method live in
 
 - **Status:** Partial. Real material per format landed 2026-10-05; the other fixes the 2026-10-03
   review asked for are open.
+- **Checked 2026-11-09 @01aec43:** the D5 highlight pair's generator lives only in
+  `~/mkvdovi-work/corpus/src/` (not committed); it paints Y 820 over the grain at (1000, 600) with
+  even sizes and a 2-pixel move, so no highlight leaves a 2x2 block. The committed fixture
+  `hdr_analyzer_mvp/tests/synthetic_accuracy.rs:455` has the same shape. The reduced-set grid is
+  anchored at the crop's top-left (`analysis/frame/reduced_set.rs:3`), so truth names the crop.
 - **Gate:** per item: synthetic material comes from a committed, reproducible generator; truth
   files are present; the L1 gate or the development corpus uses the material (owner, 2026-10-17).
 - [WS8.1][desk] Grain on the synthetic highlights and odd offsets (today they carry no grain and
