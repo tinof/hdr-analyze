@@ -167,6 +167,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   P15.4's other prerequisite.
 - **Owner direction (2026-11-07):** E7.3, then E7.2, go ahead of P9.4: E7.3 delivers wrong video
   timing, and the source is then deleted.
+- **Owner direction (2026-11-09):** WS0.2 goes ahead of P9.4: one scorecard of the delivered RPU
+  against retail on the current build, before WS1.5, WS7 and P10 change L1.
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
@@ -356,11 +358,18 @@ The detailed gap table and validation method live in
 
 - **Status:** Core complete. `tools/l1_diff`, ground-truth tests and the CI L1 gate on a six-shot
   PQ and HLG clip shipped; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: WS0.1,
-  which needs WS8.1.
+  which needs WS8.1, and WS0.2.
 - **Gate:** the CI L1 gate covers the WS8 synthetic cases (grain on highlights, a flash, a fade, an
   aspect-ratio change), each with committed references (owner, 2026-10-17).
 - [WS0.1][desk] Grow the corpus: the WS8 synthetic cases in the CI L1 gate (this step also covers
   the former E1 step 1, which had the same gate; feeds WS6). Gate: the item gate. Needs: WS8.1 (code).
+- [WS0.2][corpus] Retail baseline of the delivered 8.1 RPU on main 271b066: the DV- and
+  HDR10+-free base layer of the eight Profile 7 MEL dev cuts through mkvdovi, the RPU read back from
+  the `.DV.mkv` and scored against retail L1; the hybrid path on the four HDR10+ cuts; HotD against
+  the 2026-07-08 cm_analyze v2 output, report-only. Gate: per-cut and pooled bias and MAE of
+  delivered and pre-clamp L1 max, avg and min against retail, per frame and per shot, above the
+  floor and over all frames; frame counts matching on every cut; 0 delivered-vs-clamp mismatches;
+  scene-cut precision and recall; recorded in the log with versions and the runner path.
 
 ### WS1: grain-robust peak
 
