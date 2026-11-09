@@ -367,9 +367,10 @@ The detailed gap table and validation method live in
   HDR10+-free base layer of the eight Profile 7 MEL dev cuts through mkvdovi, the RPU read back from
   the `.DV.mkv` and scored against retail L1; the hybrid path on the four HDR10+ cuts; HotD against
   the 2026-07-08 cm_analyze v2 output, report-only. Gate: per-cut and pooled bias and MAE of
-  delivered and pre-clamp L1 max, avg and min against retail, per frame and per shot, above the
-  floor and over all frames; frame counts matching on every cut; 0 delivered-vs-clamp mismatches;
-  scene-cut precision and recall; recorded in the log with versions and the runner path.
+  delivered and pre-clamp L1 max, avg and min against retail, per frame and per shot, over all
+  frames and, for max and avg, above the floor (min has only the ≤ 12 cap); frame counts matching
+  on every cut; 0 delivered-vs-clamp mismatches; scene-cut precision and recall; recorded in the
+  log with versions and the runner path.
 
 ### WS1: grain-robust peak
 
