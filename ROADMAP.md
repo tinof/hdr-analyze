@@ -60,6 +60,10 @@ Order: owner direction of 2026-11-07 (Priorities).
 1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
    order. Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
 
+**Reassess:** plan-changed (WS0.2, PR #104): delivered L1 max reads +144 codes high per shot
+(the WS1.5 baseline), and retail L1 min is a constant 0 or 12 on all 8 cuts, so it is no
+reference for P10.5.
+
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
 ### Waiting for the owner
@@ -167,6 +171,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   P15.4's other prerequisite.
 - **Owner direction (2026-11-07):** E7.3, then E7.2, go ahead of P9.4: E7.3 delivers wrong video
   timing, and the source is then deleted.
+- **Owner direction (2026-11-09):** WS0.2 goes ahead of P9.4: one scorecard of the delivered RPU
+  against retail on the current build, before WS1.5, WS7 and P10 change L1.
 - **Sequencing (E13, 2026-10-07):** the module-size refactor is no priority of its own; its steps
   are prerequisites of priorities 2 and 4 (see there). Each move is a pure-move PR with the
   acceptance gate in its item; no other branch should be open while a move is in flight. The
@@ -354,9 +360,9 @@ The detailed gap table and validation method live in
 
 ### WS0: L1 scoring tools
 
-- **Status:** Core complete. `tools/l1_diff`, ground-truth tests and the CI L1 gate on a six-shot
-  PQ and HLG clip shipped; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: WS0.1,
-  which needs WS8.1.
+- **Status:** Core complete. `tools/l1_diff`, ground-truth tests, the CI L1 gate and the WS0.2
+  retail baseline of the delivered RPU are in [the log](docs/ROADMAP_LOG.md) (2026-10-29,
+  2026-11-09). Open: WS0.1, which needs WS8.1.
 - **Gate:** the CI L1 gate covers the WS8 synthetic cases (grain on highlights, a flash, a fade, an
   aspect-ratio change), each with committed references (owner, 2026-10-17).
 - [WS0.1][desk] Grow the corpus: the WS8 synthetic cases in the CI L1 gate (this step also covers

@@ -6,6 +6,55 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-09: WS0.2 Retail baseline of the delivered 8.1 RPU (PR #104)
+
+Step: - [WS0.2][corpus] Retail baseline of the delivered 8.1 RPU on main 271b066: the DV- and
+  HDR10+-free base layer of the eight Profile 7 MEL dev cuts through mkvdovi, the RPU read back from
+  the `.DV.mkv` and scored against retail L1; the hybrid path on the four HDR10+ cuts; HotD against
+  the 2026-07-08 cm_analyze v2 output, report-only. Gate: per-cut and pooled bias and MAE of
+  delivered and pre-clamp L1 max, avg and min against retail, per frame and per shot, over all
+  frames and, for max and avg, above the floor (min has only the ≤ 12 cap); frame counts matching
+  on every cut; 0 delivered-vs-clamp mismatches; scene-cut precision and recall; recorded in the
+  log with versions and the runner path.
+
+Gate evidence: PR #104 (docs-only; the measurement runs locally). Runner, scorer and outputs:
+`~/mkvdovi-work/ws0-2-retail-baseline-2026-11-09/` (`run.sh` parts P/C/S, `score.py`,
+`score.md`, `results.json`, `RESULT.md`). Versions (`versions.txt`): main 271b066, mkvdovi 0.8.0
+and hdr_analyzer_mvp 0.8.0 (+cuda) from that HEAD, dovi_tool 2.3.4, hdr10plus_tool 1.7.2, ffmpeg
+n9.0.2-27, mkvmerge v82.0. Flags: `--analysis-quality accurate`, the rest default; `--hwaccel auto`
+chose CUDA. Cuts: the 8 Profile 7 MEL dev cuts with CM v2.9 retail RPUs (HotD S01E06, Alita ×2,
+The Shining ×2, Joker: Folie à Deux, Skyfall ×2), 13,074 frames, 118 retail shots.
+
+- Integrity: frame counts equal on every cut (retail = delivered = sidecar `stream_frames`);
+  delivered L1 equals the generator clamp of the measured scene L1 on every frame, 0 mismatches;
+  all 12 captures print "Verification passed"; the parser reproduces `truth/embedded_l1.csv`
+  byte for byte. An independent recompute (`selftest/`, written from the definitions alone)
+  agrees with `results.json` to 0.000 code.
+- Pooled per shot, delivered (ours − retail, 12-bit PQ codes, bias / MAE): max +143.8 / 146.2
+  (7 of 118 shots read low), avg −93.2 / 108.9, min +3.3 / 3.7. Pre-clamp scene: max
+  +138.2 / 151.9, avg −222.4 / 238.0, min +116.4 / 116.8. Per frame, delivered: max
+  +141.9 / 144.9, avg −149.7 / 176.3, min +2.7 / 3.1. Above the floor equals all for max (retail
+  max is ≥ 2081 on every shot); avg above the floor: −159.8 / 180.9 (70 shots).
+- Per cut, delivered max per shot: HotD +76.1, Alita airlock +147.6, Alita Iron City +173.7,
+  Shining hedge maze +25.5, Shining mountain road +121.0, Joker +245.0, Skyfall Macau +161.7,
+  Skyfall Shanghai +130.2. Per-cut frame and above-floor strata of every series are in
+  `results.json`.
+- Scene cuts (delivered scene refresh against retail, ±1 frame): recall 0.87 (96 of 110),
+  precision 0.96 (100 emitted). Missed cuts carry one shot's peak into its neighbour: Shining
+  mountain road goes from −106.5 raw to +121.0 delivered with no floored scene.
+- Hybrid path (4 HDR10+ cuts, 46 shots): max −67.3 / 79.9, avg −6.1 / 20.0, min +8.5.
+- HotD against cm_analyze v2 (2026-07-08 output, report-only): max +92.5 / 92.5, scene avg
+  +64.4 / 64.4, scene min +4.3; retail max against cm v2 +16.5 / 26.7.
+
+Review: the pre-PR panel found one P3, fixed (the gate asked for an above-floor L1 min stratum,
+which the ≤ 12 cap does not define). Cold review: Codex exec and Codex GitHub, both LGTM.
+
+Resolution: L1 max is the one field where retail is a fair accuracy reference, and the delivered
+RPU reads about 144 codes high on it. Retail avg is anchored (2 or 3 distinct values on 6 of 8
+cuts; HotD and Joker sit at the 1229 floor), so its errors there are a difference of definition.
+Retail min is a constant 0 or 12, so these cuts give no evidence for P10.5. Rerun with
+`PARTS="P C S" run.sh` after WS1.5 to compare.
+
 ### 2026-11-08: E7.2 An always-on frame-count check (PR #103)
 
 Step: - [E7.2][corpus] An always-on frame-count check. Gate: the item's gates (2) and (3) (the added
