@@ -6,6 +6,42 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-09: WS8.1 Grain on the synthetic highlights and odd offsets (PR #106)
+
+Step: - [WS8.1][desk] Grain on the synthetic highlights and odd offsets (today they carry no grain and
+  fill exactly one chroma quad). Gate: the item gate (synthetic material comes from a committed,
+  reproducible generator; truth files are present; the L1 gate or the development corpus uses the
+  material).
+
+Gate evidence, PR #106 (local detail in `~/mkvdovi-work/ws8-1-highlight-2026-11-09/RESULT.md`):
+- Committed generator: `scripts/corpus/make_highlight_pair.py`, pure Python with integer sample
+  arithmetic. Two runs gave the same raw sha256 for both twins. The grainy highlight is
+  820 + (grainy - clean) less its local mean (the owner chose this real-grain transplant over
+  seeded grain, 2026-11-09). Segments: 2x2 at all four grid phases, 8x8 on and off the grid,
+  32x32, one- and three-frame flashes, a 2x2 moving one pixel per frame.
+- Test: `hdr_analyzer_mvp/tests/highlight_pair.rs` checks grain, the four phases, the truth against
+  block occupancy computed from the geometry, and the analyzer's pixel and `st2094-10` peaks
+  against the truth. Its refusal tests cover short inputs, negative offsets, an output that names
+  an input, and stale truth after a failed rerun.
+- Truth files: `truth/highlight.json` of both D5 highlight cuts; their manifests carry
+  `.highlight.truth`. The decoded x265 output of both twins matches the generator's raw sha256.
+- Corpus uses it: both D5 entries rerun and accepted as baselines. Expect column: clean +0.0, grain
+  -88.8 (the default `max` reads a grainy 2x2 up to 89 codes below the highlight code). Analyzer
+  vs truth: 0.00 codes worst case on every highlight frame, both twins, `max` and `st2094-10`.
+- Not changed: the in-test fixture `hdr_analyzer_mvp/tests/synthetic_accuracy.rs:455` keeps its
+  grainless one-quad highlight; WS0.1 brings the WS8 synthetic cases into the CI L1 gate.
+- The highlight chroma stays neutral in the grainy twin too, so a highlight pixel's R'G'B' is its
+  luma and the truth is exact; only luma grain is transplanted.
+
+Checked 2026-11-09 @01aec43 (moved from the WS8 item): the D5 pair's generator lived only in
+`~/mkvdovi-work/corpus/src/` and painted Y 820 at even sizes and offsets, so no highlight left a
+2x2 block. The reduced-set grid is anchored at the crop's top-left
+(`hdr_analyzer_mvp/src/analysis/frame/reduced_set.rs:3`); the generator's truth names its grid
+anchor (`grid_anchor`, the picture's top-left, the analyzer's grid under `--no-crop`).
+
+Resolution: the WS8 material now has a committed, reproducible generator for grainy, off-grid
+highlights, and the development corpus scores it.
+
 ### 2026-11-09: WS1.5 Opt-in ST 2094-10 reduced-set estimator (PR #105)
 
 Step: - [WS1.5][gpu][corpus] Opt-in ST 2094-10 reduced-set estimator, PQ path (HLG later): 2×2 blocks

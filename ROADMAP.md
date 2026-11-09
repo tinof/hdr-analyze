@@ -52,13 +52,15 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-09 at main@cf96b20)
-<!-- roadmap-next: rev=3 scope=WS1.5 config=760f5c5efe83 probes=gpu:ok,corpus:ok ready=c0cdd839997f -->
+### Next up (checked 2026-11-09 at main@01aec43)
+<!-- roadmap-next: rev=3 scope=Item-WS8.1 config=760f5c5efe83 probes=gpu:ok,corpus:ok ready=d22d7edf42c2 -->
 
-Order: the owner named WS1.5 (2026-11-09); scoped to WS1, so P9.4 (priority 2) stays next after it.
+Order: the owner named WS8.1 (2026-11-09); scoped to WS8, so P9.4 (priority 2) stays next after it.
 
-1. **WS1.1 Explain the clean-source over-read** (priority 9). Gate: in WS1.1. Why: the other
-   startable WS1 step. Branch: `docs/ws1-1-over-read`. Release: none
+1. **WS8.4 Held-out split** (priority 7). Gate: the WS8 item gate. Why: fixes the split before
+   WS8.2 and WS8.3 pick real shots. Branch: `docs/ws8-4-holdout-split`. Release: none
+2. **WS8.3 Synthetic dissolves and fades** (priority 7). Gate: the WS8 item gate. Why: WS2.2 needs
+   it. Branch: `test/ws8-3-transitions`. Release: none
 
 **Reassess:** plan-changed (WS0.2, PR #104): delivered L1 max reads +144 codes high per shot
 (the WS1.5 baseline), and retail L1 min is a constant 0 or 12 on all 8 cuts, so it is no
@@ -362,7 +364,7 @@ The detailed gap table and validation method live in
 
 - **Status:** Core complete. `tools/l1_diff`, ground-truth tests, the CI L1 gate and the WS0.2
   retail baseline of the delivered RPU are in [the log](docs/ROADMAP_LOG.md) (2026-10-29,
-  2026-11-09). Open: WS0.1, which needs WS8.1.
+  2026-11-09). Open: WS0.1.
 - **Gate:** the CI L1 gate covers the WS8 synthetic cases (grain on highlights, a flash, a fade, an
   aspect-ratio change), each with committed references (owner, 2026-10-17).
 - [WS0.1][desk] Grow the corpus: the WS8 synthetic cases in the CI L1 gate (this step also covers
@@ -517,12 +519,10 @@ The detailed gap table and validation method live in
 
 ### WS8: test material
 
-- **Status:** Partial. Real material per format landed 2026-10-05; the other fixes the 2026-10-03
-  review asked for are open.
+- **Status:** Partial. Real material per format (2026-10-05) and the grainy, off-grid highlight
+  pair (WS8.1) are in [the log](docs/ROADMAP_LOG.md) (2026-11-09). Open: WS8.2 to WS8.4.
 - **Gate:** per item: synthetic material comes from a committed, reproducible generator; truth
   files are present; the L1 gate or the development corpus uses the material (owner, 2026-10-17).
-- [WS8.1][desk] Grain on the synthetic highlights and odd offsets (today they carry no grain and
-  fill exactly one chroma quad). Gate: the item gate.
 - [WS8.2][corpus] A grainy twin from the same master as the clean one (today "clean is truth"
   holds only to about ±50 codes). Gate: the item gate.
 - [WS8.3][corpus] Synthetic cross-dissolves and fades built from real shots (blended in PQ code and
