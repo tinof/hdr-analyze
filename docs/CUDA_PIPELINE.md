@@ -23,7 +23,9 @@ committed file is stale.
                                                      │ device pointers
                                                      ▼
                                     analyze_frame kernel (one launch)
+                                    [+ reduced_set_extrema, st2094-10 only]
                                                      │ one 18 KB result buffer
+                                                     │ [+ 2 extrema words]
                                                      ▼
                          host: histograms → scene detection → L1 per frame
                                                      │ at an accepted scene cut only
@@ -42,6 +44,9 @@ committed file is stale.
    - the 256-bin v5 luminance histogram and the 31-bin hue histogram;
    - a 4,096-bin PQ histogram in the selected peak domain (max-RGB by default);
    - the per-pixel luma and max-RGB sums (for exact averages) and both maxima.
+
+   With `--peak-estimator st2094-10` a second kernel, `reduced_set_extrema`, runs on the same
+   stream after `analyze_frame` (see "Code map and fallbacks").
 
    For HLG, every pixel goes through the Dolby Vision Profile 8.4 decode first: the luma reshaping
    curve, the two order-3 chroma MMR curves, and the RPU's YCbCr-to-RGB matrix. The host fills the
@@ -242,6 +247,12 @@ composer). For each clip and composer, with crop detection and with `--no-crop`,
 The PQ clip is also analyzed with `--hlg-composer bt2100`, and its `.bin` must be byte-identical to
 the default PQ run: the option must not touch PQ input.
 
+Before the clips, the script runs the in-crate test
+`analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops` (`--peak-estimator
+st2094-10` on odd crop anchors and sizes, planar and P010, consecutive frames), because crop
+detection only yields even anchors. libtest exits 0 when its filter matches nothing, so the script
+fails unless exactly one test passed.
+
 The script fails when `nvidia-smi`, `python3` or an `ffmpeg` with `libx265` is missing, and the
 test fails when the analyzer was built without the `cuda` feature. `--pq <file>` and `--hlg <file>`
 replace a generated clip with a real HEVC 10-bit sample. Run with those options after a change to
@@ -296,6 +307,17 @@ symbol, and the driver could not JIT PTX ISA 8.5 anyway.
 - `--peak-estimator robust` runs in the kernel: it fills the cross-quad diff histogram only when
   that estimator is selected (`grain_stats`), and the host applies the same `frame/peak.rs`
   functions. With other estimators the GPU `FramePeakStats` report neutral sigma/n_eff.
+- `--peak-estimator st2094-10` launches a second kernel per frame, `reduced_set_extrema`
+  (`analysis/gpu/backend/reduced_set.rs`; CPU side `analysis/frame/reduced_set.rs`), on the same
+  stream, only with that estimator. Its threads walk the 2×2 blocks of the crop, anchored at the crop's
+  top-left (partial blocks at an odd edge), and average each component in linear light through
+  `PQ_EOTF_LUT` (`EOTF_LUT_INTERVALS` = 4096 intervals, 4097 f32 values, uploaded once at
+  `GpuAnalyzer::new`) with `_rn` linear interpolation. Its result is a separate two-word buffer,
+  cleared before each launch: word 0 the f32 bits of the highest block max-RGB, word 1
+  `0xffffffff` minus the f32 bits of the lowest block min-RGB, so both reduce with `atomicMax`;
+  0 in word 1 means no block. The host downloads the two words after the main result. Both
+  kernels decode PQ Y'CbCr through the shared `pq_rgb` helper in `kernels.cu`, which mirrors the
+  CPU's `pq_rgb` in `frame/reduced_set.rs`.
 - The CPU computes the PQ max-RGB mix and the per-pixel PQ bin (`pixel_pq_bin`) in the kernel's f32
   arithmetic, and the kernel uses `_rn` intrinsics there, so histograms and maxima are
   bit-identical. Cross-thread reductions use integer counts, u64 fixed-point sums and the max of
@@ -316,7 +338,8 @@ symbol, and the driver could not JIT PTX ISA 8.5 anyway.
   `--profile-performance` prints an "Analysis" rate that excludes decoding.
 - Profile with `nsys profile --trace=cuda` and `nsys stats --report
   cuda_gpu_kern_sum,cuda_gpu_mem_time_sum`. With `--no-crop` on a 10-bit source, the only
-  per-frame copies should be one 18 KB result download and FFmpeg's own device-to-device surface
+  per-frame copies should be one 18 KB result download (plus the 8-byte reduced-set result with
+  `--peak-estimator st2094-10`) and FFmpeg's own device-to-device surface
   copy. Crop monitoring adds a download per scene cut; an unresolved crop, a forced or ineligible
   host path, and CPU fallback add one per frame.
 - Check every change for identical output against the previous build (see above) before measuring

@@ -52,13 +52,13 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-07 at main@3c65cdd)
-<!-- roadmap-next: rev=3 scope=all config=b3103c892048 probes=gpu:ok,corpus:ok ready=0e32181ec0a6 -->
+### Next up (checked 2026-11-09 at main@cf96b20)
+<!-- roadmap-next: rev=3 scope=WS1.5 config=760f5c5efe83 probes=gpu:ok,corpus:ok ready=c0cdd839997f -->
 
-Order: owner direction of 2026-11-07 (Priorities).
+Order: the owner named WS1.5 (2026-11-09); scoped to WS1, so P9.4 (priority 2) stays next after it.
 
-1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: in P9. Why: next after the owner's E7
-   order. Branch: `fix/p9-4-hdr10plus-coverage`. Release: patch
+1. **WS1.1 Explain the clean-source over-read** (priority 9). Gate: in WS1.1. Why: the other
+   startable WS1 step. Branch: `docs/ws1-1-over-read`. Release: none
 
 **Reassess:** plan-changed (WS0.2, PR #104): delivered L1 max reads +144 codes high per shot
 (the WS1.5 baseline), and retail L1 min is a constant 0 or 12 on all 8 cuts, so it is no
@@ -370,9 +370,9 @@ The detailed gap table and validation method live in
 
 ### WS1: grain-robust peak
 
-- **Status:** Partial. Measurement core, per-scene minimum (clamped by the generator, P10), the
-  max-RGB-mean average domain and HLG max-RGB have shipped. Open: the ST 2094-10 reduced-set
-  estimator (WS1.5, WS1.6) and a grain-robust peak.
+- **Status:** Partial. Measurement core, scene minimum, max-RGB-mean average, HLG max-RGB and the
+  opt-in PQ ST 2094-10 reduced-set peak (WS1.5, [log](docs/ROADMAP_LOG.md)) have shipped. Open:
+  the reduced set as default (WS1.6), the over-read explanation (WS1.1) and a grain-robust peak.
 - A grain-robust peak is missing. Raw max-RGB reads hot against `cm_analyze` v2
   ([VALIDATION.md §7](docs/VALIDATION.md)). The current opt-in `robust` rule
   ([TECHNICAL_REFERENCE.md §2.4](docs/TECHNICAL_REFERENCE.md)) removes part of the grain bias but
@@ -409,12 +409,6 @@ The detailed gap table and validation method live in
   per-shot peak MAE against retail on the development tier, no frozen synthetic case more than
   1 code further from the standard's value, CPU = CUDA, confirmed on unseen holdout cuts).
   Needs: WS1.1.
-- [WS1.5][gpu][corpus] Opt-in ST 2094-10 reduced-set estimator, PQ path (HLG later): 2×2 blocks
-  from the crop's top-left, partial at an odd edge, components averaged in linear light (one PQ
-  EOTF table, same f32 arithmetic on CPU and CUDA), min per §6.1.3 as a diagnostic; sidecar
-  `peak_estimator` value, `tools/l1_diff`. Gate: a test reproduces the 2026-11-07 per-shot numbers
-  of the four Alita and Skyfall cuts within 1 code; an odd-anchor case; CPU = CUDA; default `.bin`
-  unchanged (L1 gate without `--update`).
 - [WS1.6][gpu][corpus][reassess] Make the WS1.5 estimator the default; mkvdovi's hybrid path then
   accepts it (`mkvdovi/src/pipeline/hybrid.rs:163` takes only `max`). Gate: the item gate, the
   definition frozen before the run on the unseen Skyfall and Joker holdout cuts (retail L1); shots

@@ -65,7 +65,7 @@ hdr_analyzer_mvp "video.mkv"
 |------|---------|-------------|
 | `--peak-domain <max-rgb\|luma>` | `max-rgb` | Domain used for direct peak measurement. For HLG, `max-rgb` uses the full Dolby Vision 8.4 decode and `luma` the 8.4 luma curve alone |
 | `--peak-source <max\|histogram99\|histogram999>` | `max` in max-RGB domain; in luma, `histogram99` (balanced/aggressive) or `max` (conservative) | Per-frame peak brightness source. Applied by the histogram smoothing pass, so it has no effect with `--hist-bin-ema-beta 0` and `--hist-temporal-median 0` |
-| `--peak-estimator <max\|percentile\|robust>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, or the raw maximum less the part of the upper tail that the measured grain explains |
+| `--peak-estimator <max\|percentile\|robust\|st2094-10>` | `max` | Estimator applied in the direct peak domain: raw maximum, fine-histogram percentile, the raw maximum less the part of the upper tail that the measured grain explains, or the SMPTE ST 2094-10 reduced pixel set (§6.1.2: the highest max-RGB of non-overlapping 2×2 block means in linear light, anchored at the crop's top-left; opt-in, PQ input with `--peak-domain max-rgb` and `--downscale 1` only, anything else is refused) |
 | `--peak-percentile <0-100>` | `99.99` | Fine 4096-bin percentile used by `--peak-estimator percentile` |
 | `--header-peak-source <max\|histogram99\|histogram999>` | none | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
 | `--hist-bin-ema-beta <0.0-1.0>` | `0.1` | EMA smoothing for histogram bins and the `.bin` frame average (lower = more smoothing, 0 = disabled). Does not affect the L1 sidecar averages. |
@@ -152,7 +152,7 @@ warning; `mkvdovi` refuses such HLG input (see [HLG input](#hlg-input)).
 |------|---------|-------------|
 | `--analysis-threads <N>` | logical cores | Override Rayon worker count for histogram analysis |
 | `--profile-performance` | off | Print per-stage throughput (decode vs. analysis) when finished |
-| `--dump-frame-stats <PATH>` | none | Write sample-rate-aligned CSV with selected/raw/percentile/robust peaks, sigma, correction, effective-tail count, and the scene-detection series (`scene_diff`, `scene_score`, `scene_baseline`, `scene_start`), then the frame's unrounded max-RGB average (`avg_max_rgb_pq`). `HDR_ANALYZER_DUMP_MAX_RGB=<dir>` also writes every analyzed pixel's max-RGB value (`frame_<n>_x<x>_y<y>_w<w>_h<h>.f32`, little-endian f32 over the crop; on CUDA only with `--downscale 1`) for `scripts/validate_hlg_chroma_siting.sh` |
+| `--dump-frame-stats <PATH>` | none | Write sample-rate-aligned CSV with selected/raw/percentile/robust peaks, sigma, correction, effective-tail count, and the scene-detection series (`scene_diff`, `scene_score`, `scene_baseline`, `scene_start`), then the frame's unrounded max-RGB average (`avg_max_rgb_pq`), then the `st2094-10` reduced-set maximum and its §6.1.3 minimum (`reduced_max_pq`, `reduced_min_pq`; 0 with another estimator). `HDR_ANALYZER_DUMP_MAX_RGB=<dir>` also writes every analyzed pixel's max-RGB value (`frame_<n>_x<x>_y<y>_w<w>_h<h>.f32`, little-endian f32 over the crop; on CUDA only with `--downscale 1`) for `scripts/validate_hlg_chroma_siting.sh` |
 
 ### Notes for v6 output
 

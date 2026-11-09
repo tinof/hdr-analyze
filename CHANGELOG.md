@@ -8,6 +8,13 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- `hdr_analyzer_mvp --peak-estimator st2094-10` (ROADMAP WS1.5, opt-in): the L1 max candidate of
+  the SMPTE ST 2094-10 reduced pixel set, the highest max-RGB of 2×2 block means averaged in
+  linear light from the crop's top-left, identical on CPU and CUDA. It is PQ only and refuses HLG
+  input, `--peak-domain luma` and `--downscale` above 1. The sidecar records
+  `peak_estimator: "st2094-10"`, `--dump-frame-stats` adds `reduced_max_pq` and `reduced_min_pq`,
+  and `l1_diff` names the estimator it scores. The default stays `max`; mkvdovi's hybrid path
+  refuses these measurements until WS1.6.
 - `hdr_analyzer_mvp --au-table` writes `<measurements>.au.json`, the AU table of the playback
   manifest (ROADMAP P15.1, [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md)). It lists every
   video packet in decode order with its pts, size and the CRC-32 of IRAP pictures, plus the source and

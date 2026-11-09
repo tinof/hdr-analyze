@@ -199,6 +199,10 @@ const STREAM_FRAMES_VERSION: u32 = 5;
 struct L1Sidecar {
     version: u32,
     min_percentile: f64,
+    /// The analyzer's `--peak-estimator` (`max`, `percentile`, `robust`, `st2094-10`); the
+    /// frame peaks scored here are that estimator's; older sidecars may not record it.
+    #[serde(default)]
+    peak_estimator: Option<String>,
     #[serde(default)]
     source: Option<SidecarSource>,
     frames: SidecarFrames,
@@ -219,6 +223,14 @@ struct SidecarFrames {
     min_pq_12bit: Vec<u16>,
     avg_luma_pq_12bit: Vec<u16>,
     avg_max_rgb_pq_12bit: Vec<u16>,
+}
+
+/// The report line naming the peak estimator whose frame peaks the max score compares.
+fn peak_estimator_line(sidecar: &L1Sidecar) -> String {
+    format!(
+        "peak:      --peak-estimator {}",
+        sidecar.peak_estimator.as_deref().unwrap_or("not recorded")
+    )
 }
 
 fn default_sidecar_path(ours: &Path) -> PathBuf {
@@ -654,6 +666,7 @@ fn main() -> Result<()> {
             "minimum:   P{} (configured lower percentile)",
             sidecar.min_percentile
         );
+        println!("{}", peak_estimator_line(sidecar));
     } else {
         println!(
             "sidecar:   not found ({}); using legacy .bin average fallback",
@@ -1082,6 +1095,29 @@ mod tests {
                 "avg_max_rgb_pq_12bit": vec![0; decoded],
             },
         }))
+    }
+
+    #[test]
+    fn report_names_the_sidecar_peak_estimator() {
+        let mut json = serde_json::json!({
+            "version": 6,
+            "min_percentile": 0.01,
+            "peak_estimator": "st2094-10",
+            "frames": {
+                "min_pq_12bit": [0],
+                "avg_luma_pq_12bit": [0],
+                "avg_max_rgb_pq_12bit": [0],
+            },
+        });
+        assert_eq!(
+            peak_estimator_line(&sidecar(json.clone())),
+            "peak:      --peak-estimator st2094-10"
+        );
+        json.as_object_mut().unwrap().remove("peak_estimator");
+        assert_eq!(
+            peak_estimator_line(&sidecar(json)),
+            "peak:      --peak-estimator not recorded"
+        );
     }
 
     #[test]
