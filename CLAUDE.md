@@ -38,7 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Claude Code feedback loop (committed in `.claude/`)
 
-- Per edit, rust-analyzer pushes diagnostics incl. `cargo check` results (needs `rustup component add rust-analyzer`). At end of turn `.claude/hooks/rust-check.sh` rustfmts touched files and runs clippy (plus `nvcc -ptx` for a touched `.cu`); it feeds back errors anywhere and warnings in touched files, never runs tests, and does not lint `cuda`-gated code. The file-size note is the ship plugin's global hook, not this one. Details: [`docs/CI.md`](docs/CI.md).
+- Per edit, rust-analyzer pushes diagnostics incl. `cargo check` results (needs `rustup component add rust-analyzer`). At end of turn `.claude/hooks/rust-check.sh` rustfmts touched files and runs clippy (plus `nvcc -ptx` for a touched `.cu`); it feeds back errors anywhere and warnings in touched files, never runs tests, and does not lint `cuda`-gated code. It skips a checkout under a fresh builder hold file. Details: [`docs/CI.md`](docs/CI.md).
 
 ## Roadmap workflow (committed in `.claude/`)
 

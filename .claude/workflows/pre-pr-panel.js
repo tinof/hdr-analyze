@@ -53,8 +53,10 @@ if (any(/^\.claude\/skills\/pre-pr-review\/(clear-record\.sh$|tests\/)/)) gates.
 if (any(/^\.claude\/skills\/pre-pr-review\/(reviewer-yield\.sh$|tests\/)/)) gates.add('reviewer-yield')
 // The end-of-turn Rust check hook and its builder-hold test.
 if (any(/^\.claude\/hooks\//)) gates.add('rust-check-hook')
+// This script's reviewer decision and gate list, and their test.
+if (any(/^\.claude\/workflows\/(pre-pr-panel\.js$|tests\/pre-pr-panel-trigger-test\.sh$)/)) gates.add('panel-trigger')
 const requiredGates = [...gates]
-log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass, record-cleanup, reviewer-yield or hook paths touched)'))
+log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass, record-cleanup, reviewer-yield, hook or panel paths touched)'))
 
 // High-risk paths: the ones that require CUDA parity or the L1 regression gate, plus the
 // cross-binary contract modules named in CLAUDE.md. A module counts as a file or as a directory of

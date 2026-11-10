@@ -70,13 +70,17 @@ blocks="$(cat "$state/blocks" 2>/dev/null || echo 0)"
 
 mapfile -t touched <"$state/files"
 
-# Group touched files by repository root (works in worktrees too).
-declare -A roots=()
+# Group touched files by repository root (works in worktrees too). Each file belongs to its own
+# checkout only: a worktree nested in the main checkout (.claude/worktrees/<name>) shares its path
+# prefix, so later steps match files to a root through `owner`, never by prefix.
+declare -A roots=() owner=()
 for f in "${touched[@]}"; do
     dir="$(dirname -- "$f")"
     [ -d "$dir" ] || continue
     root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || continue
-    [ -f "$root/Cargo.toml" ] && roots["$root"]=1
+    [ -f "$root/Cargo.toml" ] || continue
+    roots["$root"]=1
+    owner["$f"]="$root"
 done
 if [ "${#roots[@]}" -eq 0 ]; then
     rm -rf -- "$state"
@@ -95,7 +99,7 @@ keep=()
 for root in "${held[@]}"; do
     unset 'roots[$root]'
     for f in "${touched[@]}"; do
-        case "$f" in "$root"/*) keep+=("$f") ;; esac
+        [ "${owner[$f]:-}" = "$root" ] && keep+=("$f")
     done
 done
 # Done with this turn's files: forget them, except the ones a held checkout still owes a check.
@@ -123,6 +127,7 @@ for root in "${!roots[@]}"; do
     # Repo-relative touched paths for this root.
     rel=()
     for f in "${touched[@]}"; do
+        [ "${owner[$f]:-}" = "$root" ] || continue
         case "$f" in "$root"/*) rel+=("${f#"$root"/}") ;; esac
     done
 

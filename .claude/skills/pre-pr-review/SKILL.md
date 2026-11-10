@@ -122,12 +122,12 @@ bypass or auto mode each call, its resume and each `gatesOnly` recompute ask for
 ```json
 {"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
  "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md",
- "specFile": "<scratchpad>/prepr-spec.md", "hard": true}
+ "specFile": "<scratchpad>/prepr-spec.md"}
 ```
 
 **`hard`** decides, with the paths, whether the Fable 5.2 whole-diff reviewer runs: it runs on a
 high-risk diff that is also hard. The workflow sees two hard criteria in the paths by itself
-(CPU/CUDA numeric code; two or more sides of a cross-binary contract). Pass `"hard": true` for the
+(CPU/CUDA numeric code; two or more sides of a cross-binary contract). Add `"hard": true` to the args for the
 rest of the rubric in `.claude/workflow.md` "## Notes", and say in the report which reason held:
 - the changed logic lines, added plus deleted, are 300 or more:
   `git diff --numstat origin/<base>...HEAD -- '*.rs' '*.cu' 'Cargo.toml' '*/Cargo.toml' '*.sh' '*.js' '*.py' ':(exclude)*/tests/**' ':(exclude)*/tests.rs' ':(exclude)*_tests.rs'`
@@ -236,6 +236,8 @@ that list and step 3's list. Do the same after every later fix round, and run th
 | `gemini-harness` | `.claude/workflows/tests/pre-pr-gemini-test.sh` (fake agy; about 1 minute) |
 | `pre-pr-record` | `.claude/skills/pre-pr-review/tests/clear-record-test.sh` (a throwaway repo; seconds) |
 | `reviewer-yield` | `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh` (hand-made records; seconds) |
+| `rust-check-hook` | `.claude/hooks/tests/rust-check-hold-test.sh` (a throwaway repo and worktrees, stub cargo and rustfmt; seconds) |
+| `panel-trigger` | `.claude/workflows/tests/pre-pr-panel-trigger-test.sh` (the panel's `gatesOnly` mode under node; seconds) |
 
 The `test` gate is `scripts/ci/test-gate.sh`, the same script the `gate` of `.claude/workflow.md`
 runs. It builds the current analyzer next to the debug mkvdovi the integration tests run, writes the
