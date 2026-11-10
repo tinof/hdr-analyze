@@ -1,9 +1,9 @@
 export const meta = {
   name: 'pre-pr-panel',
-  description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort, a spec lens when the step text is handed over, a Sonnet whole-diff reviewer (Fable paused), each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
-  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone, or as the /ship step 3b self-check). args: {base, files, item, acceptanceGate, scopeFile, specFile?, kind?, moveProof?, moveFiles?}; specFile (the roadmap step text, or the /ship spec file) adds the spec lens; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates and starts no agents; only pre-pr-review step 5 (standalone) calls it that way, to recompute gates after fixes. /ship no longer calls gatesOnly: it reads the same path rules from .claude/workflow.md.',
+  description: 'Pre-PR review of a roadmap change: three Opus lenses at high effort, a spec lens when the step text is handed over, a Fable whole-diff reviewer on hard high-risk diffs, each finding checked by an independent Opus skeptic, plus the gates the touched paths require',
+  whenToUse: 'Internal to the pre-pr-review skill; do not run it directly. Started by that skill (standalone, or as the /ship step 3b self-check). args: {base, files, item, acceptanceGate, scopeFile, specFile?, hard?, kind?, moveProof?, moveFiles?}; specFile (the roadmap step text, or the /ship spec file) adds the spec lens; hard: true (300 or more changed logic lines, or a judgment item of the hard rubric, set by the skill) adds the Fable reviewer on a high-risk diff, as do the numeric and two-sided contract paths by themselves; kind "pure-move" with a moveProof path and moveFiles covering every non-Markdown file runs one move-integrity lens instead of the panel. Do not start it without args. With {base, files, gatesOnly: true} it only returns requiredGates, highRisk, hard and fable (the reviewer decision) and starts no agents; only pre-pr-review step 5 (standalone) calls it that way, to recompute gates after fixes. /ship no longer calls gatesOnly: it reads the same path rules from .claude/workflow.md.',
   phases: [
-    { title: 'Review', detail: 'correctness, repo contracts, tests and gates, spec when a specFile is given (Opus, high); whole diff (Sonnet, high) on every diff; Fable paused; or one move-integrity lens (Opus, high) on a pure move' },
+    { title: 'Review', detail: 'correctness, repo contracts, tests and gates, spec when a specFile is given (Opus, high); whole diff (Fable, high) on a hard high-risk diff; or one move-integrity lens (Opus, high) on a pure move' },
     { title: 'Verify', detail: 'one Opus skeptic per finding (medium), with a different lens than the finder; refutes only an impossible failure, re-ranks the rest' },
   ],
 }
@@ -51,14 +51,41 @@ if (any(/^\.claude\/workflows\/(pre-pr-gemini\.|tests\/)|^\.agents\/agents\/pre-
 if (any(/^\.claude\/skills\/pre-pr-review\/(clear-record\.sh$|tests\/)/)) gates.add('pre-pr-record')
 // The reviewer-yield observer of /pre-pr-review step 7 and its test.
 if (any(/^\.claude\/skills\/pre-pr-review\/(reviewer-yield\.sh$|tests\/)/)) gates.add('reviewer-yield')
+// The end-of-turn Rust check hook and its builder-hold test.
+if (any(/^\.claude\/hooks\//)) gates.add('rust-check-hook')
 const requiredGates = [...gates]
-log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass, record-cleanup or reviewer-yield paths touched)'))
-// Gate list only, no reviewers: lets the skills recompute gates for a file list that grew after
-// fixes, without a second copy of the path rules.
-if (a.gatesOnly) return { gatesOnly: true, requiredGates }
+log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass, record-cleanup, reviewer-yield or hook paths touched)'))
+
+// High-risk paths: the ones that require CUDA parity or the L1 regression gate, plus the
+// cross-binary contract modules named in CLAUDE.md. A module counts as a file or as a directory of
+// submodules (metadata.rs or metadata/), so a split never drops the rule.
+const riskPaths = cuda || measurement ||
+  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)|^dovi_rpu_builder\/src\//)
+// Hard diffs (owner decision 2026-11-10: Fable reviews when the difficulty warrants it). Two of
+// the repo's hard criteria (.claude/workflow.md "## Notes") show in the paths, so they never
+// depend on who built the step or on a local log:
+// - numeric work mirrored on CPU and CUDA: the analysis code with its kernel, and the composers;
+// - two or more sides of a cross-binary contract (CLAUDE.md "Cross-binary contracts"): the
+//   analyzer side (L1 sidecar, --version and --help, AU table), the mkvdovi side that reads them,
+//   and tools/l1_diff.
+// The skill adds `hard: true` for the rest of the rubric: 300 or more changed logic lines, or a
+// judgment item (a design decision with a real trade-off, an unknown root cause).
+const numeric = any(/^hdr_analyzer_mvp\/src\/analysis\/|^dovi84_composer\/src\//)
+const contractSides = [
+  /^hdr_analyzer_mvp\/src\/(l1_sidecar|cli|au_table)(\.rs$|\/)/,
+  /^mkvdovi\/src\/(metadata|external)(\.rs$|\/)|^mkvdovi\/src\/pipeline\/(measure|manifest)(\.rs$|\/)/,
+  /^tools\/l1_diff\//,
+].filter(re => any(re)).length
+const hardReason = a.hard === true ? 'hard: true from the skill' : numeric ? 'CPU/CUDA numeric path' :
+  contractSides >= 2 ? `${contractSides} sides of a cross-binary contract` : ''
+const hard = hardReason !== ''
+// Gate list and reviewer decision only, no reviewers: lets the skills recompute gates for a file
+// list that grew after fixes, and lets a test check the Fable trigger, without a second copy of
+// the path rules. `fable` ignores the pure-move mode, which is decided below.
+if (a.gatesOnly) return { gatesOnly: true, requiredGates, highRisk: riskPaths, hard, hardReason, fable: riskPaths && hard }
 
 // Pure move (a module-size split with a passing line-exact move proof): one move-integrity lens
-// replaces the three lenses, the spec lens, Sonnet and Fable. The skill selects it only after rerunning the proof on HEAD;
+// replaces the three lenses, the spec lens and Fable. The skill selects it only after rerunning the proof on HEAD;
 // without a proof path here the full panel runs. Gates stay as computed above.
 // Every non-Markdown file in scope must be one the split touches (moveFiles), so an unrelated edit
 // on the same branch never escapes the full panel.
@@ -71,11 +98,8 @@ if (a.kind === 'pure-move' && !pureMove) {
     'not in moveFiles: ' + uncovered.join(', ')) + '): running the full panel')
 }
 
-// High-risk diffs add the Fable reviewer (while FABLE_PAUSED is false): the paths that require CUDA parity or the L1 regression
-// gate, plus the cross-binary contract modules named in CLAUDE.md. A module counts as a file or as
-// a directory of submodules (metadata.rs or metadata/), so a split never drops the reviewer.
-const highRisk = !pureMove && (cuda || measurement ||
-  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)|^dovi_rpu_builder\/src\//))
+// A hard high-risk diff adds the Fable reviewer (riskPaths and hard are computed above).
+const highRisk = !pureMove && riskPaths
 
 const SCOPE = [
   `Scope: run \`git diff ${a.base}...HEAD\` for the committed part, and read the uncommitted files `,
@@ -149,17 +173,6 @@ const LENSES = pureMove ? [MOVE_LENS] : [
     prompt: `Lens: tests and gates. Does the change carry tests for what it changes? Would a test skip silently on this host (missing tool, missing sibling analyzer)? If L1 moves, are the tools/l1_diff/corpus references updated on purpose with the reason stated? The gates computed for this diff are: ${requiredGates.join(', ') || 'none'}; name a gate that is missing for this change. Is there evidence for the item's acceptance gate, or is the step being marked done without it?`,
   },
 ]
-// Model diversity (owner decision 2026-11-08): a Sonnet whole-diff reviewer on every full review,
-// on the assumption that it catches defects the Opus lenses miss. The 2026-11-08 pilot
-// (~/mkvdovi-work/review-eval/2026-11-08-model-ab/RESULT.md) found one such defect in three
-// cases; .claude/skills/pre-pr-review/reviewer-yield.sh checks the assumption on later records.
-if (!pureMove) {
-  LENSES.push({
-    key: 'sonnet', model: 'sonnet', effort: 'high',
-    prompt: 'Whole-diff review, no fixed lens: correctness, the repo contracts, tests, and whether the change does what the specification asks.',
-  })
-}
-
 // Spec axis: does the diff do what the step asks, and only that? Runs only with the step text.
 if (!pureMove && a.specFile) {
   LENSES.push({
@@ -170,25 +183,28 @@ if (!pureMove && a.specFile) {
   })
 }
 
-// Fable is paused (owner, 2026-11-08) while the Sonnet reviewer's yield is observed alone; set
-// FABLE_PAUSED to false to bring it back on high-risk diffs.
-const FABLE_PAUSED = true
-if (highRisk && !FABLE_PAUSED) {
+// Model diversity (owner decision 2026-11-10): one Fable 5.2 whole-diff reviewer at high effort on
+// a hard high-risk diff, on the assumption that it catches defects the Opus lenses miss. The Sonnet
+// reviewer of the 2026-11-08 trial left the panel the same day (5 runs, two P3 findings beyond
+// Opus). .claude/skills/pre-pr-review/reviewer-yield.sh checks the assumption on later records.
+const fableSkip = pureMove ? 'pure move' : !highRisk ? 'no high-risk path' : !hard ? 'high-risk but not hard: under 300 logic lines, no numeric or two-sided contract path' : ''
+if (!fableSkip) {
+  log(`fable reviewer on: high-risk and hard (${hardReason})`)
   LENSES.push({
-    key: 'fable', model: 'fable', effort: 'medium',
+    key: 'fable', model: 'fable', effort: 'high',
     prompt: 'Whole-diff review, no fixed lens. Narrow reviewers already cover correctness, the repo contracts in CLAUDE.md, tests and gates, and (when the step text is handed over) the specification. Look for what narrow lenses miss: a design or specification error, an interaction between two changed files, an assumption that holds in the tests but not on real media, a contract changed on one side only. Report only real defects.',
   })
 } else {
-  log(pureMove ? 'pure move: one move-integrity lens, no Fable' : FABLE_PAUSED ? 'fable reviewer paused (owner, 2026-11-08)' : 'fable reviewer skipped: no high-risk path in this diff')
+  log(pureMove ? 'pure move: one move-integrity lens, no Fable' : `fable reviewer skipped: ${fableSkip}`)
 }
 
 
 const ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 }
 const MAX_VERIFY = 8
-// The skeptic always has a different lens than the finder; Sonnet and Fable findings are checked by Opus.
+// The skeptic always has a different lens than the finder; Fable findings are checked by Opus.
 // Gemini runs outside this workflow (pre-pr-gemini.sh, started by the skill), so the panel never
 // waits for it; the skill checks its findings itself, like Codex's.
-const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness', spec: 'correctness', sonnet: 'contracts', fable: 'contracts', 'move-integrity': 'contracts' }
+const verifyLens = { correctness: 'contracts', contracts: 'correctness', 'tests-and-gates': 'correctness', spec: 'correctness', fable: 'contracts', 'move-integrity': 'contracts' }
 
 const results = await pipeline(
   LENSES,
@@ -206,12 +222,10 @@ const reviewers = LENSES.map(l => (failedLenses.includes(l.key)
 if (pureMove) {
   for (const key of ['correctness', 'contracts', 'tests-and-gates']) reviewers.push({ key, model: 'opus', effort: 'high', ran: false, reason: 'pure move: replaced by move-integrity' })
   reviewers.push({ key: 'spec', model: 'opus', effort: 'high', ran: false, reason: 'pure move' })
-  reviewers.push({ key: 'sonnet', model: 'sonnet', effort: 'high', ran: false, reason: 'pure move' })
-  reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'pure move' })
+  reviewers.push({ key: 'fable', model: 'fable', effort: 'high', ran: false, reason: 'pure move' })
 } else {
   if (!a.specFile) reviewers.push({ key: 'spec', model: 'opus', effort: 'high', ran: false, reason: 'no specFile handed over' })
-  if (FABLE_PAUSED) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'paused (owner, 2026-11-08): Sonnet trial' })
-  else if (!highRisk) reviewers.push({ key: 'fable', model: 'fable', effort: 'medium', ran: false, reason: 'no high-risk path' })
+  if (fableSkip) reviewers.push({ key: 'fable', model: 'fable', effort: 'high', ran: false, reason: fableSkip })
 }
 
 // Barrier on purpose: cap the verification count, highest priority first. No dedupe here: two

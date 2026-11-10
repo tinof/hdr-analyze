@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Sonnet 5.5 whole-diff reviewer; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
 ---
@@ -122,8 +122,20 @@ bypass or auto mode each call, its resume and each `gatesOnly` recompute ask for
 ```json
 {"base": "origin/<base>", "files": ["<every file in scope>"], "item": "<ID + step>",
  "acceptanceGate": "<quoted gate>", "scopeFile": "<scratchpad>/prepr-scope.md",
- "specFile": "<scratchpad>/prepr-spec.md"}
+ "specFile": "<scratchpad>/prepr-spec.md", "hard": true}
 ```
+
+**`hard`** decides, with the paths, whether the Fable 5.2 whole-diff reviewer runs: it runs on a
+high-risk diff that is also hard. The workflow sees two hard criteria in the paths by itself
+(CPU/CUDA numeric code; two or more sides of a cross-binary contract). Pass `"hard": true` for the
+rest of the rubric in `.claude/workflow.md` "## Notes", and say in the report which reason held:
+- the changed logic lines, added plus deleted, are 300 or more:
+  `git diff --numstat origin/<base>...HEAD -- '*.rs' '*.cu' 'Cargo.toml' '*/Cargo.toml' '*.sh' '*.js' '*.py' ':(exclude)*/tests/**' ':(exclude)*/tests.rs' ':(exclude)*_tests.rs'`
+  (the contract's `logic` globs without its `tests`);
+- or you judge that the diff holds a design decision with a real trade-off, or fixes a defect whose
+  root cause was unknown when the step started.
+A line for this step in `<git common dir>/roadmap-builders.jsonl` (a builder agent built it) is one
+more reason. Its absence means nothing: the log is local to one host. Otherwise leave `hard` out.
 
 Keep these args: step 4 resumes with them.
 
@@ -133,8 +145,8 @@ is a transcript, not that JSON, so do not parse it. If the result is missing, em
 unexpected, read the `{"type":"result",…}` lines of `journal.jsonl` in the transcript directory
 the launch result names. Each line is one agent's actual return value.
 
-It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Sonnet runs on every
-full review, the spec lens only with a `specFile`), `findings` (each verified by an independent
+It returns `complete`, `failedLenses`, `reviewers` (who ran, model, effort; Fable runs on a hard
+high-risk diff and is listed with its reason when it does not, the spec lens only with a `specFile`), `findings` (each verified by an independent
 Opus skeptic; a skeptic refutes only a failure that cannot happen and otherwise re-ranks it, so
 `priority` is the skeptic's and `finderPriority` the finder's), `refuted` (claims a
 skeptic refuted; they go into the step 8 record), `unverified` and
@@ -171,7 +183,7 @@ run the full panel.
   silently.
 
 The mode replaces only the reviewers: one move-integrity lens instead of the three lenses, the
-spec lens, Sonnet and Fable. The gates and the item's acceptance checks (`rpu-baseline compare
+spec lens and Fable. The gates and the item's acceptance checks (`rpu-baseline compare
 --require-identical-l1`, the L1 gate without `--update`) still apply.
 
 ## 4. Verify and fix
@@ -188,9 +200,9 @@ spec lens, Sonnet and Fable. The gates and the item's acceptance checks (`rpu-ba
    defect; distinct defects at the same file:line stay separate. Merge the workflow's `refuted`
    list the same way: a refuted claim that describes the same defect as another finding adds its
    lens to that entry's `finders` and is not a row of its own. Only an unmatched refuted claim
-   becomes a `refuted` entry in the step 8 record. A refuted claim whose finders are only
-   `sonnet` or `fable` was refuted by an Opus skeptic, which may share the blind spot those
-   reviewers are there to cover: read the code for it yourself and keep or reject it with a
+   becomes a `refuted` entry in the step 8 record. A refuted claim whose only finder is
+   `fable` was refuted by an Opus skeptic, which may share the blind spot that
+   reviewer is there to cover: read the code for it yourself and keep or reject it with a
    reason, like an `unverified` one.
    **Pure move:** a confirmed move-integrity finding of a change that is not a move voids the mode.
    Rerun the workflow without `kind` (a fresh run, not a resume) before you fix anything.
@@ -208,7 +220,7 @@ Run the gates after the last fix, on the final file list. Fixes can touch files 
 scope, and those files can add gates. So first commit the fixes (step 6 gives the message), then
 recompute the list: call the Workflow tool with the same `scriptPath` as step 3 and
 `args: {"base": "origin/<base>", "files": [<git diff --name-only origin/<base>...HEAD>], "gatesOnly": true}`.
-That returns `requiredGates` from the same path rules and starts no agents. Use the union of
+That returns `requiredGates` from the same path rules (with `highRisk`, `hard` and `fable`, which this step does not use) and starts no agents. Use the union of
 that list and step 3's list. Do the same after every later fix round, and run the gates again. When the last run passes, save the commit it ran on,
 `git rev-parse HEAD`, as `gatedCommit` for step 8. The gate commands:
 
@@ -270,13 +282,14 @@ Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort,
 `reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finders, verdict, fix
 commit or reason), gate results (standalone mode), blockers, docs changed.
 
-**Reviewer yield.** The Sonnet reviewer is on the panel on an assumption (owner, 2026-11-08):
-it catches defects the Opus lenses miss. Fable is paused meanwhile (`FABLE_PAUSED` in the
-workflow), so its verdict stays at "observing" until it runs again. Gemini gets the same verdict,
+**Reviewer yield.** The Fable 5.2 reviewer is on the panel on an assumption (owner, 2026-11-10):
+on a hard high-risk diff it catches defects the Opus lenses miss. The Sonnet reviewer of the
+2026-11-08 trial left the panel on 2026-11-10 after 5 runs (two findings beyond Opus, both P3); its
+old records keep their row in the table and get no verdict. Gemini gets the same verdict as Fable,
 its runs counted from `geminiPass`; the Codex focused pass gets a run count but no verdict. Run
 `.claude/skills/pre-pr-review/reviewer-yield.sh` here and put its table, its beyond-Opus list and
 its verdicts in the report. It counts the records written so far; this review's own record follows
-in step 8, and its findings table already shows what Sonnet found this time. A beyond-Opus finding is a confirmed
+in step 8, and its findings table already shows what Fable found this time. A beyond-Opus finding is a confirmed
 one that no Opus lens also reported. Say in one line per new beyond-Opus finding whether it
 mattered (recorded priorities can understate it). At "candidate for removal" (10 runs, no
 beyond-Opus finding at P0-P2), name it in the report and in `/ship`'s handoff; the owner decides,
@@ -343,7 +356,7 @@ Then write the echoed path with the Write tool:
   is `{}`: `/ship` runs and records the gates.
 - `findings` has one entry per defect after the duplicate merge in step 4.2, with **every**
   reviewer that reported it in `finders` (`correctness`, `contracts`, `tests-and-gates`, `spec`,
-  `sonnet`, `move-integrity`, `fable`, `gemini`, `codex-focused`). It includes the workflow's `refuted`
+  `move-integrity`, `fable`, `gemini`, `codex-focused`; `sonnet` in records before 2026-11-10). It includes the workflow's `refuted`
   claims (verdict `refuted`) and the ones you rejected, so a finder's false alarms count too.
 - `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass`, `geminiReason` and `geminiCost` are informational and do not affect reuse. `geminiCost` comes from the Gemini result: `seconds`, the length of `attempts`, and `usage` (`thinking_tokens`, `output_tokens`, `partial`); omit it when the pass was skipped.
 - `deferredP0P1` and `rejectedP0P1` do not block reuse. The owner sees them in the report.

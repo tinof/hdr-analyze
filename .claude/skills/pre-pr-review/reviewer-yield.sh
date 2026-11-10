@@ -5,7 +5,8 @@
 #
 # Usage: reviewer-yield.sh [--since YYYY-MM-DD] [--min-runs N] [--dir <records dir>]
 #   --since     count records written on or after this date (file mtime); default 2026-11-08,
-#               the day the Sonnet reviewer joined the panel and Fable's trial restarted.
+#               the day the reviewer trials restarted. The Sonnet reviewer ran from then until
+#               2026-11-10; the Fable 5.2 reviewer runs on hard high-risk diffs since 2026-11-10.
 #   --min-runs  runs a reviewer needs before it gets a verdict; default 10.
 #   --dir       records directory; default <git common dir>/pre-pr-review.
 #
@@ -16,7 +17,8 @@
 # split by priority. Then each beyond-Opus finding (record, where, priority, all finders), so the
 # main session can judge whether it mattered.
 #
-# Verdict, for the observed reviewers (sonnet, fable, gemini), once runs >= --min-runs:
+# Verdict, for the observed reviewers (fable, gemini), once runs >= --min-runs. A reviewer that
+# left the panel (sonnet) keeps its row in the table and gets no verdict:
 #   keep                   at least one beyond-Opus finding at P0-P2
 #   candidate for removal  none at P0-P2 (P3-only catches do not pay for a reviewer)
 # Below --min-runs: "observing (k of N runs)". The owner decides; this script never edits the panel.
@@ -51,7 +53,7 @@ if [ -d "$dir" ]; then
 fi
 echo "reviewer yield since $since: ${#files[@]} record(s) in $dir"
 if [ "${#files[@]}" -eq 0 ]; then
-    echo "no records yet; observing sonnet, fable and gemini."
+    echo "no records yet; observing fable and gemini."
     exit 0
 fi
 
@@ -89,7 +91,7 @@ jq -rn --argjson min "$min_runs" '
     ([$recs[] | .head as $h | .findings[] | select(confirmed and ((.finders // []) - opus | length) == ((.finders // []) | length)) | "  \($h) \(.priority // "?") \(.where // "?") [\((.finders // []) | join(", "))]"] | if length == 0 then ["  none"] else . end | .[]),
     "",
     "verdicts:",
-    (["sonnet", "fable", "gemini"][] as $n
+    (["fable", "gemini"][] as $n
       | ($rows | map(select(.name == $n)) | .[0] // {runs: 0, beyond: []}) as $r
       | if $r.runs < $min then "  \($n): observing (\($r.runs) of \($min) runs)"
         elif ([$r.beyond[] | select(.priority == "P0" or .priority == "P1" or .priority == "P2")] | length) > 0 then "  \($n): keep (\($r.beyond | length) beyond-Opus finding(s) in \($r.runs) runs)"
