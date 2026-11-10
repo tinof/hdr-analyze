@@ -19,9 +19,10 @@
 # session ends its turn while it waits, and without the hold this hook would rustfmt files the
 # builder is still editing and take the cargo lock. The git dir is the checkout's own (a linked
 # worktree has its own), and every run has its own file, so two runs never clear each other's
-# hold and a hold never reaches another checkout. `mark` renews the holds of the checkout an edit
-# lands in; a hold older than HOLD_MAX_MIN minutes (a dead session) no longer counts. The touched
-# files of a held checkout stay recorded, so the first Stop after the builder returns checks them.
+# hold and a hold never reaches another checkout. `mark` renews the fresh holds of the checkout an
+# edit lands in; a hold older than HOLD_MAX_MIN minutes (a dead session) no longer counts, and an
+# edit does not revive it. The touched files of a held checkout stay recorded, so the first Stop
+# after the builder returns checks them.
 set -uo pipefail
 
 MAX_BLOCKS=3
@@ -43,11 +44,13 @@ emit_system_message() {
 case "$mode" in
 mark)
     file="$(jq -r '.tool_input.file_path // empty' <<<"$input" 2>/dev/null)"
-    # An edit in a checkout with builder holds keeps them fresh, whatever the file type.
+    # An edit in a checkout with builder holds keeps them fresh, whatever the file type. Only a
+    # hold that still counts is renewed: an expired one (a dead session) must stay expired.
     if [ -n "$file" ]; then
         gd="$(git -C "$(dirname -- "$file")" rev-parse --absolute-git-dir 2>/dev/null)"
         if [ -n "$gd" ]; then
-            for h in "$gd"/claude-builder.*.hold; do [ -e "$h" ] && touch -c -- "$h"; done
+            find "$gd" -maxdepth 1 -name 'claude-builder.*.hold' -mmin "-$HOLD_MAX_MIN" \
+                -exec touch -c -- {} + 2>/dev/null
         fi
     fi
     case "$file" in

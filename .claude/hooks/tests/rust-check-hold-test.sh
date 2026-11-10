@@ -115,4 +115,12 @@ check "nested, main held: the main checkout's file stays recorded" recorded "$a/
 if recorded "$c/src/lib.rs"; then bad "nested, main held: the checked worktree file is forgotten"; else ok "nested, main held: the checked worktree file is forgotten"; fi
 rm "$ga/claude-builder.r7-1-501.hold"; stop
 
+# 9. An edit does not revive an expired hold: a hold older than the limit stays ignored even when
+#    it existed before the mark, so the next Stop checks the checkout.
+echo dead > "$ga/claude-builder.dead-2.hold"; age 240 "$ga/claude-builder.dead-2.hold"
+mark "$a/src/lib.rs"; stop
+check "expired hold before an edit: clippy runs" cargo_ran_in "$a"
+check "expired hold before an edit: the hold stays expired" test -z "$(find "$ga" -maxdepth 1 -name 'claude-builder.dead-2.hold' -mmin -180)"
+rm "$ga/claude-builder.dead-2.hold"
+
 if [ "$fails" -eq 0 ]; then echo "all rust-check hold tests passed"; else echo "$fails rust-check hold test(s) failed"; exit 1; fi

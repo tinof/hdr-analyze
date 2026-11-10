@@ -80,7 +80,7 @@ hooks run only where pre-commit is installed
   `fable-builder`), the Stop hook skips that checkout: the skill writes
   `<git dir>/claude-builder.<run>.hold` before the builder starts and deletes it afterwards. The
   hold is per checkout and per run, an edit in the checkout renews it, and one older than 3 hours
-  no longer counts. The touched files stay recorded, so the first Stop after the builder returns
+  no longer counts (an edit does not revive it). The touched files stay recorded, so the first Stop after the builder returns
   checks them. Each touched file belongs to its own checkout (its git toplevel, not a path
   prefix), so a worktree nested under `.claude/worktrees/<name>` keeps its hold, and the main
   checkout's pass never formats its files. Test:
