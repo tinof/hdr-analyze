@@ -43,6 +43,8 @@ review-surfaces: exec github
 - `gemini-harness`: `.claude/workflows/tests/pre-pr-gemini-test.sh`; paths `'.claude/workflows/pre-pr-gemini.*'` `'.claude/workflows/tests/'` `'.agents/agents/pre-pr-reviewer.md'`; where `local`.
 - `pre-pr-record`: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`; paths `'.claude/skills/pre-pr-review/clear-record.sh'` `'.claude/skills/pre-pr-review/tests/'`; where `local`.
 - `reviewer-yield`: `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh`; paths `'.claude/skills/pre-pr-review/reviewer-yield.sh'` `'.claude/skills/pre-pr-review/tests/'`; where `local`.
+- `rust-check-hook`: `.claude/hooks/tests/rust-check-hold-test.sh`; paths `'.claude/hooks/'`; where `local`.
+- `panel-trigger`: `.claude/workflows/tests/pre-pr-panel-trigger-test.sh`; paths `'.claude/workflows/pre-pr-panel.js'` `'.claude/workflows/tests/pre-pr-panel-trigger-test.sh'`; where `local`.
 
 ## Tier 2 paths
 
@@ -167,6 +169,20 @@ none
 
 ## Notes
 
+**Hard steps** (`/ship:roadmap-next` step 9.1, and the Fable reviewer of the pre-PR panel). Besides the
+general criteria (a design decision with a real trade-off, a change that must stay consistent across two or
+more components, an unknown root cause, about 300 changed logic lines or more), a step is hard in this
+repository when it holds:
+- numeric work mirrored on CPU and CUDA: `hdr_analyzer_mvp/src/analysis/` with `kernels.cu`, or
+  `dovi84_composer/src/`. The f32 operation order must match on both sides, and `scripts/cuda-parity.sh`
+  proves it;
+- two or more sides of a cross-binary contract (`CLAUDE.md` "Cross-binary contracts"): the analyzer side
+  (`l1_sidecar`, `cli`, `au_table`), the mkvdovi side that reads it (`metadata`, `external`,
+  `pipeline/measure`, `pipeline/manifest`), and `tools/l1_diff`.
+`.claude/workflows/pre-pr-panel.js` reads these two from the paths (`numeric`, `contractSides`); change both
+together. A builder agent (`opus-professor`, `fable-builder`) works under a hold file,
+`<git dir>/claude-builder.<run>.hold`, which `.claude/hooks/rust-check.sh` honors.
+
 `## Routing` is the plugin's default table without Gemini (owner decision 2026-10-24). Gemini (agy) had one
 confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the model that might change that,
 Gemini 4 Archon, is not available on this account yet. Gemini stays parked until it is; then the default
@@ -205,8 +221,9 @@ check of `scripts/ci/check-test-skips.sh`.
 `review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff` and
 `gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push. In CI the
 Rust jobs skip on a PR that changes only `gate-skip` paths, and `gemini-harness` runs only when its paths change.
-`pre-pr-record` (the test of `/pre-pr-review`'s record cleanup) and `reviewer-yield` (the test of its
-reviewer-yield observer) run only locally, not in CI.
+`pre-pr-record` (the test of `/pre-pr-review`'s record cleanup), `reviewer-yield` (the test of its
+reviewer-yield observer), `rust-check-hook` (the Stop hook's builder-hold test) and `panel-trigger` (the
+panel's Fable decision and gate list, through its `gatesOnly` mode under node) run only locally, not in CI.
 
 `gate-focused` runs `scripts/ci/test-gate.sh` with a test filter: it builds the analyzer next to mkvdovi and
 applies the same skip check, so a focused test that prints `Skipping` fails instead of passing silently. Do not

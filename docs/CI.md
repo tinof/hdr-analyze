@@ -76,6 +76,18 @@ hooks run only where pre-commit is installed
   `${TMPDIR:-/tmp}/claude-rust-check/<session_id>/`. An incremental run takes about 2–4 s on the
   `/mnt/c` checkout. Tests do not run here; they run in the pre-push hook (where installed), the
   pre-PR test gate and CI.
+  While a builder agent works in a checkout (`/ship:roadmap-next` step 9.4: `opus-professor`,
+  `fable-builder`), the Stop hook skips that checkout: the skill writes
+  `<git dir>/claude-builder.<run>.hold` before the builder starts and deletes it afterwards. The
+  hold is per checkout and per run, an edit in the checkout renews it, and one older than 3 hours
+  no longer counts (an edit does not revive it). The touched files stay recorded, so the first Stop after the builder returns
+  checks them. Each touched file belongs to its own checkout (its git toplevel, not a path
+  prefix), so a worktree nested under `.claude/worktrees/<name>` keeps its hold, and the main
+  checkout's pass never formats its files. Test:
+  `.claude/hooks/tests/rust-check-hold-test.sh` (gate `rust-check-hook`). The local gate
+  `panel-trigger` (`.claude/workflows/tests/pre-pr-panel-trigger-test.sh`) runs
+  `.claude/workflows/pre-pr-panel.js` in `gatesOnly` mode under node and checks the Fable decision
+  and the gate list; it is not in CI.
 - **Size note:** the global ship plugin hook (`~/.claude/skills/ship/scripts/size-check.sh`,
   wired in `~/.claude/settings.json`) reads `.claude/workflow.md` "## Size limits" and notes a
   touched `.rs` file over 800 code lines, or `CLAUDE.md`, `AGENTS.md` or `ROADMAP.md` over its byte
