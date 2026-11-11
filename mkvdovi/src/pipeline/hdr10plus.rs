@@ -11,6 +11,13 @@ use crate::external::{run_command_with_progress, run_command_with_spinner};
 use crate::progress;
 use crate::resume;
 
+use super::hdr10plus_coverage::COVERAGE_FILE;
+
+/// The Annex B stream the HDR10+ path extracts into the temp directory.
+pub(super) const HDR10PLUS_HEVC: &str = "video.hevc";
+/// The log of `hdr10plus_tool extract` in the temp directory.
+pub(super) const HDR10PLUS_TOOL_LOG: &str = "hdr10plus_tool.log";
+
 #[derive(Debug, PartialEq)]
 pub(super) struct Hdr10PlusPeakStats {
     pub(super) max_peak_nits: f64,
@@ -118,7 +125,7 @@ pub(super) fn extract_hdr10plus_metadata(
     resume: bool,
     stall_secs: u64,
 ) -> Result<Option<PathBuf>> {
-    let hevc = temp_dir.join("video.hevc");
+    let hevc = temp_dir.join(HDR10PLUS_HEVC);
     if resume && resume::is_complete(&hevc) {
         progress::print_info("Reusing extracted HEVC stream from a previous run.");
     } else {
@@ -151,6 +158,8 @@ pub(super) fn extract_hdr10plus_metadata(
             return Ok(None);
         }
         resume::mark_done(&hevc)?;
+        // A new stream needs a new payload count.
+        resume::invalidate(&temp_dir.join(COVERAGE_FILE))?;
     }
 
     let json_out = temp_dir.join("hdr10plus_metadata.json");
@@ -169,7 +178,7 @@ pub(super) fn extract_hdr10plus_metadata(
 
     if run_command_with_spinner(
         &mut tool,
-        &temp_dir.join("hdr10plus_tool.log"),
+        &temp_dir.join(HDR10PLUS_TOOL_LOG),
         "Extracting HDR10+ metadata",
     )? && json_out.exists()
         && fs::metadata(&json_out)?.len() > 0

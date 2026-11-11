@@ -8,6 +8,13 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- mkvdovi counts the frames of an HDR10+ input that carry their own HDR10+ payload (ROADMAP
+  P9.4). `hdr10plus_tool` gives a frame without one the previous frame's, so a partial file
+  converted without a word. Partial coverage now warns with the counts and the first gap; an
+  explicit `--hdr10plus-l1 hybrid` refuses it before analysis. A file whose payloads
+  `hdr10plus_tool` cannot extract (for example a gap at the start) is named that way instead of
+  "no dynamic metadata", and an explicit hybrid refuses it. The default stays on the hybrid and
+  delivered L1 does not change.
 - `hdr_analyzer_mvp --peak-estimator st2094-10` (ROADMAP WS1.5, opt-in): the L1 max candidate of
   the SMPTE ST 2094-10 reduced pixel set, the highest max-RGB of 2×2 block means averaged in
   linear light from the crop's top-left, identical on CPU and CUDA. It is PQ only and refuses HLG
