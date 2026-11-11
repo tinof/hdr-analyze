@@ -6,6 +6,36 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-11: P9.4 Count the frames that carry their own HDR10+ payload (PR #109)
+
+Step: - [P9.4][corpus] Count the frames that carry their own HDR10+ payload; `hdr10plus_tool` fills a
+  gap with the previous frame's, so partial coverage is silent today. Warn below full coverage;
+  refuse under an explicit `--hdr10plus-l1 hybrid`. Gate: corpus coverage counts in the log first;
+  then the warning fires on a gap clip and stays silent on a full one.
+
+Gate evidence, PR #109:
+- Corpus counts first: the entry below (all 14 HDR10+ development cuts fully covered; the built
+  mkvdovi count matches the reference scanner on all 14).
+- Warning on a gap clip, silence on a full one: `mkvdovi/tests/hdr10plus_coverage.rs`
+  `full_coverage_converts_with_the_count_and_no_warning`,
+  `a_coverage_gap_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid` and
+  `a_coverage_gap_at_the_start_is_named_instead_of_no_dynamic_metadata` (a start gap makes
+  `hdr10plus_tool` extract nothing; the default warns with the counts and falls back to HDR10
+  analysis, an explicit hybrid refuses). They ran in `scripts/ci/test-gate.sh` (725 tests, only
+  allowed skips) and in CI on PR #109.
+- Review: one Codex P1 left for the owner (a failed coverage scan only warns, also under an
+  explicit hybrid; the warn-only rule is pinned by
+  `only_a_trusted_partial_count_under_an_explicit_hybrid_refuses`). See the PR's review record.
+
+Checked 2026-11-10 @efc8306 (moved from the P9 item): `hybrid::apply` compares the gap-filled
+`SceneInfo` length (`mkvdovi/src/pipeline/hybrid.rs:229`); count the payloads before the fill
+(`tools/rpu_builder_check/src/payloads.rs:80`), also on a resumed JSON (`pipeline/hdr10plus.rs:158`).
+A parser dependency changes `Cargo.lock` (gates `clippy-cuda`, `cuda-parity`, `l1-regression`).
+The default only warns: no `Hdr10PlusMode::after_failure` (`pipeline/measure.rs:49`).
+
+Resolution: mkvdovi counts the frames with their own HDR10+ payload on every HDR10+ conversion;
+partial coverage warns, and an explicit hybrid refuses it before analysis.
+
 ### 2026-11-11: P9.4 HDR10+ payload coverage of the development corpus (gate part 1, no PR yet)
 
 The P9.4 gate asks for corpus counts before any warning is built. Fourteen of the 45 development

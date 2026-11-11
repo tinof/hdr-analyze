@@ -53,18 +53,19 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-10 at main@efc8306)
-<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=d22d7edf42c2 skip=P6.3,P6.4 -->
+<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=14446aa12dce skip=P6.3,P6.4 -->
 
-Order: priorities 2 and 4. P6.3 and P6.4 are passed over: the v0.9.0 release plan names P6.2
-and E7.1. E8.1 and E9.1 move the default `.bin` and are planned for a later minor.
+Order: priority 4 (P9.4, priority 2, closed in PR #109). P6.3 and P6.4 are passed over: the
+v0.9.0 release plan names P6.2 and E7.1. E8.1 and E9.1 move the default `.bin` and are planned
+for a later minor.
 
-1. **P9.4 HDR10+ payload coverage** (priority 2). Gate: the P9.4 gate (corpus counts in the log
-   first). Why: the only open priority-2 step. Branch: `feat/p9-4-hdr10plus-coverage`.
-   Release: patch
-2. **P6.2 Five source checks, warn-only** (priority 4). Gate: the P6 step 2 gate. Why: in the
+1. **P6.2 Five source checks, warn-only** (priority 4). Gate: the P6 step 2 gate. Why: in the
    v0.9.0 plan. Branch: `feat/p6-2-source-checks`. Release: patch
-3. **E7.1 Direct-MKV output frame count** (priority 4). Gate: the E7 gate (1). Why: in the v0.9.0
+2. **E7.1 Direct-MKV output frame count** (priority 4). Gate: the E7 gate (1). Why: in the v0.9.0
    plan. Branch: `fix/e7-1-direct-mkv-frame-count`. Release: patch
+
+**Reassess:** needs-changed (P9.4, PR #109): this PR retags P6.3, P6.4 and P14.1 from `desk` to
+`corpus`.
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
@@ -254,20 +255,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Core complete: hybrid is the HDR10+ default ([log](docs/ROADMAP_LOG.md), PR #84).
-  Open: P9.4.
+- **Status:** Core complete: hybrid is the HDR10+ default (PR #84) and payload coverage is counted
+  (P9.4, PR #109; [log](docs/ROADMAP_LOG.md)). No step open; kept for priority 2, whose end the
+  owner decides, and `pipeline/hybrid.rs`'s reference.
 - **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
   panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
   retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
-- [P9.4][corpus] Count the frames that carry their own HDR10+ payload; `hdr10plus_tool` fills a
-  gap with the previous frame's, so partial coverage is silent today. Warn below full coverage;
-  refuse under an explicit `--hdr10plus-l1 hybrid`. Gate: corpus coverage counts in the log first;
-  then the warning fires on a gap clip and stays silent on a full one.
-- **Checked 2026-11-10 @efc8306:** `hybrid::apply` compares the gap-filled `SceneInfo` length
-  (`mkvdovi/src/pipeline/hybrid.rs:229`); count the payloads before the fill
-  (`tools/rpu_builder_check/src/payloads.rs:80`), also on a resumed JSON (`pipeline/hdr10plus.rs:158`).
-  A parser dependency changes `Cargo.lock` (gates `clippy-cuda`, `cuda-parity`, `l1-regression`).
-  The default only warns: no `Hdr10PlusMode::after_failure` (`pipeline/measure.rs:49`).
 
 ### P10: measured against delivered
 
