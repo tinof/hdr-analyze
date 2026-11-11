@@ -291,7 +291,7 @@ pub(super) fn acquire_measurements(
                     hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid,
                 ) {
                     Unextracted::Refused(reason) => {
-                        progress::print_error(&hybrid_refusal(&reason));
+                        progress::print_error(&hdr10plus_coverage::unextracted_refusal(&reason));
                         return Ok(None);
                     }
                     Unextracted::Unreadable(warning) => progress::print_warn(&warning),

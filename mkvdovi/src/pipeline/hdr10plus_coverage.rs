@@ -470,6 +470,16 @@ pub(super) fn judge_unextracted(
     ))
 }
 
+/// The refusal of an explicit hybrid after `hdr10plus_tool` extracted nothing. Unlike
+/// `hybrid_refusal`, it names no `--hdr10plus-l1 hdr10plus`: that mode has no metadata here
+/// either and falls back to HDR10 analysis.
+pub(super) fn unextracted_refusal(reason: &str) -> String {
+    format!(
+        "--hdr10plus-l1 hybrid cannot be used here: {reason}. Without --hdr10plus-l1 hybrid the \
+         file converts from HDR10 analysis, without the HDR10+ metadata."
+    )
+}
+
 /// Counts the stream next to `hdr10plus_json` and prints the decision. `false`: refused.
 pub(super) fn check_extracted(
     temp_dir: &Path,

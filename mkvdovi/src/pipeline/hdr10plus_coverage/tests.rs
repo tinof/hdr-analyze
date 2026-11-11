@@ -680,6 +680,20 @@ fn unextracted_payloads_warn_or_refuse_an_explicit_hybrid() {
         panic!("an explicit hybrid refuses");
     };
     assert!(reason.contains("could not extract"), "{reason}");
+    // Nothing was extracted, so `--hdr10plus-l1 hdr10plus` has no metadata to use either.
+    let refusal = unextracted_refusal(&reason);
+    assert!(
+        refusal.starts_with("--hdr10plus-l1 hybrid cannot be used here: 43 of 48 frames"),
+        "{refusal}"
+    );
+    assert!(
+        refusal.ends_with(
+            "Without --hdr10plus-l1 hybrid the file converts from HDR10 analysis, without the \
+             HDR10+ metadata."
+        ),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("metadata alone"), "{refusal}");
     for explicit in [false, true] {
         let none = Ok(coverage(48, 0, 1, 48, Some(0), 0));
         assert_eq!(

@@ -393,6 +393,14 @@ fn a_coverage_gap_at_the_start_is_named_instead_of_no_dynamic_metadata() {
     );
     assert!(log.contains(UNEXTRACTED), "{log}");
     assert!(
+        log.contains("Without --hdr10plus-l1 hybrid the file converts from HDR10 analysis"),
+        "the refusal names the fallback that works:\n{log}"
+    );
+    assert!(
+        !log.contains("to use the HDR10+ metadata alone"),
+        "nothing was extracted, so the metadata mode cannot use it:\n{log}"
+    );
+    assert!(
         !clip.join(MEASUREMENTS).exists(),
         "the analyzer ran:\n{log}"
     );
