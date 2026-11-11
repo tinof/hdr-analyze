@@ -303,7 +303,7 @@ fn full_coverage_converts_with_the_count_and_no_warning() {
 }
 
 #[test]
-fn a_gap_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid() {
+fn a_coverage_gap_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid() {
     if let Some(reason) = missing_prerequisite() {
         eprintln!("Skipping HDR10+ coverage test: {reason}");
         return;
@@ -371,7 +371,7 @@ fn a_gap_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_h
 }
 
 #[test]
-fn a_gap_at_the_start_is_named_instead_of_no_dynamic_metadata() {
+fn a_coverage_gap_at_the_start_is_named_instead_of_no_dynamic_metadata() {
     if let Some(reason) = missing_prerequisite() {
         eprintln!("Skipping HDR10+ coverage test: {reason}");
         return;

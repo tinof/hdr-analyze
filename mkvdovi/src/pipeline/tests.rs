@@ -1181,7 +1181,7 @@ fn partial_hdr10plus_coverage_refuses_an_explicit_hybrid_and_full_coverage_does_
 }
 
 #[test]
-fn hdr10plus_payloads_that_hdr10plus_tool_cannot_extract_refuse_an_explicit_hybrid() {
+fn unextracted_hdr10plus_coverage_refuses_an_explicit_hybrid() {
     if crate::external::find_tool("hdr10plus_tool").is_none() {
         eprintln!("Skipping unextracted-payload test: hdr10plus_tool not found in PATH");
         return;

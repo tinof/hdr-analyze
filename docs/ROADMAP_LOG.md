@@ -48,6 +48,9 @@ Re-count with the built mkvdovi (a652959, `--hdr10plus-l1 hdr10plus`, dev tier o
 Alien) and prints "HDR10+ payloads: all N frames carry their own" with the counts above; the scan
 took under a second per cut. The other 9 are Dolby Vision sources (Profile 7 FEL, Profile 7 MEL,
 Profile 8) whose HDR10+ SEI mkvdovi does not read, because the Dolby Vision route comes first.
+With their RPU and enhancement-layer NAL units removed in scratch (`recount-dv.sh`, FFmpeg
+`filter_units=remove_types=62|63`, then mkvmerge), mkvdovi detects all 9 as HDR10+ and counts
+every frame, again matching the table: the built scan agrees with the reference on all 14 cuts.
 
 ### 2026-11-09: WS8.1 Grain on the synthetic highlights and odd offsets (PR #106)
 
