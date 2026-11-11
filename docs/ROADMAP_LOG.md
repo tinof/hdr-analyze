@@ -6,6 +6,43 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-11: P9.4 HDR10+ payload coverage of the development corpus (gate part 1, no PR yet)
+
+The P9.4 gate asks for corpus counts before any warning is built. Fourteen of the 45 development
+cuts are HDR10+ (manifest `hdr_format` names ST 2094 App 4); the other 31 carry no HDR10+ payload.
+On all 14, every frame carries its own payload: coverage 100 %, longest gap 0, and no cut has
+payloads only on scene-start or IRAP pictures. The frame count of each cut equals `ffprobe
+-count_packets` and the length of `hdr10plus_tool`'s `SceneInfo`.
+
+| Title (scene) | Frames | Own payload | Distinct payloads |
+|---|---|---|---|
+| Saving Private Ryan (Omaha beach) | 1449 | 1449 | 13 |
+| Saving Private Ryan (church at night) | 1453 | 1453 | 2 |
+| Saving Private Ryan (Ramelle) | 1450 | 1450 | 23 |
+| Patriot S01E06 | 2825 | 2825 | 11 |
+| Top Gun: Maverick (Darkstar) | 1453 | 1453 | 39 |
+| Deadloch (beach day) | 1552 | 1552 | 14 |
+| Deadloch (shoreline night) | 1552 | 1552 | 22 |
+| Alita: Battle Angel (airlock night) | 1462 | 1462 | 13 |
+| Alita: Battle Angel (Iron City day) | 1458 | 1458 | 16 |
+| The Shining (hedge maze night) | 1469 | 1469 | 1 |
+| The Shining (mountain road day) | 1461 | 1461 | 3 |
+| Alien (derelict chamber) | 1442 | 1442 | 19 |
+| Alien (Nostromo corridor) | 1445 | 1445 | 1 |
+| The Revenant (snow traverse) | 1448 | 1448 | 2 |
+
+Method: a Python reference scanner over the Annex B stream (the first T.35 message of each prefix
+SEI with the identity B5 003C 0001 04 01, as `tools/rpu_builder_check/src/payloads.rs` picks it),
+one access unit per picture. A control with the payload stripped from 1148 of 1552 frames reads
+404 frames (26 %), while `hdr10plus_tool` still writes all 1552 `SceneInfo` entries, so its JSON
+cannot show coverage. Limit: 8 titles in cuts of about a minute; gaps elsewhere in the films are
+not measured. The corpus shows no scene-start-only pattern, so the step's "warn below full
+coverage" stands. FFmpeg cannot count it either: its HEVC decoder carries the last payload forward
+to every later frame (`libavcodec/hevc/hevcdec.c` `set_side_data`, n9.0.2), so `ffprobe
+-show_frames` sees only a gap at the start of the stream, and a start gap, two payload NALs in one
+picture or a payload after the first slice make `hdr10plus_tool extract` fail. Evidence and
+scripts: `~/mkvdovi-work/p9-4-coverage-2026-11-11/`.
+
 ### 2026-11-09: WS8.1 Grain on the synthetic highlights and odd offsets (PR #106)
 
 Step: - [WS8.1][desk] Grain on the synthetic highlights and odd offsets (today they carry no grain and
