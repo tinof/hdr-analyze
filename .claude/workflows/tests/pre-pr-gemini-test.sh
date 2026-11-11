@@ -84,6 +84,7 @@ if want ok; then
     check "no agent file in this repo" '.agent == null'
     check_sh "the stdout is the result" 'cmp -s "$out/stdout" "$res"'
     check_sh "print mode stays read-only" 'grep -qx -- --sandbox "$fake/a1.args" && grep -qx plan "$fake/a1.args"'
+    check_sh "agy runs with AGY_ORCHESTRATOR=claude" 'grep -qx claude "$fake/a1.orchestrator"'
     check_sh "agy runs under the timeout backstop" '[ "$(command cat "$fake/a1.parent")" = timeout ]'
 fi
 

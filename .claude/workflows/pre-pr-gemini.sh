@@ -178,8 +178,10 @@ while :; do
     # setsid: its own process group, so the group kill reaches agy's children; the marker reaches
     # the ones that start their own session. timeout (no --foreground, so it signals the whole
     # group) is the backstop for a wrapper that died without cleaning up.
+    # AGY_ORCHESTRATOR puts the global agy hooks (tinof/antigravity-config) in orchestrated mode
+    # for the no-agent fallback; pre-pr-reviewer (inheritCustomizations: false) loads none of them.
     backstop=$(( deadline - attempt_start + 60 ))
-    (cd "$root" && exec env PRE_PR_GEMINI_ATTEMPT="$marker" setsid timeout -k 30 "$backstop" agy --input-format stream-json \
+    (cd "$root" && exec env PRE_PR_GEMINI_ATTEMPT="$marker" AGY_ORCHESTRATOR=claude setsid timeout -k 30 "$backstop" agy --input-format stream-json \
         --output-format stream-json --model "$model" --mode plan --sandbox "${agent_args[@]}" \
         --add-dir "$(dirname "$scope")" --json-schema "$here/pre-pr-gemini.schema.json" \
         --log-file "$a.agy.log") < "$a.message.ndjson" > "$a.stream.ndjson" 2> "$a.err" &
