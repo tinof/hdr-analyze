@@ -43,6 +43,12 @@ to every later frame (`libavcodec/hevc/hevcdec.c` `set_side_data`, n9.0.2), so `
 picture or a payload after the first slice make `hdr10plus_tool extract` fail. Evidence and
 scripts: `~/mkvdovi-work/p9-4-coverage-2026-11-11/`.
 
+Re-count with the built mkvdovi (a652959, `--hdr10plus-l1 hdr10plus`, dev tier only,
+`recount.sh`): mkvdovi takes the HDR10+ path on 5 of the 14 cuts (Patriot, both Deadloch, both
+Alien) and prints "HDR10+ payloads: all N frames carry their own" with the counts above; the scan
+took under a second per cut. The other 9 are Dolby Vision sources (Profile 7 FEL, Profile 7 MEL,
+Profile 8) whose HDR10+ SEI mkvdovi does not read, because the Dolby Vision route comes first.
+
 ### 2026-11-09: WS8.1 Grain on the synthetic highlights and odd offsets (PR #106)
 
 Step: - [WS8.1][desk] Grain on the synthetic highlights and odd offsets (today they carry no grain and

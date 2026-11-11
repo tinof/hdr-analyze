@@ -251,6 +251,117 @@ fn nal_units_of_other_layers_are_ignored() {
     let mut layer_one_slice = nal(TRAIL_R, 1, &[0xAF, 0x91, 0x40]);
     bytes.append(&mut layer_one_slice);
     assert_eq!(count(&bytes), Ok(coverage(1, 0, 1, 1, Some(0), 0)));
+    // Layer 32 sets only the layer bit in the first header byte.
+    let mut bytes = parameter_sets();
+    bytes.extend(sei(PREFIX_SEI, 32, &[hdr10plus()]));
+    bytes.extend(slice(TRAIL_R, true));
+    bytes.extend(nal(TRAIL_R, 32, &[0xAF, 0x91, 0x40]));
+    assert_eq!(count(&bytes), Ok(coverage(1, 0, 1, 1, Some(0), 0)));
+}
+
+#[test]
+fn zero_bytes_after_a_slice_header_leave_the_header_alone() {
+    // 00 00 03 right after the first slice byte, then a byte with the top bit clear.
+    let mut bytes = parameter_sets();
+    bytes.extend(prefix(&[hdr10plus()]));
+    bytes.extend(nal(
+        TRAIL_R,
+        0,
+        &[0xAF, 0x00, 0x00, 0x03, 0x01, 0x00, 0x00, 0x03, 0x02],
+    ));
+    bytes.extend(slice(TRAIL_R, false));
+    assert_eq!(count(&bytes), Ok(coverage(1, 1, 0, 0, None, 0)));
+}
+
+#[test]
+fn a_slice_of_one_byte_after_its_header_counts() {
+    let mut bytes = parameter_sets();
+    bytes.extend(prefix(&[hdr10plus()]));
+    bytes.extend(nal(TRAIL_R, 0, &[0x80]));
+    assert_eq!(count(&bytes), Ok(coverage(1, 1, 0, 0, None, 0)));
+}
+
+#[test]
+fn a_slice_longer_than_the_sei_cap_is_not_kept() {
+    let cap = 600;
+    let mut body = vec![0xAF];
+    body.resize(2000, 0x55);
+    let mut bytes = parameter_sets();
+    bytes.extend(prefix(&[hdr10plus()]));
+    bytes.extend(nal(TRAIL_R, 0, &body));
+    assert_eq!(
+        scan_with_cap(&bytes[..], cap),
+        Ok(coverage(1, 1, 0, 0, None, 0))
+    );
+}
+
+#[test]
+fn an_sei_that_ends_on_another_byte_than_the_trailing_bits_is_not_counted() {
+    for last in [0x81, 0x40, 0x01] {
+        let mut body = hdr10plus();
+        body.push(last);
+        let mut bytes = parameter_sets();
+        bytes.extend(nal(PREFIX_SEI, 0, &body));
+        bytes.extend(slice(TRAIL_R, true));
+        assert!(count(&bytes).is_err(), "last byte {last:#04x}");
+    }
+}
+
+#[test]
+fn coded_values_add_255_for_every_ff_byte() {
+    for (bytes, value, end) in [
+        (&[0x00][..], 0, 1),
+        (&[0x2D][..], 45, 1),
+        (&[0xFF, 0x2D][..], 300, 2),
+        (&[0xFF, 0xFF, 0x00, 0x07][..], 510, 3),
+    ] {
+        let mut position = 0;
+        assert_eq!(read_coded(bytes, &mut position), Ok(value), "{bytes:02x?}");
+        assert_eq!(position, end, "{bytes:02x?}");
+    }
+    let mut position = 0;
+    assert!(read_coded(&[0xFF, 0xFF], &mut position).is_err());
+}
+
+/// A reader that is interrupted before every read it serves, or that fails.
+struct Flaky<'a> {
+    bytes: &'a [u8],
+    interrupt: bool,
+    fail: bool,
+}
+
+impl Read for Flaky<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.fail {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
+        }
+        self.interrupt = !self.interrupt;
+        if self.interrupt {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        let take = 7.min(buffer.len()).min(self.bytes.len());
+        buffer[..take].copy_from_slice(&self.bytes[..take]);
+        self.bytes = &self.bytes[take..];
+        Ok(take)
+    }
+}
+
+#[test]
+fn an_interrupted_read_is_retried_and_a_failed_one_is_not_counted() {
+    let bytes = stream(&[true, false, true]);
+    let interrupted = Flaky {
+        bytes: &bytes,
+        interrupt: false,
+        fail: false,
+    };
+    assert_eq!(scan(interrupted), count(&bytes));
+    let failed = Flaky {
+        bytes: &bytes,
+        interrupt: false,
+        fail: true,
+    };
+    let error = scan(failed).unwrap_err();
+    assert!(error.contains("could not be read"), "{error}");
 }
 
 #[test]
