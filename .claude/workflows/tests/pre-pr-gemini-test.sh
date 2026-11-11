@@ -96,6 +96,39 @@ if want agent; then
     check_sh "--agent passed" 'grep -qx -- --agent "$fake/a1.args" && grep -qx pre-pr-reviewer "$fake/a1.args"'
 fi
 
+# guard_case <name> <guard path> <settings.json content or ""> [VAR=value ...]: an agent that
+# grants run_command, with the given guard and agy settings.
+guard_case() {
+    local gname=$1 gpath=$2 settings=$3
+    shift 3
+    mkdir -p "$repo/.agents/agents" "$work/$gname/agyhome"
+    printf 'tools:\n  - view_file\n  - run_command\n  - finish\n' > "$repo/.agents/agents/pre-pr-reviewer.md"
+    [ -z "$settings" ] || printf '%s\n' "$settings" > "$work/$gname/agyhome/settings.json"
+    run_case "$gname" ok PRE_PR_GEMINI_GUARD="$gpath" "$@"
+    rm -rf "$repo/.agents"
+}
+
+if want guard; then
+    touch "$work/guard.py"
+    proceed='{"toolPermission":"always-proceed"}'
+    guard_case guard-missing "$work/no-guard.py" "$proceed"
+    check "run_command without the guard: refused" \
+        '.ok == false and .attempts == [] and (.reason | test("read-only guard .* is not installed"))'
+    check_sh "agy never started" '[ ! -e "$fake/count" ]'
+
+    guard_case guard-nosettings "$work/guard.py" ""
+    check "no settings.json: refused" '.ok == false and .attempts == [] and (.reason | test("toolPermission"))'
+    check_sh "agy never started" '[ ! -e "$fake/count" ]'
+
+    guard_case guard-review "$work/guard.py" '{"toolPermission":"request-review"}'
+    check "toolPermission request-review: refused" '.ok == false and .attempts == [] and (.reason | test("always-proceed"))'
+    check_sh "agy never started" '[ ! -e "$fake/count" ]'
+
+    guard_case guard-ok "$work/guard.py" "$proceed"
+    check "guard and setting present: the pass runs" '.ok == true and .agent == "pre-pr-reviewer" and (.attempts | length) == 1'
+    check_sh "--agent passed" 'grep -qx -- --agent "$fake/a1.args" && grep -qx pre-pr-reviewer "$fake/a1.args"'
+fi
+
 if want thinkwal; then
     run_case thinkwal thinkwal
     check "conversation store writes count as activity" '.ok == true and (.attempts | length) == 1'
@@ -119,6 +152,7 @@ if want hang; then
     check "stalled, then a retry succeeds" \
         '.ok == true and .attempts[0].outcome == "stalled" and .attempts[0].usage_partial == true and .attempts[1].outcome == "completed"'
     check "partial usage flagged" '.usage.partial == true'
+    check_sh "the retry runs with AGY_ORCHESTRATOR=claude" 'grep -qx claude "$fake/a2.orchestrator"'
     no_leftovers
 
     run_case hangterm hangterm,ok

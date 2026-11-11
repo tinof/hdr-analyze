@@ -10,9 +10,11 @@
 # Per attempt N: prepr-gemini.a<N>.{diff,message.ndjson,stream.ndjson,err,agy.log}.
 # Always exits 0: a failed Gemini pass is reported, never a blocker.
 #
-# Print mode denies every action that needs a confirmation (a terminal command, a file write, a read
-# outside the workspace) and then ends the turn with status SUCCESS and no answer (2026-10-07: a
-# view_file of a ~/.claude path the diff named). So the result is checked here, not by an agent:
+# Print mode denies every action that needs a confirmation (a file write, a read outside the
+# workspace, and a terminal command unless toolPermission is "always-proceed") and then ends the turn
+# with status SUCCESS and no answer (2026-10-07: a view_file of a ~/.claude path the diff named). A
+# command the read-only guard refuses is a hook denial instead: the agent sees the reason and goes on.
+# So the result is checked here, not by an agent:
 # status, schema, no denied action, and the nonce from the diff's first line, which Gemini can only
 # echo if it read the diff. A denied attempt is retried once with the denied path or tool named;
 # every attempt is a new conversation with a new nonce, and no prompt line ever carries a nonce.
@@ -30,16 +32,22 @@
 # limits the tools to view_file, run_command and finish; its hooks file runs the read-only guard
 # ~/.gemini/hooks/review-readonly.py (tinof/antigravity-config), which refuses every command that
 # is not reading or searching inside the workspace, and refuses all of them when the guard is not
-# installed. agy 1.5 ignores grep_search. The agent is used when present. Every attempt runs with PRE_PR_GEMINI_ATTEMPT=<token>.<N> in its environment, and
+# installed. agy 1.5 ignores grep_search. The agent is used when present. When it grants
+# run_command, the pass refuses to start unless the guard is installed and agy's settings.json sets
+# toolPermission "always-proceed" (both come from tinof/antigravity-config): without the setting,
+# print mode soft-denies every command and the denial ends the attempt. Every attempt runs with
+# PRE_PR_GEMINI_ATTEMPT=<token>.<N> in its environment, and
 # cleanup kills each process that carries it, so a child that left agy's process group dies too.
 # Inside the attempt's session, `timeout` ends agy 60 s after the deadline even when this wrapper
 # was killed (SIGKILL runs no trap). A second signal during cleanup is ignored, so an interrupted
 # pass still writes its result.
 #
-# Environment: PRE_PR_GEMINI_MODEL (gemini-3.8-flash-medium), PRE_PR_GEMINI_TIMEOUT (s for all
+# Environment: PRE_PR_GEMINI_MODEL (gemini-4-argon-medium), PRE_PR_GEMINI_TIMEOUT (s for all
 # attempts, 1200), PRE_PR_GEMINI_IDLE (s, 480), PRE_PR_GEMINI_RETRIES (1), PRE_PR_GEMINI_RETRY_FLOOR
 # (s that must remain for a retry, 300), PRE_PR_GEMINI_POLL (s, 10), PRE_PR_GEMINI_KILL_GRACE
-# (s between TERM and KILL, 10), PRE_PR_GEMINI_AGY_HOME (~/.gemini/antigravity-cli).
+# (s between TERM and KILL, 10), PRE_PR_GEMINI_AGY_HOME (~/.gemini/antigravity-cli, also where
+# settings.json is read). PRE_PR_GEMINI_GUARD (~/.gemini/hooks/review-readonly.py) is a test seam
+# for the pre-flight check only: the agent's hooks file always runs the guard at its default path.
 set -u
 
 base=${1:?base}
@@ -147,9 +155,12 @@ newest_mtime() {
 
 command -v agy > /dev/null || fail "agy (Antigravity CLI) not found on PATH"
 # The reviewer agent's run_command goes through this guard; without it every command is refused.
-if [ "$agent" != null ] && grep -q run_command "$root/.agents/agents/$agent_name.md" &&
-    [ ! -f "${PRE_PR_GEMINI_GUARD:-$HOME/.gemini/hooks/review-readonly.py}" ]; then
-    fail "read-only guard ~/.gemini/hooks/review-readonly.py is not installed: apply tinof/antigravity-config"
+# Without toolPermission "always-proceed", print mode soft-denies every command the guard allows.
+if [ "$agent" != null ] && grep -q run_command "$root/.agents/agents/$agent_name.md"; then
+    [ -f "${PRE_PR_GEMINI_GUARD:-$HOME/.gemini/hooks/review-readonly.py}" ] ||
+        fail "read-only guard ~/.gemini/hooks/review-readonly.py is not installed: apply tinof/antigravity-config"
+    [ "$(jq -r '.toolPermission // empty' "$agy_home/settings.json" 2> /dev/null)" = always-proceed ] ||
+        fail "$agy_home/settings.json does not set toolPermission \"always-proceed\", so print mode would deny every command: apply tinof/antigravity-config"
 fi
 [ -r "$scope" ] || fail "scope file not readable: $scope"
 
