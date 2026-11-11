@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), a Gemini 3.8 Flash pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), a Gemini 4 Argon pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [item ID]"
 disable-model-invocation: true
 ---
@@ -94,9 +94,13 @@ Skip it when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as
 .claude/workflows/pre-pr-gemini.sh origin/<base> <scratchpad> <scratchpad>/prepr-scope.md
 ```
 
-The script runs `agy` (Antigravity CLI) with `gemini-3.8-flash-medium` in print mode, which
-denies every terminal command, file write and read outside the workspace, and with the repo agent
-`.agents/agents/pre-pr-reviewer.md` (tools `view_file`, `grep_search`, `finish`). The diff goes
+The script runs `agy` (Antigravity CLI) with `gemini-4-argon-medium` in print mode, which
+denies every file write and read outside the workspace, and with the repo agent
+`.agents/agents/pre-pr-reviewer.md` (tools `view_file`, `run_command`, `finish`). Its
+`run_command` goes through the read-only guard `~/.gemini/hooks/review-readonly.py`, which allows
+only reading and searching inside the workspace. The pass refuses to start unless that guard is
+installed and agy's `settings.json` sets `toolPermission` to `always-proceed`; both come from
+tinof/antigravity-config. The diff goes
 inside the prompt; a large diff takes about 3–6 minutes. An idle watchdog stops an attempt after
 480 s without output, and the whole pass stops after `PRE_PR_GEMINI_TIMEOUT` seconds (default
 1200). The script checks the result itself (status, schema, no denied action, a nonce that proves
