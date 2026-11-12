@@ -20,10 +20,15 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
 - HDR10: the base layer is copied unchanged. When no compatible measurements exist, `mkvdovi`
   runs `hdr_analyzer_mvp` and supplies its measurements to `dovi_tool generate`.
 - HDR10+: the base layer is copied unchanged. Source HDR10+ metadata is extracted with
-  `hdr10plus_tool`. The file falls back to HDR10
-  analysis only when extraction runs but yields no metadata (the stream carries no dynamic metadata,
-  or the extraction step exits with an error or writes an empty file). `hdr10plus_tool` is not
-  checked at startup, and if it cannot be started the file fails instead of falling back.
+  `hdr10plus_tool`. When extraction runs but yields no metadata (the step exits with an error or
+  writes an empty file), mkvdovi scans the stream for HDR10+ payloads. With none, the file falls
+  back to HDR10 analysis. With payloads that `hdr10plus_tool` could not extract, the default and
+  `--hdr10plus-l1 hdr10plus` warn with the counts and fall back to HDR10 analysis; an explicit
+  `--hdr10plus-l1 hybrid` refuses the file, also when every frame carries a payload.
+  `hdr10plus_tool` is not checked at startup, and if it cannot be started the file fails instead
+  of falling back. mkvdovi also counts the frames that carry their own payload next to extracted
+  metadata (`hdr10plus_tool` gives a frame without one the previous frame's): partial coverage
+  warns with the counts under the default and `hdr10plus`.
   By default (`--hdr10plus-l1 hybrid`) the analyzer also runs and writes its measurements next to
   the input. Scenes are the union of the HDR10+ starts and the analyzer's cuts; the peak per piece
   comes from HDR10+, the average and minimum from the measured frames, and L5 and measured L6 light
@@ -32,8 +37,8 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   uses that path with a warning: `--analysis-quality fast`, `--legacy-madvr-l1`, a missing or older
   analyzer, a malformed HDR10+ scene list (including a first start other than 0), a failed
   analysis, an unusable sidecar, or an HDR10+ frame count other than the stream's. An explicit
-  `--hdr10plus-l1 hybrid` refuses those files (source kept; an older analyzer only when analysis
-  has to run) and cannot be combined with `--legacy-madvr-l1`.
+  `--hdr10plus-l1 hybrid` refuses those files and partial payload coverage (source kept; an older
+  analyzer only when analysis has to run) and cannot be combined with `--legacy-madvr-l1`.
 - HLG: the base layer is copied unchanged and the output is Dolby Vision Profile 8.4 (HLG
   backward-compatible). A Profile 8.4 RPU carries a reshaping curve set, the composer, that a Dolby
   Vision decoder uses to turn the HLG signal into PQ. `--hlg-composer` selects it. `preset` is

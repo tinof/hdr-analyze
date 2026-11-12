@@ -52,19 +52,22 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-09 at main@01aec43)
-<!-- roadmap-next: rev=3 scope=Item-WS8.1 config=760f5c5efe83 probes=gpu:ok,corpus:ok ready=d22d7edf42c2 -->
+### Next up (checked 2026-11-10 at main@efc8306)
+<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=2a72b663be1a skip=P6.3,P6.4 -->
 
-Order: the owner named WS8.1 (2026-11-09); scoped to WS8, so P9.4 (priority 2) stays next after it.
+Order: priority 4 (P9.4, priority 2, closed in PR #109). P6.3 and P6.4 are passed over: the
+v0.9.0 release plan names P6.2 and E7.1. E8.1 and E9.1 move the default `.bin` and are planned
+for a later minor.
 
-1. **WS8.4 Held-out split** (priority 7). Gate: the WS8 item gate. Why: fixes the split before
-   WS8.2 and WS8.3 pick real shots. Branch: `docs/ws8-4-holdout-split`. Release: none
-2. **WS8.3 Synthetic dissolves and fades** (priority 7). Gate: the WS8 item gate. Why: WS2.2 needs
-   it. Branch: `test/ws8-3-transitions`. Release: none
+1. **P6.2 Five source checks, warn-only** (priority 4). Gate: the P6 step 2 gate. Why: in the
+   v0.9.0 plan. Branch: `feat/p6-2-source-checks`. Release: patch
+2. **E7.1 Direct-MKV output frame count** (priority 4). Gate: the E7 gate (1). Why: in the v0.9.0
+   plan. Branch: `fix/e7-1-direct-mkv-frame-count`. Release: patch
 
-**Reassess:** plan-changed (WS0.2, PR #104): delivered L1 max reads +144 codes high per shot
-(the WS1.5 baseline), and retail L1 min is a constant 0 or 12 on all 8 cuts, so it is no
-reference for P10.5.
+**Reassess:** needs-changed (P9.4, PR #109): this PR retags P6.3, P6.4 and P14.1 from `desk` to
+`corpus`.
+**Reassess:** new-defect (P9.4, PR #109): P9.5, an explicit hybrid refuses a failed coverage
+scan (Codex P1, owner 2026-11-12).
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
@@ -111,7 +114,7 @@ zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next minor (v0.9.0) | P15, E15.1, E15.2 (merged); PATCH-class fixes merged before it: P12.1 `--mdfix` source L6, E12.2 NVDEC + CPU analysis, E7.1, E7.2, E7.3, P6.2 | MINOR, about 2026-11-11 (rule 1); owner decision |
+| next minor (v0.9.0) | P15, E15.1, E15.2 (merged); PATCH-class fixes merged before it: P12.1 `--mdfix` source L6, E12.2 NVDEC + CPU analysis, E7.1, E7.2, E7.3, P6.2, P9.4 | MINOR, about 2026-11-11 (rule 1); owner decision |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); WS1.5 (opt-in estimator), WS1.6 (default estimator change) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (2026-10-13) and the WS6 `code / 1023` question answered by the discriminating canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3); answered 2026-10-29 for the C9: `code / 1023`, WS6.6); a second device is not required (none available, owner 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
@@ -230,10 +233,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   1.25 × MaxCLL, C7 HDR10+ MaxScl 0 on every frame, C3 stated MaxFALL above MaxCLL. Gate: the
   item's step 2 gate (each check warns on a clip that has the problem and stays silent on one that
   does not; all RPU baselines byte-identical).
-- [P6.3][desk] Check a Profile 8 record against its RPU: route by the RPU on a mismatch, as
+- [P6.3][corpus] Check a Profile 8 record against its RPU: route by the RPU on a mismatch, as
   Profile 7 does, and refuse compatibility ID 0 or 2 (8.2, SDR base) by name before temp work.
   Gate: fixture tests on both sides; RPU baselines byte-identical.
-- [P6.4][desk] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
+- [P6.4][corpus] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
   conversion drops. Gate: the item's step 2 gate.
 - **Checked 2026-10-11 (fix-l6-zero-light-levels):** none of the seven saved rpu-baseline inputs
   has a container 0, so the baselines do not cover the container-0 fix; unit and clip tests do,
@@ -254,15 +257,16 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Core complete: hybrid is the HDR10+ default ([log](docs/ROADMAP_LOG.md), PR #84).
-  Open: P9.4.
+- **Status:** Core complete: hybrid is the HDR10+ default (PR #84) and payload coverage is counted
+  (P9.4, PR #109; [log](docs/ROADMAP_LOG.md)). Open: P9.5.
 - **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
   panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
   retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
-- [P9.4][corpus] Count the frames that carry their own HDR10+ payload; `hdr10plus_tool` fills a
-  gap with the previous frame's, so partial coverage is silent today. Warn below full coverage;
-  refuse under an explicit `--hdr10plus-l1 hybrid`. Gate: corpus coverage counts in the log first;
-  then the warning fires on a gap clip and stays silent on a full one.
+- [P9.5][desk] Refuse an explicit `--hdr10plus-l1 hybrid` when the HDR10+ coverage scan fails
+  (an SEI over the 256 KiB cap, a malformed stream), instead of only warning
+  (`judge_extracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs:410`); the default keeps the
+  warning (Codex P1 on PR #109, owner 2026-11-12). Gate: a failed scan refuses an explicit hybrid
+  before analysis and only warns under the default and `hdr10plus`, in unit and clip tests.
 
 ### P10: measured against delivered
 
@@ -321,7 +325,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Its thresholds and measurements hold for that input only.
 - **Gate:** the C9 shows that the display applies 8.1 reshaping (chroma-offset canary turned the
   picture green, 2026-11-04: met). Then P14.1 and P14.2.
-- [P14.1][desk] `mkvdovi --dynamic-contrast <off|low|medium|high>` (strength 0.35 / 0.6 / 0.85,
+- [P14.1][corpus] `mkvdovi --dynamic-contrast <off|low|medium|high>` (strength 0.35 / 0.6 / 0.85,
   default off) and its curve planner, a Rust port of the prototype without I/O: from per-shot
   luma histograms to each shot's reshaping and curve-mapped L1/L3. The planner ports the anchors
   with the neighbour blend, the APL taper (full effect at a shot luma APL of 6 nits, none at 30),
@@ -520,7 +524,8 @@ The detailed gap table and validation method live in
 ### WS8: test material
 
 - **Status:** Partial. Real material per format (2026-10-05) and the grainy, off-grid highlight
-  pair (WS8.1) are in [the log](docs/ROADMAP_LOG.md) (2026-11-09). Open: WS8.2 to WS8.4.
+  pair (WS8.1) are in [the log](docs/ROADMAP_LOG.md) (2026-11-09). Open: WS8.2 to WS8.4;
+  WS8.4 fixes the split before WS8.2 and WS8.3 pick real shots.
 - **Gate:** per item: synthetic material comes from a committed, reproducible generator; truth
   files are present; the L1 gate or the development corpus uses the material (owner, 2026-10-17).
 - [WS8.2][corpus] A grainy twin from the same master as the clean one (today "clean is truth"
@@ -655,6 +660,9 @@ The detailed gap table and validation method live in
   the run and keeps the source, tested.
 - [E7.1][desk] Direct-MKV `dovi_tool` steps still accept exit status plus non-empty output. Gate:
   the item's gate (1).
+- **Checked 2026-11-10 @efc8306:** the acceptance is `run_dovi_video_step`
+  (`mkvdovi/src/pipeline/dovi_steps.rs:42`, `:66-71`), called by the clean-BL and MEL steps
+  (`:173`, `:221`); its output is video, so it needs a video frame count, not the E7.2 RPU count.
 
 ### E8: histogram percentile reader
 

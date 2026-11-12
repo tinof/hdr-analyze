@@ -158,7 +158,9 @@ pub struct Args {
     /// no analysis. Without this flag, a file that cannot take hybrid (--analysis-quality fast,
     /// --legacy-madvr-l1, an older or missing analyzer, unusable HDR10+ metadata, a failed
     /// analysis) uses hdr10plus with a warning; `--hdr10plus-l1 hybrid` refuses it instead and
-    /// cannot be combined with --legacy-madvr-l1. Other inputs ignore it.
+    /// cannot be combined with --legacy-madvr-l1. Frames without their own HDR10+ payload (which
+    /// hdr10plus_tool fills from the previous frame) warn; `--hdr10plus-l1 hybrid` refuses them.
+    /// Other inputs ignore it.
     #[arg(long, value_enum)]
     pub hdr10plus_l1: Option<Hdr10PlusL1>,
 

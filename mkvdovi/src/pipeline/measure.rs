@@ -13,6 +13,7 @@ use super::analyzer::{
 };
 use super::dovi_steps::extract_clean_base_layer;
 use super::hdr10plus::extract_hdr10plus_metadata;
+use super::hdr10plus_coverage::{self, Unextracted};
 use super::hybrid;
 use super::mdfix_notice::print_mdfix_notice;
 use super::{add_optimizer_args, analyzer_executable, is_dolby_vision, FEL_UNSUPPORTED_MESSAGE};
@@ -262,6 +263,16 @@ pub(super) fn acquire_measurements(
                 if let Some(notice) = hdr10plus_notice {
                     progress::print_warn(notice);
                 }
+                // P9.4: hdr10plus_tool fills a frame without its own payload from the previous
+                // one; partial coverage warns, and refuses only an explicit hybrid.
+                if !hdr10plus_coverage::check_extracted(
+                    temp_dir,
+                    &json_path,
+                    resume_enabled,
+                    hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid,
+                ) {
+                    return Ok(None);
+                }
                 // Before the analysis: an unusable structure should not cost a full run.
                 if hdr10plus_mode.is_hybrid() {
                     if let Err(reason) = hybrid::check_hdr10plus_file(&json_path) {
@@ -274,9 +285,20 @@ pub(super) fn acquire_measurements(
                 hdr10plus_json = Some(json_path);
             }
             Ok(None) => {
-                progress::print_warn(
-                    "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis.",
-                );
+                match hdr10plus_coverage::check_unextracted(
+                    temp_dir,
+                    resume_enabled,
+                    hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid,
+                ) {
+                    Unextracted::Refused(reason) => {
+                        progress::print_error(&hdr10plus_coverage::unextracted_refusal(&reason));
+                        return Ok(None);
+                    }
+                    Unextracted::Unreadable(warning) => progress::print_warn(&warning),
+                    Unextracted::NoPayloads => progress::print_warn(
+                        "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis.",
+                    ),
+                }
                 if hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid {
                     progress::print_info(
                         "--hdr10plus-l1 hybrid: without HDR10+ metadata the measured L1 alone is used.",

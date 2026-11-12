@@ -9,6 +9,7 @@ use super::dovi_steps::{
     feed_mkv_to_dovi_tool, resolve_dovi_input,
 };
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
+use super::hdr10plus_coverage;
 use super::measure::{
     abort_unsupported, acquire_measurements, find_reusable_measurements, hybrid_refusal,
     total_steps_for, Measured,
@@ -1128,6 +1129,80 @@ fn hdr10plus_with_no_dynamic_metadata_leaves_the_hybrid_for_hdr10_analysis() {
         assert!(measured.hdr10plus_json.is_none(), "{mode:?}");
         assert!(measured.l1_sidecar.is_some(), "{mode:?}");
     }
+}
+
+/// Seals an HDR10+ payload count of the stream in the temp directory: `own` of 4 frames.
+fn seal_coverage(dir: &Path, own: u64) {
+    let path = dir
+        .join("mkvdovi_temp_in")
+        .join(hdr10plus_coverage::COVERAGE_FILE);
+    let gap = (own < 4).then_some(own);
+    let record = json!({"version": 1, "coverage": {
+        "access_units": 4, "own": own, "gaps": u64::from(own < 4), "longest_gap": 4 - own,
+        "first_gap": gap, "ignored_payloads": 0}});
+    fs::write(&path, record.to_string()).unwrap();
+    resume::mark_done(&path).unwrap();
+}
+
+fn acquire_with_coverage(mode: Hdr10PlusMode, own: u64) -> Result<Option<Measured>> {
+    let (result, _, _) =
+        run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+            seal_hdr10plus(dir, Some(&hdr10plus_for_four_frames()));
+            seal_coverage(dir, own);
+            measurements_for_four_frames(dir);
+        });
+    result
+}
+
+#[test]
+fn partial_hdr10plus_coverage_keeps_the_default_hybrid_and_the_metadata_mode() {
+    let measured = acquire_with_coverage(Hdr10PlusMode::ImplicitHybrid, 3)
+        .unwrap()
+        .expect("the default only warns");
+    // Not `after_failure`: that would leave the hybrid for the metadata and move delivered L1.
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ImplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    let measured = acquire_with_coverage(Hdr10PlusMode::Metadata, 3)
+        .unwrap()
+        .expect("the metadata mode only warns");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+}
+
+#[test]
+fn partial_hdr10plus_coverage_refuses_an_explicit_hybrid_and_full_coverage_does_not() {
+    let refused = acquire_with_coverage(Hdr10PlusMode::ExplicitHybrid, 3);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+    let measured = acquire_with_coverage(Hdr10PlusMode::ExplicitHybrid, 4)
+        .unwrap()
+        .expect("full coverage takes the hybrid");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+}
+
+#[test]
+fn unextracted_hdr10plus_coverage_refuses_an_explicit_hybrid() {
+    if crate::external::find_tool("hdr10plus_tool").is_none() {
+        eprintln!("Skipping unextracted-payload test: hdr10plus_tool not found in PATH");
+        return;
+    }
+    let run = |mode| {
+        let (result, _, _) =
+            run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+                // hdr10plus_tool fails on this stream; the sealed count says 4 frames carry HDR10+.
+                seal_hdr10plus(dir, None);
+                seal_coverage(dir, 4);
+                measurements_for_four_frames(dir);
+            });
+        result
+    };
+    let refused = run(Hdr10PlusMode::ExplicitHybrid);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+    let measured = run(Hdr10PlusMode::ImplicitHybrid)
+        .unwrap()
+        .expect("the default falls back to HDR10 analysis");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Unsupported);
 }
 
 #[test]

@@ -6,6 +6,82 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-11: P9.4 Count the frames that carry their own HDR10+ payload (PR #109)
+
+Step: - [P9.4][corpus] Count the frames that carry their own HDR10+ payload; `hdr10plus_tool` fills a
+  gap with the previous frame's, so partial coverage is silent today. Warn below full coverage;
+  refuse under an explicit `--hdr10plus-l1 hybrid`. Gate: corpus coverage counts in the log first;
+  then the warning fires on a gap clip and stays silent on a full one.
+
+Gate evidence, PR #109:
+- Corpus counts first: the entry below (all 14 HDR10+ development cuts fully covered; the built
+  mkvdovi count matches the reference scanner on all 14).
+- Warning on a gap clip, silence on a full one: `mkvdovi/tests/hdr10plus_coverage.rs`
+  `full_coverage_converts_with_the_count_and_no_warning`,
+  `a_coverage_gap_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid` and
+  `a_coverage_gap_at_the_start_is_named_instead_of_no_dynamic_metadata` (a start gap makes
+  `hdr10plus_tool` extract nothing; the default warns with the counts and falls back to HDR10
+  analysis, an explicit hybrid refuses). They ran in `scripts/ci/test-gate.sh` (725 tests, only
+  allowed skips) and in CI on PR #109.
+- Review: one Codex P1 left for the owner (a failed coverage scan only warns, also under an
+  explicit hybrid; the warn-only rule is pinned by
+  `only_a_trusted_partial_count_under_an_explicit_hybrid_refuses`). See the PR's review record.
+
+Checked 2026-11-10 @efc8306 (moved from the P9 item): `hybrid::apply` compares the gap-filled
+`SceneInfo` length (`mkvdovi/src/pipeline/hybrid.rs:229`); count the payloads before the fill
+(`tools/rpu_builder_check/src/payloads.rs:80`), also on a resumed JSON (`pipeline/hdr10plus.rs:158`).
+A parser dependency changes `Cargo.lock` (gates `clippy-cuda`, `cuda-parity`, `l1-regression`).
+The default only warns: no `Hdr10PlusMode::after_failure` (`pipeline/measure.rs:49`).
+
+Resolution: mkvdovi counts the frames with their own HDR10+ payload on every HDR10+ conversion;
+partial coverage warns, and an explicit hybrid refuses it before analysis.
+
+### 2026-11-11: P9.4 HDR10+ payload coverage of the development corpus (gate part 1, no PR yet)
+
+The P9.4 gate asks for corpus counts before any warning is built. Fourteen of the 45 development
+cuts are HDR10+ (manifest `hdr_format` names ST 2094 App 4); the other 31 carry no HDR10+ payload.
+On all 14, every frame carries its own payload: coverage 100 %, longest gap 0, and no cut has
+payloads only on scene-start or IRAP pictures. The frame count of each cut equals `ffprobe
+-count_packets` and the length of `hdr10plus_tool`'s `SceneInfo`.
+
+| Title (scene) | Frames | Own payload | Distinct payloads |
+|---|---|---|---|
+| Saving Private Ryan (Omaha beach) | 1449 | 1449 | 13 |
+| Saving Private Ryan (church at night) | 1453 | 1453 | 2 |
+| Saving Private Ryan (Ramelle) | 1450 | 1450 | 23 |
+| Patriot S01E06 | 2825 | 2825 | 11 |
+| Top Gun: Maverick (Darkstar) | 1453 | 1453 | 39 |
+| Deadloch (beach day) | 1552 | 1552 | 14 |
+| Deadloch (shoreline night) | 1552 | 1552 | 22 |
+| Alita: Battle Angel (airlock night) | 1462 | 1462 | 13 |
+| Alita: Battle Angel (Iron City day) | 1458 | 1458 | 16 |
+| The Shining (hedge maze night) | 1469 | 1469 | 1 |
+| The Shining (mountain road day) | 1461 | 1461 | 3 |
+| Alien (derelict chamber) | 1442 | 1442 | 19 |
+| Alien (Nostromo corridor) | 1445 | 1445 | 1 |
+| The Revenant (snow traverse) | 1448 | 1448 | 2 |
+
+Method: a Python reference scanner over the Annex B stream (the first T.35 message of each prefix
+SEI with the identity B5 003C 0001 04 01, as `tools/rpu_builder_check/src/payloads.rs` picks it),
+one access unit per picture. A control with the payload stripped from 1148 of 1552 frames reads
+404 frames (26 %), while `hdr10plus_tool` still writes all 1552 `SceneInfo` entries, so its JSON
+cannot show coverage. Limit: 8 titles in cuts of about a minute; gaps elsewhere in the films are
+not measured. The corpus shows no scene-start-only pattern, so the step's "warn below full
+coverage" stands. FFmpeg cannot count it either: its HEVC decoder carries the last payload forward
+to every later frame (`libavcodec/hevc/hevcdec.c` `set_side_data`, n9.0.2), so `ffprobe
+-show_frames` sees only a gap at the start of the stream, and a start gap, two payload NALs in one
+picture or a payload after the first slice make `hdr10plus_tool extract` fail. Evidence and
+scripts: `~/mkvdovi-work/p9-4-coverage-2026-11-11/`.
+
+Re-count with the built mkvdovi (a652959, `--hdr10plus-l1 hdr10plus`, dev tier only,
+`recount.sh`): mkvdovi takes the HDR10+ path on 5 of the 14 cuts (Patriot, both Deadloch, both
+Alien) and prints "HDR10+ payloads: all N frames carry their own" with the counts above; the scan
+took under a second per cut. The other 9 are Dolby Vision sources (Profile 7 FEL, Profile 7 MEL,
+Profile 8) whose HDR10+ SEI mkvdovi does not read, because the Dolby Vision route comes first.
+With their RPU and enhancement-layer NAL units removed in scratch (`recount-dv.sh`, FFmpeg
+`filter_units=remove_types=62|63`, then mkvmerge), mkvdovi detects all 9 as HDR10+ and counts
+every frame, again matching the table: the built scan agrees with the reference on all 14 cuts.
+
 ### 2026-11-09: WS8.1 Grain on the synthetic highlights and odd offsets (PR #106)
 
 Step: - [WS8.1][desk] Grain on the synthetic highlights and odd offsets (today they carry no grain and

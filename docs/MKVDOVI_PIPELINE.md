@@ -24,7 +24,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `metadata/`: `CmV40Config`, L2/L5/L9/L11 generation; submodules `format`, `probe`, `rpu_config`,
   `sidecar`, `static_metadata`.
 - `pipeline/`: `convert_file` in `mod.rs`; by phase `temp_dir`, `measure`, `config`, `deliver`;
-  plus `analyzer`, `dovi_steps`, `hdr10plus`, `timing` (the source's video timestamps in the mux
+  plus `analyzer`, `dovi_steps`, `hdr10plus`, `hdr10plus_coverage` (the HDR10+ payload count, ROADMAP
+  P9.4), `timing` (the source's video timestamps in the mux
   and the check of the output's, ROADMAP E7.3), `rpu_count` (the output's RPU count against its
   video frames, E7.2), and `manifest/` (`mkvdovi manifest`: the AU table
   reader, the manifest build, `import.rs` for `--rpu`, no temp dir; [PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)).
@@ -122,6 +123,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
     flag. That resolution runs before the fingerprint. A fallback after it (HDR10+ structure, a
     failed analysis, the sidecar, the frame count) keeps the token and relies on the `extra.json`
     comparison below. **Add any new artifact-affecting flag to `resume_settings`.**
+  - The HDR10+ payload count (`hdr10plus_coverage.json`) is sealed with `video.hevc` and changes no
+    artifact, so it adds no token.
   - The fingerprint does not cover the measurements. `config::withdraw_stale_rpu` (called from
     `prepare_configuration`) compares the regenerated `extra.json` (written beside it as `extra.json.next`, renamed only after the
     comparison, so an interruption cannot hide a change) with the one in the temp dir and,
@@ -229,6 +232,19 @@ This section covers the code on each side.
   `config::fall_back_to_hdr10plus`, at every point the hybrid can fail. The frame count is checked
   late on purpose: only the analyzer's demuxed count is reliable. A proof against baselines
   captured before this default (E13) passes `-- --hdr10plus-l1 hdr10plus` for an HDR10+ input.
+- **Payload coverage** (`pipeline/hdr10plus_coverage.rs`, ROADMAP P9.4): `hdr10plus_tool extract`
+  gives a frame without its own HDR10+ payload the previous frame's, and FFmpeg's decoder carries
+  the last payload forward too, so neither shows a gap. mkvdovi scans the `video.hevc` it extracts
+  for the HDR10+ path, streaming and std-only: a picture counts when a prefix SEI before its first
+  slice holds a T.35 message with the HDR10+ identity (the message `hdr10plus_tool` picks). The
+  count is sealed as `hdr10plus_coverage.json` (version 1) and reused on resume; a fresh extraction
+  withdraws it. Next to the extracted metadata, partial coverage warns with the counts under the
+  default and `hdr10plus` and refuses an explicit hybrid before analysis; it never goes through
+  `after_failure`, so the default stays on the hybrid. When `hdr10plus_tool` extracts nothing from
+  a stream with payloads (a gap at the start, two payload NAL units in one picture, a payload
+  after the first slice), the warning names the counts instead of "no dynamic metadata", and an
+  explicit hybrid refuses. A count it cannot trust (a frame count other than the metadata's, no
+  payload, a malformed or oversized SEI) only warns.
 - The panel peak is **not** passed as a `--trim-targets` override.
 - HDR10+ scene peaks above 3× the mastering-display peak produce advisory warnings only. **Never
   add a silent clamp.**

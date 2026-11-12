@@ -16,6 +16,7 @@ mod config;
 mod deliver;
 mod dovi_steps;
 mod hdr10plus;
+mod hdr10plus_coverage;
 mod hybrid;
 mod manifest;
 mod mdfix_notice;
