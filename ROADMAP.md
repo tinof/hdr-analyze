@@ -53,7 +53,7 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-10 at main@efc8306)
-<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=14446aa12dce skip=P6.3,P6.4 -->
+<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=2a72b663be1a skip=P6.3,P6.4 -->
 
 Order: priority 4 (P9.4, priority 2, closed in PR #109). P6.3 and P6.4 are passed over: the
 v0.9.0 release plan names P6.2 and E7.1. E8.1 and E9.1 move the default `.bin` and are planned
@@ -66,6 +66,8 @@ for a later minor.
 
 **Reassess:** needs-changed (P9.4, PR #109): this PR retags P6.3, P6.4 and P14.1 from `desk` to
 `corpus`.
+**Reassess:** new-defect (P9.4, PR #109): P9.5, an explicit hybrid refuses a failed coverage
+scan (Codex P1, owner 2026-11-12).
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
@@ -256,11 +258,15 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 ### P9: HDR10+ → Profile 8.1 L1
 
 - **Status:** Core complete: hybrid is the HDR10+ default (PR #84) and payload coverage is counted
-  (P9.4, PR #109; [log](docs/ROADMAP_LOG.md)). No step open; kept for priority 2, whose end the
-  owner decides, and `pipeline/hybrid.rs`'s reference.
+  (P9.4, PR #109; [log](docs/ROADMAP_LOG.md)). Open: P9.5.
 - **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
   panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
   retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
+- [P9.5][desk] Refuse an explicit `--hdr10plus-l1 hybrid` when the HDR10+ coverage scan fails
+  (an SEI over the 256 KiB cap, a malformed stream), instead of only warning
+  (`judge_extracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs:410`); the default keeps the
+  warning (Codex P1 on PR #109, owner 2026-11-12). Gate: a failed scan refuses an explicit hybrid
+  before analysis and only warns under the default and `hdr10plus`, in unit and clip tests.
 
 ### P10: measured against delivered
 
