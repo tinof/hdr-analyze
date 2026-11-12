@@ -94,7 +94,7 @@ Skip it when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as
 .claude/workflows/pre-pr-gemini.sh origin/<base> <scratchpad> <scratchpad>/prepr-scope.md
 ```
 
-The script runs `agy` (Antigravity CLI) with `gemini-4-argon-medium` in print mode, which
+The script runs `agy` (Antigravity CLI) with `gemini-4-hydrogen-high` in print mode, which
 denies every file write and read outside the workspace, and with the repo agent
 `.agents/agents/pre-pr-reviewer.md` (tools `view_file`, `run_command`, `finish`). Its
 `run_command` goes through the read-only guard `~/.gemini/hooks/review-readonly.py`, which allows

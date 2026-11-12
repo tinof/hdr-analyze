@@ -42,7 +42,7 @@
 # was killed (SIGKILL runs no trap). A second signal during cleanup is ignored, so an interrupted
 # pass still writes its result.
 #
-# Environment: PRE_PR_GEMINI_MODEL (gemini-4-argon-medium), PRE_PR_GEMINI_TIMEOUT (s for all
+# Environment: PRE_PR_GEMINI_MODEL (gemini-4-hydrogen-high), PRE_PR_GEMINI_TIMEOUT (s for all
 # attempts, 1200), PRE_PR_GEMINI_IDLE (s, 480), PRE_PR_GEMINI_RETRIES (1), PRE_PR_GEMINI_RETRY_FLOOR
 # (s that must remain for a retry, 300), PRE_PR_GEMINI_POLL (s, 10), PRE_PR_GEMINI_KILL_GRACE
 # (s between TERM and KILL, 10), PRE_PR_GEMINI_AGY_HOME (~/.gemini/antigravity-cli, also where
@@ -53,7 +53,7 @@ set -u
 base=${1:?base}
 out=${2:?out-dir}
 scope=${3:?scope-file}
-model=${PRE_PR_GEMINI_MODEL:-gemini-4-argon-medium}
+model=${PRE_PR_GEMINI_MODEL:-gemini-4-hydrogen-high}
 limit=${PRE_PR_GEMINI_TIMEOUT:-1200}
 idle=${PRE_PR_GEMINI_IDLE:-480}
 retries=${PRE_PR_GEMINI_RETRIES:-1}
