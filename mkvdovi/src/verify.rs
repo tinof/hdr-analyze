@@ -1227,15 +1227,21 @@ mod tests {
         None
     }
 
-    /// The workspace-built `hdr_analyzer_mvp` (this test binary lives in `target/<profile>/deps`),
-    /// or the reason to skip. `cargo test -p mkvdovi` does not rebuild it, so its `--help` must
-    /// name every composer's sidecar mapping, as `tests/hlg_profile84.rs` requires.
+    /// The workspace-built `hdr_analyzer_mvp`, or the reason to skip. It is the first file of
+    /// that name in a directory above this test binary: `target/<profile>/deps` up to Rust 1.99,
+    /// `target/<profile>/build/mkvdovi/<hash>/out` from 1.100 on, both under
+    /// `target/<profile>`. A file, because `build/hdr_analyzer_mvp/` is a directory in the new
+    /// layout. `cargo test -p mkvdovi` does not rebuild it, so its `--help` must name every
+    /// composer's sidecar mapping, as `tests/hlg_profile84.rs` requires.
     fn sibling_analyzer() -> Result<PathBuf, String> {
-        let path = std::env::current_exe()
-            .ok()
-            .and_then(|exe| Some(exe.parent()?.parent()?.to_path_buf()))
-            .map(|dir| dir.join(format!("hdr_analyzer_mvp{}", std::env::consts::EXE_SUFFIX)))
-            .filter(|path| path.exists())
+        let name = format!("hdr_analyzer_mvp{}", std::env::consts::EXE_SUFFIX);
+        let exe =
+            std::env::current_exe().map_err(|error| format!("no test binary path: {error}"))?;
+        let path = exe
+            .ancestors()
+            .skip(1)
+            .map(|dir| dir.join(&name))
+            .find(|path| path.is_file())
             .ok_or("hdr_analyzer_mvp is not built (cargo build -p hdr_analyzer_mvp)")?;
         let help = Command::new(&path)
             .arg("--help")
