@@ -39,7 +39,7 @@ run_case() {
     out="$work/$name/out" fake="$work/$name/fake"
     mkdir -p "$out" "$fake"
     res="$out/prepr-gemini.result.json"
-    (cd "$repo" && env PATH="$bin:/usr/bin:/bin" FAKE_DIR="$fake" FAKE_AGY_PLAN="$plan" \
+    (cd "$repo" && env -u PRE_PR_GEMINI_MODEL PATH="$bin:/usr/bin:/bin" FAKE_DIR="$fake" FAKE_AGY_PLAN="$plan" \
         FAKE_AGY_HOME="$work/$name/agyhome" PRE_PR_GEMINI_AGY_HOME="$work/$name/agyhome" \
         PRE_PR_GEMINI_IDLE=3 PRE_PR_GEMINI_POLL=1 PRE_PR_GEMINI_KILL_GRACE=1 \
         PRE_PR_GEMINI_RETRY_FLOOR=1 PRE_PR_GEMINI_TIMEOUT=60 "$@" \
@@ -75,6 +75,9 @@ no_leftovers() {
 
 want() { [ -z "$only" ] || [[ $1 == *"$only"* ]]; }
 
+# The argument after --model in attempt 1's agy call.
+model_arg() { grep -x -A1 -- --model "$fake/a1.args" | sed -n 2p; }
+
 if want ok; then
     run_case ok ok
     check "one completed attempt with findings" \
@@ -86,6 +89,15 @@ if want ok; then
     check_sh "print mode stays read-only" 'grep -qx -- --sandbox "$fake/a1.args" && grep -qx plan "$fake/a1.args"'
     check_sh "agy runs with AGY_ORCHESTRATOR=claude" 'grep -qx claude "$fake/a1.orchestrator"'
     check_sh "agy runs under the timeout backstop" '[ "$(command cat "$fake/a1.parent")" = timeout ]'
+    check_sh "default model passed to agy" '[ "$(model_arg)" = gemini-4-hydrogen-high ]'
+    check "default model recorded" '.model == "gemini-4-hydrogen-high"'
+fi
+
+if want model; then
+    run_case model ok PRE_PR_GEMINI_MODEL=fake-model-x
+    check_sh "PRE_PR_GEMINI_MODEL overrides the default" '[ "$(model_arg)" = fake-model-x ]'
+    check_sh "the default model is not passed" '! grep -qx gemini-4-hydrogen-high "$fake/a1.args"'
+    check "override recorded" '.ok == true and .model == "fake-model-x"'
 fi
 
 if want agent; then
