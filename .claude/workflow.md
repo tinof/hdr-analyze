@@ -186,7 +186,8 @@ together. A builder agent (`opus-professor`, `fable-builder`) works under a hold
 `## Routing` is the plugin's default table without Gemini (owner decision 2026-10-24). Gemini (agy) had one
 confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the Gemini 4 models did not change that:
 on the 14 cases of `.claude/review-eval/cases.json` (24 known defects, 2026-11-14) Hydrogen high reported 1
-as P0/P1 and 2 as minor notes, Argon medium none, and Carbon medium (diff only) 2 minor in 10 cases. Gemini
+as P0/P1 and 2 as minor notes, Argon medium none, Argon high 2 minor in 10 cases, Carbon medium (diff only)
+2 minor in 10 cases, and Hydrogen xhigh 2 P0/P1 and 1 minor in 12 cases. Gemini
 stays parked; the owner decides when a new result justifies the default rows. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
 the round stays Tier 2 as `tier2Mode: single-family`, and both surfaces must complete. A diff that touches
 this file is reviewed under the base's routing and surfaces, and still shows the owner its diff before

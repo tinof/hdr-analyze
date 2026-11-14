@@ -91,8 +91,8 @@ Claude review for it.
 Run it only when the user passed `--gemini`; otherwise record `geminiPass: "skipped"`. It is opt-in
 since 2026-11-14 (owner): on the 14 cases of `.claude/review-eval/cases.json` (24 known defects),
 `gemini-4-hydrogen-high` reported 1 as P0/P1 and 2 as minor notes in 39 minutes, with no false
-alarm on the controls. Argon medium found none, Argon high 2 minor in 10 cases, Hydrogen xhigh 2
-P0/P1 and 1 minor in 12 cases.
+alarm on the controls. Argon medium found none, Argon high 2 minor in 10 cases, Carbon medium
+(diff only) 2 minor in 10 cases, Hydrogen xhigh 2 P0/P1 and 1 minor in 12 cases.
 
 Skip it too when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as a background Bash:
 
