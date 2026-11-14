@@ -7,6 +7,9 @@
   real discs (section 3).
 - `mkvdovi` refuses Profile 7 FEL inputs, with or without `--mdfix`. `inspect` still reports FEL.
   Profile 7 MEL, Profile 8, HDR10, HDR10+ and HLG are not affected.
+- 2026-11-12 (owner): offline FEL work reopened. It runs on a local branch beside v0.9.0 and
+  re-encodes no test file. FEL code enters `mkvdovi` only after v0.9.0 and after E7.1, E13.12,
+  E13.13, E13.14 and E13.16 ([ROADMAP.md](../ROADMAP.md) "FEL: Profile 7 FEL").
 - Nothing in this document is implemented. It is the starting point for a later session.
 - The earlier research notes (`docs/experimental/`) were removed. Their "80-90% of artistic intent"
   preservation estimate was retracted before removal; no measurement ever supported it.
@@ -100,7 +103,7 @@ display-management metadata. Verified mechanically in the review with `dovi_tool
 
 - Keeps: authored L1, L2, L4, L5, L6, scene flags; BL pixels.
 - Loses: the whole reconstruction (mapping and residual).
-- Risk carried over from the former roadmap item F2 (now the FEL placeholder): metadata authored
+- Risk carried over from the former roadmap item F2 (now the FEL item): metadata authored
   for the reconstructed picture can give wrong brightness on some titles when the EL is dropped.
   Section 4 adds that the luma mapping is not the identity on many frames.
 - Measure first: per title and per shot, the distance between BL L1 and reconstruction L1 (max and
@@ -206,7 +209,8 @@ Thresholds are fixed before each scored run.
    or misrenders the mapping, or the stream fails profile validation. Evidence for the LG OLED C9
    (2026-11-04, P14 in [`ROADMAP_LOG.md`](ROADMAP_LOG.md)): an 8.1 canary with both chroma constants
    shifted turned the picture green in Wholphin and Nuvio over Jellyfin, so the C9 applies a
-   non-identity 8.1 mapping. The precision of an arbitrary mapping is not shown, and the hold stays.
+   non-identity 8.1 mapping. The precision of an arbitrary mapping is not shown, so this gate stays
+   open; the 2026-11-12 reopening covers offline work only.
 4. **(b) against (a)**. Stop for b and c: (b) is not closer to the reference than (a), or it is
    worse in any important scene.
 5. **(c) over (b)**. Stop for c: the refit explains little of the remaining error, or the gain
@@ -267,6 +271,18 @@ offered as an explicit opt-in with the measured cost shown.
   CRC-failed RPU borrows the previous RPU's parameters for at most 3 frames; `use_prev_vdr_rpu_flag`
   is resolved in decode order at demux; a 4-tap Catmull-Rom EL upsampler lowered the per-pixel
   error spread against DoViBaker by only about 0.7% on luma.
+- AetherEngine 7.61.0 (2026-11-08, `DolbyVisionFelCurves`, off by default) also ships candidates
+  (b) and (c) during playback (the same document, section 7). Its 8.1 conversion keeps the
+  stream's luma polynomial and MMR chroma and adds a luma curve per scene: a least-squares fit of
+  the mean inverse-quantised luma residual over base-layer luma, on the stream's own pivots. It
+  reports a median Delta E ITP against its own composed picture of 2.46 → 1.49, 8.90 → 0.81 and
+  4.83 → 2.10 on three samples; its device evidence is tvOS and macOS. Read at `578bec3d`
+  (`Sources/AetherEngine/Video/FelCurves/`): the fit samples one picture per scene, the first, and
+  fits each piece on its own; the code holds no continuity constraint between fitted pieces and
+  no limit on black lift or peak. Its reference is its own composer, whose tests still pin the
+  rounding difference found on 2026-11-05 ([`ROADMAP_LOG.md`](ROADMAP_LOG.md)). The engine is
+  LGPL v3, so the method can be compared but no code is copied. A candidate (c) fit can be scored
+  against this one-picture fit on the same cuts.
 - vs-nlq, integer NLQ step on an already mapped 16-bit BL: <https://github.com/quietvoid/vs-nlq>
 - `dovi_tool` conversion modes (mode 2 removes the mapping only for FEL and keeps it for MEL; mode
   5 converts to 8.1 with the mapping preserved; read from the crate source, mode 5 not run in the

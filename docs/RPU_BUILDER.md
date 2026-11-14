@@ -239,3 +239,58 @@ bt2100 output (fixtures `p84_canary_shots` and `static_84_canary`).
 
 Regenerate the fixtures after a deliberate change with `dovi_rpu_builder/tests/fixtures/make_fixtures.sh`
 (it checks the dovi_tool version), and explain the reason in the PR.
+
+## Library plan
+
+Roadmap item P16 (owner direction, 2026-11-14): hdr-analyze is the library that players link. A
+player gets a Rust API and a C ABI. Player code (JNI, Media3, the RPU injector) stays in the
+NuvioTV fork, and this repository builds no playback engine. Nothing in this section is built yet.
+
+**What is a library today.** `dovi_rpu_builder` (this document) and its manifest reader. The fork
+wraps them in its own JNI `cdylib` (`native/rpu_builder`, `libnuvio_rpu.so`) and pins a commit of
+this repository by `rev`. The measurement is not a library: `hdr_analyzer_mvp` is a binary crate
+bound to FFmpeg, so no player can reuse the per-frame statistics, the HLG decode, the shot
+aggregation or the scene detector.
+
+**Steps, and the fork step each one serves** (fork `ROADMAP.md` Appendix A, read on its
+`perf/shield-pass` branch on 2026-11-14):
+
+| Step here | What | Fork step |
+|---|---|---|
+| P16.1 | Analysis core as a lib crate: plain planes in, frame statistics and shot L1 out | DV2.5 |
+| P16.2 | C ABI for the builder and the manifest reader | the fork's deferred combined staticlib (DV2) |
+| P16.3 | Versioning of the library crates (owner) | the fork's `rev` pin |
+| P16.4 | Decimation error table | DV1.5 |
+| P16.5 | Causal scene detector | DV2.6 |
+| P16.6 | Playback manifest version 2: per-shot reshaping and per-AU RPUs | DV4.12, DV7.8 |
+
+Fork steps that name this repository and have no step here yet:
+
+- DV4.2, a server mode that analyses a URL from a random-access point and streams finished shots.
+  It needs the fork's DV4.4 first.
+- DV4.10, a static 8.1 RPU from MaxCLL and MaxFALL. The fork's step decides where the heuristic
+  lives; E16.1 left it out of this crate.
+- DV7.6, fixed-pixel 8.1 test clips (identity, a chroma canary, an L1 pulse). The fork cites WS6.7,
+  an ID this roadmap does not have. WS6.10 covers the pulse; the 8.1 canary needs new code
+  (`canary-rpu` takes only bt2100 8.4). The owner decides whether it becomes a step.
+
+**C ABI shape.** `libdovi` is the model: the `dolby_vision` crate has a `capi` feature and is built
+with [cargo-c](https://crates.io/crates/cargo-c) (`cargo cinstall`), which gives a header, a
+pkg-config file and the library. Two constraints are known:
+
+- The fork found that a second Rust staticlib next to `libdovi.a` fails to link under fat LTO with
+  `duplicate symbol: rust_eh_personality` (its `docs/dv-conversion/DESIGN.md` 2.7). So the C ABI
+  ships as one shared library, or as one staticlib that also holds `dolby_vision`'s C API.
+- No call may unwind into C. The crate already returns an `Error` for every refusal; the C layer
+  wraps each entry point in `catch_unwind` and maps `Error::code`. That catches a panic only under
+  `panic = "unwind"`, and this workspace's release profile aborts, so the C library needs a build
+  profile that unwinds, or must accept that a panic ends the host process. P16.2 decides, and its
+  test runs on the library as shipped: `cargo test` always unwinds and proves nothing here.
+
+**Versioning.** The five shipped crates carry one version ([`RELEASING.md`](RELEASING.md)), and the
+library crates are `publish = false`. A C ABI or a crates.io release needs its own compatibility
+promise, which is P16.3 and the owner's decision. Until then a consumer pins a commit.
+
+**Licence.** This repository is MIT, as `libdovi` is, so a GPL or LGPL player can link it. Code
+from an LGPL or GPL project (AetherEngine, the fork) does not come back into this repository; a
+method can be described and reimplemented.

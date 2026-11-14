@@ -6,6 +6,99 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-14: roadmap review (library direction, FEL reopened, research check)
+
+No step closed. The roadmap was reviewed against the NuvioTV fork's roadmap (its
+`perf/shield-pass` branch), AetherEngine at `578bec3d` and a short search for newer sources. The
+decisions are in `ROADMAP.md` (Priorities entry 12, P16, R3, the FEL item).
+
+**Owner decisions (2026-11-14).**
+- hdr-analyze becomes the library that players link: a Rust API and a C ABI built with cargo-c.
+  Player code stays in the fork, and no playback engine is built here. New item P16; plan in
+  [`RPU_BUILDER.md`](RPU_BUILDER.md) "Library plan".
+- P16 and R3 sit in a new last priority entry until the owner places them.
+
+**FEL (owner, 2026-11-12, recorded with this review).** The hold of 2026-10-13 (confirmed
+2026-10-17: "revisit after 1.0.0") is lifted for offline work: a reference reconstruction and
+RPU-only experiments on a local branch, with no re-encoded test file. FEL code enters `mkvdovi`
+only after v0.9.0 and after E7.1, E13.12, E13.13, E13.14 and E13.16. The item's earlier gate line
+("when the owner lifts the hold, the F0 gate of the local `FEL_ROADMAP.md` applies", owner,
+2026-10-17) left the item, because the local plan was rewritten on 2026-11-12. Moved from the
+item and still true: E15.1 keeps a malformed source RPU (Profile 7, or one found by the RPU sniff)
+from aborting `mkvdovi` before the FEL refusal; AetherEngine's residual on/off measure and
+POC-slot pairing fit FEL_PLAN §5d and §6, and its float composer is no reference (2026-11-05).
+
+**Findings.**
+- The fork's roadmap names eight steps "in hdr-analyze" (DV1.5, DV2.5, DV2.6, DV4.2, DV4.10,
+  DV4.12, DV7.6, DV7.8). None had an item here; the table is in `RPU_BUILDER.md` "Library plan".
+- The fork's `native/rpu_builder` pins `eb727a0`, 17 commits behind `main`; two of them touch the
+  builder crates (#96, #99).
+- AetherEngine 7.61.0 (2026-11-08) ships a "FEL curve fold" that matches candidates (b) and (c) of
+  `FEL_PLAN.md`, public here since 2026-10-03 (`6c5bf8d`); `FEL_PLAN.md` has cited AetherEngine's
+  composer since 2026-10-21 (`5b5a4f0`). Its repository does not name hdr-analyze; whether the
+  fold is derived or independent cannot be told. Method and limits: `FEL_PLAN.md` section 9.
+
+**Notes, no step** (one short search; "not found" is not "does not exist").
+- SMPTE ST 2094-50 (Application #5, "Eclipsa Video"; Google with Apple and NBCUniversal;
+  finalised 2026-08 according to Phoronix): a reference white and headroom-adaptive gain curves.
+  Sources: <https://github.com/SMPTE/st2094-50> (public committee drafts), MediaInfoLib PR #2831
+  and issue #2654 (ITU-T T.35 with country code 0xB5, provider code 0x0090, oriented code 0x0001,
+  in AVC and HEVC SEI, AV1 metadata OBUs and Matroska block additions), Vulkan 1.4.366
+  `VK_GOOGLE_hdr_SMPTE_ST_2094_50_metadata`. The standard itself was not read: that is R3.1.
+- Shot detection: PERSIST (arXiv 2608.29287, 2026-08-29, code at
+  <https://github.com/linty5/PERSIST>, licence not checked) fires a cut only when the change
+  persists. Its abstract reports about half of TransNetV2's flash, overlay and archive false
+  positives at matched recall. It is a candidate scoring reference for E4.3, not analyzer code.
+- libplacebo v7.387.0 (2026-10-25) releases Profile 7 FEL merging, corrects Dolby Vision
+  reshaping to ETSI GS CCM 001, changes the units of the reshaping pivots, respects signalled
+  black level for PQ and changes tone mapping. Before WS7.1 and WS6.10, re-check on a pinned
+  version: the "reads only L1 max/avg, the source range and the reshaping" limit and the WS7 gate
+  numbers.
+- Dolby Vision 2 and HDR10+ Advanced are live on televisions since 2026-08-04 and 2026-08-06
+  (Samsung's 2026 range with Prime Video; Hisense's 2026 UX, UR9, UR8 and U7). No public bitstream
+  or metadata specification was found; the non-goal is reworded, not dropped.
+- `dolby_vision` on crates.io is still 3.4.0 (2026-08-12). `libdovi` is built with cargo-c
+  (`cargo cinstall`), the model for P16.
+- Unverified: a catalogue page lists ITU-R BT.2408-9 (03/2026); the docs cite BT.2408-8.
+- Not found: newer public work on grain-robust max-RGB or learned L1 prediction, or a quality
+  metric for dynamic tone mapping beyond ColorVideoVDP-tm (noted below).
+
+**Moved from `ROADMAP.md`** to keep it under its byte budget (history, no rule):
+- Owner directions, carried out: (2026-11-04) P15 goes ahead of the then Next up, its steps in
+  their own order (P15.1, P15.2, then P15.3, P15.4); E15.1 ranks with P15 as P15.4's prerequisite
+  (2026-11-05), and its review added E15.2. (2026-11-07) E7.3, then E7.2, go ahead of P9.4: E7.3
+  delivers wrong video timing, and the source is then deleted. (2026-11-09) WS0.2 goes ahead of
+  P9.4: one scorecard of the delivered RPU against retail before WS1.5, WS7 and P10 change L1.
+- Waiting for the owner, intro: the decisions of 2026-10-17 settled the P9 scoring rule, P13 L2,
+  E14.2, the P8 second device, E12 NVRTC, the P10 evidence and the gates of every `TODO(owner)`
+  step then listed.
+- Release plan: `v0.8.0-rc.1` was published 2026-11-03 and passed the Windows test on 2026-11-04:
+  the Windows zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ and
+  one HLG clip. The 1.0.0 row read: the WS6 `code / 1023` question answered by the discriminating
+  canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3)); a second device is not required
+  because none is available.
+- Priority 1: `--hlg-composer bt2100` and the input refusal landed 2026-10-03; other devices than
+  the C9 stay untested.
+- Priorities 2 and 4, items E8 and E9: the prerequisite E13.5 (analyzer split, before the sidecar
+  v6 step P9.2 and before E8.1 and E9.1, because E8.1 moves the default `.bin`) was met on
+  2026-10-17 (#59). Priority 4: the three L6 defects found 2026-10-07 were fixed 2026-10-11; the
+  CPU default was decided in P1.1 (2026-11-02).
+- E13 sequencing: the refactor was no priority of its own; its steps were prerequisites of
+  priorities 2 and 4.
+- Metered tests: the by-eye reading of WS6.9 on 2026-10-29 did not meet its gate, and the
+  `code / 1023` question no longer depends on it (WS6.6 answered it).
+- WS6 status: WS6.3, WS6.4 (PR #66), WS6.8 (PR #78), WS6.5 and WS6.6 (PR #80) closed; WS6.9 is
+  metered with the i1Display Pro in Dolby Vision Cinema (owner decision), files in
+  `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`.
+- WS1: the per-shot bias of `max` against retail L1 is +148 to +162 codes on Alita: Battle Angel
+  (digital, largely computer-generated) and +88 and +162 on Skyfall (both Profile 7 MEL); one lead
+  is the reference's spatial or temporal treatment of small highlights. With the 2×2 reduced set,
+  shots below retail rise from 5 to 9.
+- P14 status: the prototype writes a luma polynomial plus chroma MMR; the HDR10 fallback is
+  untouched; the dim series is CM v4.0, and well-exposed titles looked unchanged.
+- Non-goal, earlier wording: "Neither has public technical content: the announcements name
+  features, and no bitstream or metadata specification is published."
+
 ### 2026-11-11: P9.4 Count the frames that carry their own HDR10+ payload (PR #109)
 
 Step: - [P9.4][corpus] Count the frames that carry their own HDR10+ payload; `hdr10plus_tool` fills a
