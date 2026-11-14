@@ -68,6 +68,8 @@ for a later minor.
 `corpus`.
 **Reassess:** new-defect (P9.4, PR #109): P9.5, an explicit hybrid refuses a failed coverage
 scan (Codex P1, owner 2026-11-12).
+**Reassess:** needs-changed (P16.3, PR #113): P16.1 now needs the version split P16.7; P16.8
+(crates.io) needs P16.2 and P16.7.
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
 
@@ -342,7 +344,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 ### P16: library and player integration
 
 - **Status:** Open. `dovi_rpu_builder` (E16) with its manifest reader (P15) is the library today;
-  the analyzer's measurement is not. Open: P16.1 to P16.8.
+  the analyzer's measurement is not. Versioning is decided (P16.3, [log](docs/ROADMAP_LOG.md)
+  2026-11-14). Open: P16.1, P16.2, P16.4 to P16.8.
 - **Scope (owner, 2026-11-14):** a Rust API and a C ABI that players link; player code stays in
   the NuvioTV fork. Plan and the fork step each step serves:
   [`docs/RPU_BUILDER.md`](docs/RPU_BUILDER.md) "Library plan".
@@ -354,8 +357,6 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   unstable, with a versioned header).
   Gate: a C example in CI writes an 8.1 and an 8.4 RPU byte-identical to the Rust API's, and a
   test on the shipped build shows that no call unwinds into C.
-- [P16.3][owner] Versioning of the library crates. Gate: the policy is in `docs/RELEASING.md`
-  "Library crates".
 - [P16.4][corpus] The cost of decimation: per-shot L1 at sample rates 2 and 3, downscale 2 and 4,
   without top-layer `_N` pictures and IRAP only, against full analysis. Gate: the error table in
   `docs/VALIDATION.md`.
