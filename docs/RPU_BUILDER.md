@@ -259,7 +259,7 @@ aggregation or the scene detector.
 |---|---|---|
 | P16.1 | Analysis core as a lib crate: plain planes in, frame statistics and shot L1 out | DV2.5 |
 | P16.2 | C ABI for the builder and the manifest reader | the fork's deferred combined staticlib (DV2) |
-| P16.3 | Versioning of the library crates (owner) | the fork's `rev` pin |
+| P16.3, P16.7, P16.8 | Versioning: decided, then the split, then crates.io | the fork's `rev` pin |
 | P16.4 | Decimation error table | DV1.5 |
 | P16.5 | Causal scene detector | DV2.6 |
 | P16.6 | Playback manifest version 2: per-shot reshaping and per-AU RPUs | DV4.12, DV7.8 |
@@ -288,8 +288,9 @@ pkg-config file and the library. Two constraints are known:
   test runs on the library as shipped: `cargo test` always unwinds and proves nothing here.
 
 **Versioning.** The five shipped crates carry one version ([`RELEASING.md`](RELEASING.md)), and the
-library crates are `publish = false`. A C ABI or a crates.io release needs its own compatibility
-promise, which is P16.3 and the owner's decision. Until then a consumer pins a commit.
+library crates are `publish = false`. The owner decided on 2026-11-14 that the library
+crates get their own version line, git tags and an unstable-first C ABI:
+[`RELEASING.md`](RELEASING.md) "Library crates". Until the split (P16.7) a consumer pins a commit.
 
 **Licence.** This repository is MIT, as `libdovi` is, so a GPL or LGPL player can link it. Code
 from an LGPL or GPL project (AetherEngine, the fork) does not come back into this repository; a

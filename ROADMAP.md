@@ -82,7 +82,6 @@ release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
-- **P16.3: versioning of the library crates** (found 2026-11-14).
 - **E13.19: `feat/dev-corpus` cannot land.** The step, and the `l1_diff` part of E13.20, wait for that
   branch, but it is local-only behind a pre-push guard (`docs/TESTING.md` §7). The owner restates the
   condition, for example "rebase the branch after the move" (found 2026-11-01).
@@ -128,24 +127,20 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    question is also answered (WS6.6, 2026-10-29); no second device is available (owner,
    2026-10-17). WS6.9 (the metered per-gain reading) stays on the metered list.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
-   cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; the
-   flag landed 2026-10-14; the holdout scoring passed 2026-10-17 and hybrid is the default
-   (PR #84). Gate: met; the owner decides whether this priority ends.
+   cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; hybrid
+   is the default since the holdout scoring passed (PR #84). Gate: met; the owner decides whether this priority ends.
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: write L1 in-process (P10.3, max) and the measured minimum (P10.5).
    Gate: the WS7 simulator decides P10.3 (owner, 2026-10-17); the owner states P10.5's after WS6.11.
 4. **Narrow code defects** (E8, E9, P6, E7): histogram percentile reader, `--pre-denoise`
    values. Gate: unit tests for the reader and the option (E8.1, E9.1).
-5. **`--mdfix` fidelity** (P12): full regeneration stays (owner decision 2026-10-13) and the
-   notice that names the dropped levels shipped 2026-10-15 (`CHANGELOG.md` `[Unreleased]`). Open:
-   `--mdfix` ignores the source RPU's L6 (P12.1). P13 closed 2026-10-17 (v29 stays without L2).
-   Gate: the P12.1 gate.
+5. **`--mdfix` fidelity** (P12): full regeneration stays (owner, 2026-10-13). Open: `--mdfix`
+   ignores the source RPU's L6 (P12.1). Gate: the P12.1 gate.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts (WS7.1, WS7.2). Gate: the simulator reproduces the recomputed
    numbers in WS7.
 7. **Test material** (WS8): grain on synthetic highlights, unaligned positions, a same-master grainy
-   twin, transitions. Needed before 9 can be scored. Real material per format (item 5) landed
-   2026-10-05. Gate: per item in WS8.
+   twin, transitions. Needed before 9 can be scored. Gate: per item in WS8.
 8. **Scene detection** (WS2.1, E4): second signal for whole-picture motion; strong cuts closer than
    12 frames. Gate: precision and recall against authored shot lists, no loss on the other cuts.
 9. **Research, default unchanged** (WS1, WS2.2, WS2.4, WS4): ST 2094-10 reduced-set and grain-robust
@@ -347,19 +342,20 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 ### P16: library and player integration
 
 - **Status:** Open. `dovi_rpu_builder` (E16) with its manifest reader (P15) is the library today;
-  the analyzer's measurement is not. Open: P16.1 to P16.6.
+  the analyzer's measurement is not. Open: P16.1 to P16.8.
 - **Scope (owner, 2026-11-14):** a Rust API and a C ABI that players link; player code stays in
   the NuvioTV fork. Plan and the fork step each step serves:
   [`docs/RPU_BUILDER.md`](docs/RPU_BUILDER.md) "Library plan".
 - [P16.1][gpu][corpus] An analysis-core lib crate: per-frame statistics on plain planes, the HLG
   decode and shot L1, without FFmpeg, CUDA or file I/O; `hdr_analyzer_mvp` calls it. Gate: `.bin`,
   sidecars, the L1 gate, `scripts/cuda-parity.sh` and the RPU baselines byte-identical; CI checks
-  the crate for `aarch64-linux-android`.
-- [P16.2][desk] A C ABI for `dovi_rpu_builder` and its manifest reader (`capi` feature, cargo-c).
+  the crate for `aarch64-linux-android`. Needs: P16.7.
+- [P16.2][desk] A C ABI for `dovi_rpu_builder` and its manifest reader (`capi` feature, cargo-c;
+  unstable, with a versioned header).
   Gate: a C example in CI writes an 8.1 and an 8.4 RPU byte-identical to the Rust API's, and a
   test on the shipped build shows that no call unwinds into C.
-- [P16.3][owner] Versioning of the library crates: locked to the binaries, or their own semver
-  and crates.io. Gate: TODO(owner).
+- [P16.3][owner] Versioning of the library crates. Gate: the policy is in `docs/RELEASING.md`
+  "Library crates".
 - [P16.4][corpus] The cost of decimation: per-shot L1 at sample rates 2 and 3, downscale 2 and 4,
   without top-layer `_N` pictures and IRAP only, against full analysis. Gate: the error table in
   `docs/VALIDATION.md`.
@@ -370,6 +366,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   `dovi_rpu_builder/src/manifest/`): one design for per-shot reshaping with curve-mapped L1/L3
   (P14) and complete per-AU RPUs of varying length (FEL). Gate: reader tests red on the parent for
   both payloads; a version 1 manifest still reads. Needs: P14.1 (code).
+- [P16.7][desk] Split the versions as `docs/RELEASING.md` "Library crates" states
+  (`Cargo.toml`s, `scripts/ci/release-version-check.sh`, `CLAUDE.md`). Gate: the version check
+  passes with both lines and fails on a mismatch in either (test).
+- [P16.8][owner] Publish the library crates on crates.io (conditions in `docs/RELEASING.md`).
+  Gate: TODO(owner). Needs: P16.2.
 
 ## `cm_analyze` parity
 

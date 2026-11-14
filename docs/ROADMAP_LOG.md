@@ -98,6 +98,9 @@ POC-slot pairing fit FEL_PLAN §5d and §6, and its float composer is no referen
   untouched; the dim series is CM v4.0, and well-exposed titles looked unchanged.
 - Non-goal, earlier wording: "Neither has public technical content: the announcements name
   features, and no bitstream or metadata specification is published."
+- Moved later the same day, with the library versioning decision: priority 5, the `--mdfix`
+  notice that names the dropped levels shipped 2026-10-15, and P13 closed 2026-10-17 (v29 stays
+  without L2); priority 7, real material per format landed 2026-10-05.
 
 ### 2026-11-11: P9.4 Count the frames that carry their own HDR10+ payload (PR #109)
 

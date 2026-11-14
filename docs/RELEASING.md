@@ -34,6 +34,40 @@ own versions.
 A release candidate carries its suffix in the manifests too (`version = "0.6.0-rc.1"`). mkvdovi
 fingerprints resume directories with its version, so an rc and the final release must differ.
 
+### Library crates
+
+Decided by the owner on 2026-11-14 (ROADMAP P16.3). **Not in force yet:** the rules below start
+with the split PR (ROADMAP P16.7). Until it merges, the five crates above keep one version and
+`scripts/ci/release-version-check.sh` checks them as before.
+
+- **Their own version line.** `dovi84_composer`, `dovi_rpu_builder` and every later library crate
+  (the analysis core, ROADMAP P16.1) share one version, starting at 0.1.0. The binaries
+  (`hdr_analyzer_mvp`, `mkvdovi`, `verifier`) keep theirs. The table above measures flags,
+  contracts and delivered output; a library is judged by its Rust API and its C header. The
+  binaries can then reach 1.0.0 without promising a library API that is still moving.
+- **Git tags, not crates.io.** A library release is a tag `lib-vX.Y.Z` on `main`, and a consumer
+  pins the tag instead of a bare commit. The crates stay `publish = false`. Publishing is a later
+  owner step (ROADMAP P16.8), considered when all of these hold: the C ABI exists; the NuvioTV
+  fork has taken one library bump without an API break; the exact `hdr10plus = "=2.1.5"` pin no
+  longer blocks a consumer's dependency resolution. A published version cannot be removed.
+- **Bumps.**
+
+  | Change since the last library release | Bump |
+  |---|---|
+  | A removed or changed public item or signature; a `dolby_vision` major version (`dovi84_composer` exposes its types) | MINOR |
+  | RPU bytes change for the same input because a method, a default or the reference `dovi_tool` version changed | MINOR, with an "output changes" line in the notes and new fixtures |
+  | A correctness fix, also one that moves RPU bytes; a new public item | PATCH, with the "output changes" line when bytes move |
+
+- **Formats keep their own versions.** The playback manifest version, the L1 sidecar version and
+  the `Error::code` numbers are not the crate version. They only grow: a new format version or a
+  new code is a MINOR, and an existing one never changes meaning.
+- **C ABI** (ROADMAP P16.2). The first releases are labelled unstable: the header carries version
+  macros, and it may change in any MINOR. Once the fork has used it for one release cycle, the
+  owner declares it additive within a minor: functions are added, never removed or changed.
+- The binaries build against the library crates by path, so a binary release needs no library tag.
+  The split PR settles where library release notes go in `CHANGELOG.md` and how the version check
+  reads two lines.
+
 ## When to release
 
 1. **Within about a week** of merging a fix for delivered output that is wrong for every input of a
