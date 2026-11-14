@@ -267,6 +267,18 @@ offered as an explicit opt-in with the measured cost shown.
   CRC-failed RPU borrows the previous RPU's parameters for at most 3 frames; `use_prev_vdr_rpu_flag`
   is resolved in decode order at demux; a 4-tap Catmull-Rom EL upsampler lowered the per-pixel
   error spread against DoViBaker by only about 0.7% on luma.
+- AetherEngine 7.61.0 (2026-11-08, `DolbyVisionFelCurves`, off by default) also ships candidates
+  (b) and (c) during playback (the same document, section 7). Its 8.1 conversion keeps the
+  stream's luma polynomial and MMR chroma and adds a luma curve per scene: a least-squares fit of
+  the mean inverse-quantised luma residual over base-layer luma, on the stream's own pivots. It
+  reports a median Delta E ITP against its own composed picture of 2.46 → 1.49, 8.90 → 0.81 and
+  4.83 → 2.10 on three samples; its device evidence is tvOS and macOS. Read at `578bec3d`
+  (`Sources/AetherEngine/Video/FelCurves/`): the fit samples one picture per scene, the first, and
+  fits each piece on its own; the code holds no continuity constraint between fitted pieces and
+  no limit on black lift or peak. Its reference is its own composer, whose tests still pin the
+  rounding difference found on 2026-11-05 ([`ROADMAP_LOG.md`](ROADMAP_LOG.md)). The engine is
+  LGPL v3, so the method can be compared but no code is copied. A candidate (c) fit can be scored
+  against this one-picture fit on the same cuts.
 - vs-nlq, integer NLQ step on an already mapped 16-bit BL: <https://github.com/quietvoid/vs-nlq>
 - `dovi_tool` conversion modes (mode 2 removes the mapping only for FEL and keeps it for MEL; mode
   5 converts to 8.1 with the mapping preserved; read from the crate source, mode 5 not run in the
