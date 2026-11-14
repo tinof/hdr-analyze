@@ -54,19 +54,21 @@ with the split PR (ROADMAP P16.7). Until it merges, the five crates above keep o
 
   | Change since the last library release | Bump |
   |---|---|
-  | A removed or changed public item or signature; a `dolby_vision` major version (`dovi84_composer` exposes its types) | MINOR |
+  | A removed or changed public item or signature; a new enum variant or pub field, unless the type is `#[non_exhaustive]`; a `dolby_vision` or `serde_json` major version (`dolby_vision` types are in both crates' public API, `serde_json::Value` in `dovi_rpu_builder`'s) | MINOR |
   | RPU bytes change for the same input because a method, a default or the reference `dovi_tool` version changed | MINOR, with an "output changes" line in the notes and new fixtures |
-  | A correctness fix, also one that moves RPU bytes; a new public item | PATCH, with the "output changes" line when bytes move |
+  | A correctness fix, also one that moves RPU bytes; a new public item that the first row does not name | PATCH, with the "output changes" line when bytes move |
 
 - **Formats keep their own versions.** The playback manifest version, the L1 sidecar version and
   the `Error::code` numbers are not the crate version. They only grow: a new format version or a
-  new code is a MINOR, and an existing one never changes meaning.
+  new code is a MINOR of the version line whose crate defines the format (the L1 sidecar belongs
+  to the binaries and the table above), and an existing one never changes meaning.
 - **C ABI** (ROADMAP P16.2). The first releases are labelled unstable: the header carries version
   macros, and it may change in any MINOR. Once the fork has used it for one release cycle, the
   owner declares it additive within a minor: functions are added, never removed or changed.
 - The binaries build against the library crates by path, so a binary release needs no library tag.
-  The split PR settles where library release notes go in `CHANGELOG.md` and how the version check
-  reads two lines.
+  The split PR settles where library release notes go in `CHANGELOG.md`, how the version check
+  reads two lines, and what the manifest's `producer.rpu_builder_version` identifies when a binary
+  release ships library changes made since the last `lib-v` tag.
 
 ## When to release
 

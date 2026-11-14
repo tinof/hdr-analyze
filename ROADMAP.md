@@ -370,7 +370,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   (`Cargo.toml`s, `scripts/ci/release-version-check.sh`, `CLAUDE.md`). Gate: the version check
   passes with both lines and fails on a mismatch in either (test).
 - [P16.8][owner] Publish the library crates on crates.io (conditions in `docs/RELEASING.md`).
-  Gate: TODO(owner). Needs: P16.2.
+  Gate: TODO(owner). Needs: P16.2, P16.7.
 
 ## `cm_analyze` parity
 
