@@ -17,7 +17,6 @@ decisions are in `ROADMAP.md` (Priorities entry 12, P16, R3, the FEL item).
   Player code stays in the fork, and no playback engine is built here. New item P16; plan in
   [`RPU_BUILDER.md`](RPU_BUILDER.md) "Library plan".
 - P16 and R3 sit in a new last priority entry until the owner places them.
-- AetherEngine's Dolby Vision changes get a weekly check, outside this repository.
 
 **FEL (owner, 2026-11-12, recorded with this review).** The hold of 2026-10-13 (confirmed
 2026-10-17: "revisit after 1.0.0") is lifted for offline work: a reference reconstruction and
@@ -35,9 +34,9 @@ POC-slot pairing fit FEL_PLAN §5d and §6, and its float composer is no referen
 - The fork's `native/rpu_builder` pins `eb727a0`, 17 commits behind `main`; two of them touch the
   builder crates (#96, #99).
 - AetherEngine 7.61.0 (2026-11-08) ships a "FEL curve fold" that matches candidates (b) and (c) of
-  `FEL_PLAN.md`, public here since 2026-10-03 (`6c5bf8d`, which already cited AetherEngine's
-  composer). Its repository does not name hdr-analyze; whether the fold is derived or independent
-  cannot be told. Method and limits: `FEL_PLAN.md` section 9.
+  `FEL_PLAN.md`, public here since 2026-10-03 (`6c5bf8d`); `FEL_PLAN.md` has cited AetherEngine's
+  composer since 2026-10-21 (`5b5a4f0`). Its repository does not name hdr-analyze; whether the
+  fold is derived or independent cannot be told. Method and limits: `FEL_PLAN.md` section 9.
 
 **Notes, no step** (one short search; "not found" is not "does not exist").
 - SMPTE ST 2094-50 (Application #5, "Eclipsa Video"; Google with Apple and NBCUniversal;
