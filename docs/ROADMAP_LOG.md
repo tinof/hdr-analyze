@@ -6,6 +6,22 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-14: P16.3 Versioning of the library crates (PR #113)
+
+Step: - [P16.3][owner] Versioning of the library crates. Gate: the policy is in `docs/RELEASING.md`
+  "Library crates". (On `main` before this PR: "Versioning of the library crates: locked to the
+  binaries, or their own semver and crates.io. Gate: TODO(owner).")
+
+Gate evidence, PR #113: the owner's decision of 2026-11-14 is in
+[`RELEASING.md`](RELEASING.md) "Library crates": their own version line from 0.1.0, `lib-vX.Y.Z`
+git tags instead of crates.io, MINOR for API breaks (also a new variant or field of an exhaustive
+type) and for changed RPU bytes, formats versioned on the line whose crate defines them, and a C
+ABI that starts unstable. The pre-PR panel's five doc findings were fixed in the PR; Codex (exec
+and GitHub) said LGTM. See the PR's review record.
+
+Resolution: the policy is recorded and takes effect with the split, P16.7; P16.8 (crates.io)
+waits for P16.2 and P16.7. P16.1 now needs P16.7.
+
 ### 2026-11-14: roadmap review (library direction, FEL reopened, research check)
 
 No step closed. The roadmap was reviewed against the NuvioTV fork's roadmap (its
@@ -98,6 +114,9 @@ POC-slot pairing fit FEL_PLAN §5d and §6, and its float composer is no referen
   untouched; the dim series is CM v4.0, and well-exposed titles looked unchanged.
 - Non-goal, earlier wording: "Neither has public technical content: the announcements name
   features, and no bitstream or metadata specification is published."
+- Moved later the same day, with the library versioning decision: priority 5, the `--mdfix`
+  notice that names the dropped levels shipped 2026-10-15, and P13 closed 2026-10-17 (v29 stays
+  without L2); priority 7, real material per format landed 2026-10-05.
 
 ### 2026-11-11: P9.4 Count the frames that carry their own HDR10+ payload (PR #109)
 
