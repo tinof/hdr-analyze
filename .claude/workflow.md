@@ -184,13 +184,14 @@ together. A builder agent (`opus-professor`, `fable-builder`) works under a hold
 `<git dir>/claude-builder.<run>.hold`, which `.claude/hooks/rust-check.sh` honors.
 
 `## Routing` is the plugin's default table without Gemini (owner decision 2026-10-24). Gemini (agy) had one
-confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the model that might change that,
-Gemini 4 Archon, is not available on this account yet. Gemini stays parked until it is; then the default
-rows come back. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
+confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the Gemini 4 models did not change that:
+on the 14 cases of `.claude/review-eval/cases.json` (24 known defects, 2026-11-14) Hydrogen high reported 1
+as P0/P1 and 2 as minor notes, Argon medium none, and Carbon medium (diff only) 2 minor in 10 cases. Gemini
+stays parked; the owner decides when a new result justifies the default rows. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
 the round stays Tier 2 as `tier2Mode: single-family`, and both surfaces must complete. A diff that touches
 this file is reviewed under the base's routing and surfaces, and still shows the owner its diff before
 the merge. The standalone
-`/pre-pr-review` Gemini pass is not part of `/ship` and stays as it is; so does the `gemini-harness` entry
+`/pre-pr-review` Gemini pass is not part of `/ship` and runs only with `--gemini`; the `gemini-harness` entry stays
 in `## Gates`, which `/ship` still runs when its paths change.
 
 `review-surfaces: exec github` (contract 1.1, ship plugin 1.3.0): the `codex` reviewer is the local cold
