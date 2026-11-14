@@ -357,7 +357,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   the crate for `aarch64-linux-android`.
 - [P16.2][desk] A C ABI for `dovi_rpu_builder` and its manifest reader (`capi` feature, cargo-c).
   Gate: a C example in CI writes an 8.1 and an 8.4 RPU byte-identical to the Rust API's, and a
-  test shows that no call unwinds into C.
+  test on the shipped build shows that no call unwinds into C.
 - [P16.3][owner] Versioning of the library crates: locked to the binaries, or their own semver
   and crates.io. Gate: TODO(owner).
 - [P16.4][corpus] The cost of decimation: per-shot L1 at sample rates 2 and 3, downscale 2 and 4,

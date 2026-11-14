@@ -271,7 +271,7 @@ Fork steps that name this repository and have no step here yet:
 - DV4.10, a static 8.1 RPU from MaxCLL and MaxFALL. The fork's step decides where the heuristic
   lives; E16.1 left it out of this crate.
 - DV7.6, fixed-pixel 8.1 test clips (identity, a chroma canary, an L1 pulse). The fork cites WS6.7,
-  which this roadmap no longer has. WS6.10 covers the pulse; the 8.1 canary needs new code
+  an ID this roadmap does not have. WS6.10 covers the pulse; the 8.1 canary needs new code
   (`canary-rpu` takes only bt2100 8.4). The owner decides whether it becomes a step.
 
 **C ABI shape.** `libdovi` is the model: the `dolby_vision` crate has a `capi` feature and is built
@@ -282,7 +282,10 @@ pkg-config file and the library. Two constraints are known:
   `duplicate symbol: rust_eh_personality` (its `docs/dv-conversion/DESIGN.md` 2.7). So the C ABI
   ships as one shared library, or as one staticlib that also holds `dolby_vision`'s C API.
 - No call may unwind into C. The crate already returns an `Error` for every refusal; the C layer
-  wraps each entry point in `catch_unwind` and maps `Error::code`.
+  wraps each entry point in `catch_unwind` and maps `Error::code`. That catches a panic only under
+  `panic = "unwind"`, and this workspace's release profile aborts, so the C library needs a build
+  profile that unwinds, or must accept that a panic ends the host process. P16.2 decides, and its
+  test runs on the library as shipped: `cargo test` always unwinds and proves nothing here.
 
 **Versioning.** The five shipped crates carry one version ([`RELEASING.md`](RELEASING.md)), and the
 library crates are `publish = false`. A C ABI or a crates.io release needs its own compatibility
