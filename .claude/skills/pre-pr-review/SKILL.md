@@ -1,15 +1,15 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), a Gemini 4 Hydrogen pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
-argument-hint: "[--base <branch>] [item ID]"
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), with `--gemini` a Gemini 4 Hydrogen pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+argument-hint: "[--base <branch>] [--gemini] [item ID]"
 disable-model-invocation: true
 ---
 
 # pre-pr-review
 
 **Modes.**
-- **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including both
-  passes of step 2 (Codex and Gemini) and the gates in step 5. End as step 8 says.
+- **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including the
+  Codex pass of step 2, the Gemini pass only with `--gemini`, and the gates in step 5. End as step 8 says.
 - **Self-check mode:** `/ship` step 3b told you to follow this file (`self-check: skill:pre-pr-review`
   in `.claude/workflow.md`, and Claude built the code). Run steps 1, 3, 4, 6, 7 and 8: the Claude
   panel and the docs keeper. Skip step 2 (Codex and Gemini): `/ship` runs the cross-family review
@@ -23,7 +23,7 @@ running this review again while HEAD is unchanged, so a standalone run followed 
 costs one review, not two.
 
 The user's command (`/pre-pr-review` or `/ship`) is the opt-in for the `pre-pr-panel` review run
-in step 3 (and its resume in step 4); in standalone mode also for the Gemini pass in step 2b and
+in step 3 (and its resume in step 4); in standalone mode also for the Gemini pass in step 2b (with `--gemini`) and
 the `gatesOnly` calls in step 5, which start no agents.
 Codex runs read-only and follows `~/.claude/rules/codex-routing.md` (`command codex`). Gemini runs
 read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
@@ -86,9 +86,15 @@ The review text is in `<scratchpad>/prepr-codex.md`. `--json` prints no header, 
 with `ok: false` is a failed run: report its `outcome` and `reason`, and never substitute a
 Claude review for it.
 
-### 2b. Gemini pass (skipped for a docs-only diff)
+### 2b. Gemini pass (only with `--gemini`; skipped for a docs-only diff)
 
-Skip it when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as a background Bash:
+Run it only when the user passed `--gemini`; otherwise record `geminiPass: "skipped"`. It is opt-in
+since 2026-11-14 (owner): on the 14 cases of `.claude/review-eval/cases.json` (24 known defects),
+`gemini-4-hydrogen-high` reported 1 as P0/P1 and 2 as minor notes in 39 minutes, with no false
+alarm on the controls. Argon medium found none, Argon high 2 minor in 10 cases, Hydrogen xhigh 2
+P0/P1 and 1 minor in 12 cases.
+
+Skip it too when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as a background Bash:
 
 ```
 .claude/workflows/pre-pr-gemini.sh origin/<base> <scratchpad> <scratchpad>/prepr-scope.md
