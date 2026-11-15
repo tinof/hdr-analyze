@@ -6,6 +6,23 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-15: E17.1 stopped before code (batch, no step closed)
+
+The `/ship:roadmap-batch` builder of E17.1 stopped on two rules that neither `dolby_vision` 3.4.0
+nor the repo docs settle; both are under "Waiting for the owner". Its research, kept for the next
+build: duplicate L8 and L10 target indices are not rejected by the crate (`cmv40.rs:121-170` only
+counts blocks; `extension_metadata/mod.rs:57-71` adds without a duplicate check), so both checks
+stay. The L8 field-presence check can go: the parser reads fields by length (`level8.rs:69-93`)
+and requires zero padding (`blocks/mod.rs:195-223`), but a length outside 10/12/13/19/25 reaches
+`unreachable!` (`level8.rs:174-181`), so `--verify` must parse through `rpu_guard`
+(`mkvdovi/src/rpu_guard.rs:184-185`). Authored L8 and L10 reach an output only on the MEL fast
+path, which calls `verify_post_mux` with no delivery (`pipeline/dovi_steps.rs:406`), so today's
+`--verify` reads only frame 0 there. Moved from P6 to keep `ROADMAP.md` under budget:
+
+- **Checked 2026-10-11 (fix-l6-zero-light-levels):** none of the seven saved rpu-baseline inputs
+  has a container 0, so the baselines do not cover the container-0 fix; unit and clip tests do,
+  including the L6 of a generated `extra.json`.
+
 ### 2026-11-15: E13.16 Split mkvdovi's `main` by phase (PR #118)
 
 Step: - [E13.16][corpus][batch] Split mkvdovi's `main` (`mkvdovi/src/main.rs`, 188 lines) by phase. Gate: the
