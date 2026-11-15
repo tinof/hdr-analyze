@@ -6,6 +6,15 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-15: owner answers after `/ship:roadmap-batch` (no step closed)
+
+The owner took the recommended option on the four questions the batch parked. E7.1: the expected
+count is the input's ffprobe packet count, and an unreadable count falls back to ffmpeg extraction.
+P5.1: an explicit hybrid keeps refusing a `--skip-reorder` JSON. E17.1: L8 targets 24 and 25 are
+presets, and `--verify` parses the MEL passthrough RPU through `rpu_guard`, warning and skipping
+on a crate limit. P9: a failed scan on the unextracted path refuses an explicit hybrid too, new
+step P9.6. The Decided bullets are in `ROADMAP.md`; the `CLAUDE.md:89` wording stays on the list.
+
 ### 2026-11-15: E17.2 Check the whole DV config record of every output (PR #121)
 
 Step: [E17.2][desk][batch] Check the whole DV config record of every output (`mkvdovi/src/verify.rs`):

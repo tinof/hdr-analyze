@@ -90,17 +90,6 @@ release:
   condition, for example "rebase the branch after the move" (found 2026-11-01).
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
-- **E7.1: the expected frame count.** A, the ffprobe packet count (exact, MKV only) or B, MediaInfo
-  `FrameCount` (inexact); and an unreadable count falls back to extraction or is accepted.
-  Recommended: A, fall back (batch, 2026-11-15).
-- **P9: a failed scan when `hdr10plus_tool` extracts nothing** (`judge_unextracted`, test-pinned):
-  an explicit hybrid warns and converts. Refuse or keep? Recommended: refuse (batch, 2026-11-15).
-- **P5.1: an explicit hybrid on a `--skip-reorder` JSON.** Main refuses it when the extract fails
-  on a stream with payloads; the fallback converts on decode-order metadata. Keep the refusal
-  (recommended) or take the JSON (batch, 2026-11-15).
-- **E17.1: two rules.** (a) Are L8 targets 24 and 25 presets, as `trim_target_nits` and
-  `mdfix_notice.rs:226` read them, though the crate's L10 table omits them? (b) Does `--verify`
-  parse the MEL passthrough RPU (`rpu_guard`, warn and skip on a crate limit)? Recommended: yes, yes.
 - **CLAUDE.md:89: the `--verify` list** misses the E17.2 record check; proposed wording in the
   [log](docs/ROADMAP_LOG.md) (2026-11-15). A batch may not edit `CLAUDE.md`.
 
@@ -218,8 +207,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   `--skip-reorder` fallback produces a JSON whose frame count equals the video's, and one in which
   the fallback is not used (both sides; owner, 2026-10-17).
 - [P5.1][desk][batch] `hdr10plus_tool extract --skip-reorder` fallback
-  (`mkvdovi/src/pipeline/hdr10plus.rs`, `pipeline/tests.rs`; not in the code at 2026-10-17).
-  Gate: the item gate (step 1). (The HLG→PQ mastering-primaries item is gone: HLG now converts to
+  (`mkvdovi/src/pipeline/hdr10plus.rs`, `pipeline/measure.rs`, `pipeline/tests.rs`); an explicit
+  hybrid refuses a `--skip-reorder` JSON. Gate: the item gate (step 1), plus both sides of the refusal.
+- **Decided 2026-11-15 (owner):** an explicit `--hdr10plus-l1 hybrid` keeps refusing; the default
+  and `hdr10plus` use the fallback JSON with its warning. (The HLG→PQ mastering-primaries item is gone: HLG now converts to
   Profile 8.4 without re-encoding.)
 
 ### P6: source consistency warnings
@@ -256,10 +247,13 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 ### P9: HDR10+ → Profile 8.1 L1
 
 - **Status:** Core complete: hybrid is the HDR10+ default (PR #84); partial or uncountable coverage
-  refuses an explicit hybrid (P9.4, P9.5; [log](docs/ROADMAP_LOG.md)). No step open; an owner question.
+  refuses an explicit hybrid (P9.4, P9.5; [log](docs/ROADMAP_LOG.md)). Open: P9.6.
 - **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
   panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
   retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
+- [P9.6][desk][batch] Refuse an explicit hybrid when `hdr10plus_tool` extracts nothing and the
+  coverage scan fails (`judge_unextracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs`); the
+  default and `hdr10plus` keep the warning (owner, 2026-11-15). Gate: unit tests on both sides.
 
 ### P10: measured against delivered
 
@@ -685,7 +679,11 @@ The detailed gap table and validation method live in
   per file measured and reported. (3) (owner, 2026-11-07) a failed check of (2) or of E7.3 fails
   the run and keeps the source, tested.
 - [E7.1][desk][batch] Direct-MKV `dovi_tool` steps (`mkvdovi/src/pipeline/dovi_steps.rs`,
-  `pipeline/tests.rs`) still accept exit status plus non-empty output. Gate: the item's gate (1).
+  `pipeline/tests.rs`) still accept exit status plus non-empty output: compare the output's
+  access units with the input's ffprobe packet count, and fall back to ffmpeg extraction on a
+  mismatch or an unreadable count. Gate: the item's gate (1).
+- **Decided 2026-11-15 (owner):** the expected count is the ffprobe packet count of the input
+  (`timing::read_video_times`), not MediaInfo `FrameCount`; an unreadable count falls back.
 - **Checked 2026-11-10 @efc8306:** the acceptance is `run_dovi_video_step`
   (`mkvdovi/src/pipeline/dovi_steps.rs:42`, `:66-71`), called by the clean-BL and MEL steps
   (`:173`, `:221`); its output is video, so it needs a video frame count, not the E7.2 RPU count.
@@ -902,6 +900,8 @@ The detailed gap table and validation method live in
   neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence
   disagrees with the block length. First check what the `dolby_vision` crate (3.4.0) already
   rejects at parse time, and drop the checks it covers. Gate: the item gate.
+- **Decided 2026-11-15 (owner):** L8 targets 24 and 25 are presets (`trim_target_nits`); `--verify`
+  parses the MEL passthrough RPU through `rpu_guard` and warns and skips these checks on a crate limit.
 
 ### E18: hot-file budgets
 
