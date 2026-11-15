@@ -33,36 +33,61 @@ pub(super) enum Probe {
 }
 
 /// Checks the record of `output_file`'s first video stream and prints the result. Returns
-/// `false` only on a failed check; an ffprobe that cannot run is a warning.
+/// `false` only on a failed check; an ffprobe that cannot run, or reads no record, is a warning.
 pub(super) fn verify(output_file: &Path, hlg_source: bool) -> bool {
-    match probe(output_file) {
-        Probe::Unreadable => {
-            println!(
-                "{}",
-                "Could not read the Dolby Vision configuration record with ffprobe; skipping that check."
-                    .yellow()
-            );
-            true
+    let (passed, lines) = report(probe(output_file), hlg_source);
+    for line in lines {
+        match line {
+            Line::Info(text) => println!("{text}"),
+            Line::Warn(text) => println!("{}", text.yellow()),
+            Line::Fail(text) => println!("{}", text.red()),
         }
-        Probe::NoRecord => {
-            println!(
-                "{}",
-                "The output's video stream has no Dolby Vision configuration record.".red()
-            );
-            false
-        }
+    }
+    passed
+}
+
+/// One printed line of the record check.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Line {
+    Info(String),
+    Warn(String),
+    Fail(String),
+}
+
+/// Whether the record check passes, and the lines it prints. An ffprobe that reads the stream
+/// but no record only warns: an older ffprobe does not read the record from Matroska at all, and
+/// `dovi_tool info` and the RPU count still check that the output carries Dolby Vision.
+pub(super) fn report(probe: Probe, hlg_source: bool) -> (bool, Vec<Line>) {
+    match probe {
+        Probe::Unreadable => (
+            true,
+            vec![Line::Warn(
+                "Could not read the Dolby Vision configuration record with ffprobe; skipping that \
+                 check."
+                    .into(),
+            )],
+        ),
+        Probe::NoRecord => (
+            true,
+            vec![Line::Warn(
+                "ffprobe shows no Dolby Vision configuration record for the output (an older \
+                 ffprobe does not read it from Matroska); skipping that check."
+                    .into(),
+            )],
+        ),
         Probe::Record(record) => match check(&record, hlg_source) {
-            Ok(lines) => {
-                for line in lines {
-                    println!("{line}");
-                }
-                true
-            }
+            Ok(lines) => (true, lines.into_iter().map(Line::Info).collect()),
             Err(problems) => {
-                for problem in problems {
-                    println!("{}", problem.red());
+                let mut lines: Vec<Line> = problems.into_iter().map(Line::Fail).collect();
+                if !hlg_source && record.compatibility_id.is_some_and(|id| id != 1) {
+                    lines.push(Line::Warn(
+                        "mkvmerge derives the compatibility ID from the HEVC bitstream: the \
+                         source's VUI probably lacks the PQ transfer tag (transfer_characteristics \
+                         16), which the Matroska colour element alone does not set."
+                            .into(),
+                    ));
                 }
-                false
+                (false, lines)
             }
         },
     }
@@ -392,6 +417,41 @@ TAG:NUMBER_OF_FRAMES=6
         let text = format!("{PLAIN_HEVC}side_data_type=DOVI configuration record\n");
         assert_eq!(parse(&text), Some(DvConfigRecord::default()));
         assert_eq!(check(&record(&text), false).unwrap_err().len(), 6);
+    }
+
+    #[test]
+    fn a_stream_without_the_record_warns_and_passes() {
+        let (passed, lines) = report(classify(true, PLAIN_HEVC.as_bytes()), false);
+        assert!(
+            passed,
+            "an ffprobe that reads no record cannot fail the output"
+        );
+        assert!(
+            matches!(lines.as_slice(), [Line::Warn(text)] if text.contains("skipping that check")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn a_pq_output_with_another_id_names_the_missing_vui_tag() {
+        let text = with_field(PQ_81, "dv_bl_signal_compatibility_id", Some("0"));
+        let (passed, lines) = report(Probe::Record(record(&text)), false);
+        assert!(!passed);
+        assert!(
+            matches!(lines.as_slice(), [Line::Fail(_), Line::Warn(hint)] if hint.contains("transfer_characteristics")),
+            "{lines:?}"
+        );
+        // A good PQ record and an HLG mismatch get no PQ hint.
+        let (passed, lines) = report(Probe::Record(record(PQ_81)), false);
+        assert!(
+            passed && lines.iter().all(|line| matches!(line, Line::Info(_))),
+            "{lines:?}"
+        );
+        let (passed, lines) = report(Probe::Record(record(PQ_81)), true);
+        assert!(
+            !passed && lines.iter().all(|line| matches!(line, Line::Fail(_))),
+            "{lines:?}"
+        );
     }
 
     #[test]
