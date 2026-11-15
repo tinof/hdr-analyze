@@ -14,6 +14,12 @@ This document provides a historical record of completed milestones, feature impl
   too. A wrong field fails `--verify`; a PQ output with another ID also gets a hint about a
   missing VUI transfer tag. An ffprobe that cannot run, or that shows no record (an older ffprobe
   does not read it from Matroska), only skips the check with a warning.
+- mkvdovi retries `hdr10plus_tool extract` with `--skip-reorder` when the normal extraction of an
+  HDR10+ input fails (ROADMAP P5.1). The flag is the tool's workaround for misauthored HEVC files.
+  Before, such a file fell back to HDR10 analysis without its HDR10+ metadata. The retry warns,
+  says that its metadata is not reordered to display order, and writes its own log
+  (`hdr10plus_tool_skip_reorder.log`), so `hdr10plus_tool.log` keeps the first failure. A file
+  whose normal extraction works runs the tool once, as before.
 - mkvdovi counts the frames of an HDR10+ input that carry their own HDR10+ payload (ROADMAP
   P9.4). `hdr10plus_tool` gives a frame without one the previous frame's, so a partial file
   converted without a word. Partial coverage now warns with the counts and the first gap; an
