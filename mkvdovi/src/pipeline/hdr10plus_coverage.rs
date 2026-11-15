@@ -5,7 +5,8 @@
 //! The scan reads the Annex B stream that the HDR10+ path already extracts. A picture counts
 //! when a prefix SEI before its first slice holds a `user_data_registered_itu_t_t35` message
 //! with the HDR10+ identity, the message `hdr10plus_tool` 1.7.2 picks (the port in
-//! `tools/rpu_builder_check/src/payloads.rs`). A scan that cannot be trusted only warns.
+//! `tools/rpu_builder_check/src/payloads.rs`). A count that cannot be trusted only warns, except
+//! that a scan that fails refuses an explicit hybrid (P9.5).
 
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
@@ -398,8 +399,8 @@ fn ignored_detail(coverage: &Coverage) -> String {
     }
 }
 
-/// The decision when `hdr10plus_tool` extracted `scene_frames` frames. Only a trusted partial
-/// count refuses, and only under an explicit hybrid.
+/// The decision when `hdr10plus_tool` extracted `scene_frames` frames. A trusted partial count
+/// and a scan that fails refuse, and only under an explicit hybrid.
 pub(super) fn judge_extracted(
     counted: &Result<Coverage, String>,
     scene_frames: Option<u64>,
@@ -407,6 +408,12 @@ pub(super) fn judge_extracted(
 ) -> Verdict {
     let coverage = match counted {
         Ok(coverage) => coverage,
+        // P9.5: an explicit hybrid does not run on a stream whose coverage is unknown.
+        Err(reason) if explicit_hybrid => {
+            return Verdict::Refused(format!(
+                "the HDR10+ payload coverage could not be counted ({reason})"
+            ))
+        }
         Err(reason) => return Verdict::NotCounted(reason.clone()),
     };
     let Some(frames) = scene_frames else {

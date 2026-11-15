@@ -3,7 +3,9 @@
 //! A clip whose every frame carries one converts with the count and no warning. A clip with a
 //! gap converts with a warning under the default and `--hdr10plus-l1 hdr10plus`, and an explicit
 //! `--hdr10plus-l1 hybrid` refuses it before any analysis. A gap at the start, which makes
-//! `hdr10plus_tool extract` fail, is named the same way instead of "no dynamic metadata".
+//! `hdr10plus_tool extract` fail, is named the same way instead of "no dynamic metadata". A
+//! stream the count cannot read (an SEI NAL unit over the scan's 256 KiB cap) refuses an explicit
+//! hybrid before analysis too (ROADMAP P9.5) and only warns under the default and `hdr10plus`.
 //!
 //! The gaps are cut by removing the HDR10+ SEI NAL units of chosen access units from a stream
 //! `hdr10plus_tool inject` wrote, so the expected counts come from the cut, not from mkvdovi.
@@ -27,6 +29,7 @@ const TEMP_DIR: &str = "mkvdovi_temp_clip";
 const COVERAGE_FILE: &str = "hdr10plus_coverage.json";
 const FRAMES: u64 = 48;
 const PREFIX_SEI: u8 = 39;
+const SUFFIX_SEI: u8 = 40;
 /// ST 2094-40 in a T.35 message: country 0xB5, provider 0x003C, oriented code 1, application 4,
 /// version 1.
 const HDR10PLUS_IDENTITY: [u8; 7] = [0xB5, 0x00, 0x3C, 0x00, 0x01, 0x04, 0x01];
@@ -223,6 +226,54 @@ fn without_payloads(stream: &[u8], cut: RangeInclusive<u64>) -> Vec<u8> {
     kept
 }
 
+/// `stream` with one suffix SEI NAL unit of `len` bytes (header and trailing bits included)
+/// after the last slice of access unit `at` (decode order): a user_data_unregistered message of
+/// 0x5A bytes, so the unit needs no emulation prevention and `len` is its size in the stream.
+/// A suffix SEI, because mkvmerge 82 writes a truncated SEI into the track's `hvcC` when the
+/// stream holds a prefix SEI this long, which breaks the count before the long unit is reached.
+fn with_suffix_sei_of(stream: &[u8], at: u64, len: usize) -> Vec<u8> {
+    // Header (2), payload type 5 (1), the size bytes, the payload and the trailing byte (1).
+    let coded = |size: usize| [vec![0xFF; size / 255], vec![(size % 255) as u8]].concat();
+    let payload = (0..len)
+        .rev()
+        .find(|&size| 2 + 1 + coded(size).len() + size + 1 == len)
+        .expect("a payload size fits");
+    assert_ne!(payload % 255, 0, "the last size byte must not be zero");
+    let unit = [
+        vec![0, 0, 1, SUFFIX_SEI << 1, 1, 5],
+        coded(payload),
+        vec![0x5A; payload],
+        vec![0x80],
+    ]
+    .concat();
+    assert_eq!(unit.len() - 3, len);
+    let slice = |unit: &[u8]| {
+        let kind = (unit[0] >> 1) & 0x3F;
+        (kind <= 21).then(|| unit.len() > 2 && unit[2] & 0x80 != 0)
+    };
+    let spans = nal_spans(stream);
+    let mut out = Vec::with_capacity(stream.len() + unit.len());
+    // Access units started so far: the current picture is number `started - 1`.
+    let mut started = 0u64;
+    let mut inserted = false;
+    for (index, &(start, end)) in spans.iter().enumerate() {
+        out.extend_from_slice(&stream[start..end]);
+        let Some(first_in_picture) = slice(&stream[start + 3..end]) else {
+            continue;
+        };
+        started += u64::from(first_in_picture);
+        let continued = spans
+            .get(index + 1)
+            .is_some_and(|&(next, next_end)| slice(&stream[next + 3..next_end]) == Some(false));
+        if started == at + 1 && !continued {
+            out.extend_from_slice(&unit);
+            inserted = true;
+        }
+    }
+    assert!(inserted, "access unit {at} is in the stream");
+    out
+}
+
 /// `<dir>/clip.mkv` from an Annex B stream.
 fn mux(dir: &Path, stream: &[u8]) -> PathBuf {
     std::fs::create_dir_all(dir).unwrap();
@@ -411,5 +462,60 @@ fn a_coverage_gap_at_the_start_is_named_instead_of_no_dynamic_metadata() {
     assert!(success, "the default converts from HDR10 analysis:\n{log}");
     assert!(log.contains(UNEXTRACTED), "{log}");
     assert!(!log.contains("no dynamic metadata found"), "{log}");
+    assert!(clip.join(OUTPUT).exists());
+}
+
+#[test]
+fn a_failed_count_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid() {
+    if let Some(reason) = missing_prerequisite() {
+        eprintln!("Skipping HDR10+ coverage test: {reason}");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let clip = dir.path().join("oversized-sei");
+    // One byte over the scan's cap (`SEI_CAP`), in a frame that keeps its HDR10+ payload, so
+    // `hdr10plus_tool` still extracts all 48 frames and the count alone fails.
+    mux(
+        &clip,
+        &with_suffix_sei_of(&hdr10plus_stream(dir.path()), 12, 256 * 1024 + 1),
+    );
+    const NOT_COUNTED: &str = "an SEI NAL unit is longer than 262144 bytes";
+
+    let (success, log) = convert(&clip, &["--hdr10plus-l1", "hybrid"]);
+    assert!(!success, "an explicit hybrid must refuse:\n{log}");
+    assert!(
+        log.contains(&format!(
+            "--hdr10plus-l1 hybrid cannot be used here: the HDR10+ payload coverage could not be \
+             counted ({NOT_COUNTED}). Convert with --hdr10plus-l1 hdr10plus"
+        )),
+        "{log}"
+    );
+    assert!(
+        !clip.join(MEASUREMENTS).exists(),
+        "the analyzer ran:\n{log}"
+    );
+    assert!(!clip.join(OUTPUT).exists(), "{log}");
+    assert!(
+        !clip.join(TEMP_DIR).join(COVERAGE_FILE).exists(),
+        "a failed count is not sealed:\n{log}"
+    );
+    clean(&clip);
+
+    let warning = format!("HDR10+ payload coverage was not counted: {NOT_COUNTED}.");
+    let (success, log) = convert(&clip, &[]);
+    assert!(success, "the default converts:\n{log}");
+    assert!(log.contains(&warning), "{log}");
+    assert!(!log.contains("cannot be used here"), "{log}");
+    assert!(
+        log.contains(HYBRID_RAN),
+        "the default stays on the hybrid:\n{log}"
+    );
+    assert!(clip.join(OUTPUT).exists());
+    clean(&clip);
+
+    let (success, log) = convert(&clip, &["--hdr10plus-l1", "hdr10plus"]);
+    assert!(success, "the metadata mode converts:\n{log}");
+    assert!(log.contains(&warning), "{log}");
+    assert!(!log.contains(HYBRID_RAN), "{log}");
     assert!(clip.join(OUTPUT).exists());
 }

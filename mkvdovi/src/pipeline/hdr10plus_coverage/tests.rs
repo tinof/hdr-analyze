@@ -613,7 +613,7 @@ fn scene_info_frames_counts_the_entries_without_reading_them() {
 }
 
 #[test]
-fn only_a_trusted_partial_count_under_an_explicit_hybrid_refuses() {
+fn a_partial_or_failed_count_under_an_explicit_hybrid_refuses() {
     let full = Ok(coverage(48, 48, 0, 0, None, 0));
     let partial = Ok(coverage(48, 47, 1, 1, Some(20), 0));
     for explicit in [false, true] {
@@ -633,10 +633,13 @@ fn only_a_trusted_partial_count_under_an_explicit_hybrid_refuses() {
             judge_extracted(&partial, None, explicit),
             Verdict::NotCounted(_)
         ));
-        assert!(matches!(
-            judge_extracted(&Err("unreadable".into()), Some(48), explicit),
-            Verdict::NotCounted(_)
-        ));
+        // P9.5: a failed scan refuses an explicit hybrid and only warns under the default.
+        let failed = judge_extracted(&Err("unreadable".into()), Some(48), explicit);
+        if explicit {
+            assert!(matches!(failed, Verdict::Refused(_)), "{failed:?}");
+        } else {
+            assert!(matches!(failed, Verdict::NotCounted(_)), "{failed:?}");
+        }
     }
     let Verdict::Partial(warning) = judge_extracted(&partial, Some(48), false) else {
         panic!("the default warns");
@@ -648,6 +651,45 @@ fn only_a_trusted_partial_count_under_an_explicit_hybrid_refuses() {
         panic!("an explicit hybrid refuses");
     };
     assert!(reason.contains("only 47 of 48 frames"), "{reason}");
+}
+
+#[test]
+fn a_scan_that_fails_refuses_an_explicit_hybrid_and_warns_otherwise() {
+    let cap = 64;
+    let oversized = scan_with_cap(&stream_with_sei_of(cap + 1)[..], cap);
+    let malformed = count(&[parameter_sets(), slice(TRAIL_R, false)].concat());
+    for (counted, cause) in [
+        (oversized, "an SEI NAL unit is longer than 64 bytes"),
+        (
+            malformed,
+            "a slice continues a picture whose first slice is missing",
+        ),
+    ] {
+        let Verdict::NotCounted(warning) = judge_extracted(&counted, Some(48), false) else {
+            panic!("the default warns on {cause}");
+        };
+        assert_eq!(warning, cause);
+        let Verdict::Refused(reason) = judge_extracted(&counted, Some(48), true) else {
+            panic!("an explicit hybrid refuses {cause}");
+        };
+        assert_eq!(
+            reason,
+            format!("the HDR10+ payload coverage could not be counted ({cause})")
+        );
+        // The metadata was extracted, so the refusal can name the metadata mode.
+        let refusal = hybrid_refusal(&reason);
+        assert!(
+            refusal.starts_with(
+                "--hdr10plus-l1 hybrid cannot be used here: the HDR10+ payload coverage could \
+                 not be counted ("
+            ),
+            "{refusal}"
+        );
+        assert!(
+            refusal.ends_with("to use the HDR10+ metadata alone."),
+            "{refusal}"
+        );
+    }
 }
 
 #[test]
