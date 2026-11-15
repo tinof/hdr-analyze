@@ -6,6 +6,33 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-15: E17.2 Check the whole DV config record of every output (PR #121)
+
+Step: [E17.2][desk][batch] Check the whole DV config record of every output (`mkvdovi/src/verify.rs`):
+  profile 8, a level, RPU and BL present, no EL, compatibility ID 1 (PQ) or 4 (HLG); today only
+  the HLG ID is read. Gate: unit tests on canned ffprobe output, both sides; the existing
+  `--verify` tests unchanged.
+
+- **Decided 2026-11-15 (batch, recommended; owner may override):** the one existing assertion
+  that pinned the HLG-only check (`pq_verify_passes_when_the_sidecar_is_missing`,
+  `!log.contains("compatibility ID")`) now asserts the PQ ID 1 line; not taken: PQ wording that
+  avoids the phrase.
+
+Gate evidence, PR #121: unit tests in `mkvdovi/src/verify/dv_record.rs` on canned ffprobe 9.0.2
+output, both sides of every field; `scripts/ci/test-gate.sh` (739 passed) and green CI. The mkvdovi
+gate on the branch's release build with a `--features cuda` analyzer: all 16 RPU-baseline compares
+against `0.8.0/` identical, every `RPU.bin` byte-identical, and the record check passed on all 16
+real outputs (PQ ID 1, HLG ID 4); evidence in `~/mkvdovi-work/rpu-baseline/e17-2-batch/`. Built by
+`/ship:roadmap-batch`; the pre-PR panel's two P3s were fixed (an ffprobe that reads no record now
+warns, as an old one cannot read it from Matroska; a PQ ID mismatch names the missing VUI transfer
+tag); Gemini 4 Hydrogen high review LGTM.
+
+Resolution: `--verify` checks the whole record. Stale and not editable by a batch: `CLAUDE.md:89`.
+Proposed wording: "- **`--verify`** hard-fails malformed metadata, a Dolby Vision configuration
+record that is not Profile 8 with RPU and base layer, no enhancement layer and compatibility ID 1
+(PQ) or 4 (HLG), frame-count mismatches, a wrong CM version, an HLG composer mismatch, and
+(generated RPUs) a source range or L1 that differs from the sidecar after the clamp."
+
 ### 2026-11-15: E17.1 stopped before code (batch, no step closed)
 
 The `/ship:roadmap-batch` builder of E17.1 stopped on two rules that neither `dolby_vision` 3.4.0

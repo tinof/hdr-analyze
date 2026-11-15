@@ -101,6 +101,8 @@ release:
 - **E17.1: two rules.** (a) Are L8 targets 24 and 25 presets, as `trim_target_nits` and
   `mdfix_notice.rs:226` read them, though the crate's L10 table omits them? (b) Does `--verify`
   parse the MEL passthrough RPU (`rpu_guard`, warn and skip on a crate limit)? Recommended: yes, yes.
+- **CLAUDE.md:89: the `--verify` list** misses the E17.2 record check; proposed wording in the
+  [log](docs/ROADMAP_LOG.md) (2026-11-15). A batch may not edit `CLAUDE.md`.
 
 ### Metered tests (later)
 
@@ -892,7 +894,7 @@ The detailed gap table and validation method live in
 
 - **Status:** Open. `--verify` checks that the generated levels exist (`assert_rpu_invariants`),
   not whether authored L8 and L10 blocks from Dolby Vision inputs are consistent; prior art in
-  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E17.1, E17.2.
+  [the log](docs/ROADMAP_LOG.md) (2026-10-29); the DV record check is done (E17.2). Open: E17.1.
 - **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
   RPU passes; the existing `--verify` tests unchanged; the E13 mkvdovi gate passes.
 - [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
@@ -900,10 +902,6 @@ The detailed gap table and validation method live in
   neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence
   disagrees with the block length. First check what the `dolby_vision` crate (3.4.0) already
   rejects at parse time, and drop the checks it covers. Gate: the item gate.
-- [E17.2][desk][batch] Check the whole DV config record of every output (`mkvdovi/src/verify.rs`):
-  profile 8, a level, RPU and BL present, no EL, compatibility ID 1 (PQ) or 4 (HLG); today only
-  the HLG ID is read. Gate: unit tests on canned ffprobe output, both sides; the existing
-  `--verify` tests unchanged.
 
 ### E18: hot-file budgets
 
