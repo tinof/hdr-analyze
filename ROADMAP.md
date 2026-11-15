@@ -95,6 +95,9 @@ release:
   Recommended: A, fall back (batch, 2026-11-15).
 - **P9: a failed scan when `hdr10plus_tool` extracts nothing** (`judge_unextracted`, test-pinned):
   an explicit hybrid warns and converts. Refuse or keep? Recommended: refuse (batch, 2026-11-15).
+- **P5.1: an explicit hybrid on a `--skip-reorder` JSON.** Main refuses it when the extract fails
+  on a stream with payloads; the fallback converts on decode-order metadata. Keep the refusal
+  (recommended) or take the JSON (batch, 2026-11-15).
 
 ### Metered tests (later)
 
@@ -204,6 +207,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 ### P5: L9 primaries
 
 - **Status:** Partial. L9 detection prefers mastering-display primaries and has an override.
+  P5.1 is built on local `feat/p5-1-skip-reorder-fallback` @a98adf7 (resumed 1); open: an explicit
+  hybrid takes a `--skip-reorder` JSON (pre-PR P2), held for the owner.
 - **Gate:** step 1: a test in which the normal `hdr10plus_tool extract` fails and the
   `--skip-reorder` fallback produces a JSON whose frame count equals the video's, and one in which
   the fallback is not used (both sides; owner, 2026-10-17).
@@ -768,9 +773,9 @@ The detailed gap table and validation method live in
 
 ### E13: module size refactor
 
-- **Status:** Partial. Steps 2-5, E13.11 and E13.15 done, no production file over the 800-line
-  limit; history in [the log](docs/ROADMAP_LOG.md). Open: E13.6-E13.10, E13.12-E13.14 and
-  E13.16-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
+- **Status:** Partial. Steps 2-5, E13.11, E13.15 and E13.16 done, no production file over the
+  800-line limit; history in [the log](docs/ROADMAP_LOG.md). Open: E13.6-E13.10, E13.12-E13.14 and
+  E13.17-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
 - **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
@@ -809,8 +814,6 @@ The detailed gap table and validation method live in
 - [E13.14][corpus][batch] Split `acquire_measurements` (`mkvdovi/src/pipeline/measure.rs`, 221 lines) by
   phase; `fresh_analysis_args` (`:617`), shared with `mkvdovi manifest`, stays as it is.
   Needs: P12.1. Gate: the mkvdovi gate.
-- [E13.16][corpus][batch] Split mkvdovi's `main` (`mkvdovi/src/main.rs`, 188 lines) by phase. Gate: the
-  mkvdovi gate.
 - [E13.17][corpus][batch] Split `mdfix_notice` (`mkvdovi/src/pipeline/mdfix_notice.rs`, 160 lines) by
   phase. Needs: P12.1. Gate: the mkvdovi gate.
 - [E13.18][desk] Split `tools/fit_hlg_composer/src/siting.rs` (803 lines, limit 800) as a pure move.
@@ -828,11 +831,6 @@ The detailed gap table and validation method live in
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
-- **Checked 2026-11-05 @cd44e61:** `e13-step5/` holds only the step 5 analyzer `.bin` captures, no
-  `rpu-baseline.sh` stems, so the mkvdovi gate now names the `0.8.0/` sets (`0.8.0/run-prerelease.sh`,
-  16 compares identical). Both analyzer gates pass `--disable-optimizer`, so E13.6 diffs
-  optimizer-enabled `.bin` files. No open branch touches `mkvdovi/src/pipeline/`; `feat/dev-corpus`
-  is 11 commits ahead of main and cannot land (owner list).
 
 ### E14: test-suite audit
 

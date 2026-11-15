@@ -6,6 +6,34 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-15: E13.16 Split mkvdovi's `main` by phase (PR #118)
+
+Step: - [E13.16][corpus][batch] Split mkvdovi's `main` (`mkvdovi/src/main.rs`, 188 lines) by phase. Gate: the
+  mkvdovi gate.
+
+Gate evidence, PR #118: fmt, clippy and `scripts/ci/test-gate.sh` (727 passed, no test edited) and
+green CI. The RPU-baseline part ran on the branch's release build with a `--features cuda`
+analyzer, as the 0.8.0 captures: all 16 `rpu-baseline.sh compare --require-identical-l1` runs
+against `~/mkvdovi-work/rpu-baseline/0.8.0/` passed and every `RPU.bin` was byte-identical; the
+own-log diff only adds the E7.2, E7.3 and P9.4 check lines main gained after 0.8.0 (none removed).
+A first run with a CPU-only analyzer (NVDEC decode, CPU analysis: the E12.2 path) changed L1 on
+10 of 16 cuts and outside L1 nothing; it does not count. Evidence: `e13-16-batch/` (that run in
+`nocuda-run/`). Built by `/ship:roadmap-batch`; self-check four Opus lenses (no finding), Gemini 4
+Hydrogen high review LGTM.
+
+Resolution: `main` calls seven private phase functions in the old order; the `#[expect]` marker is
+gone. Moved here from the item to keep `ROADMAP.md` under budget:
+
+- **Checked 2026-11-05 @cd44e61:** `e13-step5/` holds only the step 5 analyzer `.bin` captures, no
+  `rpu-baseline.sh` stems, so the mkvdovi gate now names the `0.8.0/` sets (`0.8.0/run-prerelease.sh`,
+  16 compares identical). Both analyzer gates pass `--disable-optimizer`, so E13.6 diffs
+  optimizer-enabled `.bin` files. No open branch touches `mkvdovi/src/pipeline/`; `feat/dev-corpus`
+  is 11 commits ahead of main and cannot land (owner list).
+
+P5.1 was built in the same batch and held: on main an explicit hybrid refuses a file whose
+extract fails while it has payloads, and the `--skip-reorder` JSON would let it convert. The
+resume finding of its pre-PR panel is fixed on the branch; the policy waits for the owner.
+
 ### 2026-11-15: P9.5 Refuse an explicit hybrid when the HDR10+ count fails (PR #116)
 
 Step: - [P9.5][desk][batch] Refuse an explicit `--hdr10plus-l1 hybrid` when the HDR10+ coverage scan fails
