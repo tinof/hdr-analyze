@@ -98,6 +98,9 @@ release:
 - **P5.1: an explicit hybrid on a `--skip-reorder` JSON.** Main refuses it when the extract fails
   on a stream with payloads; the fallback converts on decode-order metadata. Keep the refusal
   (recommended) or take the JSON (batch, 2026-11-15).
+- **E17.1: two rules.** (a) Are L8 targets 24 and 25 presets, as `trim_target_nits` and
+  `mdfix_notice.rs:226` read them, though the crate's L10 table omits them? (b) Does `--verify`
+  parse the MEL passthrough RPU (`rpu_guard`, warn and skip on a crate limit)? Recommended: yes, yes.
 
 ### Metered tests (later)
 
@@ -234,9 +237,6 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Gate: fixture tests on both sides; RPU baselines byte-identical.
 - [P6.4][corpus] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
   conversion drops. Gate: the item's step 2 gate.
-- **Checked 2026-10-11 (fix-l6-zero-light-levels):** none of the seven saved rpu-baseline inputs
-  has a container 0, so the baselines do not cover the container-0 fix; unit and clip tests do,
-  including the L6 of a generated `extra.json`.
 
 ### P8: HLG → Profile 8.4 composer
 
