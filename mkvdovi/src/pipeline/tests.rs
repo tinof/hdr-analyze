@@ -2613,6 +2613,56 @@ fn a_failed_hdr10plus_extract_retries_with_skip_reorder_and_takes_its_json() {
 
 #[cfg(unix)]
 #[test]
+fn a_resumed_run_keeps_the_skip_reorder_marker_of_the_json_it_reuses() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_resumed_run_keeps_the_skip_reorder_marker_of_the_json_it_reuses")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let marker = fake.temp.join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+    extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+    assert!(marker.exists(), "the fallback marks its JSON");
+
+    // The resumed run reuses the sealed JSON without running the tool, and the marker that
+    // makes it warn again stays.
+    let reused = extract_sealed_hdr10plus(&fake).expect("the sealed JSON is reused");
+    assert_eq!(reused, fake.temp.join("hdr10plus_metadata.json"));
+    assert_eq!(fake.calls("hdr10plus_tool").len(), 2);
+    assert!(
+        marker.exists(),
+        "the reused JSON still came from --skip-reorder"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_normal_extract_after_a_fallback_removes_the_skip_reorder_marker() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_normal_extract_after_a_fallback_removes_the_skip_reorder_marker")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let json_path = extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+    let marker = fake.temp.join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+    assert!(marker.exists(), "the fallback marks its JSON");
+
+    // A later run re-extracts (the JSON is no longer sealed) and the normal extraction works.
+    resume::invalidate(&json_path).unwrap();
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    extract_sealed_hdr10plus(&fake).expect("the normal extraction works");
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[2]), "{}", calls[2]);
+    assert!(
+        !marker.exists(),
+        "a normal JSON carries no --skip-reorder marker"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_working_hdr10plus_extract_runs_once_without_skip_reorder() {
     let Some(fake) =
         seal_hdr10plus_stream("a_working_hdr10plus_extract_runs_once_without_skip_reorder")
