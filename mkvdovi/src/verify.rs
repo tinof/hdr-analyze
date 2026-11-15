@@ -11,6 +11,8 @@ use crate::external::{self, run_command};
 use crate::metadata;
 use crate::progress;
 
+mod dv_record;
+
 #[allow(dead_code)]
 pub fn verify_post_mux(
     input_file: &str,
@@ -80,25 +82,10 @@ pub fn verify_post_mux_with_options(
         }
     }
 
-    // Profile 8.4 must be signalled as HLG-compatible (ID 4). mkvmerge derives the ID from the
-    // bitstream, so a missing HLG tag there would silently yield ID 2 (SDR).
-    if hlg_source {
-        match dv_bl_signal_compatibility_id(output_file) {
-            Some(4) => println!("Dolby Vision compatibility ID 4 (HLG)."),
-            Some(id) => {
-                println!(
-                    "{}",
-                    format!("Dolby Vision compatibility ID is {id}; Profile 8.4 needs 4 (HLG).")
-                        .red()
-                );
-                ok = false;
-            }
-            None => println!(
-                "{}",
-                "Could not read the Dolby Vision compatibility ID with ffprobe; skipping that check."
-                    .yellow()
-            ),
-        }
+    // The output's Dolby Vision configuration record: Profile 8, a level, RPU and BL, no EL, and
+    // the compatibility ID of the source transfer (1 for PQ, 4 for HLG).
+    if !dv_record::verify(output_file, hlg_source) {
+        ok = false;
     }
 
     // 2. Extract RPU from the muxed output for structural inspection.
@@ -749,28 +736,6 @@ fn get_duration_from_file(path: &Path) -> Option<f64> {
 
 fn run_logged_command(cmd: &mut Command, log_path: &Path) -> bool {
     matches!(run_command(cmd, log_path), Ok(true))
-}
-
-/// `dv_bl_signal_compatibility_id` of the first video stream's Dolby Vision configuration record.
-fn dv_bl_signal_compatibility_id(output_file: &Path) -> Option<u8> {
-    let output = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_streams",
-            "-of",
-            "default=nw=1",
-        ])
-        .arg(output_file)
-        .output()
-        .ok()?;
-    String::from_utf8(output.stdout)
-        .ok()?
-        .lines()
-        .find_map(|line| line.strip_prefix("dv_bl_signal_compatibility_id="))
-        .and_then(|value| value.trim().parse().ok())
 }
 
 #[cfg(test)]
@@ -1604,7 +1569,10 @@ mod tests {
         let (ok, log) = verify_in_child(&clip.source, &output, Some(&measurements), None);
         assert!(ok, "a PQ output needs no sidecar:\n{log}");
         assert!(!log.contains("cannot be verified"), "{log}");
-        // The compatibility ID is only checked for HLG output.
-        assert!(!log.contains("compatibility ID"), "{log}");
+        // The configuration record of a PQ output carries compatibility ID 1.
+        assert!(
+            log.contains("Dolby Vision compatibility ID 1 (PQ)."),
+            "{log}"
+        );
     }
 }
