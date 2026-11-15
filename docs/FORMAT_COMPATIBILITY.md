@@ -37,8 +37,9 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   uses that path with a warning: `--analysis-quality fast`, `--legacy-madvr-l1`, a missing or older
   analyzer, a malformed HDR10+ scene list (including a first start other than 0), a failed
   analysis, an unusable sidecar, or an HDR10+ frame count other than the stream's. An explicit
-  `--hdr10plus-l1 hybrid` refuses those files and partial payload coverage (source kept; an older
-  analyzer only when analysis has to run) and cannot be combined with `--legacy-madvr-l1`.
+  `--hdr10plus-l1 hybrid` refuses those files, partial payload coverage and a coverage count that
+  fails next to extracted metadata (source kept; an older analyzer only when analysis has to run)
+  and cannot be combined with `--legacy-madvr-l1`.
 - HLG: the base layer is copied unchanged and the output is Dolby Vision Profile 8.4 (HLG
   backward-compatible). A Profile 8.4 RPU carries a reshaping curve set, the composer, that a Dolby
   Vision decoder uses to turn the HLG signal into PQ. `--hlg-composer` selects it. `preset` is
