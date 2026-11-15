@@ -6,6 +6,23 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-15: roadmap shaped for `/ship:roadmap-batch` (no step closed)
+
+Eight steps got the `[batch]` tag (owner, 2026-11-15): P9.5, E7.1, P5.1, E17.1, E17.2, E13.14,
+E13.16 and E13.17; E7.1, P5.1, E17.1 and E17.2 now name the file they change. The contract moved
+to 1.2 with `## Unattended` `none` and no `self-review`, so a batch runs in routed mode. The
+pre-PR self-check added `pipeline/tests.rs` to E7.1 and P5.1 (both put fake-tool tests there),
+`Needs: P12.1` to E13.14 and E13.17 (P12.1 edits both functions), and moved the mkvdovi gate into
+E13's Gate bullet, which batch hands to its builder; E17's gate now points at it. To keep
+`ROADMAP.md` under its byte budget, the Checked bullet of the finished item E15 moved here
+verbatim:
+
+- **Checked 2026-11-05 @7ec5c49:** callers use `parse_source_rpu_file` (`mkvdovi/src/rpu_check.rs:335`,
+  `:450`, `:467`). In `dolby_vision` 3.4.0 the reserved-block allocation is unreachable (`ensure!(false)`
+  first, `cmv29.rs:57`, `cmv40.rs:57`); the count is `extension_metadata/mod.rs:114`. The crate reads
+  the DM payload also under `use_prev_vdr_rpu_flag` (`dovi_rpu.rs:186`); the walk
+  follows it there too. P15.4's import must use the same guarded parse.
+
 ### 2026-11-14: P16.3 Versioning of the library crates (PR #113)
 
 Step: - [P16.3][owner] Versioning of the library crates. Gate: the policy is in `docs/RELEASING.md`

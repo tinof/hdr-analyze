@@ -8,7 +8,7 @@ turns that part off. A diff that touches this file is always Tier 2.
 ## Settings
 
 ```
-contract:       1.1
+contract:       1.2
 repo:           tinof/hdr-analyze
 base:           main
 merge:          squash
@@ -156,6 +156,10 @@ fork delivers. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.
 - Changelog heading for unreleased work: `## [Unreleased]` in `CHANGELOG.md`.
 - The **Release plan** table in `ROADMAP.md` names which steps ship in which release.
 
+## Unattended
+
+none
+
 ## Codex notes
 
 - Codex's sandbox has no GPU and no access to `~/mkvdovi-work`; CUDA parity and corpus checks are decided by
@@ -182,6 +186,13 @@ repository when it holds:
 `.claude/workflows/pre-pr-panel.js` reads these two from the paths (`numeric`, `contractSides`); change both
 together. A builder agent (`opus-professor`, `fable-builder`) works under a hold file,
 `<git dir>/claude-builder.<run>.hold`, which `.claude/hooks/rust-check.sh` honors.
+
+`/ship:roadmap-batch` (contract 1.2, owner decisions 2026-11-15). `self-review` is left out on purpose, so
+a batch runs in routed mode: Claude builds, and each PR gets `/ship`'s review by the routing row before it
+merges (Gemini while Codex is disabled). Batch builds only steps tagged `[batch]` in `ROADMAP.md`. It does
+not read the Release plan or the E13 sequencing rule, so a step that either one holds back stays untagged.
+`## Unattended` is `none`: the repository deploys no service, and the pure moves E13.18 and E13.19 keep the
+normal review, because the line-exact move proof lives outside the repository (`/pre-pr-review`, "Pure move").
 
 `## Routing` is the plugin's default table without Gemini (owner decision 2026-10-24). Gemini (agy) had one
 confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the Gemini 4 models did not change that:
