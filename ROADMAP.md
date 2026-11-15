@@ -72,7 +72,7 @@ scan (Codex P1, owner 2026-11-12).
 **Reassess:** needs-changed (P16.3, PR #113): P16.1 now needs the version split P16.7; P16.8
 (crates.io) needs P16.2 and P16.7.
 
-- Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:595`).
+- Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:617`).
 
 ### Waiting for the owner
 
@@ -203,7 +203,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   `--skip-reorder` fallback produces a JSON whose frame count equals the video's, and one in which
   the fallback is not used (both sides; owner, 2026-10-17).
 - [P5.1][desk][batch] `hdr10plus_tool extract --skip-reorder` fallback
-  (`mkvdovi/src/pipeline/hdr10plus.rs`; not in the code at 2026-10-17).
+  (`mkvdovi/src/pipeline/hdr10plus.rs`, `pipeline/tests.rs`; not in the code at 2026-10-17).
   Gate: the item gate (step 1). (The HLG→PQ mastering-primaries item is gone: HLG now converts to
   Profile 8.4 without re-encoding.)
 
@@ -677,8 +677,8 @@ The detailed gap table and validation method live in
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
   per file measured and reported. (3) (owner, 2026-11-07) a failed check of (2) or of E7.3 fails
   the run and keeps the source, tested.
-- [E7.1][desk][batch] Direct-MKV `dovi_tool` steps (`mkvdovi/src/pipeline/dovi_steps.rs`) still
-  accept exit status plus non-empty output. Gate: the item's gate (1).
+- [E7.1][desk][batch] Direct-MKV `dovi_tool` steps (`mkvdovi/src/pipeline/dovi_steps.rs`,
+  `pipeline/tests.rs`) still accept exit status plus non-empty output. Gate: the item's gate (1).
 - **Checked 2026-11-10 @efc8306:** the acceptance is `run_dovi_video_step`
   (`mkvdovi/src/pipeline/dovi_steps.rs:42`, `:66-71`), called by the clean-BL and MEL steps
   (`:173`, `:221`); its output is video, so it needs a video frame count, not the E7.2 RPU count.
@@ -782,7 +782,10 @@ The detailed gap table and validation method live in
   moves cut through. Each command's result goes in the move's PR body: the pre-PR panel computes
   only fmt, clippy and test (plus the CUDA gates) for mkvdovi paths. An automatic rpu-baseline gate
   would need a baseline-path convention and an update mode for PRs that change the RPU on purpose;
-  it is not planned.
+  it is not planned. The mkvdovi gate (E13.12-E13.17, E17.1): fmt, clippy, tests, and
+  `scripts/rpu-baseline.sh compare --require-identical-l1` against the `default/`, `mdfix/`,
+  `preset/` and `hdr10plus/` (no-flag) sets of `~/mkvdovi-work/rpu-baseline/0.8.0/` (05a135c; they
+  equal rc.1, 0.7.0 and `p9-3-hybrid-default/`).
 - [E13.6][gpu][corpus] Split `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`) by
   phase. Gate: fmt, clippy (also `--features cuda`), tests; the L1 regression gate without
   `--update`; `scripts/cuda-parity.sh` PASS; optimizer-enabled CPU and CUDA `.bin` and sidecar
@@ -798,20 +801,18 @@ The detailed gap table and validation method live in
 - [E13.9][gpu][corpus] Split `run` (281 lines, `pipeline/mod.rs`) by phase. Gate: as E13.6.
 - [E13.10][gpu][corpus] Split `launch_and_collect` (243 lines, `analysis/gpu/backend.rs`) by phase.
   Gate: as E13.6.
-- Code lines below are clippy's count (blank and comment lines skipped), 2026-10-28 @dc4882d. The
-  mkvdovi gate: fmt, clippy, tests, and `scripts/rpu-baseline.sh compare --require-identical-l1`
-  against the `default/`, `mdfix/`, `preset/` and `hdr10plus/` (no-flag) sets of
-  `~/mkvdovi-work/rpu-baseline/0.8.0/` (05a135c; they equal rc.1, 0.7.0 and `p9-3-hybrid-default/`).
+- Code lines below are clippy's count (blank and comment lines skipped), 2026-10-28 @dc4882d.
 - [E13.12][corpus] Split `convert_file` (`mkvdovi/src/pipeline/mod.rs`) by phase; step 4 left it at
   281 lines. Gate: the mkvdovi gate.
 - [E13.13][corpus] Split `verify_post_mux_with_options` (`mkvdovi/src/verify.rs`, 256 lines) by
   phase. Gate: the mkvdovi gate.
 - [E13.14][corpus][batch] Split `acquire_measurements` (`mkvdovi/src/pipeline/measure.rs`, 221 lines) by
-  phase. Gate: the mkvdovi gate.
+  phase; `fresh_analysis_args` (`:617`), shared with `mkvdovi manifest`, stays as it is.
+  Needs: P12.1. Gate: the mkvdovi gate.
 - [E13.16][corpus][batch] Split mkvdovi's `main` (`mkvdovi/src/main.rs`, 188 lines) by phase. Gate: the
   mkvdovi gate.
 - [E13.17][corpus][batch] Split `mdfix_notice` (`mkvdovi/src/pipeline/mdfix_notice.rs`, 160 lines) by
-  phase. Gate: the mkvdovi gate.
+  phase. Needs: P12.1. Gate: the mkvdovi gate.
 - [E13.18][desk] Split `tools/fit_hlg_composer/src/siting.rs` (803 lines, limit 800) as a pure move.
   Gate: `tool:fit_hlg_composer`, and a diff that shows only moved blocks.
 - [E13.19][desk] Split `tools/l1_diff/src/main.rs` (948 lines, limit 800) as a pure move, after the
@@ -895,7 +896,7 @@ The detailed gap table and validation method live in
   not whether authored L8 and L10 blocks from Dolby Vision inputs are consistent; prior art in
   [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E17.1, E17.2.
 - **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
-  RPU passes; the existing `--verify` tests and the RPU baselines are unchanged.
+  RPU passes; the existing `--verify` tests unchanged; the E13 mkvdovi gate passes.
 - [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
   `target_display_index` values, duplicate L10 target indices, an L8 target that resolves to
   neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence

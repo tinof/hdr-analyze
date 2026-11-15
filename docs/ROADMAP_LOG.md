@@ -10,7 +10,10 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 Eight steps got the `[batch]` tag (owner, 2026-11-15): P9.5, E7.1, P5.1, E17.1, E17.2, E13.14,
 E13.16 and E13.17; E7.1, P5.1, E17.1 and E17.2 now name the file they change. The contract moved
-to 1.2 with `## Unattended` `none` and no `self-review`, so a batch runs in routed mode. To keep
+to 1.2 with `## Unattended` `none` and no `self-review`, so a batch runs in routed mode. The
+pre-PR self-check added `pipeline/tests.rs` to E7.1 and P5.1 (both put fake-tool tests there),
+`Needs: P12.1` to E13.14 and E13.17 (P12.1 edits both functions), and moved the mkvdovi gate into
+E13's Gate bullet, which batch hands to its builder; E17's gate now points at it. To keep
 `ROADMAP.md` under its byte budget, the Checked bullet of the finished item E15 moved here
 verbatim:
 
