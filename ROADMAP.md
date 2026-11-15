@@ -90,6 +90,11 @@ release:
   condition, for example "rebase the branch after the move" (found 2026-11-01).
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
+- **E7.1: the expected frame count.** A, the ffprobe packet count (exact, MKV only) or B, MediaInfo
+  `FrameCount` (inexact); and an unreadable count falls back to extraction or is accepted.
+  Recommended: A, fall back (batch, 2026-11-15).
+- **P9: a failed scan when `hdr10plus_tool` extracts nothing** (`judge_unextracted`, test-pinned):
+  an explicit hybrid warns and converts. Refuse or keep? Recommended: refuse (batch, 2026-11-15).
 
 ### Metered tests (later)
 
@@ -243,16 +248,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Core complete: hybrid is the HDR10+ default (PR #84) and payload coverage is counted
-  (P9.4, PR #109; [log](docs/ROADMAP_LOG.md)). Open: P9.5.
+- **Status:** Core complete: hybrid is the HDR10+ default (PR #84); partial or uncountable coverage
+  refuses an explicit hybrid (P9.4, P9.5; [log](docs/ROADMAP_LOG.md)). No step open; an owner question.
 - **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
   panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
   retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
-- [P9.5][desk][batch] Refuse an explicit `--hdr10plus-l1 hybrid` when the HDR10+ coverage scan fails
-  (an SEI over the 256 KiB cap, a malformed stream), instead of only warning
-  (`judge_extracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs:410`); the default keeps the
-  warning (Codex P1 on PR #109, owner 2026-11-12). Gate: a failed scan refuses an explicit hybrid
-  before analysis and only warns under the default and `hdr10plus`, in unit and clip tests.
 
 ### P10: measured against delivered
 

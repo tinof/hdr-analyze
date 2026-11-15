@@ -6,6 +6,28 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-15: P9.5 Refuse an explicit hybrid when the HDR10+ count fails (PR #116)
+
+Step: - [P9.5][desk][batch] Refuse an explicit `--hdr10plus-l1 hybrid` when the HDR10+ coverage scan fails
+  (an SEI over the 256 KiB cap, a malformed stream), instead of only warning
+  (`judge_extracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs:410`); the default keeps the
+  warning (Codex P1 on PR #109, owner 2026-11-12). Gate: a failed scan refuses an explicit hybrid
+  before analysis and only warns under the default and `hdr10plus`, in unit and clip tests.
+
+Gate evidence, PR #116: the unit test `a_scan_that_fails_refuses_an_explicit_hybrid_and_warns_otherwise`
+(an oversized SEI and a malformed stream, both flags) and the clip test
+`a_failed_count_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid`
+(`mkvdovi/tests/hdr10plus_coverage.rs`) fail on the parent and pass; `scripts/ci/test-gate.sh`
+passed (727 tests, only allowed skips) and CI was green. Built by `/ship:roadmap-batch` in routed
+mode; the pre-PR panel (four Opus lenses) ran as self-check, and Gemini 4 Hydrogen high reviewed
+it cold (LGTM; Codex is disabled). See the PR's review record.
+
+Resolution: `judge_extracted` refuses a failed scan under an explicit hybrid. The panel found that
+`judge_unextracted` still keeps a failed scan as `NoPayloads` when `hdr10plus_tool` extracts
+nothing (pinned by `unextracted_payloads_warn_or_refuse_an_explicit_hybrid`); that path is outside
+the step and waits under "Waiting for the owner". E7.1 stopped in the same batch before any code:
+the source of the expected frame count is an owner question too.
+
 ### 2026-11-15: roadmap shaped for `/ship:roadmap-batch` (no step closed)
 
 Eight steps got the `[batch]` tag (owner, 2026-11-15): P9.5, E7.1, P5.1, E17.1, E17.2, E13.14,
