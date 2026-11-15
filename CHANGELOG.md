@@ -80,9 +80,9 @@ This document provides a historical record of completed milestones, feature impl
   is not Matroska, such as MP4 or TS, or an unreadable file), it muxes with the stream's own
   timing, warns, and skips the timing check; a non-DV source is then kept, not deleted.
 - The L1 sidecar is written through a temp file and a rename, so an interrupted run leaves none.
-- An explicit `--hdr10plus-l1 hybrid` now refuses an HDR10+ file whose payload coverage cannot
-  be counted (an SEI NAL unit over 256 KiB, a malformed stream) before analysis, as it refuses
-  partial coverage (ROADMAP P9.5). The default and `--hdr10plus-l1 hdr10plus` still only warn.
+- An explicit `--hdr10plus-l1 hybrid` now refuses an HDR10+ file whose metadata `hdr10plus_tool`
+  extracted but whose payload coverage cannot be counted (an SEI NAL unit over 256 KiB, a
+  malformed stream) before analysis, as it refuses partial coverage (ROADMAP P9.5). The default and `--hdr10plus-l1 hdr10plus` still only warn.
 
 ## [0.8.0] - 2026-11-04
 

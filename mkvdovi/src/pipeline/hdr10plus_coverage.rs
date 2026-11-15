@@ -6,7 +6,8 @@
 //! when a prefix SEI before its first slice holds a `user_data_registered_itu_t_t35` message
 //! with the HDR10+ identity, the message `hdr10plus_tool` 1.7.2 picks (the port in
 //! `tools/rpu_builder_check/src/payloads.rs`). A count that cannot be trusted only warns, except
-//! that a scan that fails refuses an explicit hybrid (P9.5).
+//! that a scan that fails refuses an explicit hybrid when `hdr10plus_tool` extracted metadata
+//! (P9.5).
 
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
@@ -408,7 +409,8 @@ pub(super) fn judge_extracted(
 ) -> Verdict {
     let coverage = match counted {
         Ok(coverage) => coverage,
-        // P9.5: an explicit hybrid does not run on a stream whose coverage is unknown.
+        // P9.5: with extracted metadata, an explicit hybrid does not run on a stream whose
+        // coverage is unknown. `judge_unextracted` keeps a failed scan as `NoPayloads`.
         Err(reason) if explicit_hybrid => {
             return Verdict::Refused(format!(
                 "the HDR10+ payload coverage could not be counted ({reason})"

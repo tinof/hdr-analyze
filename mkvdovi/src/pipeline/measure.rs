@@ -264,7 +264,8 @@ pub(super) fn acquire_measurements(
                     progress::print_warn(notice);
                 }
                 // P9.4: hdr10plus_tool fills a frame without its own payload from the previous
-                // one; partial coverage warns, and refuses only an explicit hybrid.
+                // one; partial coverage or a failed count warns, and refuses only an explicit
+                // hybrid (P9.4, P9.5).
                 if !hdr10plus_coverage::check_extracted(
                     temp_dir,
                     &json_path,
