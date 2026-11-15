@@ -280,6 +280,13 @@ This section covers the code on each side.
   `--cm-version` (`pipeline::expected_cm_version`: CM v4.0 metadata under v29, none under v40); an
   RPU frame count that differs from the muxed video track (MediaInfo `FrameCount`) or the L1
   sidecar. L6 MaxCLL/MaxFALL 0 in a passed-through Profile 7 MEL RPU is only a warning.
+- Dolby Vision configuration record (`verify/dv_record.rs`, every output): ffprobe reads the
+  record of the first video stream; a Profile other than 8, a missing level, a missing RPU or base
+  layer, an enhancement layer, or a compatibility ID other than 1 (PQ) or 4 (HLG) fails. For a PQ
+  output with another ID it also prints a hint: mkvmerge derives the ID from the HEVC bitstream, so
+  the source VUI probably lacks transfer_characteristics 16. An ffprobe that cannot run, or that
+  reads the stream but shows no record (an older ffprobe does not read it from Matroska), warns and
+  skips the check; `dovi_tool info` and the RPU count still show the output carries Dolby Vision.
 - HLG output: hard-fails when there are no measurements or the sidecar does not load, and checks
   that **every** RPU frame carries the composer the sidecar names (`dovi84_composer::check_rpu_file`).
 - Generated RPU (`verify::DeliveryExpectation`; not the MEL passthrough, whose RPU can carry levels

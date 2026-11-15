@@ -11,8 +11,9 @@ This document provides a historical record of completed milestones, feature impl
 - mkvdovi `--verify` checks the whole Dolby Vision configuration record of every output (ROADMAP
   E17.2): Profile 8, a level, RPU and base layer present, no enhancement layer, and compatibility
   ID 1 for PQ or 4 for HLG. Before, only the HLG ID was read. A PQ output now needs the record
-  too, and a stream without one fails. An ffprobe that cannot run still only skips the check with
-  a warning.
+  too. A wrong field fails `--verify`; a PQ output with another ID also gets a hint about a
+  missing VUI transfer tag. An ffprobe that cannot run, or that shows no record (an older ffprobe
+  does not read it from Matroska), only skips the check with a warning.
 - mkvdovi counts the frames of an HDR10+ input that carry their own HDR10+ payload (ROADMAP
   P9.4). `hdr10plus_tool` gives a frame without one the previous frame's, so a partial file
   converted without a word. Partial coverage now warns with the counts and the first gap; an

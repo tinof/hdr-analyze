@@ -340,7 +340,11 @@ the final RPU and validates structured `dovi_tool info --frame 0` JSON: Profile 
 sane L6 metadata, the CM version `--cm-version` asked for (CM v4.0 metadata fails a v29 run, its
 absence fails a v40 run), and required L9/L11/L254 blocks for CM v4.0. It fails when the RPU frame count
 differs from the muxed video track's frame count or from the L1 sidecar, and warns when the output
-and input video frame counts differ. For an RPU that `mkvdovi` generated (every path except the
+and input video frame counts differ. It reads the output's Dolby Vision configuration record with
+ffprobe and fails unless it shows Profile 8, a level, RPU and base layer present, no enhancement
+layer, and compatibility ID 1 for PQ or 4 for HLG; a PQ output with another ID also gets a hint
+that the source VUI probably lacks the PQ transfer tag. When ffprobe cannot run, or shows no record
+(an older ffprobe does not read it from Matroska), the check is skipped with a warning. For an RPU that `mkvdovi` generated (every path except the
 Profile 7 MEL passthrough), the RPU is parsed in-process, which also gives the frame count. Every
 frame must then carry the expected source range: for 8.1 the mastering display range (not checked
 when the mastering values are implausible and `dovi_tool` derives the range from L6, which the
