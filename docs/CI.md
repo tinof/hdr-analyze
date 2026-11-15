@@ -100,4 +100,5 @@ hooks run only where pre-commit is installed
   `kernels.ptx` and never rewrites the file. A stale PTX or a compile error (exit 1) is reported
   as a problem to fix; a missing or wrong NVRTC (exit 2) or a timeout is only a system message.
 - The hook does not lint the `cuda`-gated Rust code; CI's lint job does
-  (`cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings`).
+  (`cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings`). That lint
+  needs no GPU or CUDA toolkit: cudarc loads the driver at runtime.

@@ -90,8 +90,6 @@ release:
   condition, for example "rebase the branch after the move" (found 2026-11-01).
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
-- **CLAUDE.md:89: the `--verify` list** misses the E17.2 record check; proposed wording in the
-  [log](docs/ROADMAP_LOG.md) (2026-11-15). A batch may not edit `CLAUDE.md`.
 
 ### Metered tests (later)
 

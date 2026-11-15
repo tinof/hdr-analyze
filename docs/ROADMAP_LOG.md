@@ -6,6 +6,13 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-15: `CLAUDE.md` names the E17.2 record check (no step closed)
+
+The owner approved the `--verify` wording proposed in the E17.2 entry below; it is now in
+`CLAUDE.md` "mkvdovi operational gotchas". To stay under the 24,000-byte budget, two details left
+`CLAUDE.md`: why the CUDA clippy needs no GPU (cudarc loads the driver at runtime, now in
+[`CI.md`](CI.md)), and the code-search note "2026-10-24 audit: 0 LSP calls in 219 sessions".
+
 ### 2026-11-15: owner answers after `/ship:roadmap-batch` (no step closed)
 
 The owner took the recommended option on the four questions the batch parked. E7.1: the expected
