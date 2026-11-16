@@ -318,7 +318,10 @@ pub(super) fn acquire_measurements(
                 hdr_type = HdrFormat::Hdr10Unsupported;
                 hdr10plus_mode = Hdr10PlusMode::Metadata;
             }
-            Err(_) => return Ok(None),
+            Err(error) => {
+                progress::print_error(&format!("HDR10+ metadata extraction failed: {error:#}"));
+                return Ok(None);
+            }
         }
     }
 
