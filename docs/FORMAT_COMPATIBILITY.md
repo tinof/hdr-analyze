@@ -244,8 +244,10 @@ When the selected HDR10+ source produces scene L1 peaks above three times the ma
 `mkvdovi` warns and preserves the source metadata. Real sources can contain valid outliers, so peaks
 are never silently clamped.
 
-`hdr10plus_tool extract --skip-reorder` is not currently retried when ordinary extraction fails; that
-fallback remains on the roadmap.
+When ordinary `hdr10plus_tool extract` fails, `mkvdovi` retries it with `--skip-reorder` (the tool's
+workaround for misauthored HEVC files; log `hdr10plus_tool_skip_reorder.log`). That metadata keeps the
+bitstream order and is not reordered to display order. The default and `--hdr10plus-l1 hdr10plus` use
+it with a warning; an explicit `--hdr10plus-l1 hybrid` refuses it before analysis, also on resume.
 
 ## CM v4.0 metadata
 

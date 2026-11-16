@@ -249,6 +249,13 @@ This section covers the code on each side.
   fails refuses an explicit hybrid too (P9.6), and the default and `hdr10plus` fall back with the
   "no dynamic metadata" warning. A count it cannot trust otherwise (a frame count other than the
   metadata's, no payload) only warns.
+- **`--skip-reorder` fallback** (`pipeline/hdr10plus.rs`, ROADMAP P5.1): only after the normal
+  `hdr10plus_tool extract` fails, mkvdovi runs it again with `--skip-reorder`, logged to
+  `hdr10plus_tool_skip_reorder.log` so `hdr10plus_tool.log` keeps the first failure. A JSON from the
+  retry gets the marker `hdr10plus_metadata.skip_reorder`; each extraction run removes the old JSON
+  and marker first, so only the retry leaves one. A resumed run that reuses the JSON warns again,
+  and `measure::acquire_measurements` refuses an explicit hybrid on the marker before the count or
+  analysis; the default and `hdr10plus` proceed with the warning.
 - The panel peak is **not** passed as a `--trim-targets` override.
 - HDR10+ scene peaks above 3× the mastering-display peak produce advisory warnings only. **Never
   add a silent clamp.**
