@@ -8,6 +8,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- mkvdovi `--verify` checks the authored CM v4.0 L8 and L10 blocks on every frame of the output
+  RPU (ROADMAP E17.1). Two L8 blocks for the same target display, two L10 blocks for the same
+  target display, or an L8 target that is neither a preset display (24 and 25 included) nor an
+  L10 block of the same frame fail `--verify`. These blocks come from Dolby Vision inputs on the
+  Profile 7 MEL fast path, where `--verify` read only frame 0 before. An RPU the `dolby_vision`
+  parser cannot read is parsed through the abort guard and skips these checks with a warning.
+  Whether an L8 block's optional fields match its length is not checked: the parser already
+  refuses a mismatch.
 - mkvdovi `--verify` checks the whole Dolby Vision configuration record of every output (ROADMAP
   E17.2): Profile 8, a level, RPU and base layer present, no enhancement layer, and compatibility
   ID 1 for PQ or 4 for HLG. Before, only the HLG ID was read. A PQ output now needs the record

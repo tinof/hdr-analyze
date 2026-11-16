@@ -11,6 +11,7 @@ use crate::external::{self, run_command};
 use crate::metadata;
 use crate::progress;
 
+mod authored_blocks;
 mod dv_record;
 
 #[allow(dead_code)]
@@ -34,9 +35,9 @@ pub fn verify_post_mux(
 /// What an RPU mkvdovi generated must deliver, checked frame by frame on the RPU extracted from
 /// the muxed output. Only for generated RPUs: the `dolby_vision` crate wrote them, so it always
 /// parses them, while a passed-through source RPU (Profile 7 MEL) can carry levels the crate does
-/// not read (L253) and gets the external checks only. `None` therefore also marks the RPU as
-/// passed through for the structural checks: its L6 MaxCLL/MaxFALL of 0 is warned about, not
-/// failed.
+/// not read (L253) and gets the external checks and the authored-block checks only, which skip
+/// an RPU the crate cannot parse. `None` therefore also marks the RPU as passed through for the
+/// structural checks: its L6 MaxCLL/MaxFALL of 0 is warned about, not failed.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeliveryExpectation<'a> {
     /// The measured L1 the RPU was generated from. `None` when the RPU's L1 does not come from
@@ -155,6 +156,12 @@ pub fn verify_post_mux_with_options(
         .as_ref()
         .map(|rpus| rpus.len() as u64)
         .or(summary_frames);
+    // Authored CM v4.0 L8 and L10 blocks on every frame; a generated RPU reuses its parse.
+    if (delivery.is_none() || parsed_rpus.is_some())
+        && !authored_blocks::verify(&rpu_path, parsed_rpus.as_deref())
+    {
+        ok = false;
+    }
 
     let mut frame_cmd = external::dovi_tool_command();
     frame_cmd.args(["info", "--frame", "0", "-i", rpu_path.to_str().unwrap()]);
