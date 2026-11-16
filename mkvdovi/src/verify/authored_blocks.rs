@@ -138,8 +138,11 @@ pub(super) fn check(rpus: &[DoviRpu]) -> Vec<Finding> {
 /// Checks the authored blocks of the RPU extracted from the output and prints the result.
 /// `parsed` is the RPU already parsed by the caller (a generated RPU); without it the file at
 /// `rpu_path` is parsed through [`rpu_guard`]. Returns `false` only on a problem: an RPU the
-/// crate cannot parse, on any frame, skips the checks for the whole RPU with a warning (a
-/// passed-through RPU can carry levels the crate does not read, such as L253).
+/// crate cannot parse, on any frame, skips the checks for the whole RPU with a warning. Any
+/// parse error skips, not only a guard refusal: a passed-through RPU can carry L253, which
+/// `dolby_vision` 3.4.0 refuses with a plain error ("Unknown metadata block found",
+/// `cmv40.rs:56-64`), and failing on it would fail valid Profile 7 MEL outputs. A malformed
+/// RPU still fails `--verify` through the `dovi_tool` checks.
 pub(super) fn verify(rpu_path: &Path, parsed: Option<&[DoviRpu]>) -> bool {
     let owned;
     let rpus = match parsed {

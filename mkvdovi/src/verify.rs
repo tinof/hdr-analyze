@@ -1288,6 +1288,17 @@ mod tests {
     }
 
     fn dv_clip(dir: &Path, x265_params: &str, profile: &str) -> DvClip {
+        dv_clip_with_blocks(dir, x265_params, profile, &[])
+    }
+
+    /// [`dv_clip`] whose one shot also carries `extra` metadata blocks (`dovi_tool generate`
+    /// JSON, for example an authored-style L8 block).
+    fn dv_clip_with_blocks(
+        dir: &Path,
+        x265_params: &str,
+        profile: &str,
+        extra: &[serde_json::Value],
+    ) -> DvClip {
         let raw = encode_hevc(dir, "source.hevc", CLIP_FRAMES, x265_params);
         let source = dir.join("source.mkv");
         mux(&raw, &source);
@@ -1308,9 +1319,11 @@ mod tests {
                 "shots": [{
                     "start": 0,
                     "duration": CLIP_FRAMES,
-                    "metadata_blocks": [{
+                    "metadata_blocks": std::iter::once(json!({
                         "Level1": { "min_pq": 0, "max_pq": 2081, "avg_pq": 1000 }
-                    }]
+                    }))
+                    .chain(extra.iter().cloned())
+                    .collect::<Vec<_>>()
                 }]
             })
             .to_string(),
@@ -1419,6 +1432,53 @@ mod tests {
             None,
         );
         println!("{VERIFY_RESULT_PREFIX}{ok}");
+    }
+
+    /// E17.1 through `--verify` itself: an output RPU whose L8 block trims for target display
+    /// 20, with no L10 block to define it, fails the run; the same clip with a preset target
+    /// (1, 100 nits) passes the L8 and L10 checks.
+    #[test]
+    fn verify_fails_on_an_l8_target_that_is_neither_a_preset_nor_an_l10_block() {
+        if let Some(reason) = missing_verify_tools() {
+            eprintln!(
+                "Skipping verify_fails_on_an_l8_target_that_is_neither_a_preset_nor_an_l10_block: \
+                 {reason}"
+            );
+            return;
+        }
+        let l8 = |target: u8| {
+            json!({ "Level8": {
+                "length": 10, "target_display_index": target, "trim_slope": 2048,
+                "trim_offset": 2048, "trim_power": 2048, "trim_chroma_weight": 2048,
+                "trim_saturation_gain": 2048, "ms_weight": 2048
+            }})
+        };
+        for (target, expect_ok) in [(20, false), (1, true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let clip = dv_clip_with_blocks(dir.path(), PQ_X265, "8.1", &[l8(target)]);
+            let output = dir.path().join("out.DV.mkv");
+            mux(&clip.injected, &output);
+
+            let (ok, log) = verify_in_child(&clip.source, &output, None, None);
+            let unresolved = format!(
+                "an L8 block for target display {target}, which is neither a preset display nor \
+                 an L10 block of the frame"
+            );
+            assert_eq!(
+                log.contains(&unresolved),
+                !expect_ok,
+                "target {target}:\n{log}"
+            );
+            if expect_ok {
+                assert!(ok, "target {target}:\n{log}");
+                assert!(
+                    log.contains("L8 and L10 blocks: consistent on all 6 frames."),
+                    "{log}"
+                );
+            } else {
+                assert!(!ok, "target {target}:\n{log}");
+            }
+        }
     }
 
     #[test]
