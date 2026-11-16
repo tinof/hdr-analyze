@@ -742,10 +742,56 @@ fn unextracted_payloads_warn_or_refuse_an_explicit_hybrid() {
             judge_unextracted(&none, explicit, log),
             Unextracted::NoPayloads
         );
-        let error = Err("unreadable".to_string());
+    }
+    let error = Err("unreadable".to_string());
+    assert_eq!(
+        judge_unextracted(&error, false, log),
+        Unextracted::NoPayloads
+    );
+    assert!(matches!(
+        judge_unextracted(&error, true, log),
+        Unextracted::Refused(_)
+    ));
+}
+
+#[test]
+fn a_scan_that_fails_after_no_extraction_refuses_an_explicit_hybrid() {
+    let log = Path::new("hdr10plus_tool.log");
+    let cap = 64;
+    let oversized = scan_with_cap(&stream_with_sei_of(cap + 1)[..], cap);
+    let malformed = count(&[parameter_sets(), slice(TRAIL_R, false)].concat());
+    for (counted, cause) in [
+        (oversized, "an SEI NAL unit is longer than 64 bytes"),
+        (
+            malformed,
+            "a slice continues a picture whose first slice is missing",
+        ),
+    ] {
+        // The default and `hdr10plus` keep the HDR10 fallback with its warning.
         assert_eq!(
-            judge_unextracted(&error, explicit, log),
-            Unextracted::NoPayloads
+            judge_unextracted(&counted, false, log),
+            Unextracted::NoPayloads,
+            "the default falls back on {cause}"
         );
+        let Unextracted::Refused(reason) = judge_unextracted(&counted, true, log) else {
+            panic!("an explicit hybrid refuses {cause}");
+        };
+        assert_eq!(
+            reason,
+            format!(
+                "hdr10plus_tool extracted no HDR10+ metadata (see hdr10plus_tool.log) and the \
+                 HDR10+ payload coverage could not be counted ({cause})"
+            )
+        );
+        // Nothing was extracted, so the refusal names no metadata mode.
+        let refusal = unextracted_refusal(&reason);
+        assert!(
+            refusal.starts_with(
+                "--hdr10plus-l1 hybrid cannot be used here: hdr10plus_tool extracted no HDR10+ \
+                 metadata"
+            ),
+            "{refusal}"
+        );
+        assert!(!refusal.contains("metadata alone"), "{refusal}");
     }
 }
