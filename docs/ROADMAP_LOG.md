@@ -6,6 +6,56 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-16: E17.1 parked on a disputed finding (batch, no step closed)
+
+`/ship:roadmap-batch` built E17.1 as PR #129 (`feat/e17-1-verify-authored-blocks` @d1c13d1). Its
+gate passed: `scripts/ci/test-gate.sh` (759 passed), and the E13 mkvdovi gate on a release build
+with a `+cuda` analyzer. There, all 16 `rpu-baseline.sh compare --require-identical-l1` runs
+against `0.8.0/` passed, every `RPU.bin` was byte-identical, and all 16 real outputs printed "L8
+and L10 blocks: consistent on all N frames"; evidence in `~/mkvdovi-work/rpu-baseline/e17-1-batch/`.
+The rerun on the head rebased onto E7.1 (`e17-1-batch-rebased/`) gave the same result.
+The pre-PR panel's three P3s: the docs gap and the untested call site were fixed
+(`verify_fails_on_an_l8_target_that_is_neither_a_preset_nor_an_l10_block`); the narrowing of the
+parse-failure skip to guard refusals was rejected, as the crate refuses L253 with a plain error.
+Gemini 4 Hydrogen high raised one P1: a frame after frame 0 that does not parse would make
+`parse_rpu_file` keep only the RPUs before it. It is DISPUTED: the crate returns an error when
+fewer RPUs parse than start codes were found (`rpu/utils.rs:122-133`), and
+`a_frame_after_the_first_that_does_not_parse_fails_the_whole_parse` passes on the reviewed code.
+A DISPUTED finding leaves the merge to the owner (Waiting for the owner). The
+`rpu_guard.rs:71` comment ("keeps the RPUs before the first one it cannot parse") is what the
+finding read; it is worth rewording when the file is next touched.
+
+### 2026-11-16: E7.1 Direct-MKV `dovi_tool` output frame count (PR #128)
+
+Step: [E7.1][desk][batch] Direct-MKV `dovi_tool` steps (`mkvdovi/src/pipeline/dovi_steps.rs`,
+  `pipeline/tests.rs`) still accept exit status plus non-empty output: compare the output's
+  access units with the input's ffprobe packet count, and fall back to ffmpeg extraction on a
+  mismatch or an unreadable count. Gate: the item's gate (1).
+
+- **Decided 2026-11-15 (owner):** the expected count is the ffprobe packet count of the input
+  (`timing::read_video_times`), not MediaInfo `FrameCount`; an unreadable count falls back.
+- **Checked 2026-11-10 @efc8306:** the acceptance is `run_dovi_video_step`
+  (`mkvdovi/src/pipeline/dovi_steps.rs:42`, `:66-71`), called by the clean-BL and MEL steps
+  (`:173`, `:221`); its output is video, so it needs a video frame count, not the E7.2 RPU count.
+
+Gate evidence, PR #128: `direct_mkv_step_with_a_truncated_output_falls_back_to_ffmpeg_extraction`
+and `mel_conversion_with_a_truncated_direct_output_muxes_the_extracted_stream` fail on the parent
+and pass; the other sides are `direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction`,
+`direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction`,
+`direct_mkv_step_whose_output_cannot_be_counted_falls_back_to_ffmpeg_extraction` and
+`a_source_whose_frames_cannot_be_counted_skips_the_direct_mkv_read` (`mkvdovi/src/pipeline/tests.rs`).
+The real-tool `profile7_mel_fast_path_counts_its_rpus` asserts that the direct read is kept.
+`scripts/ci/test-gate.sh` (759 passed), CI green. Added time per file: one more read of the
+source's packets (0.26 s for a 1200-frame 1080p file) and one count of the output stream (about
+1 s per GB, warm cache). On real media, the E17.1 RPU-baseline rerun on a head that contains this
+change (`~/mkvdovi-work/rpu-baseline/e17-1-batch-rebased/`) took the direct-MKV path on all 16
+inputs (three Profile 7 MEL) with no fallback, and all 16 compares against `0.8.0/` passed.
+Built by `/ship:roadmap-batch`; the pre-PR panel's three P3s were fixed;
+Gemini 4 Hydrogen high review LGTM.
+
+Resolution: a direct-MKV output is accepted only with the source's frame count; otherwise ffmpeg
+extracts.
+
 ### 2026-11-16: P5.1 `hdr10plus_tool extract --skip-reorder` fallback (PR #126)
 
 Step: [P5.1][desk][batch] `hdr10plus_tool extract --skip-reorder` fallback
