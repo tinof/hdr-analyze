@@ -4,12 +4,19 @@
 # <git dir>/claude-builder.<run>.hold exists, `stop` neither formats nor lints that checkout and
 # keeps its touched files; a stale hold does not count; two runs do not clear each other's hold;
 # a hold in one checkout does not hold another, also for a worktree nested inside the main
-# checkout; `mark` renews the holds of the checkout it edits.
+# checkout; `mark` renews the holds of the checkout it edits. It also checks that the hook keeps to
+# bash 3.2 syntax (macOS /bin/bash), that clippy diagnostics are reported for touched files only,
+# that a touched tools/<crate> gets one clippy run of its own, and the timeout fallbacks.
 #
 # Usage: .claude/hooks/tests/rust-check-hold-test.sh
+#        RUST_CHECK_TEST_BASH=/bin/bash .claude/hooks/tests/rust-check-hold-test.sh   (macOS 3.2)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 hook="$here/../rust-check.sh"
+# The shell that runs the hook (the test itself runs under any bash).
+hook_bin=$(command -v "${RUST_CHECK_TEST_BASH:-bash}") || { echo "FAIL no hook shell: ${RUST_CHECK_TEST_BASH:-bash}"; exit 1; }
+hook_ver=$("$hook_bin" -c 'echo $BASH_VERSION')
+echo "hook shell: $hook_bin (bash $hook_ver)"
 work=$(mktemp -d "${TMPDIR:-/tmp}/rust-check-hold-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 fails=0
@@ -17,10 +24,17 @@ ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fails=$((fails + 1)); }
 check() { local name=$1; shift; if "$@"; then ok "$name"; else bad "$name"; fi; }
 
+# 0. No bash 4 syntax: macOS /bin/bash 3.2 has no mapfile/readarray, no associative arrays and no
+#    ${!name} expansions. Comment lines are left out (the header names what it avoids).
+bash4=$(grep -v '^[[:space:]]*#' "$hook" | grep -nE '(^|[^[:alnum:]_])(mapfile|readarray)([^[:alnum:]_]|$)|(declare|local|typeset) +-[[:alpha:]]*A|\$\{!')
+if [ -z "$bash4" ]; then ok "the hook uses no bash 4 syntax"; else bad "the hook uses no bash 4 syntax:"$'\n'"$bash4"; fi
+
 # Stubs: record every call with the directory it ran in (rustfmt also with its arguments, so a
-# test sees which files it formatted), print nothing, succeed.
+# test sees which files it formatted), succeed. cargo also records its arguments in cargo-args and
+# prints cargo-out when that file exists, as clippy's diagnostics.
 mkdir -p "$work/bin" "$work/tmp"
-printf '#!/usr/bin/env bash\necho "cargo $PWD" >> "%s/calls"\n' "$work" > "$work/bin/cargo"
+printf '#!/usr/bin/env bash\necho "cargo $PWD" >> "%s/calls"\necho "$*" >> "%s/cargo-args"\n[ -f "%s/cargo-out" ] && cat "%s/cargo-out"\nexit 0\n' \
+    "$work" "$work" "$work" "$work" > "$work/bin/cargo"
 printf '#!/usr/bin/env bash\necho "rustfmt $PWD $*" >> "%s/calls"\n' "$work" > "$work/bin/rustfmt"
 chmod +x "$work/bin/cargo" "$work/bin/rustfmt"
 # Set a file's mtime <minutes> back. GNU date takes -d, BSD date (macOS) takes -v.
@@ -41,8 +55,8 @@ gb=$(git -C "$b" rev-parse --absolute-git-dir)
 
 session=hold-test
 state="$work/tmp/claude-rust-check/$session"
-mark() { printf '{"session_id":"%s","tool_input":{"file_path":"%s"}}' "$session" "$1" | bash "$hook" mark; }
-stop() { : > "$work/calls"; out=$(printf '{"session_id":"%s"}' "$session" | bash "$hook" stop 2>&1); }
+mark() { printf '{"session_id":"%s","tool_input":{"file_path":"%s"}}' "$session" "$1" | "$hook_bin" "$hook" mark; }
+stop() { : > "$work/calls"; : > "$work/cargo-args"; out=$(printf '{"session_id":"%s"}' "$session" | "$hook_bin" "$hook" stop 2>&1); }
 cargo_ran_in() { grep -qxF "cargo $1" "$work/calls"; }
 no_calls() { [ ! -s "$work/calls" ]; }
 recorded() { grep -qxF -- "$1" "$state/files" 2>/dev/null; }
@@ -123,4 +137,50 @@ check "expired hold before an edit: clippy runs" cargo_ran_in "$a"
 check "expired hold before an edit: the hold stays expired" test -z "$(find "$ga" -maxdepth 1 -name 'claude-builder.dead-2.hold' -mmin -180)"
 rm "$ga/claude-builder.dead-2.hold"
 
-if [ "$fails" -eq 0 ]; then echo "all rust-check hold tests passed"; else echo "$fails rust-check hold test(s) failed"; exit 1; fi
+# 10. Diagnostics: errors are reported from anywhere, warnings only for touched files (the others
+#     are counted), and a touched tools/<crate> gets exactly one clippy run with its manifest and
+#     its paths prefixed. The cargo stub prints the same three lines for both runs.
+mkdir -p "$a/tools/t/src"
+printf '[package]\nname = "t"\nversion = "0.0.0"\n' > "$a/tools/t/Cargo.toml"
+echo 'pub fn g() {}' > "$a/tools/t/src/lib.rs"
+printf '%s\n' 'src/lib.rs:1:1: warning: touched warn' 'src/other.rs:1:1: warning: untouched warn' \
+    'src/err.rs:2:3: error[E0001]: boom' 'note: not a diagnostic line' > "$work/cargo-out"
+reported() { printf '%s\n' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' | grep -qxF -- "$1"; }
+mark "$a/src/lib.rs"; mark "$a/tools/t/src/lib.rs"; mark "$a/tools/t/Cargo.toml"; stop
+check "diagnostics: a warning in a touched file is reported" reported 'src/lib.rs:1:1: warning: touched warn'
+check "diagnostics: a touched tools/ file's warning is reported with its prefix" reported 'tools/t/src/lib.rs:1:1: warning: touched warn'
+check "diagnostics: an error is reported" reported 'src/err.rs:2:3: error[E0001]: boom'
+check "diagnostics: a tools/ error is reported with its prefix" reported 'tools/t/src/err.rs:2:3: error[E0001]: boom'
+if printf '%s\n' "$out" | grep -qF 'untouched warn'; then bad "diagnostics: an untouched file's warning is not reported"; else ok "diagnostics: an untouched file's warning is not reported"; fi
+check "diagnostics: untouched warnings are counted" reported '2 more warning(s) in untouched files (CI runs clippy with -D warnings)'
+check "diagnostics: one workspace run" test "$(grep -c -- '--workspace' "$work/cargo-args")" -eq 1
+check "diagnostics: one tools/t run with its manifest" test "$(grep -c -- '--manifest-path tools/t/Cargo.toml' "$work/cargo-args")" -eq 1
+rm -f "$work/cargo-out"; rm -rf -- "$state"
+
+# 11. Timeout fallbacks, on a PATH that holds only the tools the hook and the stubs need: without
+#     timeout(1) the hook uses gtimeout, and without either it runs clippy unbounded.
+farm="$work/farm"
+mkdir -p "$farm"
+for t in jq git cat dirname find touch mkdir grep rm tail; do
+    p=$(command -v "$t") || { bad "timeout fallback: $t is on PATH"; continue; }
+    ln -s "$p" "$farm/$t"
+done
+ln -s "$hook_bin" "$farm/bash"
+ln -s "$work/bin/cargo" "$farm/cargo"
+ln -s "$work/bin/rustfmt" "$farm/rustfmt"
+farm_stop() { : > "$work/calls"; out=$(printf '{"session_id":"%s"}' "$session" | PATH="$farm" "$hook_bin" "$hook" stop 2>&1); }
+if PATH="$farm" "$hook_bin" -c 'command -v timeout || command -v gtimeout' >/dev/null; then
+    bad "timeout fallback: the farm PATH has no timeout or gtimeout"
+else
+    ok "timeout fallback: the farm PATH has no timeout or gtimeout"
+fi
+mark "$a/src/lib.rs"; farm_stop
+check "no timeout(1), no gtimeout: clippy still runs" cargo_ran_in "$a"
+check "no timeout(1), no gtimeout: state cleared" test ! -e "$state"
+printf '#!/usr/bin/env bash\necho "gtimeout $1" >> "%s/calls"\nshift\nexec "$@"\n' "$work" > "$farm/gtimeout"
+chmod +x "$farm/gtimeout"
+mark "$a/src/lib.rs"; farm_stop
+check "gtimeout only: clippy runs under gtimeout" grep -qxF 'gtimeout 540' "$work/calls"
+check "gtimeout only: clippy runs" cargo_ran_in "$a"
+
+if [ "$fails" -eq 0 ]; then echo "all rust-check hold tests passed (hook shell bash $hook_ver)"; else echo "$fails rust-check hold test(s) failed (hook shell bash $hook_ver)"; exit 1; fi
