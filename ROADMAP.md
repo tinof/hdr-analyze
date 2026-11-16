@@ -54,7 +54,7 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-10 at main@efc8306)
-<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=2a72b663be1a skip=P6.3,P6.4 -->
+<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=719baa0963f0 skip=P6.3,P6.4 -->
 
 Order: priority 4 (P9.4, priority 2, closed in PR #109). P6.3 and P6.4 are passed over: the
 v0.9.0 release plan names P6.2 and E7.1. E8.1 and E9.1 move the default `.bin` and are planned
@@ -62,8 +62,6 @@ for a later minor.
 
 1. **P6.2 Five source checks, warn-only** (priority 4). Gate: the P6 step 2 gate. Why: in the
    v0.9.0 plan. Branch: `feat/p6-2-source-checks`. Release: patch
-2. **E7.1 Direct-MKV output frame count** (priority 4). Gate: the E7 gate (1). Why: in the v0.9.0
-   plan. Branch: `fix/e7-1-direct-mkv-frame-count`. Release: patch
 
 **Reassess:** needs-changed (P9.4, PR #109): this PR retags P6.3, P6.4 and P14.1 from `desk` to
 `corpus`.
@@ -88,6 +86,12 @@ release:
 - **E13.19: `feat/dev-corpus` cannot land.** The step, and the `l1_diff` part of E13.20, wait for that
   branch, but it is local-only behind a pre-push guard (`docs/TESTING.md` §7). The owner restates the
   condition, for example "rebase the branch after the move" (found 2026-11-01).
+- **E17.1: merge PR #129?** Gemini's P1 F1 (a broken frame after frame 0 would leave later frames
+  unchecked) is DISPUTED: `dolby_vision` 3.4.0 `rpu/utils.rs:122-133` fails the whole parse, and
+  a new test shows it. Options: merge anyway (recommended), or leave open (found 2026-11-16).
+- **`CLAUDE.md` `--verify` line: name the E17.1 checks?** Proposed: add "a duplicate L8/L10 target
+  or an L8 target with no preset or L10 block (skipped with a warning when the RPU does not
+  parse)". `CLAUDE.md` is at 23,973 of 24,000 bytes, so a detail moves out with it (2026-11-16).
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
 
@@ -661,22 +665,14 @@ The detailed gap table and validation method live in
 
 ### E7: completeness
 
-- **Status:** Partial. Every conversion checks the output's RPU count (E7.2) and video timing
-  (E7.3); history in [the log](docs/ROADMAP_LOG.md). Open: E7.1.
+- **Status:** Done, no step open: every conversion checks the output's RPU count, video timing
+  and direct-MKV frame count (E7.1–E7.3; [log](docs/ROADMAP_LOG.md)). Kept because
+  `mkvdovi/src/pipeline/mod.rs` and Priorities 4 cite the E7 gate.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
   per file measured and reported. (3) (owner, 2026-11-07) a failed check of (2) or of E7.3 fails
   the run and keeps the source, tested.
-- [E7.1][desk][batch] Direct-MKV `dovi_tool` steps (`mkvdovi/src/pipeline/dovi_steps.rs`,
-  `pipeline/tests.rs`) still accept exit status plus non-empty output: compare the output's
-  access units with the input's ffprobe packet count, and fall back to ffmpeg extraction on a
-  mismatch or an unreadable count. Gate: the item's gate (1).
-- **Decided 2026-11-15 (owner):** the expected count is the ffprobe packet count of the input
-  (`timing::read_video_times`), not MediaInfo `FrameCount`; an unreadable count falls back.
-- **Checked 2026-11-10 @efc8306:** the acceptance is `run_dovi_video_step`
-  (`mkvdovi/src/pipeline/dovi_steps.rs:42`, `:66-71`), called by the clean-BL and MEL steps
-  (`:173`, `:221`); its output is video, so it needs a video frame count, not the E7.2 RPU count.
 
 ### E8: histogram percentile reader
 
@@ -880,9 +876,9 @@ The detailed gap table and validation method live in
 
 ### E17: `--verify` checks for authored CM v4.0 blocks
 
-- **Status:** Open. `--verify` checks that the generated levels exist (`assert_rpu_invariants`),
-  not whether authored L8 and L10 blocks from Dolby Vision inputs are consistent; prior art in
-  [the log](docs/ROADMAP_LOG.md) (2026-10-29); the DV record check is done (E17.2). Open: E17.1.
+- **Status:** Partial. E17.1 is built on `feat/e17-1-verify-authored-blocks` @d1c13d1, PR #129
+  open with `review:needs-human` (resumed 1): its one finding, Gemini P1 F1, is DISPUTED and
+  waits for the owner's merge decision. The DV record check is done (E17.2).
 - **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
   RPU passes; the existing `--verify` tests unchanged; the E13 mkvdovi gate passes.
 - [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
@@ -892,6 +888,10 @@ The detailed gap table and validation method live in
   rejects at parse time, and drop the checks it covers. Gate: the item gate.
 - **Decided 2026-11-15 (owner):** L8 targets 24 and 25 are presets (`trim_target_nits`); `--verify`
   parses the MEL passthrough RPU through `rpu_guard` and warns and skips these checks on a crate limit.
+- **Decided 2026-11-16 (batch, recommended; owner may override):** the checks live in
+  `mkvdovi/src/verify/authored_blocks.rs`, as `verify.rs` is near its 800-line limit; not taken: a
+  split step. Any parse failure skips them with a warning, not only a guard refusal: the crate
+  refuses L253 with a plain error (`cmv40.rs:56-64`); not taken: failing valid MEL outputs.
 
 ### E18: hot-file budgets
 
