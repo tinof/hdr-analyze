@@ -19,7 +19,9 @@ This document provides a historical record of completed milestones, feature impl
   Before, such a file fell back to HDR10 analysis without its HDR10+ metadata. The retry warns,
   says that its metadata is not reordered to display order, and writes its own log
   (`hdr10plus_tool_skip_reorder.log`), so `hdr10plus_tool.log` keeps the first failure. A file
-  whose normal extraction works runs the tool once, as before.
+  whose normal extraction works runs the tool once, as before. An explicit `--hdr10plus-l1 hybrid`
+  refuses a `--skip-reorder` JSON before analysis, also one a resumed run reuses; the default and
+  `--hdr10plus-l1 hdr10plus` convert with it and its warning.
 - mkvdovi counts the frames of an HDR10+ input that carry their own HDR10+ payload (ROADMAP
   P9.4). `hdr10plus_tool` gives a frame without one the previous frame's, so a partial file
   converted without a word. Partial coverage now warns with the counts and the first gap; an

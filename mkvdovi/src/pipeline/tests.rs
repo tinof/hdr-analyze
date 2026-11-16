@@ -1205,6 +1205,62 @@ fn unextracted_hdr10plus_coverage_refuses_an_explicit_hybrid() {
     assert_eq!(measured.hdr_type, HdrFormat::Hdr10Unsupported);
 }
 
+/// `acquire_with_coverage` at full coverage, on a reused JSON that a `--skip-reorder` retry of
+/// an earlier run produced when `skip_reorder`.
+fn acquire_reused_json(mode: Hdr10PlusMode, skip_reorder: bool) -> Result<Option<Measured>> {
+    let (result, _, _) =
+        run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+            seal_hdr10plus(dir, Some(&hdr10plus_for_four_frames()));
+            seal_coverage(dir, 4);
+            measurements_for_four_frames(dir);
+            if skip_reorder {
+                let marker = dir
+                    .join("mkvdovi_temp_in")
+                    .join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+                fs::write(marker, b"").unwrap();
+            }
+        });
+    result
+}
+
+#[test]
+fn a_reused_skip_reorder_json_refuses_an_explicit_hybrid_and_a_normal_one_does_not() {
+    let refused = acquire_reused_json(Hdr10PlusMode::ExplicitHybrid, true);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+    let measured = acquire_reused_json(Hdr10PlusMode::ExplicitHybrid, false)
+        .unwrap()
+        .expect("a normal extraction takes the hybrid");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+}
+
+#[test]
+fn a_reused_skip_reorder_json_keeps_the_default_hybrid_and_the_metadata_mode() {
+    let measured = acquire_reused_json(Hdr10PlusMode::ImplicitHybrid, true)
+        .unwrap()
+        .expect("the default only warns");
+    // Not `after_failure`: the owner kept the default on the hybrid with the fallback's JSON.
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ImplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    assert!(measured.hdr10plus_json.is_some());
+    let measured = acquire_reused_json(Hdr10PlusMode::Metadata, true)
+        .unwrap()
+        .expect("the metadata mode only warns");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+    assert!(measured.hdr10plus_json.is_some());
+}
+
+#[test]
+fn the_skip_reorder_refusal_names_the_flag_and_the_way_out() {
+    let refusal = hdr10plus::skip_reorder_refusal();
+    assert!(refusal.contains("--skip-reorder"), "{refusal}");
+    assert!(
+        refusal.contains("Without --hdr10plus-l1 hybrid the file converts"),
+        "{refusal}"
+    );
+}
+
 #[test]
 fn acquire_measurements_refuses_fel() {
     let (result, _, _) = run_acquire_measurements(&[], HdrFormat::DolbyVisionFel, |_| {});
@@ -2737,4 +2793,104 @@ exit 1
     assert_eq!(extract_sealed_hdr10plus(&fake), None);
     assert_eq!(fake.calls("hdr10plus_tool").len(), 2);
     assert!(!fake.temp.join("hdr10plus_metadata.json").exists());
+}
+
+/// `acquire_measurements` in `mode` on the sealed stream of `fake`, with measurements next to
+/// the input that a hybrid reuses (the input gets the size their sidecar records).
+#[cfg(unix)]
+fn acquire_from_sealed_stream(fake: &FakeTools, mode: Hdr10PlusMode) -> Result<Option<Measured>> {
+    fs::write(&fake.input, b"src").unwrap();
+    measurements_for_four_frames(fake.dir.path());
+    let mut argv = vec!["mkvdovi"];
+    argv.extend_from_slice(&ACCURATE);
+    let args = Args::try_parse_from(argv).unwrap();
+    let (mut total, mut current) = (total_steps_for(HdrFormat::Hdr10Plus), 1);
+    acquire_measurements(
+        fake.input(),
+        &fake.temp,
+        &args,
+        true,
+        None,
+        HdrFormat::Hdr10Plus,
+        mode,
+        None,
+        None,
+        &mut total,
+        &mut current,
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let refused = acquire_from_sealed_stream(&fake, Hdr10PlusMode::ExplicitHybrid);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(is_skip_reorder(&calls[1]), "{}", calls[1]);
+    assert!(fake
+        .temp
+        .join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER)
+        .exists());
+    // Refused before the payload count, the first check after the extraction.
+    assert!(!fake.temp.join(hdr10plus_coverage::COVERAGE_FILE).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback() {
+    for (mode, hdr_type) in [
+        (
+            Hdr10PlusMode::ImplicitHybrid,
+            HdrFormat::Hdr10WithMeasurements,
+        ),
+        (Hdr10PlusMode::Metadata, HdrFormat::Hdr10Plus),
+    ] {
+        let Some(fake) = seal_hdr10plus_stream(
+            "the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback",
+        ) else {
+            return;
+        };
+        fake.script("hdr10plus_tool", REORDER_FAILS);
+        let measured = acquire_from_sealed_stream(&fake, mode)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{mode:?} converts with the fallback's JSON"));
+
+        assert_eq!(fake.calls("hdr10plus_tool").len(), 2, "{mode:?}");
+        assert_eq!(measured.hdr10plus_mode, mode);
+        assert_eq!(measured.hdr_type, hdr_type, "{mode:?}");
+        assert_eq!(
+            measured.hdr10plus_json,
+            Some(fake.temp.join("hdr10plus_metadata.json")),
+            "{mode:?}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_explicit_hybrid_takes_the_json_of_a_normal_extraction() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_explicit_hybrid_takes_the_json_of_a_normal_extraction")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    let measured = acquire_from_sealed_stream(&fake, Hdr10PlusMode::ExplicitHybrid)
+        .unwrap()
+        .expect("a normal extraction takes the hybrid");
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[0]), "{}", calls[0]);
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    assert!(fake.temp.join(hdr10plus_coverage::COVERAGE_FILE).exists());
 }

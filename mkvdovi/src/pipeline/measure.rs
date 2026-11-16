@@ -12,7 +12,9 @@ use super::analyzer::{
     run_hdr_analyzer,
 };
 use super::dovi_steps::extract_clean_base_layer;
-use super::hdr10plus::extract_hdr10plus_metadata;
+use super::hdr10plus::{
+    extract_hdr10plus_metadata, extracted_with_skip_reorder, skip_reorder_refusal,
+};
 use super::hdr10plus_coverage::{self, Unextracted};
 use super::hybrid;
 use super::mdfix_notice::print_mdfix_notice;
@@ -259,6 +261,14 @@ pub(super) fn acquire_measurements(
         );
         match extract_hdr10plus_metadata(input_file, temp_dir, resume_enabled, args.stall_timeout) {
             Ok(Some(json_path)) => {
+                // P5.1: the `--skip-reorder` fallback keeps the bitstream order; an explicit
+                // hybrid refuses it before any count or analysis, the other modes warned.
+                if hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid
+                    && extracted_with_skip_reorder(temp_dir)
+                {
+                    progress::print_error(&skip_reorder_refusal());
+                    return Ok(None);
+                }
                 // Printed here: a file with no dynamic metadata takes neither HDR10+ path.
                 if let Some(notice) = hdr10plus_notice {
                     progress::print_warn(notice);

@@ -25,6 +25,20 @@ pub(super) const HDR10PLUS_SKIP_REORDER_MARKER: &str = "hdr10plus_metadata.skip_
 const SKIP_REORDER_WARNING: &str = "HDR10+ metadata extracted with --skip-reorder: it keeps the \
      order of the bitstream and is not reordered to display order.";
 
+/// Whether the HDR10+ JSON in `temp_dir` came from the `--skip-reorder` retry, this run or the
+/// run whose JSON it reuses.
+pub(super) fn extracted_with_skip_reorder(temp_dir: &Path) -> bool {
+    temp_dir.join(HDR10PLUS_SKIP_REORDER_MARKER).exists()
+}
+
+/// Why an explicit hybrid refuses a `--skip-reorder` JSON, with what converts the file instead.
+pub(super) fn skip_reorder_refusal() -> String {
+    "--hdr10plus-l1 hybrid cannot be used here: the HDR10+ metadata came from the \
+     hdr10plus_tool extract --skip-reorder fallback and is not reordered to display order. \
+     Without --hdr10plus-l1 hybrid the file converts with this metadata and a warning."
+        .to_string()
+}
+
 #[derive(Debug, PartialEq)]
 pub(super) struct Hdr10PlusPeakStats {
     pub(super) max_peak_nits: f64,
@@ -172,7 +186,7 @@ pub(super) fn extract_hdr10plus_metadata(
     let json_out = temp_dir.join("hdr10plus_metadata.json");
     if resume && resume::is_complete(&json_out) {
         progress::print_info("Reusing extracted HDR10+ metadata from a previous run.");
-        if temp_dir.join(HDR10PLUS_SKIP_REORDER_MARKER).exists() {
+        if extracted_with_skip_reorder(temp_dir) {
             progress::print_warn(SKIP_REORDER_WARNING);
         }
         return Ok(Some(json_out));
