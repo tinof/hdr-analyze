@@ -6,8 +6,8 @@
 //! when a prefix SEI before its first slice holds a `user_data_registered_itu_t_t35` message
 //! with the HDR10+ identity, the message `hdr10plus_tool` 1.7.2 picks (the port in
 //! `tools/rpu_builder_check/src/payloads.rs`). A count that cannot be trusted only warns, except
-//! that a scan that fails refuses an explicit hybrid when `hdr10plus_tool` extracted metadata
-//! (P9.5).
+//! that a scan that fails refuses an explicit hybrid, both when `hdr10plus_tool` extracted
+//! metadata (P9.5) and when it extracted nothing (P9.6).
 
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};

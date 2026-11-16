@@ -151,10 +151,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    until its gate is met. Gate: per item (WS4: blinded A/B on a device; WS1 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); offline work reopened by
     the owner (2026-11-12), `mkvdovi` code after v0.9.0. Gate: none until a step states one.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, P5, WS0, WS6): the
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, WS0, WS6): the
     remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
     v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
-    provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5), `--verify`
+    provenance and open-GOP scoring (E3, E6, E11), `--verify`
     checks for authored CM v4.0 blocks (E17), hot-file byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 12. **Library and player integration; a new output format** (P16, R3). Added 2026-11-14; ranked
@@ -198,18 +198,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P5: L9 primaries
 
-- **Status:** Partial. L9 detection prefers mastering-display primaries and has an override.
-  P5.1 is built on local `feat/p5-1-skip-reorder-fallback` @a98adf7 (resumed 1); open: an explicit
-  hybrid takes a `--skip-reorder` JSON (pre-PR P2), held for the owner.
+- **Status:** Done, no step open. L9 detection prefers mastering-display primaries and has an
+  override; the HDR10+ extract retries with `--skip-reorder` (P5.1, [log](docs/ROADMAP_LOG.md)).
+  Kept because `docs/CM_ANALYZE_PARITY.md` cites P5.
 - **Gate:** step 1: a test in which the normal `hdr10plus_tool extract` fails and the
   `--skip-reorder` fallback produces a JSON whose frame count equals the video's, and one in which
   the fallback is not used (both sides; owner, 2026-10-17).
-- [P5.1][desk][batch] `hdr10plus_tool extract --skip-reorder` fallback
-  (`mkvdovi/src/pipeline/hdr10plus.rs`, `pipeline/measure.rs`, `pipeline/tests.rs`); an explicit
-  hybrid refuses a `--skip-reorder` JSON. Gate: the item gate (step 1), plus both sides of the refusal.
-- **Decided 2026-11-15 (owner):** an explicit `--hdr10plus-l1 hybrid` keeps refusing; the default
-  and `hdr10plus` use the fallback JSON with its warning. (The HLG→PQ mastering-primaries item is gone: HLG now converts to
-  Profile 8.4 without re-encoding.)
 
 ### P6: source consistency warnings
 
@@ -244,14 +238,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 
 ### P9: HDR10+ → Profile 8.1 L1
 
-- **Status:** Core complete: hybrid is the HDR10+ default (PR #84); partial or uncountable coverage
-  refuses an explicit hybrid (P9.4, P9.5; [log](docs/ROADMAP_LOG.md)). Open: P9.6.
+- **Status:** Done, no step open: hybrid is the HDR10+ default (PR #84); partial or uncountable
+  coverage refuses an explicit hybrid (P9.4–P9.6; [log](docs/ROADMAP_LOG.md)). Kept because
+  Priorities 2 names only P9 and `mkvdovi/src/pipeline/hybrid.rs` cites ROADMAP P9.
 - **Gate:** hybrid met (PR #84); its plan and the step 1 rule moved to the log (2026-11-05). The
   panel peak is not a trim target; suspicious scene peaks only warn. Peak is not scored against
   retail: hybrid takes the `dovi_tool` HDR10+ peak, about 104 codes below retail on the holdout.
-- [P9.6][desk][batch] Refuse an explicit hybrid when `hdr10plus_tool` extracts nothing and the
-  coverage scan fails (`judge_unextracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs`); the
-  default and `hdr10plus` keep the warning (owner, 2026-11-15). Gate: unit tests on both sides.
 
 ### P10: measured against delivered
 

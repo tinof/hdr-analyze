@@ -6,6 +6,48 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-16: P5.1 `hdr10plus_tool extract --skip-reorder` fallback (PR #126)
+
+Step: [P5.1][desk][batch] `hdr10plus_tool extract --skip-reorder` fallback
+  (`mkvdovi/src/pipeline/hdr10plus.rs`, `pipeline/measure.rs`, `pipeline/tests.rs`); an explicit
+  hybrid refuses a `--skip-reorder` JSON. Gate: the item gate (step 1), plus both sides of the refusal.
+
+- **Decided 2026-11-15 (owner):** an explicit `--hdr10plus-l1 hybrid` keeps refusing; the default
+  and `hdr10plus` use the fallback JSON with its warning. (The HLG→PQ mastering-primaries item is
+  gone: HLG now converts to Profile 8.4 without re-encoding.)
+
+Gate evidence, PR #126: `a_failed_hdr10plus_extract_retries_with_skip_reorder_and_takes_its_json`
+runs the real hdr10plus_tool behind a shim that fails the first call, and the fallback JSON's frame
+count equals the video's; `a_working_hdr10plus_extract_runs_once_without_skip_reorder` is the other
+side. The refusal, both sides: `an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback`,
+`the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback`, and the resume
+tests `a_reused_skip_reorder_json_refuses_an_explicit_hybrid_and_a_normal_one_does_not` and
+`a_reused_skip_reorder_json_keeps_the_default_hybrid_and_the_metadata_mode` (all in
+`mkvdovi/src/pipeline/tests.rs`). `scripts/ci/test-gate.sh` passed (only allowed skips), CI green.
+Built by `/ship:roadmap-batch` (resumed from the 2026-11-15 run); the pre-PR panel's one P3 was
+fixed (an I/O error in the HDR10+ extraction now prints its reason); Gemini 4 Hydrogen high review
+LGTM.
+
+Resolution: a failed normal extraction retries with `--skip-reorder`; a marker next to the JSON
+keeps the warning and the explicit-hybrid refusal on resume.
+
+### 2026-11-16: P9.6 Refuse an explicit hybrid when the unextracted scan fails (PR #125)
+
+Step: [P9.6][desk][batch] Refuse an explicit hybrid when `hdr10plus_tool` extracts nothing and the
+  coverage scan fails (`judge_unextracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs`); the
+  default and `hdr10plus` keep the warning (owner, 2026-11-15). Gate: unit tests on both sides.
+
+Gate evidence, PR #125: `a_scan_that_fails_after_no_extraction_refuses_an_explicit_hybrid` (an
+oversized SEI and a malformed stream; fails on the parent commit) and
+`unextracted_payloads_warn_or_refuse_an_explicit_hybrid` in
+`mkvdovi/src/pipeline/hdr10plus_coverage/tests.rs`, both sides; `scripts/ci/test-gate.sh` passed
+(only allowed skips), CI green. Built by `/ship:roadmap-batch`; the pre-PR panel found nothing;
+Gemini 4 Hydrogen high review LGTM, its two P2 doc notes fixed in this docs PR
+(`docs/FORMAT_COMPATIBILITY.md`, the `hdr10plus_coverage.rs` module doc).
+
+Resolution: every failed coverage scan refuses an explicit hybrid, with or without extracted
+metadata; `coverage.own == 0` and a missing extracted stream still fall back.
+
 ### 2026-11-15: `CLAUDE.md` names the E17.2 record check (no step closed)
 
 The owner approved the `--verify` wording proposed in the E17.2 entry below; it is now in
