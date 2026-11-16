@@ -65,6 +65,9 @@ hooks run only where pre-commit is installed
   It needs the rustup component: `rustup component add rust-analyzer`. Without it,
   `~/.cargo/bin/rust-analyzer` is only the rustup proxy, the LSP server crashes with exit code 1,
   and no diagnostics arrive.
+- **LSP queries:** positions are 1-based and must land on the symbol; "no definition found"
+  usually means a wrong column. `workspaceSymbol` returns empty for about 45 s after a cold start
+  (moved from `CLAUDE.md`, "Code search and reading").
 - **End of turn:** `.claude/hooks/rust-check.sh`, wired in `.claude/settings.json`. PostToolUse
   records touched `.rs`/`.cu`/`.ptx`/Cargo/lint-config files. The Stop hook then rustfmts those files
   without reporting, and runs `cargo clippy --workspace --all-targets` (plus
