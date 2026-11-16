@@ -397,6 +397,36 @@ mod tests {
         );
     }
 
+    /// A frame after frame 0 that the crate refuses (a broken CRC) must fail the whole parse,
+    /// so that the checks are skipped with a warning; `parse_rpu_file` would keep only the RPUs
+    /// before it and the later frames would go unchecked.
+    #[test]
+    fn a_frame_after_the_first_that_does_not_parse_fails_the_whole_parse() {
+        let (_dir, path) = round_trip(&[vec![], vec![], vec![l8(1, 10), l8(1, 10)]]);
+        let bytes = std::fs::read(&path).unwrap();
+        let starts: Vec<usize> = bytes
+            .windows(4)
+            .enumerate()
+            .filter(|(_, window)| *window == [0, 0, 0, 1])
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(starts.len(), 3);
+        // Flip a bit of frame 1's CRC: the byte before its trailing 0x80.
+        let mut broken = bytes.clone();
+        broken[starts[2] - 2] ^= 0x01;
+        assert!(DoviRpu::parse_unspec62_nalu(&broken[starts[1] + 4..starts[2]]).is_err());
+        assert!(DoviRpu::parse_unspec62_nalu(&broken[starts[2] + 4..]).is_ok());
+        let broken_path = path.with_file_name("broken.bin");
+        std::fs::write(&broken_path, &broken).unwrap();
+        assert!(
+            rpu_guard::parse_source_rpu_file(&broken_path).is_err(),
+            "a parse that drops frames 1 and 2 hides frame 2's duplicate L8"
+        );
+        assert!(verify(&broken_path, None), "skipped with a warning");
+        assert_eq!(rpu_guard::parse_source_rpu_file(&path).unwrap().len(), 3);
+        assert!(!verify(&path, None), "frame 2's duplicate L8 fails");
+    }
+
     #[test]
     fn an_rpu_the_crate_cannot_parse_skips_the_checks() {
         let dir = tempfile::tempdir().unwrap();
