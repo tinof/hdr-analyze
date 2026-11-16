@@ -1947,6 +1947,21 @@ fn direct_mkv_step_with_a_truncated_output_falls_back_to_ffmpeg_extraction() {
 
 #[cfg(unix)]
 #[test]
+fn direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction",
+        Some(48),
+        Some(50),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 2, "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
 fn direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction() {
     let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
         "direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction",
