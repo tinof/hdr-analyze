@@ -86,12 +86,6 @@ release:
 - **E13.19: `feat/dev-corpus` cannot land.** The step, and the `l1_diff` part of E13.20, wait for that
   branch, but it is local-only behind a pre-push guard (`docs/TESTING.md` §7). The owner restates the
   condition, for example "rebase the branch after the move" (found 2026-11-01).
-- **E17.1: merge PR #129?** Gemini's P1 F1 (a broken frame after frame 0 would leave later frames
-  unchecked) is DISPUTED: `dolby_vision` 3.4.0 `rpu/utils.rs:122-133` fails the whole parse, and
-  a new test shows it. Options: merge anyway (recommended), or leave open (found 2026-11-16).
-- **`CLAUDE.md` `--verify` line: name the E17.1 checks?** Proposed: add "a duplicate L8/L10 target
-  or an L8 target with no preset or L10 block (skipped with a warning when the RPU does not
-  parse)". `CLAUDE.md` is at 23,973 of 24,000 bytes, so a detail moves out with it (2026-11-16).
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
 
@@ -155,11 +149,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    until its gate is met. Gate: per item (WS4: blinded A/B on a device; WS1 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); offline work reopened by
     the owner (2026-11-12), `mkvdovi` code after v0.9.0. Gate: none until a step states one.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, WS0, WS6): the
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E18, P3, WS0, WS6): the
     remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
     v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
-    provenance and open-GOP scoring (E3, E6, E11), `--verify`
-    checks for authored CM v4.0 blocks (E17), hot-file byte budgets (E18). Ranked below 1–10; added
+    provenance and open-GOP scoring (E3, E6, E11), hot-file
+    byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 12. **Library and player integration; a new output format** (P16, R3). Added 2026-11-14; ranked
     last until the owner places them. Gate: per step.
@@ -873,25 +867,6 @@ The detailed gap table and validation method live in
 - **Status:** Done, no step open: E15.1 and E15.2 guard source RPUs through the DM payload
   (`mkvdovi/src/rpu_guard.rs`, [log](docs/ROADMAP_LOG.md)); kept because
   `docs/MKVDOVI_PIPELINE.md` cites ROADMAP E15.
-
-### E17: `--verify` checks for authored CM v4.0 blocks
-
-- **Status:** Partial. E17.1 is built on `feat/e17-1-verify-authored-blocks` @d1c13d1, PR #129
-  open with `review:needs-human` (resumed 1): its one finding, Gemini P1 F1, is DISPUTED and
-  waits for the owner's merge decision. The DV record check is done (E17.2).
-- **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
-  RPU passes; the existing `--verify` tests unchanged; the E13 mkvdovi gate passes.
-- [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
-  `target_display_index` values, duplicate L10 target indices, an L8 target that resolves to
-  neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence
-  disagrees with the block length. First check what the `dolby_vision` crate (3.4.0) already
-  rejects at parse time, and drop the checks it covers. Gate: the item gate.
-- **Decided 2026-11-15 (owner):** L8 targets 24 and 25 are presets (`trim_target_nits`); `--verify`
-  parses the MEL passthrough RPU through `rpu_guard` and warns and skips these checks on a crate limit.
-- **Decided 2026-11-16 (batch, recommended; owner may override):** the checks live in
-  `mkvdovi/src/verify/authored_blocks.rs`, as `verify.rs` is near its 800-line limit; not taken: a
-  split step. Any parse failure skips them with a warning, not only a guard refusal: the crate
-  refuses L253 with a plain error (`cmv40.rs:56-64`); not taken: failing valid MEL outputs.
 
 ### E18: hot-file budgets
 
