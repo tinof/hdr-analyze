@@ -70,11 +70,11 @@ pub(super) enum Verdict {
 /// The decision on a count when `hdr10plus_tool` extracted nothing.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Unextracted {
-    /// No payload, or no count: the HDR10 fallback as before.
+    /// No payload, or (not under an explicit hybrid) no count: the HDR10 fallback as before.
     NoPayloads,
     /// Payloads that the tool could not extract: the fallback, with this warning.
     Unreadable(String),
-    /// The same under an explicit hybrid: this refusal reason.
+    /// The same, or a failed count, under an explicit hybrid: this refusal reason.
     Refused(String),
 }
 
@@ -410,7 +410,7 @@ pub(super) fn judge_extracted(
     let coverage = match counted {
         Ok(coverage) => coverage,
         // P9.5: with extracted metadata, an explicit hybrid does not run on a stream whose
-        // coverage is unknown. `judge_unextracted` keeps a failed scan as `NoPayloads`.
+        // coverage is unknown. `judge_unextracted` refuses it the same way (P9.6).
         Err(reason) if explicit_hybrid => {
             return Verdict::Refused(format!(
                 "the HDR10+ payload coverage could not be counted ({reason})"
@@ -452,14 +452,24 @@ pub(super) fn judge_extracted(
     ))
 }
 
-/// The decision when `hdr10plus_tool` extracted nothing from a stream with payloads.
+/// The decision when `hdr10plus_tool` extracted nothing from a stream with payloads. A scan
+/// that fails refuses an explicit hybrid and keeps the HDR10 fallback otherwise.
 pub(super) fn judge_unextracted(
     counted: &Result<Coverage, String>,
     explicit_hybrid: bool,
     tool_log: &Path,
 ) -> Unextracted {
-    let Ok(coverage) = counted else {
-        return Unextracted::NoPayloads;
+    let coverage = match counted {
+        Ok(coverage) => coverage,
+        // P9.6: payloads the tool missed may sit in a stream the scan cannot read either.
+        Err(reason) if explicit_hybrid => {
+            return Unextracted::Refused(format!(
+                "hdr10plus_tool extracted no HDR10+ metadata (see {}) and the HDR10+ payload \
+                 coverage could not be counted ({reason})",
+                tool_log.display()
+            ))
+        }
+        Err(_) => return Unextracted::NoPayloads,
     };
     if coverage.own == 0 {
         return Unextracted::NoPayloads;
@@ -522,7 +532,8 @@ pub(super) fn check_unextracted(
         return Unextracted::NoPayloads;
     }
     let counted = count_sealed(temp_dir, resume);
-    if let Err(reason) = &counted {
+    // An explicit hybrid refuses a failed count, and the refusal names the reason.
+    if let (Err(reason), false) = (&counted, explicit_hybrid) {
         progress::print_warn(&format!(
             "HDR10+ payload coverage was not counted: {reason}."
         ));

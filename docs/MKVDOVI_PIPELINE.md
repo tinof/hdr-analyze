@@ -245,8 +245,10 @@ This section covers the code on each side.
   after the first slice), the warning names the counts instead of "no dynamic metadata", and an
   explicit hybrid refuses. Next to the extracted metadata, a scan that fails (an SEI NAL unit over
   the 256 KiB cap, a malformed stream) warns under the default and `hdr10plus` and refuses an
-  explicit hybrid before analysis (P9.5). A count it cannot trust otherwise (a frame count other
-  than the metadata's, no payload, a failed scan when `hdr10plus_tool` extracted nothing) only warns.
+  explicit hybrid before analysis (P9.5). When `hdr10plus_tool` extracted nothing, a scan that
+  fails refuses an explicit hybrid too (P9.6), and the default and `hdr10plus` fall back with the
+  "no dynamic metadata" warning. A count it cannot trust otherwise (a frame count other than the
+  metadata's, no payload) only warns.
 - The panel peak is **not** passed as a `--trim-targets` override.
 - HDR10+ scene peaks above 3× the mastering-display peak produce advisory warnings only. **Never
   add a silent clamp.**

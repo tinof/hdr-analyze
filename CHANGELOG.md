@@ -90,6 +90,10 @@ This document provides a historical record of completed milestones, feature impl
   extracted but whose payload coverage cannot be counted (an SEI NAL unit over 256 KiB, a
   malformed stream) before analysis, as it refuses partial coverage (ROADMAP P9.5). The default and
   `--hdr10plus-l1 hdr10plus` still only warn.
+- An explicit `--hdr10plus-l1 hybrid` also refuses an HDR10+ file when `hdr10plus_tool` extracts
+  nothing and the payload coverage cannot be counted (ROADMAP P9.6). Before, it fell back to HDR10
+  analysis with the "no dynamic metadata" warning. The refusal names the failed count and the
+  `hdr10plus_tool` log. The default and `--hdr10plus-l1 hdr10plus` keep the warning and the fallback.
 
 ## [0.8.0] - 2026-11-04
 
