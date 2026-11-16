@@ -302,8 +302,16 @@ This section covers the code on each side.
   skips the check; `dovi_tool info` and the RPU count still show the output carries Dolby Vision.
 - HLG output: hard-fails when there are no measurements or the sidecar does not load, and checks
   that **every** RPU frame carries the composer the sidecar names (`dovi84_composer::check_rpu_file`).
+- Authored L8 and L10 blocks (`verify/authored_blocks.rs`, every frame, generated and passed-through
+  RPUs): fails two L8 blocks for one `target_display_index`, two L10 blocks for one target index,
+  or an L8 target that is neither a preset (`PRESET_TARGET_DISPLAYS` plus 24 and 25) nor an L10
+  block of the same frame. A generated RPU reuses the parse below; the MEL passthrough RPU is
+  parsed through `rpu_guard::parse_source_rpu_file`. Any parse failure (a guard refusal, or a crate
+  error such as L253) warns and skips these checks. There is no separate L8 field-presence check:
+  the parser reads exactly the fields of the block length, and the guard refuses a length without a
+  layout. A clean run prints "L8 and L10 blocks: consistent on all N frames."
 - Generated RPU (`verify::DeliveryExpectation`; not the MEL passthrough, whose RPU can carry levels
-  the crate cannot parse, such as L253): parses the extracted RPU in-process (frame count from the
+  the crate cannot parse, such as L253, and gets only the L8/L10 parse above): parses the extracted RPU in-process (frame count from the
   parse) and hard-fails a frame whose source range differs from `metadata::expected_source_range`,
   or whose L1 differs from the sidecar scene's L1 after the generator's clamp
   (`ExtMetadataBlockLevel1::from_stats_cm_version(.., V29)`). The clamps themselves are only

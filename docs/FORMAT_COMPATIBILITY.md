@@ -357,7 +357,10 @@ the maximum); any other difference fails. The output reports how many scenes tho
 per field and by how much (one line per scene with `--verbose`). It also notes scenes whose L1 max
 lies above `source_max_pq`. HDR10+ output from the hybrid is compared with the
 hybrid pieces. HDR10+ output from the metadata path and `--legacy-madvr-l1` output are not compared with
-the measurements, because their L1 does not come from them. For HLG output it also
+the measurements, because their L1 does not come from them. On every frame, generated or passed
+through, it fails two L8 blocks or two L10 blocks for the same target display, and an L8 target that
+is neither a preset display (24 and 25 included) nor an L10 block of the same frame; an RPU the
+`dolby_vision` parser cannot read (an L253 block, for example) skips this check with a warning. For HLG output it also
 fails when no measurements are available or the L1 sidecar does not load, and it checks that every
 RPU frame carries the composer the sidecar names (`dovi84-v3` = preset,
 `dovi84-bt2100-v1-spec420` = bt2100), so a measurement is never paired with an RPU of another composer. Missing source L6 fields or
