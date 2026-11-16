@@ -94,6 +94,7 @@ These tests print `Skipping` and return when their tools or media are missing. D
 - `pipeline::tests::hdr10plus_with_no_dynamic_metadata_leaves_the_hybrid_for_hdr10_analysis` skips without hdr10plus_tool; it runs the real tool on a stream with no HDR10+ metadata.
 - `mkvdovi/tests/hdr10plus_hybrid.rs` skips without ffmpeg with libx265, ffprobe, mkvmerge, dovi_tool, hdr10plus_tool or a sibling analyzer. A sibling analyzer that writes a pre-v6 sidecar fails it, so build the analyzer first (`scripts/ci/test-gate.sh` does; `cargo test -p mkvdovi` does not). MediaInfo classifying its clip as anything but HDR10+ is a failure, not a skip.
 - `mkvdovi/tests/hdr10plus_coverage.rs` (P9.4 HDR10+ payload coverage) skips on the same tools and sibling analyzer as `hdr10plus_hybrid.rs`. `pipeline::tests::unextracted_hdr10plus_coverage_refuses_an_explicit_hybrid` skips without hdr10plus_tool.
+- The P5.1 `--skip-reorder` fallback tests in `mkvdovi/src/pipeline/tests.rs` that run the real tool (`seal_hdr10plus_stream`) skip without hdr10plus_tool or ffmpeg with libx265.
 - `mkvdovi/tests/source_rpu_abort.rs` skips without ffmpeg with libx265, ffprobe, mkvmerge or `which`; it shims `dovi_tool` and `mediainfo` on a sandboxed `PATH`.
 - `mkvdovi/tests/open_gop_start.rs` skips on the same tools, without a sibling analyzer, or when that analyzer writes a pre-v5 sidecar.
 - The clip tests of `mkvdovi/src/pipeline/timing/tests.rs` (`clips`) skip without ffmpeg with libx265, ffprobe or mkvmerge.

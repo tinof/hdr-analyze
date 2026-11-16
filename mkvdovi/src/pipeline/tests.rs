@@ -1205,6 +1205,62 @@ fn unextracted_hdr10plus_coverage_refuses_an_explicit_hybrid() {
     assert_eq!(measured.hdr_type, HdrFormat::Hdr10Unsupported);
 }
 
+/// `acquire_with_coverage` at full coverage, on a reused JSON that a `--skip-reorder` retry of
+/// an earlier run produced when `skip_reorder`.
+fn acquire_reused_json(mode: Hdr10PlusMode, skip_reorder: bool) -> Result<Option<Measured>> {
+    let (result, _, _) =
+        run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+            seal_hdr10plus(dir, Some(&hdr10plus_for_four_frames()));
+            seal_coverage(dir, 4);
+            measurements_for_four_frames(dir);
+            if skip_reorder {
+                let marker = dir
+                    .join("mkvdovi_temp_in")
+                    .join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+                fs::write(marker, b"").unwrap();
+            }
+        });
+    result
+}
+
+#[test]
+fn a_reused_skip_reorder_json_refuses_an_explicit_hybrid_and_a_normal_one_does_not() {
+    let refused = acquire_reused_json(Hdr10PlusMode::ExplicitHybrid, true);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+    let measured = acquire_reused_json(Hdr10PlusMode::ExplicitHybrid, false)
+        .unwrap()
+        .expect("a normal extraction takes the hybrid");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+}
+
+#[test]
+fn a_reused_skip_reorder_json_keeps_the_default_hybrid_and_the_metadata_mode() {
+    let measured = acquire_reused_json(Hdr10PlusMode::ImplicitHybrid, true)
+        .unwrap()
+        .expect("the default only warns");
+    // Not `after_failure`: the owner kept the default on the hybrid with the fallback's JSON.
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ImplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    assert!(measured.hdr10plus_json.is_some());
+    let measured = acquire_reused_json(Hdr10PlusMode::Metadata, true)
+        .unwrap()
+        .expect("the metadata mode only warns");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+    assert!(measured.hdr10plus_json.is_some());
+}
+
+#[test]
+fn the_skip_reorder_refusal_names_the_flag_and_the_way_out() {
+    let refusal = hdr10plus::skip_reorder_refusal();
+    assert!(refusal.contains("--skip-reorder"), "{refusal}");
+    assert!(
+        refusal.contains("Without --hdr10plus-l1 hybrid the file converts"),
+        "{refusal}"
+    );
+}
+
 #[test]
 fn acquire_measurements_refuses_fel() {
     let (result, _, _) = run_acquire_measurements(&[], HdrFormat::DolbyVisionFel, |_| {});
@@ -1500,12 +1556,16 @@ fn mux_output_reuses_a_finished_mux_when_resuming() {
 }
 
 // Delivery steps against fake external tools. The functions under test spawn `ffmpeg`,
-// `ffprobe`, `mkvmerge` and `dovi_tool` from PATH, and PATH is shared by every test in this
-// binary, so the shims are installed once and pass every call through to the real tool unless
-// one of its arguments lies in a `FakeTools` sandbox that scripts that tool.
+// `ffprobe`, `mkvmerge`, `dovi_tool` and `hdr10plus_tool` from PATH, and PATH is shared by every
+// test in this binary, so the shims are installed once and pass every call through to the real
+// tool unless one of its arguments lies in a `FakeTools` sandbox that scripts that tool.
 
 #[cfg(unix)]
 const SHIMMED_TOOLS: [&str; 4] = ["ffmpeg", "ffprobe", "mkvmerge", "dovi_tool"];
+
+/// Shimmed only when found, so that the tests that do not script it still run without it.
+#[cfg(unix)]
+const OPTIONAL_SHIMMED_TOOLS: [&str; 1] = ["hdr10plus_tool"];
 
 #[cfg(unix)]
 const SANDBOX_PREFIX: &str = "mkvdovi-fake-";
@@ -1514,23 +1574,35 @@ const SANDBOX_PREFIX: &str = "mkvdovi-fake-";
 /// missing: a shim would then hide that from the tests that skip without it.
 #[cfg(unix)]
 fn shims_installed() -> bool {
+    shimmed_tools().is_some()
+}
+
+/// The tools shimmed on PATH, or `None` when one of [`SHIMMED_TOOLS`] is missing.
+#[cfg(unix)]
+fn shimmed_tools() -> Option<&'static [&'static str]> {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::OnceLock;
 
-    static INSTALLED: OnceLock<bool> = OnceLock::new();
-    *INSTALLED.get_or_init(|| {
+    static INSTALLED: OnceLock<Option<Vec<&'static str>>> = OnceLock::new();
+    let installed = INSTALLED.get_or_init(|| {
         let mut real = Vec::new();
         for tool in SHIMMED_TOOLS {
             match crate::external::find_tool(tool) {
                 Some(path) => real.push((tool, path)),
-                None => return false,
+                None => return None,
             }
         }
+        for tool in OPTIONAL_SHIMMED_TOOLS {
+            if let Some(path) = crate::external::find_tool(tool) {
+                real.push((tool, path));
+            }
+        }
+        let tools: Vec<&'static str> = real.iter().map(|&(tool, _)| tool).collect();
         let mut scripts = Vec::new();
         for (tool, real_path) in real {
             // A sandbox call appends its argv to `<root>/fake/<tool>.calls` and runs
             // `<root>/fake/<tool>.sh` with IN (after -i), OUT (after -o, else the last
-            // argument) and LAST set. That script must exit itself.
+            // argument), LAST and REAL (the real tool) set. That script must exit itself.
             let script = format!(
                 r#"#!/bin/sh
 root=
@@ -1548,12 +1620,13 @@ if [ -n "$root" ] && [ -f "$root/fake/{tool}.sh" ]; then
     LAST=$arg
   done
   [ -n "$OUT" ] || OUT=$LAST
+  REAL='{real}'
   . "$root/fake/{tool}.sh"
   exit 99
 fi
-exec '{}' "$@"
+exec '{real}' "$@"
 "#,
-                real_path.display()
+                real = real_path.display()
             );
             scripts.push((tool, script));
         }
@@ -1583,8 +1656,9 @@ exec '{}' "$@"
         let mut dirs = vec![bin];
         dirs.extend(std::env::split_paths(&path));
         std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
-        true
-    })
+        Some(tools)
+    });
+    installed.as_deref()
 }
 
 /// A sandbox holding `in.mkv`, the temp dir `mkvdovi_temp_in` and the output path `in.DV.mkv`.
@@ -2435,4 +2509,388 @@ fn mux_output_passes_the_timing_before_the_video_file() {
             assert!(!calls[0].contains("--sync") && !calls[0].contains("--timestamps"));
         }
     }
+}
+
+// P5.1: the `hdr10plus_tool extract --skip-reorder` fallback, against a real HDR10+ stream.
+
+/// The frames of [`seal_hdr10plus_stream`]'s stream, the count given to the encoder.
+#[cfg(unix)]
+const HDR10PLUS_STREAM_FRAMES: u64 = 4;
+
+/// Runs `command`; panics with its stderr when it fails.
+#[cfg(unix)]
+fn run_fixture_tool(command: &mut std::process::Command) {
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{command:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A [`FakeTools`] sandbox whose temp dir holds a sealed `video.hevc` of
+/// [`HDR10PLUS_STREAM_FRAMES`] frames with an HDR10+ payload each, encoded by ffmpeg (libx265)
+/// and injected by the real `hdr10plus_tool`. `None` (after a skip message) without the tools.
+#[cfg(unix)]
+fn seal_hdr10plus_stream(test: &str) -> Option<FakeTools> {
+    let fake = FakeTools::new(test)?;
+    if !shimmed_tools().is_some_and(|tools| tools.contains(&"hdr10plus_tool")) {
+        println!("Skipping {test}: hdr10plus_tool not found in PATH");
+        return None;
+    }
+    let encoders = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .unwrap();
+    if !String::from_utf8_lossy(&encoders.stdout).contains("libx265") {
+        println!("Skipping {test}: ffmpeg has no libx265 encoder");
+        return None;
+    }
+    // Built in the sandbox before any tool is scripted, so the shims run the real tools.
+    let plain = fake.dir.path().join("plain.hevc");
+    run_fixture_tool(
+        std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=128x72:r=24",
+                "-frames:v",
+                &HDR10PLUS_STREAM_FRAMES.to_string(),
+                "-c:v",
+                "libx265",
+                "-preset",
+                "ultrafast",
+                "-x265-params",
+                "log-level=error:bframes=0:colorprim=bt2020:transfer=smpte2084:\
+                 colormatrix=bt2020nc",
+                "-pix_fmt",
+                "yuv420p10le",
+                "-f",
+                "hevc",
+                "-y",
+            ])
+            .arg(&plain),
+    );
+    let frame = |index: u64| {
+        json!({
+            "BezierCurveData": {"Anchors": [102, 205, 307, 410, 512, 614, 717, 819, 922],
+                                "KneePointX": 0, "KneePointY": 0},
+            "LuminanceParameters": {
+                "AverageRGB": 300,
+                "LuminanceDistributions": {
+                    "DistributionIndex": [1, 5, 10, 25, 50, 75, 90, 95, 99],
+                    "DistributionValues": [0, 10, 100, 200, 300, 400, 500, 600, 1000],
+                },
+                "MaxScl": [0, 0, 0],
+            },
+            "NumberOfWindows": 1,
+            "TargetedSystemDisplayMaximumLuminance": 400,
+            "SceneFrameIndex": index,
+            "SceneId": 0,
+            "SequenceFrameIndex": index,
+        })
+    };
+    let metadata = json!({
+        "JSONInfo": {"HDR10plusProfile": "B", "Version": "1.0"},
+        "SceneInfo": (0..HDR10PLUS_STREAM_FRAMES).map(frame).collect::<Vec<_>>(),
+        "SceneInfoSummary": {"SceneFirstFrameIndex": [0],
+                             "SceneFrameNumbers": [HDR10PLUS_STREAM_FRAMES]},
+        "ToolInfo": {"Tool": "hdr10plus_tool", "Version": "1.7.2"},
+    });
+    let metadata_path = fake.dir.path().join("hdr10plus.json");
+    fs::write(&metadata_path, metadata.to_string()).unwrap();
+    let hevc = fake.temp.join(hdr10plus::HDR10PLUS_HEVC);
+    run_fixture_tool(
+        std::process::Command::new("hdr10plus_tool")
+            .arg("inject")
+            .arg("-i")
+            .arg(&plain)
+            .arg("-j")
+            .arg(&metadata_path)
+            .arg("-o")
+            .arg(&hevc),
+    );
+    resume::mark_done(&hevc).unwrap();
+    Some(fake)
+}
+
+/// `extract_hdr10plus_metadata` on the sealed stream of `fake`, resuming so that it extracts
+/// from that stream.
+#[cfg(unix)]
+fn extract_sealed_hdr10plus(fake: &FakeTools) -> Option<PathBuf> {
+    hdr10plus::extract_hdr10plus_metadata(fake.input(), &fake.temp, true, 0).unwrap()
+}
+
+#[cfg(unix)]
+fn is_skip_reorder(call: &str) -> bool {
+    call.split(' ').any(|arg| arg == "--skip-reorder")
+}
+
+/// hdr10plus_tool whose normal extraction fails and whose `--skip-reorder` run is the real tool.
+#[cfg(unix)]
+const REORDER_FAILS: &str = r#"case " $* " in *" --skip-reorder "*) exec "$REAL" "$@" ;; esac
+echo 'scripted: reordering failed' >&2
+exit 1
+"#;
+
+#[cfg(unix)]
+#[test]
+fn a_failed_hdr10plus_extract_retries_with_skip_reorder_and_takes_its_json() {
+    let Some(fake) = seal_hdr10plus_stream(
+        "a_failed_hdr10plus_extract_retries_with_skip_reorder_and_takes_its_json",
+    ) else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let json_path = extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+
+    assert_eq!(json_path, fake.temp.join("hdr10plus_metadata.json"));
+    assert!(resume::is_complete(&json_path), "sealed for resume");
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[0]), "{}", calls[0]);
+    assert!(is_skip_reorder(&calls[1]), "{}", calls[1]);
+    // The frame count of the fallback's JSON is the video's: the encoder's count, which the
+    // payload scan of the same stream confirms.
+    assert_eq!(
+        hdr10plus_coverage::scene_info_frames(&json_path),
+        Some(HDR10PLUS_STREAM_FRAMES)
+    );
+    let counted = hdr10plus_coverage::count_sealed(&fake.temp, false).unwrap();
+    assert_eq!(counted.access_units, HDR10PLUS_STREAM_FRAMES);
+    // The first log keeps the failure of the normal extraction.
+    let log = fs::read_to_string(fake.temp.join(hdr10plus::HDR10PLUS_TOOL_LOG)).unwrap();
+    assert!(log.contains("scripted: reordering failed"), "{log}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_resumed_run_keeps_the_skip_reorder_marker_of_the_json_it_reuses() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_resumed_run_keeps_the_skip_reorder_marker_of_the_json_it_reuses")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let marker = fake.temp.join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+    extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+    assert!(marker.exists(), "the fallback marks its JSON");
+
+    // The resumed run reuses the sealed JSON without running the tool, and the marker that
+    // makes it warn again stays.
+    let reused = extract_sealed_hdr10plus(&fake).expect("the sealed JSON is reused");
+    assert_eq!(reused, fake.temp.join("hdr10plus_metadata.json"));
+    assert_eq!(fake.calls("hdr10plus_tool").len(), 2);
+    assert!(
+        marker.exists(),
+        "the reused JSON still came from --skip-reorder"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_normal_extract_after_a_fallback_removes_the_skip_reorder_marker() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_normal_extract_after_a_fallback_removes_the_skip_reorder_marker")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let json_path = extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+    let marker = fake.temp.join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+    assert!(marker.exists(), "the fallback marks its JSON");
+
+    // A later run re-extracts (the JSON is no longer sealed) and the normal extraction works.
+    resume::invalidate(&json_path).unwrap();
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    extract_sealed_hdr10plus(&fake).expect("the normal extraction works");
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[2]), "{}", calls[2]);
+    assert!(
+        !marker.exists(),
+        "a normal JSON carries no --skip-reorder marker"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_working_hdr10plus_extract_runs_once_without_skip_reorder() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_working_hdr10plus_extract_runs_once_without_skip_reorder")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    let json_path = extract_sealed_hdr10plus(&fake).expect("the normal extraction works");
+
+    assert!(resume::is_complete(&json_path), "sealed for resume");
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[0]), "{}", calls[0]);
+    assert_eq!(
+        hdr10plus_coverage::scene_info_frames(&json_path),
+        Some(HDR10PLUS_STREAM_FRAMES)
+    );
+    assert!(!fake
+        .temp
+        .join(hdr10plus::HDR10PLUS_SKIP_REORDER_LOG)
+        .exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_hdr10plus_extract_whose_fallback_fails_too_extracts_nothing() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_hdr10plus_extract_whose_fallback_fails_too_extracts_nothing")
+    else {
+        return;
+    };
+    // Each run leaves a partial JSON: neither may pass for an extraction.
+    fake.script(
+        "hdr10plus_tool",
+        r#"printf '{"partial":' > "$OUT"
+case " $* " in *" --skip-reorder "*) echo 'scripted: fallback failed' >&2; exit 1 ;; esac
+echo 'scripted: normal failed' >&2
+exit 1
+"#,
+    );
+    assert_eq!(extract_sealed_hdr10plus(&fake), None);
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(is_skip_reorder(&calls[1]), "{}", calls[1]);
+    assert!(!resume::is_complete(
+        &fake.temp.join("hdr10plus_metadata.json")
+    ));
+    let read = |name| fs::read_to_string(fake.temp.join(name)).unwrap();
+    let normal = read(hdr10plus::HDR10PLUS_TOOL_LOG);
+    assert!(normal.contains("scripted: normal failed"), "{normal}");
+    let fallback = read(hdr10plus::HDR10PLUS_SKIP_REORDER_LOG);
+    assert!(fallback.contains("scripted: fallback failed"), "{fallback}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_partial_json_of_the_failed_extract_does_not_pass_for_the_fallbacks() {
+    let Some(fake) = seal_hdr10plus_stream(
+        "a_partial_json_of_the_failed_extract_does_not_pass_for_the_fallbacks",
+    ) else {
+        return;
+    };
+    // The normal run leaves a partial JSON and fails; the fallback exits 0 and writes nothing.
+    fake.script(
+        "hdr10plus_tool",
+        r#"case " $* " in *" --skip-reorder "*) exit 0 ;; esac
+printf '{"partial":' > "$OUT"
+exit 1
+"#,
+    );
+    assert_eq!(extract_sealed_hdr10plus(&fake), None);
+    assert_eq!(fake.calls("hdr10plus_tool").len(), 2);
+    assert!(!fake.temp.join("hdr10plus_metadata.json").exists());
+}
+
+/// `acquire_measurements` in `mode` on the sealed stream of `fake`, with measurements next to
+/// the input that a hybrid reuses (the input gets the size their sidecar records).
+#[cfg(unix)]
+fn acquire_from_sealed_stream(fake: &FakeTools, mode: Hdr10PlusMode) -> Result<Option<Measured>> {
+    fs::write(&fake.input, b"src").unwrap();
+    measurements_for_four_frames(fake.dir.path());
+    let mut argv = vec!["mkvdovi"];
+    argv.extend_from_slice(&ACCURATE);
+    let args = Args::try_parse_from(argv).unwrap();
+    let (mut total, mut current) = (total_steps_for(HdrFormat::Hdr10Plus), 1);
+    acquire_measurements(
+        fake.input(),
+        &fake.temp,
+        &args,
+        true,
+        None,
+        HdrFormat::Hdr10Plus,
+        mode,
+        None,
+        None,
+        &mut total,
+        &mut current,
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let refused = acquire_from_sealed_stream(&fake, Hdr10PlusMode::ExplicitHybrid);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(is_skip_reorder(&calls[1]), "{}", calls[1]);
+    assert!(fake
+        .temp
+        .join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER)
+        .exists());
+    // Refused before the payload count, the first check after the extraction.
+    assert!(!fake.temp.join(hdr10plus_coverage::COVERAGE_FILE).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback() {
+    for (mode, hdr_type) in [
+        (
+            Hdr10PlusMode::ImplicitHybrid,
+            HdrFormat::Hdr10WithMeasurements,
+        ),
+        (Hdr10PlusMode::Metadata, HdrFormat::Hdr10Plus),
+    ] {
+        let Some(fake) = seal_hdr10plus_stream(
+            "the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback",
+        ) else {
+            return;
+        };
+        fake.script("hdr10plus_tool", REORDER_FAILS);
+        let measured = acquire_from_sealed_stream(&fake, mode)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{mode:?} converts with the fallback's JSON"));
+
+        assert_eq!(fake.calls("hdr10plus_tool").len(), 2, "{mode:?}");
+        assert_eq!(measured.hdr10plus_mode, mode);
+        assert_eq!(measured.hdr_type, hdr_type, "{mode:?}");
+        assert_eq!(
+            measured.hdr10plus_json,
+            Some(fake.temp.join("hdr10plus_metadata.json")),
+            "{mode:?}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_explicit_hybrid_takes_the_json_of_a_normal_extraction() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_explicit_hybrid_takes_the_json_of_a_normal_extraction")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    let measured = acquire_from_sealed_stream(&fake, Hdr10PlusMode::ExplicitHybrid)
+        .unwrap()
+        .expect("a normal extraction takes the hybrid");
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[0]), "{}", calls[0]);
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    assert!(fake.temp.join(hdr10plus_coverage::COVERAGE_FILE).exists());
 }
