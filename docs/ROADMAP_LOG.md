@@ -28,20 +28,10 @@ Gemini's DISPUTED P1 (2026-11-16, decision record on #129).
 Resolution: `--verify` checks the authored L8 and L10 blocks on every frame; an RPU the crate
 cannot parse skips the checks with a warning.
 
-### 2026-11-16: owner answers after `/ship:roadmap-batch` (no step closed)
+### E17: `--verify` checks for authored CM v4.0 blocks (moved from the roadmap)
 
-The owner took the recommended option on both questions the batch parked. E17.1: merge PR #129
-anyway, with F1 DISPUTED. `CLAUDE.md`: its `--verify` line names the E17.1 checks; to stay within
-24,000 bytes, the LSP position and cold-start detail moved to [`CI.md`](CI.md). Also from the run:
-the batch's self-review changed `/ship:roadmap-batch` (the CI wait takes its SHA from
-`git rev-parse`; a kept branch's old worktree is pruned first) and proposes that `CHANGELOG.md`
-and Markdown docs not block a batch pairing; that one waits for the owner.
-
-#### E17: `--verify` checks for authored CM v4.0 blocks (moved from the roadmap)
-
-- **Status:** Partial. E17.1 is built on `feat/e17-1-verify-authored-blocks` @d1c13d1, PR #129
-  open with `review:needs-human` (resumed 1): its one finding, Gemini P1 F1, is DISPUTED and
-  waits for the owner's merge decision. The DV record check is done (E17.2).
+- **Status:** Done, no step open: E17.1 merged as PR #129 (owner "merge anyway", F1 DISPUTED)
+  and E17.2 as PR #121; [log](ROADMAP_LOG.md).
 - **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
   RPU passes; the existing `--verify` tests unchanged; the E13 mkvdovi gate passes.
 - [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
@@ -55,6 +45,15 @@ and Markdown docs not block a batch pairing; that one waits for the owner.
   `mkvdovi/src/verify/authored_blocks.rs`, as `verify.rs` is near its 800-line limit; not taken: a
   split step. Any parse failure skips them with a warning, not only a guard refusal: the crate
   refuses L253 with a plain error (`cmv40.rs:56-64`); not taken: failing valid MEL outputs.
+
+### 2026-11-16: owner answers after `/ship:roadmap-batch` (no step closed)
+
+The owner took the recommended option on both questions the batch parked. E17.1: merge PR #129
+anyway, with F1 DISPUTED. `CLAUDE.md`: its `--verify` line names the E17.1 checks; to stay within
+24,000 bytes, the LSP position and cold-start detail moved to [`CI.md`](CI.md). Also from the run:
+the batch's self-review changed `/ship:roadmap-batch` (the CI wait takes its SHA from
+`git rev-parse`; a kept branch's old worktree is pruned first) and proposes that `CHANGELOG.md`
+and Markdown docs not block a batch pairing; that one waits for the owner.
 
 ### 2026-11-16: E17.1 parked on a disputed finding (batch, no step closed)
 
