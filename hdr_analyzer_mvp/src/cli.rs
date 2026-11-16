@@ -20,6 +20,11 @@ pub enum PeakEstimator {
     Percentile,
     /// Apply the grain-adaptive extreme-value correction.
     Robust,
+    /// The SMPTE ST 2094-10 reduced pixel set (§6.1.2): the highest max-RGB of non-overlapping
+    /// 2x2 block means, averaged in linear light, anchored at the crop's top-left. PQ input,
+    /// max-rgb peak domain and --downscale 1 only.
+    #[value(name = "st2094-10")]
+    ReducedSet,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

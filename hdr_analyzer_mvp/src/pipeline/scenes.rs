@@ -59,14 +59,14 @@ pub(super) fn write_frame_stats_csv(
     let mut writer = BufWriter::new(file);
     writeln!(
         writer,
-        "frame,selected_pq,raw_max_pq,percentile_pq,robust_pq,sigma_pq,correction_pq,n_eff,scene_diff,scene_score,scene_baseline,scene_start,avg_max_rgb_pq"
+        "frame,selected_pq,raw_max_pq,percentile_pq,robust_pq,sigma_pq,correction_pq,n_eff,scene_diff,scene_score,scene_baseline,scene_start,avg_max_rgb_pq,reduced_max_pq,reduced_min_pq"
     )?;
 
     for (frame_index, stat) in stats.iter().enumerate() {
         let (scene_diff, scene_score, scene_baseline) = scene_values[frame_index];
         writeln!(
             writer,
-            "{frame_index},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},{},{:.6},{:.6},{:.6},{},{:.12}",
+            "{frame_index},{:.12},{:.12},{:.12},{:.12},{:.12},{:.12},{},{:.6},{:.6},{:.6},{},{:.12},{:.12},{:.12}",
             stat.selected_peak_pq,
             stat.raw_max_pq,
             stat.percentile_pq,
@@ -78,7 +78,9 @@ pub(super) fn write_frame_stats_csv(
             scene_score,
             scene_baseline,
             u8::from(cut_frames.contains(&(frame_index as u32))),
-            stat.avg_max_rgb_pq
+            stat.avg_max_rgb_pq,
+            stat.reduced_max_pq,
+            stat.reduced_min_pq
         )?;
     }
     writer

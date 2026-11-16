@@ -20,6 +20,32 @@ pub(super) fn field<'a>(map: &'a Map<String, Value>, key: &str, path: &str) -> R
         .ok_or_else(|| Error::Manifest(format!("{path}.{key} is missing")))
 }
 
+/// A key that must be present and may be null (`None`); otherwise read by `read`.
+pub(super) fn nullable<T>(
+    map: &Map<String, Value>,
+    key: &str,
+    path: &str,
+    read: fn(&Map<String, Value>, &str, &str) -> Result<T>,
+) -> Result<Option<T>> {
+    match field(map, key, path)? {
+        Value::Null => Ok(None),
+        _ => read(map, key, path).map(Some),
+    }
+}
+
+/// A key that may be missing or null (`None`); otherwise read by `read`.
+pub(super) fn optional<T>(
+    map: &Map<String, Value>,
+    key: &str,
+    path: &str,
+    read: fn(&Map<String, Value>, &str, &str) -> Result<T>,
+) -> Result<Option<T>> {
+    match map.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => read(map, key, path).map(Some),
+    }
+}
+
 pub(super) fn u64_at(map: &Map<String, Value>, key: &str, path: &str) -> Result<u64> {
     field(map, key, path)?
         .as_u64()

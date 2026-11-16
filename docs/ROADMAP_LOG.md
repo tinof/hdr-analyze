@@ -6,6 +6,963 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-16: E17.1 `--verify` checks for authored L8 and L10 blocks (PR #129)
+
+Step: [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
+  `target_display_index` values, duplicate L10 target indices, an L8 target that resolves to
+  neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence
+  disagrees with the block length. First check what the `dolby_vision` crate (3.4.0) already
+  rejects at parse time, and drop the checks it covers. Gate: the item gate.
+
+Gate evidence, PR #129: unit tests in `mkvdovi/src/verify/authored_blocks.rs` round-trip crafted
+RPUs through the crate (`an_authored_rpu_and_a_generated_one_pass`, `a_duplicate_l8_target_fails`,
+`a_duplicate_l10_target_fails`, `an_l8_target_needs_a_preset_or_an_l10_block_of_its_frame`), and
+`verify_fails_on_an_l8_target_that_is_neither_a_preset_nor_an_l10_block` runs `--verify` on a
+generated clip; no existing `--verify` test changed. The field-presence check was dropped: the
+parser reads exactly the fields of the block length and the guard refuses a length without a
+layout. The E13 mkvdovi gate: see the entry "E17.1 parked on a disputed finding" below (16 of 16
+baseline compares identical, every real output consistent). CI green after one rerun of the
+lint job, whose runner failed to install the toolchain. The owner answered "merge anyway" on
+Gemini's DISPUTED P1 (2026-11-16, decision record on #129).
+
+Resolution: `--verify` checks the authored L8 and L10 blocks on every frame; an RPU the crate
+cannot parse skips the checks with a warning.
+
+### E17: `--verify` checks for authored CM v4.0 blocks (moved from the roadmap)
+
+- **Status:** Done, no step open: E17.1 merged as PR #129 (owner "merge anyway", F1 DISPUTED)
+  and E17.2 as PR #121; [log](ROADMAP_LOG.md).
+- **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
+  RPU passes; the existing `--verify` tests unchanged; the E13 mkvdovi gate passes.
+- [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
+  `target_display_index` values, duplicate L10 target indices, an L8 target that resolves to
+  neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence
+  disagrees with the block length. First check what the `dolby_vision` crate (3.4.0) already
+  rejects at parse time, and drop the checks it covers. Gate: the item gate.
+- **Decided 2026-11-15 (owner):** L8 targets 24 and 25 are presets (`trim_target_nits`); `--verify`
+  parses the MEL passthrough RPU through `rpu_guard` and warns and skips these checks on a crate limit.
+- **Decided 2026-11-16 (batch, recommended; owner may override):** the checks live in
+  `mkvdovi/src/verify/authored_blocks.rs`, as `verify.rs` is near its 800-line limit; not taken: a
+  split step. Any parse failure skips them with a warning, not only a guard refusal: the crate
+  refuses L253 with a plain error (`cmv40.rs:56-64`); not taken: failing valid MEL outputs.
+
+### 2026-11-16: owner answers after `/ship:roadmap-batch` (no step closed)
+
+The owner took the recommended option on both questions the batch parked. E17.1: merge PR #129
+anyway, with F1 DISPUTED. `CLAUDE.md`: its `--verify` line names the E17.1 checks; to stay within
+24,000 bytes, the LSP position and cold-start detail moved to [`CI.md`](CI.md). Also from the run:
+the batch's self-review changed `/ship:roadmap-batch` (the CI wait takes its SHA from
+`git rev-parse`; a kept branch's old worktree is pruned first) and proposes that `CHANGELOG.md`
+and Markdown docs not block a batch pairing; that one waits for the owner.
+
+### 2026-11-16: E17.1 parked on a disputed finding (batch, no step closed)
+
+`/ship:roadmap-batch` built E17.1 as PR #129 (`feat/e17-1-verify-authored-blocks` @d1c13d1). Its
+gate passed: `scripts/ci/test-gate.sh` (759 passed), and the E13 mkvdovi gate on a release build
+with a `+cuda` analyzer. There, all 16 `rpu-baseline.sh compare --require-identical-l1` runs
+against `0.8.0/` passed, every `RPU.bin` was byte-identical, and all 16 real outputs printed "L8
+and L10 blocks: consistent on all N frames"; evidence in `~/mkvdovi-work/rpu-baseline/e17-1-batch/`.
+The rerun on the head rebased onto E7.1 (`e17-1-batch-rebased/`) gave the same result.
+The pre-PR panel's three P3s: the docs gap and the untested call site were fixed
+(`verify_fails_on_an_l8_target_that_is_neither_a_preset_nor_an_l10_block`); the narrowing of the
+parse-failure skip to guard refusals was rejected, as the crate refuses L253 with a plain error.
+Gemini 4 Hydrogen high raised one P1: a frame after frame 0 that does not parse would make
+`parse_rpu_file` keep only the RPUs before it. It is DISPUTED: the crate returns an error when
+fewer RPUs parse than start codes were found (`rpu/utils.rs:122-133`), and
+`a_frame_after_the_first_that_does_not_parse_fails_the_whole_parse` passes on the reviewed code.
+A DISPUTED finding leaves the merge to the owner (Waiting for the owner). The
+`rpu_guard.rs:71` comment ("keeps the RPUs before the first one it cannot parse") is what the
+finding read; it is worth rewording when the file is next touched.
+
+### 2026-11-16: E7.1 Direct-MKV `dovi_tool` output frame count (PR #128)
+
+Step: [E7.1][desk][batch] Direct-MKV `dovi_tool` steps (`mkvdovi/src/pipeline/dovi_steps.rs`,
+  `pipeline/tests.rs`) still accept exit status plus non-empty output: compare the output's
+  access units with the input's ffprobe packet count, and fall back to ffmpeg extraction on a
+  mismatch or an unreadable count. Gate: the item's gate (1).
+
+- **Decided 2026-11-15 (owner):** the expected count is the ffprobe packet count of the input
+  (`timing::read_video_times`), not MediaInfo `FrameCount`; an unreadable count falls back.
+- **Checked 2026-11-10 @efc8306:** the acceptance is `run_dovi_video_step`
+  (`mkvdovi/src/pipeline/dovi_steps.rs:42`, `:66-71`), called by the clean-BL and MEL steps
+  (`:173`, `:221`); its output is video, so it needs a video frame count, not the E7.2 RPU count.
+
+Gate evidence, PR #128: `direct_mkv_step_with_a_truncated_output_falls_back_to_ffmpeg_extraction`
+and `mel_conversion_with_a_truncated_direct_output_muxes_the_extracted_stream` fail on the parent
+and pass; the other sides are `direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction`,
+`direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction`,
+`direct_mkv_step_whose_output_cannot_be_counted_falls_back_to_ffmpeg_extraction` and
+`a_source_whose_frames_cannot_be_counted_skips_the_direct_mkv_read` (`mkvdovi/src/pipeline/tests.rs`).
+The real-tool `profile7_mel_fast_path_counts_its_rpus` asserts that the direct read is kept.
+`scripts/ci/test-gate.sh` (759 passed), CI green. Added time per file: one more read of the
+source's packets (0.26 s for a 1200-frame 1080p file) and one count of the output stream (about
+1 s per GB, warm cache). On real media, the E17.1 RPU-baseline rerun on a head that contains this
+change (`~/mkvdovi-work/rpu-baseline/e17-1-batch-rebased/`) took the direct-MKV path on all 16
+inputs (three Profile 7 MEL) with no fallback, and all 16 compares against `0.8.0/` passed.
+Built by `/ship:roadmap-batch`; the pre-PR panel's three P3s were fixed;
+Gemini 4 Hydrogen high review LGTM.
+
+Resolution: a direct-MKV output is accepted only with the source's frame count; otherwise ffmpeg
+extracts.
+
+### 2026-11-16: P5.1 `hdr10plus_tool extract --skip-reorder` fallback (PR #126)
+
+Step: [P5.1][desk][batch] `hdr10plus_tool extract --skip-reorder` fallback
+  (`mkvdovi/src/pipeline/hdr10plus.rs`, `pipeline/measure.rs`, `pipeline/tests.rs`); an explicit
+  hybrid refuses a `--skip-reorder` JSON. Gate: the item gate (step 1), plus both sides of the refusal.
+
+- **Decided 2026-11-15 (owner):** an explicit `--hdr10plus-l1 hybrid` keeps refusing; the default
+  and `hdr10plus` use the fallback JSON with its warning. (The HLG→PQ mastering-primaries item is
+  gone: HLG now converts to Profile 8.4 without re-encoding.)
+
+Gate evidence, PR #126: `a_failed_hdr10plus_extract_retries_with_skip_reorder_and_takes_its_json`
+runs the real hdr10plus_tool behind a shim that fails the first call, and the fallback JSON's frame
+count equals the video's; `a_working_hdr10plus_extract_runs_once_without_skip_reorder` is the other
+side. The refusal, both sides: `an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback`,
+`the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback`, and the resume
+tests `a_reused_skip_reorder_json_refuses_an_explicit_hybrid_and_a_normal_one_does_not` and
+`a_reused_skip_reorder_json_keeps_the_default_hybrid_and_the_metadata_mode` (all in
+`mkvdovi/src/pipeline/tests.rs`). `scripts/ci/test-gate.sh` passed (only allowed skips), CI green.
+Built by `/ship:roadmap-batch` (resumed from the 2026-11-15 run); the pre-PR panel's one P3 was
+fixed (an I/O error in the HDR10+ extraction now prints its reason); Gemini 4 Hydrogen high review
+LGTM.
+
+Resolution: a failed normal extraction retries with `--skip-reorder`; a marker next to the JSON
+keeps the warning and the explicit-hybrid refusal on resume.
+
+### 2026-11-16: P9.6 Refuse an explicit hybrid when the unextracted scan fails (PR #125)
+
+Step: [P9.6][desk][batch] Refuse an explicit hybrid when `hdr10plus_tool` extracts nothing and the
+  coverage scan fails (`judge_unextracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs`); the
+  default and `hdr10plus` keep the warning (owner, 2026-11-15). Gate: unit tests on both sides.
+
+Gate evidence, PR #125: `a_scan_that_fails_after_no_extraction_refuses_an_explicit_hybrid` (an
+oversized SEI and a malformed stream; fails on the parent commit) and
+`unextracted_payloads_warn_or_refuse_an_explicit_hybrid` in
+`mkvdovi/src/pipeline/hdr10plus_coverage/tests.rs`, both sides; `scripts/ci/test-gate.sh` passed
+(only allowed skips), CI green. Built by `/ship:roadmap-batch`; the pre-PR panel found nothing;
+Gemini 4 Hydrogen high review LGTM, its two P2 doc notes fixed in this docs PR
+(`docs/FORMAT_COMPATIBILITY.md`, the `hdr10plus_coverage.rs` module doc).
+
+Resolution: every failed coverage scan refuses an explicit hybrid, with or without extracted
+metadata; `coverage.own == 0` and a missing extracted stream still fall back.
+
+### 2026-11-15: `CLAUDE.md` names the E17.2 record check (no step closed)
+
+The owner approved the `--verify` wording proposed in the E17.2 entry below; it is now in
+`CLAUDE.md` "mkvdovi operational gotchas". To stay under the 24,000-byte budget, two details left
+`CLAUDE.md`: why the CUDA clippy needs no GPU (cudarc loads the driver at runtime, now in
+[`CI.md`](CI.md)), and the code-search note "2026-10-24 audit: 0 LSP calls in 219 sessions".
+
+### 2026-11-15: owner answers after `/ship:roadmap-batch` (no step closed)
+
+The owner took the recommended option on the four questions the batch parked. E7.1: the expected
+count is the input's ffprobe packet count, and an unreadable count falls back to ffmpeg extraction.
+P5.1: an explicit hybrid keeps refusing a `--skip-reorder` JSON. E17.1: L8 targets 24 and 25 are
+presets, and `--verify` parses the MEL passthrough RPU through `rpu_guard`, warning and skipping
+on a crate limit. P9: a failed scan on the unextracted path refuses an explicit hybrid too, new
+step P9.6. The Decided bullets are in `ROADMAP.md`; the `CLAUDE.md:89` wording stays on the list.
+
+### 2026-11-15: E17.2 Check the whole DV config record of every output (PR #121)
+
+Step: [E17.2][desk][batch] Check the whole DV config record of every output (`mkvdovi/src/verify.rs`):
+  profile 8, a level, RPU and BL present, no EL, compatibility ID 1 (PQ) or 4 (HLG); today only
+  the HLG ID is read. Gate: unit tests on canned ffprobe output, both sides; the existing
+  `--verify` tests unchanged.
+
+- **Decided 2026-11-15 (batch, recommended; owner may override):** the one existing assertion
+  that pinned the HLG-only check (`pq_verify_passes_when_the_sidecar_is_missing`,
+  `!log.contains("compatibility ID")`) now asserts the PQ ID 1 line; not taken: PQ wording that
+  avoids the phrase.
+
+Gate evidence, PR #121: unit tests in `mkvdovi/src/verify/dv_record.rs` on canned ffprobe 9.0.2
+output, both sides of every field; `scripts/ci/test-gate.sh` (739 passed) and green CI. The mkvdovi
+gate on the branch's release build with a `--features cuda` analyzer: all 16 RPU-baseline compares
+against `0.8.0/` identical, every `RPU.bin` byte-identical, and the record check passed on all 16
+real outputs (PQ ID 1, HLG ID 4); evidence in `~/mkvdovi-work/rpu-baseline/e17-2-batch/`. Built by
+`/ship:roadmap-batch`; the pre-PR panel's two P3s were fixed (an ffprobe that reads no record now
+warns, as an old one cannot read it from Matroska; a PQ ID mismatch names the missing VUI transfer
+tag); Gemini 4 Hydrogen high review LGTM.
+
+Resolution: `--verify` checks the whole record. Stale and not editable by a batch: `CLAUDE.md:89`.
+Proposed wording: "- **`--verify`** hard-fails malformed metadata, a Dolby Vision configuration
+record that is not Profile 8 with RPU and base layer, no enhancement layer and compatibility ID 1
+(PQ) or 4 (HLG), frame-count mismatches, a wrong CM version, an HLG composer mismatch, and
+(generated RPUs) a source range or L1 that differs from the sidecar after the clamp."
+
+### 2026-11-15: E17.1 stopped before code (batch, no step closed)
+
+The `/ship:roadmap-batch` builder of E17.1 stopped on two rules that neither `dolby_vision` 3.4.0
+nor the repo docs settle; both are under "Waiting for the owner". Its research, kept for the next
+build: duplicate L8 and L10 target indices are not rejected by the crate (`cmv40.rs:121-170` only
+counts blocks; `extension_metadata/mod.rs:57-71` adds without a duplicate check), so both checks
+stay. The L8 field-presence check can go: the parser reads fields by length (`level8.rs:69-93`)
+and requires zero padding (`blocks/mod.rs:195-223`), but a length outside 10/12/13/19/25 reaches
+`unreachable!` (`level8.rs:174-181`), so `--verify` must parse through `rpu_guard`
+(`mkvdovi/src/rpu_guard.rs:184-185`). Authored L8 and L10 reach an output only on the MEL fast
+path, which calls `verify_post_mux` with no delivery (`pipeline/dovi_steps.rs:406`), so today's
+`--verify` reads only frame 0 there. Moved from P6 to keep `ROADMAP.md` under budget:
+
+- **Checked 2026-10-11 (fix-l6-zero-light-levels):** none of the seven saved rpu-baseline inputs
+  has a container 0, so the baselines do not cover the container-0 fix; unit and clip tests do,
+  including the L6 of a generated `extra.json`.
+
+### 2026-11-15: E13.16 Split mkvdovi's `main` by phase (PR #118)
+
+Step: - [E13.16][corpus][batch] Split mkvdovi's `main` (`mkvdovi/src/main.rs`, 188 lines) by phase. Gate: the
+  mkvdovi gate.
+
+Gate evidence, PR #118: fmt, clippy and `scripts/ci/test-gate.sh` (727 passed, no test edited) and
+green CI. The RPU-baseline part ran on the branch's release build with a `--features cuda`
+analyzer, as the 0.8.0 captures: all 16 `rpu-baseline.sh compare --require-identical-l1` runs
+against `~/mkvdovi-work/rpu-baseline/0.8.0/` passed and every `RPU.bin` was byte-identical; the
+own-log diff only adds the E7.2, E7.3 and P9.4 check lines main gained after 0.8.0 (none removed).
+A first run with a CPU-only analyzer (NVDEC decode, CPU analysis: the E12.2 path) changed L1 on
+10 of 16 cuts and outside L1 nothing; it does not count. Evidence: `e13-16-batch/` (that run in
+`nocuda-run/`). Built by `/ship:roadmap-batch`; self-check four Opus lenses (no finding), Gemini 4
+Hydrogen high review LGTM.
+
+Resolution: `main` calls seven private phase functions in the old order; the `#[expect]` marker is
+gone. Moved here from the item to keep `ROADMAP.md` under budget:
+
+- **Checked 2026-11-05 @cd44e61:** `e13-step5/` holds only the step 5 analyzer `.bin` captures, no
+  `rpu-baseline.sh` stems, so the mkvdovi gate now names the `0.8.0/` sets (`0.8.0/run-prerelease.sh`,
+  16 compares identical). Both analyzer gates pass `--disable-optimizer`, so E13.6 diffs
+  optimizer-enabled `.bin` files. No open branch touches `mkvdovi/src/pipeline/`; `feat/dev-corpus`
+  is 11 commits ahead of main and cannot land (owner list).
+
+P5.1 was built in the same batch and held: on main an explicit hybrid refuses a file whose
+extract fails while it has payloads, and the `--skip-reorder` JSON would let it convert. The
+resume finding of its pre-PR panel is fixed on the branch; the policy waits for the owner.
+
+### 2026-11-15: P9.5 Refuse an explicit hybrid when the HDR10+ count fails (PR #116)
+
+Step: - [P9.5][desk][batch] Refuse an explicit `--hdr10plus-l1 hybrid` when the HDR10+ coverage scan fails
+  (an SEI over the 256 KiB cap, a malformed stream), instead of only warning
+  (`judge_extracted`, `mkvdovi/src/pipeline/hdr10plus_coverage.rs:410`); the default keeps the
+  warning (Codex P1 on PR #109, owner 2026-11-12). Gate: a failed scan refuses an explicit hybrid
+  before analysis and only warns under the default and `hdr10plus`, in unit and clip tests.
+
+Gate evidence, PR #116: the unit test `a_scan_that_fails_refuses_an_explicit_hybrid_and_warns_otherwise`
+(an oversized SEI and a malformed stream, both flags) and the clip test
+`a_failed_count_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid`
+(`mkvdovi/tests/hdr10plus_coverage.rs`) fail on the parent and pass; `scripts/ci/test-gate.sh`
+passed (727 tests, only allowed skips) and CI was green. Built by `/ship:roadmap-batch` in routed
+mode; the pre-PR panel (four Opus lenses) ran as self-check, and Gemini 4 Hydrogen high reviewed
+it cold (LGTM; Codex is disabled). See the PR's review record.
+
+Resolution: `judge_extracted` refuses a failed scan under an explicit hybrid. The panel found that
+`judge_unextracted` still keeps a failed scan as `NoPayloads` when `hdr10plus_tool` extracts
+nothing (pinned by `unextracted_payloads_warn_or_refuse_an_explicit_hybrid`); that path is outside
+the step and waits under "Waiting for the owner". E7.1 stopped in the same batch before any code:
+the source of the expected frame count is an owner question too.
+
+### 2026-11-15: roadmap shaped for `/ship:roadmap-batch` (no step closed)
+
+Eight steps got the `[batch]` tag (owner, 2026-11-15): P9.5, E7.1, P5.1, E17.1, E17.2, E13.14,
+E13.16 and E13.17; E7.1, P5.1, E17.1 and E17.2 now name the file they change. The contract moved
+to 1.2 with `## Unattended` `none` and no `self-review`, so a batch runs in routed mode. The
+pre-PR self-check added `pipeline/tests.rs` to E7.1 and P5.1 (both put fake-tool tests there),
+`Needs: P12.1` to E13.14 and E13.17 (P12.1 edits both functions), and moved the mkvdovi gate into
+E13's Gate bullet, which batch hands to its builder; E17's gate now points at it. To keep
+`ROADMAP.md` under its byte budget, the Checked bullet of the finished item E15 moved here
+verbatim:
+
+- **Checked 2026-11-05 @7ec5c49:** callers use `parse_source_rpu_file` (`mkvdovi/src/rpu_check.rs:335`,
+  `:450`, `:467`). In `dolby_vision` 3.4.0 the reserved-block allocation is unreachable (`ensure!(false)`
+  first, `cmv29.rs:57`, `cmv40.rs:57`); the count is `extension_metadata/mod.rs:114`. The crate reads
+  the DM payload also under `use_prev_vdr_rpu_flag` (`dovi_rpu.rs:186`); the walk
+  follows it there too. P15.4's import must use the same guarded parse.
+
+### 2026-11-14: P16.3 Versioning of the library crates (PR #113)
+
+Step: - [P16.3][owner] Versioning of the library crates. Gate: the policy is in `docs/RELEASING.md`
+  "Library crates". (On `main` before this PR: "Versioning of the library crates: locked to the
+  binaries, or their own semver and crates.io. Gate: TODO(owner).")
+
+Gate evidence, PR #113: the owner's decision of 2026-11-14 is in
+[`RELEASING.md`](RELEASING.md) "Library crates": their own version line from 0.1.0, `lib-vX.Y.Z`
+git tags instead of crates.io, MINOR for API breaks (also a new variant or field of an exhaustive
+type) and for changed RPU bytes, formats versioned on the line whose crate defines them, and a C
+ABI that starts unstable. The pre-PR panel's five doc findings were fixed in the PR; Codex (exec
+and GitHub) said LGTM. See the PR's review record.
+
+Resolution: the policy is recorded and takes effect with the split, P16.7; P16.8 (crates.io)
+waits for P16.2 and P16.7. P16.1 now needs P16.7.
+
+### 2026-11-14: roadmap review (library direction, FEL reopened, research check)
+
+No step closed. The roadmap was reviewed against the NuvioTV fork's roadmap (its
+`perf/shield-pass` branch), AetherEngine at `578bec3d` and a short search for newer sources. The
+decisions are in `ROADMAP.md` (Priorities entry 12, P16, R3, the FEL item).
+
+**Owner decisions (2026-11-14).**
+- hdr-analyze becomes the library that players link: a Rust API and a C ABI built with cargo-c.
+  Player code stays in the fork, and no playback engine is built here. New item P16; plan in
+  [`RPU_BUILDER.md`](RPU_BUILDER.md) "Library plan".
+- P16 and R3 sit in a new last priority entry until the owner places them.
+
+**FEL (owner, 2026-11-12, recorded with this review).** The hold of 2026-10-13 (confirmed
+2026-10-17: "revisit after 1.0.0") is lifted for offline work: a reference reconstruction and
+RPU-only experiments on a local branch, with no re-encoded test file. FEL code enters `mkvdovi`
+only after v0.9.0 and after E7.1, E13.12, E13.13, E13.14 and E13.16. The item's earlier gate line
+("when the owner lifts the hold, the F0 gate of the local `FEL_ROADMAP.md` applies", owner,
+2026-10-17) left the item, because the local plan was rewritten on 2026-11-12. Moved from the
+item and still true: E15.1 keeps a malformed source RPU (Profile 7, or one found by the RPU sniff)
+from aborting `mkvdovi` before the FEL refusal; AetherEngine's residual on/off measure and
+POC-slot pairing fit FEL_PLAN §5d and §6, and its float composer is no reference (2026-11-05).
+
+**Findings.**
+- The fork's roadmap names eight steps "in hdr-analyze" (DV1.5, DV2.5, DV2.6, DV4.2, DV4.10,
+  DV4.12, DV7.6, DV7.8). None had an item here; the table is in `RPU_BUILDER.md` "Library plan".
+- The fork's `native/rpu_builder` pins `eb727a0`, 17 commits behind `main`; two of them touch the
+  builder crates (#96, #99).
+- AetherEngine 7.61.0 (2026-11-08) ships a "FEL curve fold" that matches candidates (b) and (c) of
+  `FEL_PLAN.md`, public here since 2026-10-03 (`6c5bf8d`); `FEL_PLAN.md` has cited AetherEngine's
+  composer since 2026-10-21 (`5b5a4f0`). Its repository does not name hdr-analyze; whether the
+  fold is derived or independent cannot be told. Method and limits: `FEL_PLAN.md` section 9.
+
+**Notes, no step** (one short search; "not found" is not "does not exist").
+- SMPTE ST 2094-50 (Application #5, "Eclipsa Video"; Google with Apple and NBCUniversal;
+  finalised 2026-08 according to Phoronix): a reference white and headroom-adaptive gain curves.
+  Sources: <https://github.com/SMPTE/st2094-50> (public committee drafts), MediaInfoLib PR #2831
+  and issue #2654 (ITU-T T.35 with country code 0xB5, provider code 0x0090, oriented code 0x0001,
+  in AVC and HEVC SEI, AV1 metadata OBUs and Matroska block additions), Vulkan 1.4.366
+  `VK_GOOGLE_hdr_SMPTE_ST_2094_50_metadata`. The standard itself was not read: that is R3.1.
+- Shot detection: PERSIST (arXiv 2608.29287, 2026-08-29, code at
+  <https://github.com/linty5/PERSIST>, licence not checked) fires a cut only when the change
+  persists. Its abstract reports about half of TransNetV2's flash, overlay and archive false
+  positives at matched recall. It is a candidate scoring reference for E4.3, not analyzer code.
+- libplacebo v7.387.0 (2026-10-25) releases Profile 7 FEL merging, corrects Dolby Vision
+  reshaping to ETSI GS CCM 001, changes the units of the reshaping pivots, respects signalled
+  black level for PQ and changes tone mapping. Before WS7.1 and WS6.10, re-check on a pinned
+  version: the "reads only L1 max/avg, the source range and the reshaping" limit and the WS7 gate
+  numbers.
+- Dolby Vision 2 and HDR10+ Advanced are live on televisions since 2026-08-04 and 2026-08-06
+  (Samsung's 2026 range with Prime Video; Hisense's 2026 UX, UR9, UR8 and U7). No public bitstream
+  or metadata specification was found; the non-goal is reworded, not dropped.
+- `dolby_vision` on crates.io is still 3.4.0 (2026-08-12). `libdovi` is built with cargo-c
+  (`cargo cinstall`), the model for P16.
+- Unverified: a catalogue page lists ITU-R BT.2408-9 (03/2026); the docs cite BT.2408-8.
+- Not found: newer public work on grain-robust max-RGB or learned L1 prediction, or a quality
+  metric for dynamic tone mapping beyond ColorVideoVDP-tm (noted below).
+
+**Moved from `ROADMAP.md`** to keep it under its byte budget (history, no rule):
+- Owner directions, carried out: (2026-11-04) P15 goes ahead of the then Next up, its steps in
+  their own order (P15.1, P15.2, then P15.3, P15.4); E15.1 ranks with P15 as P15.4's prerequisite
+  (2026-11-05), and its review added E15.2. (2026-11-07) E7.3, then E7.2, go ahead of P9.4: E7.3
+  delivers wrong video timing, and the source is then deleted. (2026-11-09) WS0.2 goes ahead of
+  P9.4: one scorecard of the delivered RPU against retail before WS1.5, WS7 and P10 change L1.
+- Waiting for the owner, intro: the decisions of 2026-10-17 settled the P9 scoring rule, P13 L2,
+  E14.2, the P8 second device, E12 NVRTC, the P10 evidence and the gates of every `TODO(owner)`
+  step then listed.
+- Release plan: `v0.8.0-rc.1` was published 2026-11-03 and passed the Windows test on 2026-11-04:
+  the Windows zip ran GPU analysis with only the driver and matched the Linux `.bin` on one PQ and
+  one HLG clip. The 1.0.0 row read: the WS6 `code / 1023` question answered by the discriminating
+  canary or the neutral-finder probe (WS6.3–WS6.9, WS6 gate (3)); a second device is not required
+  because none is available.
+- Priority 1: `--hlg-composer bt2100` and the input refusal landed 2026-10-03; other devices than
+  the C9 stay untested.
+- Priorities 2 and 4, items E8 and E9: the prerequisite E13.5 (analyzer split, before the sidecar
+  v6 step P9.2 and before E8.1 and E9.1, because E8.1 moves the default `.bin`) was met on
+  2026-10-17 (#59). Priority 4: the three L6 defects found 2026-10-07 were fixed 2026-10-11; the
+  CPU default was decided in P1.1 (2026-11-02).
+- E13 sequencing: the refactor was no priority of its own; its steps were prerequisites of
+  priorities 2 and 4.
+- Metered tests: the by-eye reading of WS6.9 on 2026-10-29 did not meet its gate, and the
+  `code / 1023` question no longer depends on it (WS6.6 answered it).
+- WS6 status: WS6.3, WS6.4 (PR #66), WS6.8 (PR #78), WS6.5 and WS6.6 (PR #80) closed; WS6.9 is
+  metered with the i1Display Pro in Dolby Vision Cinema (owner decision), files in
+  `~/mkvdovi-work/ws6-neutral-probe-2026-10-27/`.
+- WS1: the per-shot bias of `max` against retail L1 is +148 to +162 codes on Alita: Battle Angel
+  (digital, largely computer-generated) and +88 and +162 on Skyfall (both Profile 7 MEL); one lead
+  is the reference's spatial or temporal treatment of small highlights. With the 2×2 reduced set,
+  shots below retail rise from 5 to 9.
+- P14 status: the prototype writes a luma polynomial plus chroma MMR; the HDR10 fallback is
+  untouched; the dim series is CM v4.0, and well-exposed titles looked unchanged.
+- Non-goal, earlier wording: "Neither has public technical content: the announcements name
+  features, and no bitstream or metadata specification is published."
+- Moved later the same day, with the library versioning decision: priority 5, the `--mdfix`
+  notice that names the dropped levels shipped 2026-10-15, and P13 closed 2026-10-17 (v29 stays
+  without L2); priority 7, real material per format landed 2026-10-05.
+
+### 2026-11-11: P9.4 Count the frames that carry their own HDR10+ payload (PR #109)
+
+Step: - [P9.4][corpus] Count the frames that carry their own HDR10+ payload; `hdr10plus_tool` fills a
+  gap with the previous frame's, so partial coverage is silent today. Warn below full coverage;
+  refuse under an explicit `--hdr10plus-l1 hybrid`. Gate: corpus coverage counts in the log first;
+  then the warning fires on a gap clip and stays silent on a full one.
+
+Gate evidence, PR #109:
+- Corpus counts first: the entry below (all 14 HDR10+ development cuts fully covered; the built
+  mkvdovi count matches the reference scanner on all 14).
+- Warning on a gap clip, silence on a full one: `mkvdovi/tests/hdr10plus_coverage.rs`
+  `full_coverage_converts_with_the_count_and_no_warning`,
+  `a_coverage_gap_warns_under_the_default_and_the_metadata_mode_and_refuses_an_explicit_hybrid` and
+  `a_coverage_gap_at_the_start_is_named_instead_of_no_dynamic_metadata` (a start gap makes
+  `hdr10plus_tool` extract nothing; the default warns with the counts and falls back to HDR10
+  analysis, an explicit hybrid refuses). They ran in `scripts/ci/test-gate.sh` (725 tests, only
+  allowed skips) and in CI on PR #109.
+- Review: one Codex P1 left for the owner (a failed coverage scan only warns, also under an
+  explicit hybrid; the warn-only rule is pinned by
+  `only_a_trusted_partial_count_under_an_explicit_hybrid_refuses`). See the PR's review record.
+
+Checked 2026-11-10 @efc8306 (moved from the P9 item): `hybrid::apply` compares the gap-filled
+`SceneInfo` length (`mkvdovi/src/pipeline/hybrid.rs:229`); count the payloads before the fill
+(`tools/rpu_builder_check/src/payloads.rs:80`), also on a resumed JSON (`pipeline/hdr10plus.rs:158`).
+A parser dependency changes `Cargo.lock` (gates `clippy-cuda`, `cuda-parity`, `l1-regression`).
+The default only warns: no `Hdr10PlusMode::after_failure` (`pipeline/measure.rs:49`).
+
+Resolution: mkvdovi counts the frames with their own HDR10+ payload on every HDR10+ conversion;
+partial coverage warns, and an explicit hybrid refuses it before analysis.
+
+### 2026-11-11: P9.4 HDR10+ payload coverage of the development corpus (gate part 1, no PR yet)
+
+The P9.4 gate asks for corpus counts before any warning is built. Fourteen of the 45 development
+cuts are HDR10+ (manifest `hdr_format` names ST 2094 App 4); the other 31 carry no HDR10+ payload.
+On all 14, every frame carries its own payload: coverage 100 %, longest gap 0, and no cut has
+payloads only on scene-start or IRAP pictures. The frame count of each cut equals `ffprobe
+-count_packets` and the length of `hdr10plus_tool`'s `SceneInfo`.
+
+| Title (scene) | Frames | Own payload | Distinct payloads |
+|---|---|---|---|
+| Saving Private Ryan (Omaha beach) | 1449 | 1449 | 13 |
+| Saving Private Ryan (church at night) | 1453 | 1453 | 2 |
+| Saving Private Ryan (Ramelle) | 1450 | 1450 | 23 |
+| Patriot S01E06 | 2825 | 2825 | 11 |
+| Top Gun: Maverick (Darkstar) | 1453 | 1453 | 39 |
+| Deadloch (beach day) | 1552 | 1552 | 14 |
+| Deadloch (shoreline night) | 1552 | 1552 | 22 |
+| Alita: Battle Angel (airlock night) | 1462 | 1462 | 13 |
+| Alita: Battle Angel (Iron City day) | 1458 | 1458 | 16 |
+| The Shining (hedge maze night) | 1469 | 1469 | 1 |
+| The Shining (mountain road day) | 1461 | 1461 | 3 |
+| Alien (derelict chamber) | 1442 | 1442 | 19 |
+| Alien (Nostromo corridor) | 1445 | 1445 | 1 |
+| The Revenant (snow traverse) | 1448 | 1448 | 2 |
+
+Method: a Python reference scanner over the Annex B stream (the first T.35 message of each prefix
+SEI with the identity B5 003C 0001 04 01, as `tools/rpu_builder_check/src/payloads.rs` picks it),
+one access unit per picture. A control with the payload stripped from 1148 of 1552 frames reads
+404 frames (26 %), while `hdr10plus_tool` still writes all 1552 `SceneInfo` entries, so its JSON
+cannot show coverage. Limit: 8 titles in cuts of about a minute; gaps elsewhere in the films are
+not measured. The corpus shows no scene-start-only pattern, so the step's "warn below full
+coverage" stands. FFmpeg cannot count it either: its HEVC decoder carries the last payload forward
+to every later frame (`libavcodec/hevc/hevcdec.c` `set_side_data`, n9.0.2), so `ffprobe
+-show_frames` sees only a gap at the start of the stream, and a start gap, two payload NALs in one
+picture or a payload after the first slice make `hdr10plus_tool extract` fail. Evidence and
+scripts: `~/mkvdovi-work/p9-4-coverage-2026-11-11/`.
+
+Re-count with the built mkvdovi (a652959, `--hdr10plus-l1 hdr10plus`, dev tier only,
+`recount.sh`): mkvdovi takes the HDR10+ path on 5 of the 14 cuts (Patriot, both Deadloch, both
+Alien) and prints "HDR10+ payloads: all N frames carry their own" with the counts above; the scan
+took under a second per cut. The other 9 are Dolby Vision sources (Profile 7 FEL, Profile 7 MEL,
+Profile 8) whose HDR10+ SEI mkvdovi does not read, because the Dolby Vision route comes first.
+With their RPU and enhancement-layer NAL units removed in scratch (`recount-dv.sh`, FFmpeg
+`filter_units=remove_types=62|63`, then mkvmerge), mkvdovi detects all 9 as HDR10+ and counts
+every frame, again matching the table: the built scan agrees with the reference on all 14 cuts.
+
+### 2026-11-09: WS8.1 Grain on the synthetic highlights and odd offsets (PR #106)
+
+Step: - [WS8.1][desk] Grain on the synthetic highlights and odd offsets (today they carry no grain and
+  fill exactly one chroma quad). Gate: the item gate (synthetic material comes from a committed,
+  reproducible generator; truth files are present; the L1 gate or the development corpus uses the
+  material).
+
+Gate evidence, PR #106 (local detail in `~/mkvdovi-work/ws8-1-highlight-2026-11-09/RESULT.md`):
+- Committed generator: `scripts/corpus/make_highlight_pair.py`, pure Python with integer sample
+  arithmetic. Two runs gave the same raw sha256 for both twins. The grainy highlight is
+  820 + (grainy - clean) less its local mean (the owner chose this real-grain transplant over
+  seeded grain, 2026-11-09). Segments: 2x2 at all four grid phases, 8x8 on and off the grid,
+  32x32, one- and three-frame flashes, a 2x2 moving one pixel per frame.
+- Test: `hdr_analyzer_mvp/tests/highlight_pair.rs` checks grain, the four phases, the truth against
+  block occupancy computed from the geometry, and the analyzer's pixel and `st2094-10` peaks
+  against the truth. Its refusal tests cover short inputs, negative offsets, an output that names
+  an input, and stale truth after a failed rerun.
+- Truth files: `truth/highlight.json` of both D5 highlight cuts; their manifests carry
+  `.highlight.truth`. The decoded x265 output of both twins matches the generator's raw sha256.
+- Corpus uses it: both D5 entries rerun and accepted as baselines. Expect column: clean +0.0, grain
+  -88.8 (the default `max` reads a grainy 2x2 up to 89 codes below the highlight code). Analyzer
+  vs truth: 0.00 codes worst case on every highlight frame, both twins, `max` and `st2094-10`.
+- Not changed: the in-test fixture `hdr_analyzer_mvp/tests/synthetic_accuracy.rs:455` keeps its
+  grainless one-quad highlight; WS0.1 brings the WS8 synthetic cases into the CI L1 gate.
+- The highlight chroma stays neutral in the grainy twin too, so a highlight pixel's R'G'B' is its
+  luma and the truth is exact; only luma grain is transplanted.
+
+Checked 2026-11-09 @01aec43 (moved from the WS8 item): the D5 pair's generator lived only in
+`~/mkvdovi-work/corpus/src/` and painted Y 820 at even sizes and offsets, so no highlight left a
+2x2 block. The reduced-set grid is anchored at the crop's top-left
+(`hdr_analyzer_mvp/src/analysis/frame/reduced_set.rs:3`); the generator's truth names its grid
+anchor (`grid_anchor`, the picture's top-left, the analyzer's grid under `--no-crop`).
+
+Resolution: the WS8 material now has a committed, reproducible generator for grainy, off-grid
+highlights, and the development corpus scores it.
+
+### 2026-11-09: WS1.5 Opt-in ST 2094-10 reduced-set estimator (PR #105)
+
+Step: - [WS1.5][gpu][corpus] Opt-in ST 2094-10 reduced-set estimator, PQ path (HLG later): 2×2 blocks
+  from the crop's top-left, partial at an odd edge, components averaged in linear light (one PQ
+  EOTF table, same f32 arithmetic on CPU and CUDA), min per §6.1.3 as a diagnostic; sidecar
+  `peak_estimator` value, `tools/l1_diff`. Gate: a test reproduces the 2026-11-07 per-shot numbers
+  of the four Alita and Skyfall cuts within 1 code; an odd-anchor case; CPU = CUDA; default `.bin`
+  unchanged (L1 gate without `--update`).
+
+Gate evidence, PR #105:
+- Per-shot reproduction: `reproduce.py` in `~/mkvdovi-work/ws1-5-reduced-set-2026-11-09/` (run by
+  `run.sh`; `RESULT.md`, `RESULT.json`). It fails when any per-shot value is more than 1 code from
+  the 2026-11-07 spike (variant B, linear light). It ran on a clean tree at the PR's analyzer
+  commit, with `--peak-estimator st2094-10 --peak-source max --no-crop --downscale 1`, CPU and
+  CUDA. The four cuts matched: largest per-shot difference 0.0003 code, per frame 0.0004 code. The
+  pooled floored per-shot max vs retail L1 over 82 shots was +66.7 signed, MAE 78.1 (default `max`
+  138.9) and 9 under-reads, equal to the spike. The script stays local because its media and
+  reference data are corpus-only.
+- Odd-anchor case and CPU = CUDA:
+  - `analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops` covers odd
+    anchors and sizes, planar and P010, and consecutive frames. `scripts/cuda-parity.sh` runs it
+    and requires exactly one passed test.
+  - The `cuda_parity` st2094-10 cases passed on the RTX 4070.
+  - On real content every reduced max, min and selected value matched on all 5,841 frames of the
+    four cuts.
+- Default `.bin` unchanged: the L1 regression gate passed without `--update`. The new estimator
+  runs as its own pass and kernel with its own result words.
+- Synthetic frozen cases, against an f64 reference: `hdr_analyzer_mvp/tests/reduced_set.rs`.
+
+Resolution: `--peak-estimator st2094-10` measures the ST 2094-10 statistic on PQ input (max-RGB
+domain, `--downscale 1` only; anything else is refused). It halves the clean-source L1 max
+over-read on the four retail cuts. WS1.6 decides whether it becomes the default.
+
+### 2026-11-09: WS0.2 Retail baseline of the delivered 8.1 RPU (PR #104)
+
+Step: - [WS0.2][corpus] Retail baseline of the delivered 8.1 RPU on main 271b066: the DV- and
+  HDR10+-free base layer of the eight Profile 7 MEL dev cuts through mkvdovi, the RPU read back from
+  the `.DV.mkv` and scored against retail L1; the hybrid path on the four HDR10+ cuts; HotD against
+  the 2026-07-08 cm_analyze v2 output, report-only. Gate: per-cut and pooled bias and MAE of
+  delivered and pre-clamp L1 max, avg and min against retail, per frame and per shot, over all
+  frames and, for max and avg, above the floor (min has only the ≤ 12 cap); frame counts matching
+  on every cut; 0 delivered-vs-clamp mismatches; scene-cut precision and recall; recorded in the
+  log with versions and the runner path.
+
+Gate evidence: PR #104 (docs-only; the measurement runs locally). Runner, scorer and outputs:
+`~/mkvdovi-work/ws0-2-retail-baseline-2026-11-09/` (`run.sh` parts P/C/S, `score.py`,
+`score.md`, `results.json`, `RESULT.md`). Versions (`versions.txt`): main 271b066, mkvdovi 0.8.0
+and hdr_analyzer_mvp 0.8.0 (+cuda) from that HEAD, dovi_tool 2.3.4, hdr10plus_tool 1.7.2, ffmpeg
+n9.0.2-27, mkvmerge v82.0. Flags: `--analysis-quality accurate`, the rest default; `--hwaccel auto`
+chose CUDA. Cuts: the 8 Profile 7 MEL dev cuts with CM v2.9 retail RPUs (HotD S01E06, Alita ×2,
+The Shining ×2, Joker: Folie à Deux, Skyfall ×2), 13,074 frames, 118 retail shots.
+
+- Integrity: frame counts equal on every cut (retail = delivered = sidecar `stream_frames`);
+  delivered L1 equals the generator clamp of the measured scene L1 on every frame, 0 mismatches;
+  all 12 captures print "Verification passed"; the parser reproduces `truth/embedded_l1.csv`
+  byte for byte. An independent recompute (`selftest/`, written from the definitions alone)
+  agrees with `results.json` to 0.000 code.
+- Pooled per shot, delivered (ours − retail, 12-bit PQ codes, bias / MAE): max +143.8 / 146.2
+  (7 of 118 shots read low), avg −93.2 / 108.9, min +3.3 / 3.7. Pre-clamp scene: max
+  +138.2 / 151.9, avg −222.4 / 238.0, min +116.4 / 116.8. Per frame, delivered: max
+  +141.9 / 144.9, avg −149.7 / 176.3, min +2.7 / 3.1. Above the floor equals all for max (retail
+  max is ≥ 2081 on every shot); avg above the floor: −159.8 / 180.9 (70 shots).
+- Per cut, delivered max per shot: HotD +76.1, Alita airlock +147.6, Alita Iron City +173.7,
+  Shining hedge maze +25.5, Shining mountain road +121.0, Joker +245.0, Skyfall Macau +161.7,
+  Skyfall Shanghai +130.2. Per-cut frame and above-floor strata of every series are in
+  `results.json`.
+- Scene cuts (delivered scene refresh against retail, ±1 frame): recall 0.87 (96 of 110),
+  precision 0.96 (100 emitted). Missed cuts carry one shot's peak into its neighbour: Shining
+  mountain road goes from −106.5 raw to +121.0 delivered with no floored scene.
+- Hybrid path (4 HDR10+ cuts, 46 shots): max −67.3 / 79.9, avg −6.1 / 20.0, min +8.5.
+- HotD against cm_analyze v2 (2026-07-08 output, report-only): max +92.5 / 92.5, scene avg
+  +64.4 / 64.4, scene min +4.3; retail max against cm v2 +16.5 / 26.7.
+
+Review: the pre-PR panel found one P3, fixed (the gate asked for an above-floor L1 min stratum,
+which the ≤ 12 cap does not define). Cold review: Codex exec and Codex GitHub, both LGTM.
+
+Resolution: L1 max is the one field where retail is a fair accuracy reference, and the delivered
+RPU reads about 144 codes high on it. Retail avg is anchored (2 or 3 distinct values on 6 of 8
+cuts; HotD and Joker sit at the 1229 floor), so its errors there are a difference of definition.
+Retail min is a constant 0 or 12, so these cuts give no evidence for P10.5. Rerun with
+`PARTS="P C S" run.sh` after WS1.5 to compare.
+
+### 2026-11-08: E7.2 An always-on frame-count check (PR #103)
+
+Step: - [E7.2][corpus] An always-on frame-count check. Gate: the item's gates (2) and (3) (the added
+  time per file is measured on real files).
+
+Gate evidence: PR #103. Local gates: fmt, workspace clippy (also rustc 1.99.1) and
+`scripts/ci/test-gate.sh` (673 passed, only allowed skips). Gate (2), both sides:
+`mkvdovi/tests/rpu_count.rs` converts a 48-frame PQ source and a Profile 7 MEL source and logs
+`RPU count: 48 RPUs for 48 video frames`, checked against a per-AU read of the output; a run with
+`--dovi-input raw` counts through the extracted stream. Gate (3): a `dovi_tool` shim that injects no
+RPU (0 for 48), one that cuts the 48th RPU from every count (47 for 48), and a reused output without
+RPUs each fail the run, remove the output and keep the source; the fake-tool tests add more RPUs
+than frames and an uncountable output. All 8 integration tests fail on `main`. Added time per file
+(release build, `~/mkvdovi-work/e7-2-rpu-count-2026-11-08/RESULT.md`): a one-hour UHD HLG episode,
+8.29 GB and 86,275 frames, took 20 s with dovi_tool 2.3.4 reading the MKV directly (3.5 % of a run
+with fresh CUDA analysis) and 66 s under `--dovi-input raw`, 40 s of it ffmpeg's 8.3 GB temp copy of
+the video; a 1.85 GB, 300-frame dev cut took under 1 s (output in the page cache). Review: the
+pre-PR panel found five P3 defects, all fixed: a failed count kept the sealed stream the mux took,
+so a resumed run muxed the same bytes into the same failure (now withdrawn; a third-run test proves
+the recovery), one untested side of the comparison, an untested MediaInfo frame count, the raw-path
+timing and a missing TESTING.md skip entry. Codex plan check: three P2 concerns, applied (fail
+closed, MEL tests, resume tests). Cold review: Codex exec and Codex GitHub, both LGTM.
+
+Resolution: `pipeline/rpu_count.rs` runs after `timing::deliver` on both mux paths. It takes the
+frame count from the timing check's packet read (else ffprobe, else MediaInfo) and counts the
+output's RPUs by start code. The direct MKV read decides only when it matches; otherwise the
+extracted video stream decides. A differing or unreadable count removes the output, withdraws the
+mux input and fails the run. The direct-read-then-ffmpeg fallback is the pattern E7.1 asks of the
+input-side steps.
+
+### 2026-11-07: E7.3 Keep the source's video timestamps in the mux (PR #101)
+
+Step: - [E7.3][desk] `mux_output` muxes the Annex B stream without the source's video timestamps
+  (`mkvdovi/src/pipeline/deliver.rs:176`): a VFR source comes out at a constant rate, and a video
+  start of 2000 ms moves to 0 while the audio keeps its own (found by P15.3's tests). Gate: tests
+  with a VFR source and a non-zero video start show the output's video pts equal the source's,
+  and the bitstream stays bit-identical; an always-on check of the output's video start and
+  duration against the source's meets the item's gate (3).
+
+Checked 2026-11-07 @3c65cdd (moved from the item): E7.3 has a second mux site of the same shape (no
+`--timestamps`): the MEL fast path's `mux_hevc_with_original`
+(`mkvdovi/src/pipeline/dovi_steps.rs:255-292`), beside `deliver.rs:167-176`; fix both.
+
+Gate evidence: PR #101. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (657
+passed, only allowed skips). `mkvdovi/tests/mux_timing.rs` converts a VFR source (24 then 30 fps
+after a 500 ms gap), a source whose video starts at 2000 ms and a Profile 7 MEL source from
+2000 ms. The output's video pts equal the source's packet for packet, and its slice NAL units
+equal the source's. A late start keeps the source's default duration, and its non-DV source is
+deleted only after the check passed. An mkvmerge shim that drops `--sync` and `--timestamps`
+makes the run fail, removes the output and keeps the source (gate (3)). A failed ffprobe timing
+query gives an unchecked run that keeps the source. All five fail on `main` (video at 0 ms against
+the source's 2000 ms; a VFR frame at 1000 ms against 1500 ms). The check compares every frame time,
+so the start, the frame count and the span; the last frame's own duration is not compared (Gemini
+P2 note). Review: the pre-PR panel found three P3 defects, all fixed: a whole-millisecond
+timestamps file gave 23.976 fps a 42 ms default duration (now snapped to the source's frame-rate
+grid, 41708333 ns), a missing libx265 skip and an untested source-kept branch. Cold review: Gemini
+alone, LGTM, in place of Codex (quota paused, owner direction).
+
+Resolution: `pipeline/timing.rs` `deliver` muxes both sites with `--sync` (constant rate) or a
+timestamps v2 file (variable rate), checks the output's frame times against the source's within
+1 ms, retries a constant-rate miss once with the file, and fails the run on a mismatch; a source
+whose times cannot be read (no ffprobe, not Matroska) is muxed unchecked and kept.
+
+### 2026-11-07: Direction after two outside reviews; ST 2094-10 reduced-set spike (no PR)
+
+Why: the owner had two outside models review the project (Gemini 4 Argon, then GPT-6 Astra on
+Gemini's answer) and asked which of their ideas belong in the plan, and how the licensed
+`cm_analyze` can help. Every claim was checked against the repo and primary sources (four
+verification agents, an Opus refuter on the draft; the Codex second opinion did not run, usage
+limit). Evidence and the full recommendation: `~/mkvdovi-work/st2094-reduced-set-spike-2026-11-07/`
+(`DIRECTION.md`, `results/`).
+
+- **Standard.** SMPTE ST 2094-10:2021 §6.1.2 (normative, free at pub.smpte.org): L1 min, average
+  and max are taken over a "reduced pixel set": non-overlapping 2×2 blocks from the processing
+  window's top-left, each the component-by-component average of its pixels (partial blocks at the
+  edge average only the pixels inside). §6.1.3: the minimum should be the lowest PQ minRGB. Neither
+  ST 2094-10 nor ST 2094-1:2016 (§4.11 maxRGB) says whether the average is taken in linear light or
+  on PQ codes; §4.1 PQ-encodes maxRGB after forming it, and Annex B.3 (informative) takes linear-light
+  input. ETSI TS 103 572 V1.3.1 §4.3: the L5 offsets "specify the selected pixels"; L4 is a
+  temporally filtered mean and spread of PQ max-RGB that resets at scene cuts. The analyzer
+  measures single pixels (`hdr_analyzer_mvp/src/analysis/frame/mod.rs:333-407`). The 2026-10-03
+  spatial tests (WS1 below) tried minima and a prefilter, never the standard's 2×2 mean.
+- **Spike.** Control: the recomputed per-pixel max-RGB matches analyzer 0.8.0 framestats within
+  5e-5 code on every frame of four retail cuts (Alita ×2, Skyfall ×2; P7 MEL, CM v2.9 RPUs; no
+  `cm_analyze` output opened) and reproduces `l1_diff`'s per-shot bias. Over 82 shots, per-shot L1
+  max against retail L1, mean signed / MAE: raw +127.4 / 147.1; 2×2 mean on PQ codes (A)
+  +54.3 / 86.1; 2×2 mean in linear light (B) +56.8 / 88.0. Floored at 2081 like the generator: raw
+  +135.6 / 138.9, A +64.4 / 76.0, B +66.7 / 78.1. Shots below retail, floored: raw 5, A and B 9
+  (largest −131 codes); unfloored 7 and 11. Per cut, floored, under B the bias falls 148→54,
+  162→84, 162→86, 108→58; the rest stays unexplained.
+  With quad-shared chroma A is exactly the mean of per-pixel max-RGB, so it leaves the average
+  unchanged. Synthetic highlights: aligned 2×2, 8×8, 32×32 and flashes keep 3534 under A and B; a
+  2×2 specular off the block grid reads about 2111 (A) or 3225 (B). Grain: the dark twin's excess
+  falls from 107 to 66–69 codes; the snow twin's clean side clips, so it does not inform.
+- **Open observation, no step.** On the unfloored shots of Iron City and the Shanghai fight (15
+  each) the retail average sits on average 191 (Shanghai) and 238 (Iron City) codes above the
+  analyzer's mean (both CM v2.9; the
+  shot lists come from scene-refresh flags and are unchecked); HotD matched `cm_analyze` v2 within
+  +16.5.
+- **Lead for the rest of the over-read.** Retail L1 is measured on the master, before the 4:2:0
+  encode, whose ringing raises the base layer's peak. Chroma reconstruction is ruled out
+  (VALIDATION §7: 9 to 11 codes); shot-aggregation rules were rejected in WS2.
+- **Owner decisions.** (1) L1 max targets the ST 2094-10 statistic, averaged in linear light (B):
+  it fits retail as well as A (within 3 codes pooled) and loses about 300 instead of 1400 codes on
+  an off-grid speck; this amends the 2026-10-17 WS1 rule (synthetic truth is the standard's value).
+  (2) `cm_analyze` stays score-only: holdouts without retail Dolby Vision, and a report-only score
+  of a frozen estimator; never a choice between variants. Holdout confirmation uses retail L1
+  (unseen Skyfall and Joker cuts), as P9 did. (3) E7.3, then E7.2, go ahead of P9.4; a failed
+  frame-count or timestamp check keeps the source. (4) L1 min splits from P10.3 into P10.5 with an
+  owner gate after WS6.11, since libplacebo does not read L1 min.
+- **Roadmap changes.** New: WS1.5 (opt-in estimator), WS1.6 (default), P10.5. Changed: the WS1
+  gate and WS1.1/WS1.3 wording, the E7 gate (3) and E7.2/E7.3 gates, P10.3, WS8.4, the WS2 L4
+  note, Priorities (owner direction, "Kept by decision", entries 3 and 9), the Release plan.
+- **Notes, no step.** FEL_PLAN gate 3 gets the P14 canary as C9 evidence (the hold stays).
+  ColorVideoVDP-tm (Chen et al., SIGGRAPH 2026) adapts the metric to tone mapping, but its code
+  needs the unreleased cvvdp 0.6.0 and has no licence; WS7.2 uses the released 0.5.7 (MIT).
+  Dolby's metadata page (2026-10-17) names CM4+ / Dolby Vision 2 levels (L15, L18, L11x) and calls
+  the RPU format proprietary; field layouts exist only in community code citing a non-public Dolby
+  spec, so the non-goal stands. Dolby's WO2021247670A1 family (granted in US, JP, KR, CN) claims
+  smoothing and half-size decimation before metadata in an editing pipeline; ST 2094-10 carries
+  Dolby and InterDigital patent statements; no freedom-to-operate review (PROVENANCE).
+- **Assessed, not adopted.** Fitting anything to `cm_analyze` output (PROVENANCE). 4×4 tile order
+  statistics with "zero loss" (a 2×2 mean already loses 300 to 1400 codes off-grid). IPT/LMS peak
+  domain (the standard defines maxRGB). L4 as an L1 damper (L1 is shot-constant in the retail
+  RPUs). A rewrite of linear-interpolation pieces (the E15.1 refusal stays). Automatic L2/L8/L10
+  trims (WS4 stays deferred; Dolby calls trims optional). Per-shot XML (WS5, with R2). CameraVDP
+  (needs a calibrated camera rig). A learned shot detector in the analyzer (TransNet V2 and AutoShot
+  are MIT, at most an offline baseline). A Wasserstein/CDF scene distance (the bins are unequal).
+  P14 secant chroma (a comparison only, if P14.1 is built). Already planned: E4.1, E4.3, E4.4, E2.2,
+  P3.1, WS7.1 (ST 2094-10 curve), WS2.2, E7.1, E7.3; the CUDA decode overlap is noted in
+  `docs/CUDA_PIPELINE.md` "Possible next steps".
+- **Moved from the roadmap (budget).** P9: both HDR10+ Profile A discs (Alien, Alita) carry MaxSCL
+  0 on every frame, but the percentile distribution (99th percentile 90 to 129 nits per scene on
+  Alita) and the average are present. A peak taken from MaxSCL is unusable on such sources, so the
+  pixel fallback is required, not optional; whether the percentiles can stand in is open. WS6
+  (Checked 2026-10-25 @3c0c913): `canary_mapping` moved to `dovi84_composer/src/canary.rs:18`
+  (E16) and still only offsets constants; the ladder's gain composers live in the local `ws6ladder`
+  evidence crate (`~/mkvdovi-work/ws6-slope-ladder-2026-10-18/`, `run.sh`), so a probe built there
+  keeps the PR docs-only (touching `dovi84_composer/src/` adds CUDA parity and the L1 gate).
+  Pre-register the fit's residual limit and an inconclusive outcome (the intercepts differ by one
+  code); fix the picture mode (ladder Cinema, canaries Cinema Home; log 2026-10-22). No `spotread`
+  in WSL. WS6, the `code / 1023` question (2026-10-06, answered 2026-10-29): do devices evaluate the
+  8.4 composer at `code / 1023` (as libplacebo and the `bt2100` fit) or at the spec's `code / 1024`?
+  Under the latter `bt2100` is 5.9 codes off neutral, probably too little to see on a neutral ramp,
+  so the test needs a pattern that separates the two. A `code / 1024` answer means a refit (new
+  composer and RPU). The P8 canary test (2026-10-13) does not answer it.
+
+### 2026-11-06: P15.5 Manifest for an FFmpeg-cut open-GOP file (PR #100)
+
+Step: - [P15.5][corpus] An FFmpeg stream-copy open-GOP cut whose RASL pictures have negative MKV
+  timestamps gets no pts, so `mkvdovi manifest` refuses it; the conversion accepts it. Gate:
+  such a cut gets a manifest whose RPUs equal the conversion's, or a test pins the refusal as
+  decided in `docs/PLAYBACK_MANIFEST.md`. Needs: P15.3.
+
+Owner decision (2026-11-06): keep the refusal and name a remedy, rather than add a Matroska
+block-timestamp reader to the analyzer. Gate evidence: PR #100. Local gates: fmt, workspace clippy,
+`scripts/ci/test-gate.sh` (only allowed skips) and `l1-regression`. Two new tests use an FFmpeg
+stream copy of an open-GOP x265 cut with one RASL picture:
+`ffmpeg_open_gop_cut_is_refused_and_its_mkvmerge_remux_matches_the_conversion`
+(`mkvdovi/tests/playback_manifest.rs`) and
+`an_ffmpeg_open_gop_cut_is_refused_on_import_and_its_remux_imports`
+(`mkvdovi/tests/playback_manifest_rpu.rs`). They pin the refusal and its remedy on the measured
+and `--rpu` paths, and check that the measured run keeps the `.bin` and sidecar but writes no AU
+table. The `mkvmerge -o` remux keeps every packet payload in decode order, and its manifest rebuilds
+the cut's conversion RPUs AU for AU. The measured test fails on the parent's message. Real content:
+the remux of the dev cut d3 (FFmpeg-made, 2 RASL pictures at -42 and -41 ms) got a manifest
+(18 shots over 1445 pictures). On synthetic cuts with two or three RASL pictures, FFmpeg n9.0.2
+writes two of them with one timestamp, so the remux is refused for a duplicate pts. The message
+then names a new `mkvmerge --split` cut. A pre-PR skeptic reproduced the one-RASL fixture with
+Ubuntu's FFmpeg 6.1.1 and x265 3.5, the CI toolchain. Review: the pre-PR panel found no defect
+(two P3 claims refuted); Codex exec and Codex's GitHub review: LGTM.
+
+Resolution: the analyzer's no-pts refusal (`au_table.rs` `AuRecorder::observe_packet`) names the
+cause, the mkvmerge remux and the `--split` fallback; P15 has no open step. Open idea, not a step:
+refuse before the measurement pass, which today runs in full before the refusal.
+
+### 2026-11-06: P15.4 `mkvdovi manifest --rpu` import (PR #99)
+
+Step: - [P15.4][gpu] `mkvdovi manifest --rpu`: an imported `RPU.bin`, accepted only when it rebuilds
+  byte for byte from the manifest. Gate: a good file accepted; a wrong composer, a wrong count
+  and per-frame trims refused, naming the first differing AU. Needs: P15.3, E15.1, E15.2.
+
+Gate evidence: PR #99. Local gates: fmt, workspace clippy, `scripts/ci/test-gate.sh` (only
+allowed skips) and `tool:rpu_builder_check`. `mkvdovi/tests/playback_manifest_rpu.rs` imports the
+`dovi_tool extract-rpu` output of real `--keep-source` conversions. A PQ source with B-frames, a
+letterbox with CM v2.9 and with other trims, L9 and L11, and HLG under bt2100 and preset are each
+accepted. The player's path over each manifest rebuilds the conversion's RPUs AU for AU, and the
+parameters equal those of a measured manifest of the same source. The same test refuses a missing
+or extra RPU, a per-frame L2 trim, a per-frame L1, a changed L6 and a wrong HLG composer, naming
+the picture and its AU (decode index from ffprobe's packet order), plus the E15.1 abort fixture
+without an abort. `mkvdovi/src/pipeline/manifest/import/tests.rs` covers the presentation-to-decode
+map past a non-picture AU, the first differing picture, both RPU.bin forms (with and without the
+`7C 01` NAL header), zero bytes before a start code, the V29/V40 average floors and the generator
+clamp range. Each of these tests fails on the mutant it guards.
+
+Owner decisions (2026-11-05): the parameters come from the RPU itself (the analyzer runs
+`--au-table-only`), and the coverage class is `approximate`. Found while building: `dovi_tool`
+writes RPUs without the `7C 01` NAL header. Review: an ad hoc 3-lens panel found that the guard
+skipped NAL-header RPUs (P1, fixed: the guard now checks the parsed slice), plus four test gaps
+(fixed). The pre-PR panel found a misleading clamp diagnostic (P3, fixed). Codex exec and Codex's
+GitHub review: LGTM (both first hit usage limits and were rerun).
+
+Resolution: `mkvdovi manifest --rpu` writes an `rpu-bin` manifest (`producer.rpu_bin_sha256`,
+null sidecar fields) only for an RPU.bin it reproduces byte for byte; P15.5 stays open.
+
+### 2026-11-05: E15.2 Extend the guard past the mapping (PR #98)
+
+Step: - [E15.2][desk] Extend the guard (`mkvdovi/src/rpu_guard.rs`) past the mapping: the crate allocates
+  `num_ext_blocks` (CM v2.9, v4.0) before it reads the blocks. Gate: such RPUs get an error where
+  the crate aborts; Profile 7 NLQ data is walked. Needs: E15.1.
+
+Gate evidence: PR #98. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (only
+allowed skips). The walk now follows the Profile 7 NLQ data and the DM payload (compressed or
+full, CM v2.9 then v4.0), also under `use_prev_vdr_rpu_flag`, up to the last non-zero byte as the
+crate reads it. Fixtures come from the crate's own writer (real CRC): P8.1 CM v2.9 and v4.0,
+Profile 7 with non-zero NLQ data, compressed DM and a reused mapping. A `catch_unwind` on the crate
+proves each refused case panics: `an_extension_block_count_is_an_error_where_the_crate_panics`
+(2^62 blocks in each CM version of each layout) and
+`a_block_length_the_crate_cannot_read_is_an_error_where_it_panics` (L8 26, L9 18, L10 22 bytes:
+`unreachable!` in `required_bits`). `valid_dm_payloads_pass_and_the_walk_ends_at_the_crc` shows the
+walk ends at the CRC on every layout, the Profile 7 NLQ one included. Counts above a ninth of the
+bits left are refused; counts and cut-short blocks the crate errors on stay its error. Mutations
+of the DM walk, the NLQ walk, the reuse path, the trailing-zero trim, the length check and the
+count bound each fail a test.
+
+Review: the pre-PR panel found the L8/L9/L10 length abort (P1, fixed) and the loose count bound
+(P3, fixed). Codex exec and Codex's GitHub review: LGTM. The crate's reserved-block allocation is
+unreachable in 3.4.0 (`ensure!(false)` first), so the step no longer names it.
+
+Resolution: source RPUs whose DM payload `dolby_vision` 3.4 would abort on are refused with the
+E15.1 error; E15 has no step left.
+
+### 2026-11-05: E15.1 Pre-scan source RPUs for the unparseable piece (PR #97)
+
+Step: - [E15.1][desk] Pre-scan each source RPU's data mapping for that piece before `parse_rpu_file` in the
+  three functions, and return an error instead; re-check the scan when the crate is bumped. Gate: a
+  unit test with an RPU carrying such a piece (built bit by bit, since the crate's writer panics on it
+  too) gets an error from each of the three functions where the parent panics; a multi-file run
+  continues with the next file; the existing mkvdovi tests pass unchanged.
+
+Gate evidence: PR #97. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (only
+allowed skips). `mkvdovi/src/rpu_guard.rs` walks each source RPU's header and data mapping with
+the crate's bit reads before `parse_rpu_file`. Bit-built fixtures (`rpu_guard/fixtures.rs`,
+committed as `mkvdovi/tests/fixtures/linear_interp_RPU.bin`) put the piece in each component,
+after MMR pieces, in a second piece, with Profile 7 NLQ and with float coefficients; a
+`catch_unwind` on the crate proves each one panics, and the guard returns an error naming the
+RPU. `rpu_check::tests::a_linear_interpolation_piece_is_an_error_not_an_abort` (classify, analyze)
+and `a_refused_window_fails_the_sample_even_beside_a_good_one` (`sample_rpu_windows`) fail on the
+parent behaviour. `mkvdovi/tests/source_rpu_abort.rs` runs two files with `dovi_tool` and
+`mediainfo` shims: the run reaches the second file and ends normally, and the HDR10-tagged second
+file is refused instead of "Detected: HDR10". Valid RPUs (8.1 CM v2.9/v4.0, 5, 8.4 preset and
+bt2100) pass and parse unchanged. `cargo mutants --in-diff`: survivors triaged (tests added for
+six, nine equivalent, two pre-existing).
+
+Review: the pre-PR panel found the sniff fallback (a refused RPU passed as HDR10; fixed) and the
+DM payload allocations (new step E15.2). Codex exec found that one refused window was hidden by a
+readable one (fixed); Codex's GitHub review: LGTM.
+
+Resolution: source RPUs that `dolby_vision` 3.4 would abort on are refused with an error, and a
+multi-file run continues; E15.2 extends the guard past the mapping.
+
+### 2026-11-05: P15.3 `mkvdovi manifest <input> [--out] [--work-dir]` (PR #96)
+
+Step: - [P15.3][corpus] `mkvdovi manifest <input> [--out] [--work-dir]`; never muxes or deletes.
+Gate: VFR, non-zero start and open-GOP accepted; builder RPUs from the manifest equal the
+`--keep-source` output byte for byte for 8.4 bt2100 and 8.1; a different encode and a
+mismatched composer rejected; `extra.json` goldens and RPU baselines unchanged. Needs: P15.1,
+P15.2, E13.15.
+
+Gate evidence: PR #96. Local gates: fmt, workspace clippy, `scripts/ci/test-gate.sh` (583 tests,
+only allowed skips), `clippy-cuda`, `l1-regression`, `tool:rpu_builder_check` and
+`scripts/cuda-parity.sh` (PASS) on the RTX 4070 host. `mkvdovi/tests/playback_manifest.rs` builds
+the player's RPUs from the manifest and compares them with the `--keep-source` conversion:
+`variable_frame_rate_matches_the_conversion`, `non_zero_start_matches_the_conversion`,
+`open_gop_cut_matches_the_conversion`, `hlg_bt2100_matches_the_conversion_and_a_preset_pair_is_not_reused`
+(8.4 bt2100; the mismatched composer), `pq_with_b_frames_matches_the_conversion_and_rejects_another_encode`
+(8.1; a different encode) and `cm_v29_trims_l5_and_measured_light_levels_match_the_conversion`;
+the `extra.json` goldens pass unchanged. Real content
+(`~/mkvdovi-work/rpu-baseline/p15-3-b6e7ea6/RESULT.md`): all 16 RPU captures equal
+`~/mkvdovi-work/rpu-baseline/0.8.0/` (`compare --require-identical-l1` exit 0, `RPU.bin`
+byte-identical), and manifest RPUs equal the conversion's byte for byte on five development cuts
+(8.1, HLG bt2100 and preset). Review: Codex exec found two defects, both fixed with tests (an
+analyzer temp file that is the input; a concurrent writer's manifest temp file); Codex's GitHub
+review LGTM with the first one as a P2.
+
+Resolution: `mkvdovi manifest` (`mkvdovi/src/pipeline/manifest/`) measures with the AU table,
+reuses a pair only for the same input bytes, composer and sampling, and writes
+`<stem>.dvmanifest.json`. Open: a dev cut made by an FFmpeg stream copy, whose two RASL pictures
+have negative MKV timestamps, gets no pts and is refused while its conversion works (new step
+P15.5); the mux drops the source's video timestamps (new step E7.3).
+
+### 2026-11-05: E13.15 Split `prepare_configuration` by phase (PR #95)
+
+Step: - [E13.15][corpus] Split `prepare_configuration` (`mkvdovi/src/pipeline/config.rs`, 211 lines) by
+phase. Gate: the mkvdovi gate.
+
+Gate evidence: PR #95. Local gates: fmt, workspace clippy and `scripts/ci/test-gate.sh` (555 tests,
+only allowed skips). The RPU part of the mkvdovi gate: 16 captures with the branch build (5 default,
+2 `--mdfix`, 1 `--hlg-composer preset`, 8 HDR10+ with no flag), compared with
+`~/mkvdovi-work/rpu-baseline/0.8.0/` by `~/mkvdovi-work/rpu-baseline/e13-15-addc604/run-e13-15.sh`.
+Every `compare --require-identical-l1` exits 0, every `RPU.bin` is byte-identical, and mkvdovi's own
+log lines match, so the messages kept their order. `e13-step5/`, which the gate named before, holds
+only analyzer `.bin` captures, so the gate now names `0.8.0/`. Review: Codex exec LGTM; Codex's
+GitHub review hit its usage limit and gave no review.
+
+Resolution: `prepare_configuration` is a coordinator over seven helpers in `config.rs` (CM v4.0
+config, HDR10+ peak advisory, fresh sidecar load, hybrid combine, L5 offsets, profile choice, source
+range); the `extra.json` write and commit stay in it. P15.3's `Needs: E13.15` is met. Open: no test
+reaches the non-hybrid refusal arms through `prepare_configuration`, here or before the split.
+
+### 2026-11-05: AetherEngine review, six new steps (no PR)
+
+Why: the owner asked what AetherEngine (`superuser404notfound/AetherEngine` at `a6fbf0a1`, a
+Swift playback engine for Apple platforms) does with HDR10, HDR10+ and HLG, and whether any of it
+would help this project. It plays those formats as they are and never generates an RPU from a
+non-DV source, so it has nothing for our measurement or L1. Seven ideas were assessed, one agent
+each, plus a critic; the code references below were checked against both trees. AetherEngine is
+LGPL-3.0 and this repo is MIT: every step is written from public specs, and no AetherEngine code
+or numbers are copied (`docs/PROVENANCE.md`).
+
+New steps and their evidence:
+
+- **WS6.10, WS6.11, per-level pulse test.** AetherEngine proves that a device applies the RPU
+  with constant pixels under an RPU that alternates, and a null-RPU control
+  (`Probes/DolbyVisionPulse/`, `Scripts/gen_pulse.py`). We cannot test L1 min, L2, L3, L5, L6, L8,
+  L9 or L11 in libplacebo, and the P8 and WS6.6 canaries each answered one question. One pulse
+  file per level tells whether the Shield → C9 chain applies our L2 trims, L6 and L11, which
+  decides how much the deferred L2 trims work and P12 matter. The test pattern's base layer is
+  encoded once as a test asset; mkvdovi is not involved. Their quarter-stop threshold (about 300
+  PQ codes of L1 movement, `Sources/aetherctl/DvSurvey.swift:114`) has no derivation and is only
+  a starting value. Optional: a frame picker in `tools/l1_diff` that lists the frames where our L1
+  and trims move most, for viewing. Risk: the Shield may rewrite the RPU, so a steady level may
+  come from the player rather than the panel.
+- **P9.4, HDR10+ coverage.** `tools/rpu_builder_check/src/payloads.rs:4-7` mirrors
+  `hdr10plus_tool` 1.7.2: a frame without its own HDR10+ payload takes the previous frame's in
+  decode order. The extracted JSON therefore always has one entry per frame, and the hybrid frame
+  count check (`mkvdovi/src/pipeline/hybrid.rs`) cannot see partial coverage. Some discs may carry
+  HDR10+ only on scene-start frames, so the corpus is counted before any threshold is set.
+  AetherEngine's strict ST 2094-40 validator (`Sources/AetherEngine/Video/HDR10PlusMetadataScan.swift`)
+  adds nothing beyond `hdr10plus_tool`'s structural parse.
+- **E17.2, the whole DV configuration record in `--verify`.** `mkvdovi/src/verify.rs:83-101` reads
+  only `dv_bl_signal_compatibility_id` and only for HLG sources; nothing checks the profile,
+  level, RPU, BL or EL flags, or ID 1 for PQ outputs. AetherEngine's DV route needs exactly these
+  fields (`docs/formats.md:285-305` there). mkvmerge's out-of-band hvcC already meets its other
+  container rules, so no hvcC rebuild or level cap is planned: either would change a bit-exact copy.
+- **P6.3, a Profile 8 record against its RPU.** `mkvdovi/src/metadata/format.rs:55-56` returns
+  `DolbyVisionP8` on the MediaInfo string alone; Profile 7 is checked against the RPU
+  (`probe_profile7_kind`), and every other case goes through `sniff_dolby_vision_rpu`, so
+  AetherEngine's #532 case (a Profile 5 record over a P7/P8 RPU) and the recordless Profile 5 are
+  already handled. "profile 8" also matches 8.2 (SDR base), which under `--mdfix` fails late, not by
+  name. DV inputs keep their source, so no file is at risk.
+- **P6.4, HDR Vivid.** No detection exists (`rg -i 'vivid|cuva'` finds nothing). A CUVA T.35 SEI
+  (country 0x26, provider 0x0004, oriented code 0x0005) on an HLG or PQ base would be dropped
+  without a word. Count a hit only for a complete message with zero trailing bits, as
+  `Sources/AetherEngine/Video/HDRVividMetadataScan.swift` does, to avoid false positives.
+- **FEL (bullet only, the item stays on hold).** `Sources/AetherEngine/Diagnostics/FelResidualMeasure.swift`
+  composes each frame with and without the residual and reports diff share, mean, signed mean,
+  p99, the share at ≥ 2 and ≥ 4 codes and four luma bands. That is close to FEL_PLAN §5d, in 12-bit
+  codes instead of their 10-bit. `Decoder/DualLayerPictureAlignment.swift` pairs BL and EL by POC
+  display slot, an open point of FEL_PLAN §6. Their Metal composer computes in float with FMA
+  and is tested against its own CPU model, so it is not the integer reference §6 asks for.
+  `tools/fel_gpu/` (untracked) holds only `__pycache__/*.pyc` and a `.venv`; its source is gone.
+
+Not taken: alternative-transfer SEI HLG detection (#839 there) is already in place
+(`hdr_analyzer_mvp/src/ffmpeg_io.rs:497-503`, `mkvdovi/src/metadata/format.rs` frame-level
+fallback, the #43 work); an RPU CRC guard (our parsers already fail visibly); SDR preview stills
+(BT.2390 or Hable), which cannot show what the C9 does with L1.
+
+Moved from the P9 item in `ROADMAP.md` (verbatim):
+
+- **Plan:** opt-in hybrid mode (scene list = union of HDR10+ starts and the analyzer's cuts, peak
+  per piece from HDR10+; average, minimum and L5 from pixels),
+  scored on the development tier before any default change, with a pixel fallback for missing or
+  implausible HDR10+ statistics. The panel peak is still not passed as a trim target, and
+  suspicious scene peaks still only warn.
+- **Gate:** met (PR #84). Step 1's gate (owner, 2026-10-17), done: score the four
+  holdout cuts with retail DV L1 (`q-alita-01/02`, `q-the-shining-01/02`) against it; Alien and
+  Deadloch stay unseen. Pre-registered rule: hybrid becomes the default if the average's pooled
+  clamped MAE (above the floor and over all frames) is lower than today's HDR10+ path, and the
+  per-frame MAE of L1 max and of L1 min against retail is not higher than today's path; the owner
+  confirms the flip. Done 2026-10-17: PASS on every clause, flip confirmed for the minor after
+  v0.7.0.
+
 ### 2026-11-05: P15.2 `dovi_rpu_builder::manifest` (PR #93)
 
 Step: - [P15.2][desk] `dovi_rpu_builder::manifest`: schema, strict parse, `AuMatcher`, params round

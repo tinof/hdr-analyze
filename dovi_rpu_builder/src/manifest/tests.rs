@@ -20,10 +20,11 @@ fn manifest() -> PlaybackManifest {
         producer: Producer {
             mkvdovi_version: "0.8.0".into(),
             analyzer_version: "0.8.0".into(),
-            sidecar_version: 6,
+            sidecar_version: Some(6),
             au_table_version: 1,
             rpu_builder_version: "0.8.0".into(),
-            sidecar_sha256: DIGEST.into(),
+            sidecar_sha256: Some(DIGEST.into()),
+            rpu_bin_sha256: None,
         },
         source: Source {
             file_name: "title.mkv".into(),
@@ -337,11 +338,78 @@ fn l1_policy_rules() {
         |json| json["l1_policy"] = json!("auto"),
         "l1_policy 'auto' is not measured or rpu-bin",
     );
-    let mut m = manifest();
-    m.l1_policy = L1Policy::RpuBin;
+    // A measured manifest names its sidecar and has no rpu_bin_sha256 key at all.
+    let measured = valid_json();
+    assert_eq!(measured["producer"]["sidecar_sha256"], json!(DIGEST));
+    assert!(measured["producer"].get("rpu_bin_sha256").is_none());
+    let mut m = rpu_bin_manifest();
     let json = m.to_json().unwrap();
     assert_eq!(json["l1_policy"], json!("rpu-bin"));
+    assert_eq!(json["producer"]["rpu_bin_sha256"], json!(DIGEST));
+    assert_eq!(json["producer"]["sidecar_version"], Value::Null);
+    assert_eq!(json["producer"]["sidecar_sha256"], Value::Null);
     assert_eq!(PlaybackManifest::from_value(&json).unwrap(), m);
+
+    // Each policy refuses the other's provenance, when parsed and when built in code.
+    refused(
+        |json| json["producer"]["rpu_bin_sha256"] = json!(DIGEST),
+        "l1_policy measured has no producer.rpu_bin_sha256",
+    );
+    refused(
+        |json| json["producer"]["sidecar_sha256"] = Value::Null,
+        "l1_policy measured needs producer.sidecar_version and producer.sidecar_sha256",
+    );
+    refused(
+        |json| json["producer"]["sidecar_version"] = Value::Null,
+        "l1_policy measured needs",
+    );
+    refused(
+        |json| {
+            json["producer"]
+                .as_object_mut()
+                .unwrap()
+                .remove("sidecar_sha256");
+        },
+        "producer.sidecar_sha256 is missing",
+    );
+    let rpu_bin = json;
+    refused_from(
+        rpu_bin.clone(),
+        |json| json["producer"]["sidecar_sha256"] = json!(DIGEST),
+        "l1_policy rpu-bin names no sidecar",
+    );
+    refused_from(
+        rpu_bin.clone(),
+        |json| json["producer"]["sidecar_version"] = json!(6),
+        "l1_policy rpu-bin names no sidecar",
+    );
+    refused_from(
+        rpu_bin.clone(),
+        |json| {
+            json["producer"]
+                .as_object_mut()
+                .unwrap()
+                .remove("rpu_bin_sha256");
+        },
+        "l1_policy rpu-bin needs producer.rpu_bin_sha256",
+    );
+    refused_from(
+        rpu_bin,
+        |json| json["producer"]["rpu_bin_sha256"] = json!("abc"),
+        "producer.rpu_bin_sha256 is not a SHA-256",
+    );
+    m.producer.sidecar_version = Some(6);
+    assert!(m.validate().is_err());
+}
+
+/// The fixture as an imported `RPU.bin` would make it: no sidecar, the file's digest.
+fn rpu_bin_manifest() -> PlaybackManifest {
+    let mut m = manifest();
+    m.l1_policy = L1Policy::RpuBin;
+    m.producer.sidecar_version = None;
+    m.producer.sidecar_sha256 = None;
+    m.producer.rpu_bin_sha256 = Some(DIGEST.into());
+    m
 }
 
 #[test]
@@ -638,8 +706,12 @@ fn validate_applies_the_track_and_digest_rules() {
         "source.tail_sha256",
     );
     refused_everywhere(
-        |m| m.producer.sidecar_sha256 = String::new(),
+        |m| m.producer.sidecar_sha256 = Some(String::new()),
         "producer.sidecar_sha256",
+    );
+    refused_everywhere(
+        |m| m.producer.rpu_bin_sha256 = Some(DIGEST.to_uppercase()),
+        "producer.rpu_bin_sha256",
     );
     refused_everywhere(
         |m| m.track.codec_private_sha256 = format!("{DIGEST}0"),

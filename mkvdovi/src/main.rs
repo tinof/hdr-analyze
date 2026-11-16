@@ -13,6 +13,7 @@ mod pipeline;
 mod progress;
 mod resume;
 mod rpu_check;
+mod rpu_guard;
 mod verify;
 
 use cli::{Args, SubCmd};
@@ -129,27 +130,26 @@ fn collect_default_inputs() -> anyhow::Result<Vec<String>> {
     Ok(files)
 }
 
-#[expect(clippy::too_many_lines, reason = "E13.16: split by phase")]
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-
-    // Dispatch subcommands first (before dependency checks that require full toolchain)
-    if let Some(subcmd) = &args.subcmd {
-        match subcmd {
-            SubCmd::Inspect(inspect_args) => {
-                return rpu_check::inspect_file(&inspect_args.input);
+/// Runs a subcommand. Called before `check_dependencies`, which needs the full toolchain.
+fn dispatch_subcommand(subcmd: &SubCmd) -> anyhow::Result<()> {
+    match subcmd {
+        SubCmd::Inspect(inspect_args) => rpu_check::inspect_file(&inspect_args.input),
+        SubCmd::Manifest(manifest_args) => {
+            // Before `check_dependencies`: a manifest needs no mkvmerge, and it checks
+            // the tools it does need itself.
+            if !pipeline::manifest_file(manifest_args)? {
+                std::process::exit(1);
             }
+            Ok(())
         }
     }
+}
 
-    // Initialize progress module with verbosity settings
-    progress::set_verbose(args.verbose);
-    progress::set_quiet(args.quiet);
-
-    // Graceful interrupt: a dropped session (SIGHUP), SIGTERM, or Ctrl+C (SIGINT) prints a
-    // resume hint and exits. The temp directory is only cleaned on a successful conversion, so
-    // an interrupted run leaves its artifacts in place and the next invocation resumes from
-    // them (unless `--no-resume` is passed).
+/// Graceful interrupt: a dropped session (SIGHUP), SIGTERM, or Ctrl+C (SIGINT) prints a
+/// resume hint and exits. The temp directory is only cleaned on a successful conversion, so
+/// an interrupted run leaves its artifacts in place and the next invocation resumes from
+/// them (unless `--no-resume` is passed).
+fn install_interrupt_handler() {
     let _ = ctrlc::set_handler(|| {
         eprintln!(
             "\n{}",
@@ -157,34 +157,32 @@ fn main() -> anyhow::Result<()> {
         );
         std::process::exit(130);
     });
+}
 
-    // Check dependencies after parsing so `--help`/`--version` work without tools installed.
-    if let Err(e) = external::check_dependencies() {
-        eprintln!("{}", format!("Dependency check failed: {}", e).red());
-        std::process::exit(1);
+/// Basic handling for "boost" logic modification.
+fn boosted_peak_source(peak_source: cli::PeakSource, boost: bool) -> cli::PeakSource {
+    if !boost {
+        return peak_source;
     }
-
-    // Basic handling for "boost" logic modification
-    let mut peak_source = args.peak_source;
-    if args.boost {
-        match peak_source {
-            cli::PeakSource::MaxSclLuminance
-            | cli::PeakSource::MaxScl
-            | cli::PeakSource::Histogram => {
-                if !progress::is_quiet() {
-                    eprintln!(
-                        "{}",
-                        "Boost mode enabled: using --peak-source=histogram99 for HDR10+ peak detection."
-                            .green()
-                    );
-                }
-                peak_source = cli::PeakSource::Histogram99;
+    match peak_source {
+        cli::PeakSource::MaxSclLuminance | cli::PeakSource::MaxScl | cli::PeakSource::Histogram => {
+            if !progress::is_quiet() {
+                eprintln!(
+                    "{}",
+                    "Boost mode enabled: using --peak-source=histogram99 for HDR10+ peak detection."
+                        .green()
+                );
             }
-            cli::PeakSource::Histogram99 => {
-                // Already default, no op
-            }
+            cli::PeakSource::Histogram99
         }
+        // Already default, no op
+        cli::PeakSource::Histogram99 => peak_source,
     }
+}
+
+/// Applies `--boost`, resolves the `auto` settings and validates the flags.
+fn resolve_run_args(args: &Args) -> anyhow::Result<Args> {
+    let peak_source = boosted_peak_source(args.peak_source, args.boost);
 
     let mut final_args = args.clone();
     final_args.peak_source = peak_source;
@@ -204,27 +202,17 @@ fn main() -> anyhow::Result<()> {
     if let Some(conflict) = final_args.flag_conflict() {
         anyhow::bail!(conflict);
     }
+    Ok(final_args)
+}
 
-    if !progress::is_quiet() {
-        eprintln!("{} mkvdovi", "Starting".green().bold());
-    }
-
-    // Process files
-    let mut files = final_args.input.clone();
-    if files.is_empty() {
-        files = collect_default_inputs()?;
-        if files.is_empty() {
-            eprintln!("No MKV files found in the current directory tree.");
-            return Ok(());
-        }
-    }
-
-    // Filter out already-converted files
+/// Drops already-converted `.DV.mkv` inputs (unless `--mdfix`); returns the rest and
+/// the number skipped.
+fn filter_converted(files: Vec<String>, mdfix: bool) -> (Vec<String>, usize) {
     let mut skipped: usize = 0;
     let actionable_files: Vec<String> = files
         .into_iter()
         .filter(|f| {
-            if f.ends_with(".DV.mkv") && !final_args.mdfix {
+            if f.ends_with(".DV.mkv") && !mdfix {
                 if !progress::is_quiet() {
                     eprintln!("{}", format!("Skipping already converted: {}", f).yellow());
                 }
@@ -235,27 +223,16 @@ fn main() -> anyhow::Result<()> {
             }
         })
         .collect();
+    (actionable_files, skipped)
+}
 
-    let total_files = actionable_files.len();
-    if total_files == 0 {
-        if !progress::is_quiet() {
-            eprintln!("No files to process (all skipped or already converted).");
-        }
-        return Ok(());
-    }
-
-    if total_files > 1 && !progress::is_quiet() {
-        eprintln!(
-            "{}",
-            format!("Queued {} file(s) for processing.", total_files).cyan()
-        );
-    }
-
-    let run_start = Instant::now();
+/// Converts each file in turn; returns the succeeded and failed counts.
+fn convert_all(files: &[String], args: &Args) -> (usize, usize) {
+    let total_files = files.len();
     let mut succeeded: usize = 0;
     let mut failed: usize = 0;
 
-    for (idx, file) in actionable_files.iter().enumerate() {
+    for (idx, file) in files.iter().enumerate() {
         if total_files > 1 && !progress::is_quiet() {
             eprintln!(
                 "\n{}",
@@ -265,7 +242,7 @@ fn main() -> anyhow::Result<()> {
             );
         }
 
-        match pipeline::convert_file(file, &final_args) {
+        match pipeline::convert_file(file, args) {
             Ok(true) => succeeded += 1,
             Ok(false) => {
                 progress::print_error(&format!("Failed to process: {}", file));
@@ -277,8 +254,10 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
+    (succeeded, failed)
+}
 
-    // --- Summary ---
+fn print_summary(succeeded: usize, failed: usize, skipped: usize, run_start: Instant) {
     let total_elapsed = run_start.elapsed();
     let elapsed_str = progress::format_duration_pub(total_elapsed);
 
@@ -312,6 +291,67 @@ fn main() -> anyhow::Result<()> {
             );
         }
     }
+}
+
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
+    // Dispatch subcommands first (before dependency checks that require full toolchain)
+    if let Some(subcmd) = &args.subcmd {
+        return dispatch_subcommand(subcmd);
+    }
+
+    // Initialize progress module with verbosity settings
+    progress::set_verbose(args.verbose);
+    progress::set_quiet(args.quiet);
+
+    install_interrupt_handler();
+
+    // Check dependencies after parsing so `--help`/`--version` work without tools installed.
+    if let Err(e) = external::check_dependencies() {
+        eprintln!("{}", format!("Dependency check failed: {}", e).red());
+        std::process::exit(1);
+    }
+
+    let final_args = resolve_run_args(&args)?;
+
+    if !progress::is_quiet() {
+        eprintln!("{} mkvdovi", "Starting".green().bold());
+    }
+
+    // Process files
+    let mut files = final_args.input.clone();
+    if files.is_empty() {
+        files = collect_default_inputs()?;
+        if files.is_empty() {
+            eprintln!("No MKV files found in the current directory tree.");
+            return Ok(());
+        }
+    }
+
+    // Filter out already-converted files
+    let (actionable_files, skipped) = filter_converted(files, final_args.mdfix);
+
+    let total_files = actionable_files.len();
+    if total_files == 0 {
+        if !progress::is_quiet() {
+            eprintln!("No files to process (all skipped or already converted).");
+        }
+        return Ok(());
+    }
+
+    if total_files > 1 && !progress::is_quiet() {
+        eprintln!(
+            "{}",
+            format!("Queued {} file(s) for processing.", total_files).cyan()
+        );
+    }
+
+    let run_start = Instant::now();
+    let (succeeded, failed) = convert_all(&actionable_files, &final_args);
+
+    // --- Summary ---
+    print_summary(succeeded, failed, skipped, run_start);
 
     if failed > 0 {
         std::process::exit(1);

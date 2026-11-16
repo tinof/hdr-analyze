@@ -206,6 +206,7 @@ pub fn write_l1_sidecar(
             PeakEstimator::Max => "max",
             PeakEstimator::Percentile => "percentile",
             PeakEstimator::Robust => "robust",
+            PeakEstimator::ReducedSet => "st2094-10",
         }
         .to_owned(),
         peak_source: peak_source.to_owned(),

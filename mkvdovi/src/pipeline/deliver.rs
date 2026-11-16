@@ -12,6 +12,8 @@ use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
 
+use super::timing::MuxTiming;
+
 /// The raw HEVC base layer the RPU is injected into: `bl_source_file` itself when it already is
 /// one, else `BL.hevc` extracted into `temp_dir`. `None`: the extraction failed and was reported;
 /// `convert_file` returns `Ok(false)`.
@@ -147,8 +149,8 @@ pub(super) fn inject_rpu(
     Ok(Some(bl_rpu_hevc))
 }
 
-/// Muxes `bl_rpu_hevc` with every non-video track of the input into `output_file`. Returns false
-/// when mkvmerge failed.
+/// Muxes `bl_rpu_hevc`, timed by `timing`, with every non-video track of the input into
+/// `output_file`. Returns false when mkvmerge failed.
 pub(super) fn mux_output(
     input_file: &str,
     bl_rpu_hevc: &Path,
@@ -156,6 +158,7 @@ pub(super) fn mux_output(
     temp_dir: &Path,
     resume_enabled: bool,
     args: &Args,
+    timing: &MuxTiming,
 ) -> Result<bool> {
     // The mux sentinel lives inside the temp dir (the output file is outside it), so cleanup
     // removes it and no stray marker is left beside the final `.DV.mkv`.
@@ -173,7 +176,7 @@ pub(super) fn mux_output(
             mkvmerge_cmd.arg("--no-chapters");
         }
 
-        mkvmerge_cmd.arg(bl_rpu_hevc);
+        mkvmerge_cmd.args(timing.mkvmerge_args()).arg(bl_rpu_hevc);
         mkvmerge_cmd.arg("--no-video").arg(input_file);
 
         let mux_total = fs::metadata(input_file).ok().map(|m| m.len());

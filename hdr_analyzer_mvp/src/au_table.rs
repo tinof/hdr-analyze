@@ -12,6 +12,7 @@
 //! `--help` advertises the capability `au-table-v1` (`cli.rs`); mkvdovi probes it before it
 //! relies on the table. Version 1 covers one HEVC video track in Matroska. It refuses laced video blocks, packets
 //! without a pts and two video packets with one pts; the measurements are unaffected by a refusal.
+//! A packet without a pts names the mkvmerge remux that fixes the known cause (ROADMAP P15.5).
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -197,7 +198,16 @@ impl AuRecorder {
         }
         let index = self.pts.len() as u64;
         let Some(pts) = pts else {
-            self.refuse(format!("video packet {index} has no pts"));
+            // The known source (ROADMAP P15.5, docs/PLAYBACK_MANIFEST.md): FFmpeg's Matroska
+            // demuxer gives a block whose timestamp is negative no pts.
+            self.refuse(format!(
+                "video packet {index} has no pts. An FFmpeg stream copy cut at an open-GOP \
+                 picture gives its leading pictures negative Matroska timestamps, which FFmpeg \
+                 reads as no pts. Remux the file with `mkvmerge -o <new>.mkv <input>`, which \
+                 makes them non-negative, and use the remux. If the remux is refused because \
+                 two packets have the same pts, the cut lost those timestamps: cut the source \
+                 again with `mkvmerge --split`"
+            ));
             return;
         };
         // FFmpeg gives every lace of a block the block's position, so a laced block shows as

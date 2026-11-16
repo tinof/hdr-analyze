@@ -3,16 +3,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use colored::Colorize;
 use dolby_vision::rpu::dovi_rpu::DoviRpu;
 use dolby_vision::rpu::extension_metadata::blocks::{
     ExtMetadataBlock, ExtMetadataBlockLevel2, ExtMetadataBlockLevel3, ExtMetadataBlockLevel8,
 };
 use dolby_vision::rpu::rpu_data_nlq::DoviELType;
-use dolby_vision::rpu::utils::parse_rpu_file;
 
 use crate::external::{self, run_command_live, run_command_with_spinner};
+use crate::rpu_guard::{is_unparseable, parse_source_rpu_file};
 
 const CEILING_EPSILON_PQ: u16 = 6;
 const CLIPPED_FRAME_RATIO: f64 = 0.01;
@@ -313,18 +313,36 @@ pub fn record_authored_levels(acc: &mut AuthoredLevels, rpus: &[DoviRpu]) {
 /// not dominated by dark openings (studio logos, title cards).
 pub fn sample_rpu_windows(input: &str, temp_dir: &Path) -> Result<SampledRpu> {
     let offsets = window_offsets(probe_duration_secs(input));
+    sample_extracted_windows(
+        offsets
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, offset)| extract_rpu_window(input, temp_dir, *offset, idx)),
+    )
+}
+
+/// The per-window parse of [`sample_rpu_windows`], over the `RPU.bin` of each window that
+/// could be extracted.
+fn sample_extracted_windows(rpu_paths: impl IntoIterator<Item = PathBuf>) -> Result<SampledRpu> {
     let mut l1_frames = Vec::new();
     let mut mastering_peak_pq = None;
     let mut level5 = None;
     let mut windows_sampled = 0usize;
     let mut authored = AuthoredLevels::default();
+    let mut parse_error = None;
 
-    for (idx, offset) in offsets.iter().enumerate() {
-        let Some(rpu_path) = extract_rpu_window(input, temp_dir, *offset, idx) else {
-            continue;
-        };
-        let Ok(rpus) = parse_rpu_file(&rpu_path) else {
-            continue;
+    for rpu_path in rpu_paths {
+        let rpus = match parse_source_rpu_file(&rpu_path) {
+            Ok(rpus) => rpus,
+            // The source carries RPUs mkvdovi cannot read: a sample of the other windows would
+            // hide that, so the whole sample fails with the guard's reason.
+            Err(error) if is_unparseable(&error) => {
+                anyhow::bail!("A sampled Dolby Vision RPU cannot be parsed: {error:#}")
+            }
+            Err(error) => {
+                parse_error.get_or_insert(error);
+                continue;
+            }
         };
         l1_frames.extend(rpus.iter().filter_map(l1_from_rpu));
         if mastering_peak_pq.is_none() {
@@ -339,7 +357,13 @@ pub fn sample_rpu_windows(input: &str, temp_dir: &Path) -> Result<SampledRpu> {
     authored.windows = windows_sampled;
 
     if windows_sampled == 0 || l1_frames.is_empty() {
-        anyhow::bail!("No Dolby Vision RPU data found in sampled windows");
+        match parse_error {
+            // The caller prints the error with `{}`, which shows the outermost message only.
+            Some(error) => {
+                anyhow::bail!("No Dolby Vision RPU data found in sampled windows: {error:#}")
+            }
+            None => anyhow::bail!("No Dolby Vision RPU data found in sampled windows"),
+        }
     }
 
     Ok(SampledRpu {
@@ -423,7 +447,7 @@ fn window_offsets(duration_secs: Option<f64>) -> Vec<u32> {
 }
 
 pub fn classify_rpu_format(rpu_path: &Path) -> Result<RpuFormatKind> {
-    let rpus = parse_rpu_file(rpu_path).context("Failed to parse Dolby Vision RPU")?;
+    let rpus = parse_source_rpu_file(rpu_path)?;
     let Some(rpu) = rpus.first() else {
         anyhow::bail!("No RPU frames found");
     };
@@ -440,7 +464,7 @@ pub fn classify_rpu_format(rpu_path: &Path) -> Result<RpuFormatKind> {
 }
 
 pub fn analyze_rpu_file(rpu_path: &Path) -> Result<RpuReport> {
-    let rpus = parse_rpu_file(rpu_path).context("Failed to parse Dolby Vision RPU")?;
+    let rpus = parse_source_rpu_file(rpu_path)?;
     analyze_rpus(
         rpus.iter().filter_map(l1_from_rpu).collect(),
         rpus.iter().find_map(mastering_peak_from_rpu),
@@ -1000,6 +1024,55 @@ mod tests {
         ] {
             let path = write_rpu_bin(dir.path(), name, &rpus);
             assert_eq!(classify_rpu_format(&path).unwrap(), expected, "{name}");
+        }
+    }
+
+    /// One window the guard refuses makes the whole sample an error, even when another window
+    /// has L1: a partial sample would hide the unparseable RPU. Other parse failures only drop
+    /// their window, as before.
+    #[test]
+    fn a_refused_window_fails_the_sample_even_beside_a_good_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = write_rpu_bin(
+            dir.path(),
+            "good.bin",
+            &generated(RpuCmVersion::V40, vec![vec![]]),
+        );
+        let refused = dir.path().join("refused.bin");
+        fs::write(
+            &refused,
+            crate::rpu_guard::fixtures::linear_interp_rpu_bin(),
+        )
+        .unwrap();
+        let garbage = dir.path().join("garbage.bin");
+        fs::write(&garbage, [0x19u8; 64]).unwrap();
+
+        for windows in [
+            [good.clone(), refused.clone()],
+            [refused.clone(), good.clone()],
+        ] {
+            let error = format!("{:#}", sample_extracted_windows(windows).unwrap_err());
+            assert!(error.contains("linear interpolation"), "{error}");
+        }
+        let sample = sample_extracted_windows([good.clone(), garbage]).unwrap();
+        assert_eq!(sample.windows_sampled, 1);
+        assert_eq!(sample.l1_frames.len(), 2);
+    }
+
+    /// E15.1: on the parent commit both functions abort the process (`unimplemented!` in
+    /// `dolby_vision` under `panic = "abort"`); they now return an error naming the RPU.
+    #[test]
+    fn a_linear_interpolation_piece_is_an_error_not_an_abort() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("RPU.bin");
+        fs::write(&path, crate::rpu_guard::fixtures::linear_interp_rpu_bin()).unwrap();
+        for (name, error) in [
+            ("classify_rpu_format", classify_rpu_format(&path).map(drop)),
+            ("analyze_rpu_file", analyze_rpu_file(&path).map(drop)),
+        ] {
+            let error = format!("{:#}", error.unwrap_err());
+            assert!(error.contains("RPU 0:"), "{name}: {error}");
+            assert!(error.contains("linear interpolation"), "{name}: {error}");
         }
     }
 

@@ -68,7 +68,7 @@ are those of v5.6.4 and are not guaranteed to carry forward.
 | Area | Source |
 |------|--------|
 | DV bitstream / RPU / composer metadata | ETSI GS CCM 001 V1.1.1 (public ETSI spec, "Compound Content Management") |
-| Dynamic metadata semantics (L1 etc.) | SMPTE ST 2094-10 (published SMPTE standard) |
+| Dynamic metadata semantics (L1 etc.) | SMPTE ST 2094-10 (published SMPTE standard); §6.1.2–6.1.5 define L1 over a 2×2 reduced pixel set, the target of the planned reduced-set estimator (ROADMAP WS1.5) |
 | PQ transfer function | SMPTE ST 2084 / ITU-R BT.2100 |
 | HLG transfer function | ARIB STD-B67 / ITU-R BT.2100 |
 | Profile 8.4 HLG decode (luma curve, chroma MMR curves, YCbCr-to-RGB matrix) | MIT-licensed [`dolby_vision`](https://crates.io/crates/dolby_vision) crate (`Profile84` preset `rpu_data_mapping()` and `dm_data()`, from iPhone-recorded 8.4 RPUs); evaluation checked against libplacebo's renderer on grey and colour patches |

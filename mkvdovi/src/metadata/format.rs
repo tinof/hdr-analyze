@@ -7,6 +7,7 @@ use super::{
     find_measurements_file, get_ffprobe_json, get_ffprobe_video_json, get_mediainfo_json, HdrFormat,
 };
 use crate::rpu_check::{self, RpuFormatKind};
+use crate::rpu_guard;
 
 pub fn check_hdr_format(input_file: &str) -> HdrFormat {
     let path = Path::new(input_file);
@@ -465,9 +466,11 @@ fn probe_profile7_kind(input_file: &str) -> Option<HdrFormat> {
     temp_dir.push(format!("mkvdovi_dv_probe_{}", std::process::id()));
     fs::create_dir_all(&temp_dir).ok()?;
 
+    // An RPU the guard refuses falls back to the FEL refusal like any other failure, but the
+    // user is told the real cause.
     let result = rpu_check::extract_rpu_sample(input_file, &temp_dir)
         .ok()
-        .and_then(|rpu| rpu_check::classify_rpu_format(&rpu).ok())
+        .and_then(|rpu| classify_or_warn(&rpu).ok().flatten())
         .map(hdr_format_from_rpu);
 
     let _ = fs::remove_dir_all(&temp_dir);
@@ -481,15 +484,33 @@ fn sniff_dolby_vision_rpu(input_file: &str) -> Option<HdrFormat> {
     let rpu_path = temp_dir.join("sniff_RPU.bin");
 
     let result = if rpu_check::try_extract_rpu_quiet(input_file, &rpu_path, Some(60)) {
-        rpu_check::classify_rpu_format(&rpu_path)
-            .ok()
-            .map(hdr_format_from_rpu)
+        match classify_or_warn(&rpu_path) {
+            Ok(kind) => kind.map(hdr_format_from_rpu),
+            // The file carries Dolby Vision RPUs that mkvdovi cannot read: refuse it rather
+            // than convert it as HDR10, which would replace the authored metadata.
+            Err(()) => Some(HdrFormat::Unsupported),
+        }
     } else {
         None
     };
 
     let _ = fs::remove_dir_all(&temp_dir);
     result
+}
+
+/// `classify_rpu_format`, with the E15.1 guard's refusal as `Err` after a warning that names
+/// it; any other failure is `Ok(None)`, as before.
+fn classify_or_warn(rpu_path: &Path) -> Result<Option<RpuFormatKind>, ()> {
+    match rpu_check::classify_rpu_format(rpu_path) {
+        Ok(kind) => Ok(Some(kind)),
+        Err(error) if rpu_guard::is_unparseable(&error) => {
+            crate::progress::print_warn(&format!(
+                "The source's Dolby Vision RPU cannot be parsed, so it is refused: {error:#}"
+            ));
+            Err(())
+        }
+        Err(_) => Ok(None),
+    }
 }
 
 fn hdr_format_from_rpu(kind: RpuFormatKind) -> HdrFormat {

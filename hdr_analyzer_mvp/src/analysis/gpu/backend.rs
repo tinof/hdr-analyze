@@ -10,10 +10,13 @@ use libloading::Library;
 use madvr_parse::MadVRFrame;
 
 use super::*;
-use crate::analysis::frame::FramePeakStats;
+use crate::analysis::frame::reduced_set::{linear_to_pq, PQ_EOTF_LUT};
+use crate::analysis::frame::{check_reduced_set_options, FramePeakStats};
 use crate::analysis::hlg::ChromaSiting;
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::l1_sidecar::FrameL1Measurement;
+
+mod reduced_set;
 
 /// Leading fields of FFmpeg's `AVCUDADeviceContext` (hwcontext_cuda.h), unchanged since
 /// FFmpeg 4. Mirrored locally because ffmpeg-sys only binds that header when the CUDA
@@ -86,6 +89,12 @@ pub struct GpuAnalyzer {
     stream: Arc<CudaStream>,
     kernel: CudaFunction,
     compose_kernel: CudaFunction,
+    /// `--peak-estimator st2094-10`: `reduced_set_extrema`, its EOTF table and its two result
+    /// words (kernels.cu), cleared before every launch.
+    reduced_set_kernel: CudaFunction,
+    eotf_lut: CudaSlice<f32>,
+    extrema: CudaSlice<u32>,
+    extrema_host: [u32; 2],
     transfer_lut: CudaSlice<f32>,
     luminance_bin_lut: CudaSlice<u16>,
     dovi_params: CudaSlice<f32>,
@@ -173,6 +182,15 @@ impl GpuAnalyzer {
         let compose_kernel = module
             .load_function("compose_chroma")
             .map_err(|err| anyhow!("failed to load compose_chroma kernel: {err:?}"))?;
+        let reduced_set_kernel = module
+            .load_function("reduced_set_extrema")
+            .map_err(|err| anyhow!("failed to load reduced_set_extrema kernel: {err:?}"))?;
+        let eotf_lut = stream
+            .clone_htod(PQ_EOTF_LUT.as_slice())
+            .map_err(|err| anyhow!("failed to upload the PQ EOTF table: {err:?}"))?;
+        let extrema = stream
+            .alloc_zeros::<u32>(2)
+            .map_err(|err| anyhow!("failed to allocate the reduced-set result: {err:?}"))?;
         let transfer_lut = stream
             .clone_htod(&build_transfer_lut(transfer_function, composer))
             .map_err(|err| anyhow!("failed to upload transfer LUT: {err:?}"))?;
@@ -195,6 +213,10 @@ impl GpuAnalyzer {
             stream,
             kernel,
             compose_kernel,
+            reduced_set_kernel,
+            eotf_lut,
+            extrema,
+            extrema_host: [0; 2],
             transfer_lut,
             luminance_bin_lut,
             dovi_params,
@@ -241,7 +263,7 @@ impl GpuAnalyzer {
                 "HDR_ANALYZER_DUMP_MAX_RGB needs --downscale 1 on the CUDA path"
             ));
         }
-        Ok(())
+        check_reduced_set_options(options, sample_stride)
     }
 
     fn upload_plane(
@@ -612,6 +634,10 @@ impl GpuAnalyzer {
             .arg(&centred);
         unsafe { launch.launch(cfg) }
             .map_err(|err| anyhow!("CUDA analysis launch failed: {err:?}"))?;
+        let reduced_set = options.peak_estimator == PeakEstimator::ReducedSet;
+        if reduced_set {
+            self.launch_reduced_set(planes, crop_rect)?;
+        }
 
         self.stream
             .memcpy_dtoh(&self.results, &mut self.results_host)
@@ -628,11 +654,24 @@ impl GpuAnalyzer {
             }
             _ => None,
         };
+        if reduced_set {
+            self.stream
+                .memcpy_dtoh(&self.extrema, &mut self.extrema_host)
+                .map_err(|err| anyhow!("failed to download the reduced-set result: {err:?}"))?;
+        }
         // A copy into pageable memory normally completes before returning, but CUDA does
         // not promise it; the results, and the caller's frame, are only safe after this.
         self.stream
             .synchronize()
             .map_err(|err| anyhow!("CUDA analysis did not complete: {err:?}"))?;
+        // Word 1 holds 0xffffffff minus the minimum's bit pattern; 0 means no block.
+        let (reduced_max_pq, reduced_min_pq) = match (reduced_set, self.extrema_host) {
+            (true, [high, low]) if low != 0 => (
+                linear_to_pq(f32::from_bits(high)),
+                linear_to_pq(f32::from_bits(u32::MAX - low)),
+            ),
+            _ => (0.0, 0.0),
+        };
         let counts = &self.results_host[..SUMS_WORD];
         let sums = result_sums(&self.results_host);
 
@@ -692,6 +731,7 @@ impl GpuAnalyzer {
             PeakEstimator::Max => raw_max_pq,
             PeakEstimator::Percentile => percentile_pq,
             PeakEstimator::Robust => robust_pq,
+            PeakEstimator::ReducedSet => reduced_max_pq,
         };
         let min_pq = low_percentile_pq(&pq_hist, options.min_percentile);
 
@@ -720,6 +760,8 @@ impl GpuAnalyzer {
                 sigma_pq,
                 n_eff,
                 avg_max_rgb_pq,
+                reduced_max_pq,
+                reduced_min_pq,
             },
             max_rgb_pixels,
         })

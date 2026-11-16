@@ -16,6 +16,7 @@ use crate::ffmpeg_io::TransferFunction;
 use crate::l1_sidecar::FrameL1Measurement;
 
 mod peak;
+pub(crate) mod reduced_set;
 
 use self::peak::record_cross_quad_diff;
 pub(crate) use self::peak::{
@@ -54,6 +55,34 @@ pub struct FramePeakStats {
     /// The frame's unrounded max-RGB average (normalized PQ), as `FrameL1Measurement` holds it
     /// before the sidecar rounds it to a 12-bit code; written by `--dump-frame-stats`.
     pub avg_max_rgb_pq: f64,
+    /// `--peak-estimator st2094-10` only, else 0: the ST 2094-10 reduced-set maximum (the
+    /// selected peak) and its §6.1.3 minimum, a diagnostic (normalized PQ).
+    pub reduced_max_pq: f64,
+    pub reduced_min_pq: f64,
+}
+
+/// Refuse the reduced-set estimator where it is not defined yet, before any frame is analyzed:
+/// HLG input (WS1.5 is the PQ path), the luma peak domain, and sampled pixels (`--downscale` > 1
+/// on the CPU path, a sampling stride on CUDA), since its 2x2 blocks are source pixels.
+pub(crate) fn check_reduced_set_options(
+    options: &FrameAnalysisOptions<'_>,
+    sample_stride: u32,
+) -> Result<()> {
+    if options.peak_estimator != PeakEstimator::ReducedSet {
+        return Ok(());
+    }
+    if options.transfer_function == TransferFunction::Hlg {
+        anyhow::bail!("--peak-estimator st2094-10 measures PQ input only; this input is HLG");
+    }
+    if options.peak_domain != PeakDomain::MaxRgb {
+        anyhow::bail!("--peak-estimator st2094-10 needs --peak-domain max-rgb");
+    }
+    if sample_stride > 1 {
+        anyhow::bail!(
+            "--peak-estimator st2094-10 needs --downscale 1: its 2x2 blocks are source pixels"
+        );
+    }
+    Ok(())
 }
 
 pub struct AnalyzedFrame {
@@ -471,10 +500,33 @@ pub fn analyze_native_frame_cropped(
     } else {
         (0.0, raw_max_pq, 0)
     };
+    // The reduced set reads the same (possibly denoised) luma as the loop above.
+    let (reduced_max_pq, reduced_min_pq) = if options.peak_estimator == PeakEstimator::ReducedSet {
+        check_reduced_set_options(options, 1)?;
+        let planes = reduced_set::Planes {
+            y: y_plane_data,
+            y_stride,
+            u: u_plane_data,
+            u_stride,
+            v: v_plane_data,
+            v_stride,
+            width: frame_width,
+            height: frame_height,
+        };
+        reduced_set::reduced_set_extrema(&planes, crop_rect).map_or((0.0, 0.0), |(high, low)| {
+            (
+                reduced_set::linear_to_pq(high),
+                reduced_set::linear_to_pq(low),
+            )
+        })
+    } else {
+        (0.0, 0.0)
+    };
     let selected_peak_pq = match options.peak_estimator {
         PeakEstimator::Max => raw_max_pq,
         PeakEstimator::Percentile => percentile_pq,
         PeakEstimator::Robust => robust_pq,
+        PeakEstimator::ReducedSet => reduced_max_pq,
     };
 
     let mut histogram: Vec<f64> = accumulator.hist_bins.to_vec();
@@ -527,6 +579,8 @@ pub fn analyze_native_frame_cropped(
             sigma_pq,
             n_eff,
             avg_max_rgb_pq,
+            reduced_max_pq,
+            reduced_min_pq,
         },
         max_rgb_pixels,
     })

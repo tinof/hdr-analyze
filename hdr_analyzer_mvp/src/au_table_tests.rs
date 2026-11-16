@@ -172,6 +172,18 @@ fn packet_without_pts_is_refused() {
         error.to_string().contains("video packet 1 has no pts"),
         "{error}"
     );
+    assert!(
+        error
+            .to_string()
+            .contains("Remux the file with `mkvmerge -o <new>.mkv <input>`"),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("cut the source again with `mkvmerge --split`"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -16,12 +16,24 @@
 # Portable to macOS /bin/bash 3.2: no mapfile, no associative arrays, and every expansion of
 # an array that can be empty uses ${a[@]+"${a[@]}"} (bash < 4.4 calls an empty "${a[@]}"
 # unbound under set -u). Regexes live in variables so [[ =~ ]] parses the same in 3.2 and 5.
+#
+# Builder hold: while a builder agent owns a checkout, `stop` does not format or lint it.
+# /ship:roadmap-next writes <git dir>/claude-builder.<run>.hold before it starts a builder
+# (opus-professor, fable-builder) and deletes that one file when the builder returns. The main
+# session ends its turn while it waits, and without the hold this hook would rustfmt files the
+# builder is still editing and take the cargo lock. The git dir is the checkout's own (a linked
+# worktree has its own), and every run has its own file, so two runs never clear each other's
+# hold and a hold never reaches another checkout. `mark` renews the fresh holds of the checkout an
+# edit lands in; a hold older than HOLD_MAX_MIN minutes (a dead session) no longer counts, and an
+# edit does not revive it. The touched files of a held checkout stay recorded, so the first Stop
+# after the builder returns checks them.
 set -uo pipefail
 
 MAX_BLOCKS=3
 MAX_LINES=40
 CLIPPY_TIMEOUT=540
 NVCC_TIMEOUT=60
+HOLD_MAX_MIN=180
 
 # Stock macOS has no timeout(1); Homebrew coreutils may install only gtimeout. Without either,
 # run unbounded: the hook's own timeout in settings.json (600 s) still stops a hung run.
@@ -54,6 +66,15 @@ emit_system_message() {
 case "$mode" in
 mark)
     file="$(jq -r '.tool_input.file_path // empty' <<<"$input" 2>/dev/null)"
+    # An edit in a checkout with builder holds keeps them fresh, whatever the file type. Only a
+    # hold that still counts is renewed: an expired one (a dead session) must stay expired.
+    if [ -n "$file" ]; then
+        gd="$(git -C "$(dirname -- "$file")" rev-parse --absolute-git-dir 2>/dev/null)"
+        if [ -n "$gd" ]; then
+            find "$gd" -maxdepth 1 -name 'claude-builder.*.hold' -mmin "-$HOLD_MAX_MIN" \
+                -exec touch -c -- {} + 2>/dev/null
+        fi
+    fi
     case "$file" in
     *.rs | *.cu | *.ptx | */Cargo.toml | */Cargo.lock | */clippy.toml | */rustfmt.toml | */.cargo/config.toml) ;;
     *) exit 0 ;;
@@ -77,17 +98,56 @@ while IFS= read -r f || [ -n "$f" ]; do
     [ -n "$f" ] && touched+=("$f")
 done <"$state/files"
 
-# Group touched files by repository root (works in worktrees too).
+# Group touched files by repository root (works in worktrees too). Each file belongs to its own
+# checkout only: a worktree nested in the main checkout (.claude/worktrees/<name>) shares its path
+# prefix, so later steps match files to a root through `owners`, never by prefix. owners[i] is the
+# root of touched[i], or empty when that file is in no Cargo checkout.
 roots=()
-for f in ${touched[@]+"${touched[@]}"}; do
+owners=()
+for ((i = 0; i < ${#touched[@]}; i++)); do
+    f="${touched[i]}"
+    owners[i]=""
     dir="$(dirname -- "$f")"
     [ -d "$dir" ] || continue
     root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || continue
     [ -f "$root/Cargo.toml" ] || continue
+    owners[i]="$root"
     contains "$root" ${roots[@]+"${roots[@]}"} || roots+=("$root")
 done
 if [ "${#roots[@]}" -eq 0 ]; then
     rm -rf -- "$state"
+    exit 0
+fi
+
+# Leave out every checkout that a builder holds, and keep its touched files for a later Stop.
+held=()
+for root in ${roots[@]+"${roots[@]}"}; do
+    gd="$(git -C "$root" rev-parse --absolute-git-dir 2>/dev/null)" || continue
+    if [ -n "$(find "$gd" -maxdepth 1 -name 'claude-builder.*.hold' -mmin "-$HOLD_MAX_MIN" -print -quit 2>/dev/null)" ]; then
+        held+=("$root")
+    fi
+done
+keep=()
+if [ "${#held[@]}" -gt 0 ]; then
+    free=()
+    for root in "${roots[@]}"; do
+        contains "$root" "${held[@]}" || free+=("$root")
+    done
+    roots=(${free[@]+"${free[@]}"})
+    for ((i = 0; i < ${#touched[@]}; i++)); do
+        [ -n "${owners[i]:-}" ] && contains "${owners[i]}" "${held[@]}" && keep+=("${touched[i]}")
+    done
+fi
+# Done with this turn's files: forget them, except the ones a held checkout still owes a check.
+finish_state() {
+    if [ "${#keep[@]}" -gt 0 ]; then
+        printf '%s\n' "${keep[@]}" >"$state/files"
+    else
+        rm -rf -- "$state"
+    fi
+}
+if [ "${#roots[@]}" -eq 0 ]; then
+    finish_state
     exit 0
 fi
 
@@ -106,7 +166,9 @@ nvcc_re='^[^[:space:]].*\([0-9]+\): (catastrophic )?(error|warning)'
 for root in "${roots[@]}"; do
     # Repo-relative touched paths for this root.
     rel=()
-    for f in ${touched[@]+"${touched[@]}"}; do
+    for ((i = 0; i < ${#touched[@]}; i++)); do
+        [ "${owners[i]:-}" = "$root" ] || continue
+        f="${touched[i]}"
         case "$f" in "$root"/*) rel+=("${f#"$root"/}") ;; esac
     done
 
@@ -202,11 +264,11 @@ if [ "${#report[@]}" -eq 0 ]; then
     if [ -n "$infra_error" ]; then
         # Environment problem, not a code problem: tell the user, do not make Claude loop on it.
         emit_system_message "$infra_error"
-        rm -rf -- "$state"
+        finish_state
         exit 0
     fi
     # Clean (warnings elsewhere are pre-existing and do not block).
-    rm -rf -- "$state"
+    finish_state
     exit 0
 fi
 

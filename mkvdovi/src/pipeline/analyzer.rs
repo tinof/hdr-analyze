@@ -100,16 +100,38 @@ pub(super) fn run_hdr_analyzer(
     extra_args: &[String],
     args: &Args,
 ) -> Result<Option<PathBuf>> {
-    let exe = analyzer_executable();
+    let out_path = measurements_path_in(Path::new(input).parent().unwrap_or(Path::new(".")), input);
+    let ok = run_hdr_analyzer_at(
+        input,
+        &out_path,
+        &temp_dir.join("analyzer.log"),
+        extra_args,
+        args,
+    )?;
+    Ok(ok.then_some(out_path))
+}
 
-    let dir = Path::new(input).parent().unwrap_or(Path::new("."));
+/// `<dir>/<input stem>_measurements.bin`: where the analyzer's measurements for `input` go.
+pub(super) fn measurements_path_in(dir: &Path, input: &str) -> PathBuf {
     let stem = Path::new(input).file_stem().unwrap().to_string_lossy();
-    let out_path = dir.join(format!("{}_measurements.bin", stem));
+    dir.join(format!("{}_measurements.bin", stem))
+}
 
+/// Runs the analyzer on `input` with the sampling of `args.analysis_quality`, writing `out_path`
+/// (and its sidecars) and the command log to `log_path`. True when it succeeded and wrote
+/// `out_path`.
+pub(super) fn run_hdr_analyzer_at(
+    input: &str,
+    out_path: &Path,
+    log_path: &Path,
+    extra_args: &[String],
+    args: &Args,
+) -> Result<bool> {
+    let exe = analyzer_executable();
     let (downscale, sample_rate) = analysis_sampling(args.analysis_quality);
 
     let mut cmd = Command::new(&exe);
-    cmd.arg(input).arg("-o").arg(&out_path);
+    cmd.arg(input).arg("-o").arg(out_path);
     cmd.arg("--downscale").arg(downscale.to_string());
     cmd.arg("--sample-rate").arg(sample_rate.to_string());
     cmd.args(extra_args);
@@ -119,12 +141,7 @@ pub(super) fn run_hdr_analyzer(
     }
 
     // Use inherit_stderr so indicatif progress bar works correctly (detects TTY)
-    if external::run_command_inherit_stderr(&mut cmd, &temp_dir.join("analyzer.log"))?
-        && out_path.exists()
-    {
-        return Ok(Some(out_path));
-    }
-    Ok(None)
+    Ok(external::run_command_inherit_stderr(&mut cmd, log_path)? && out_path.exists())
 }
 
 /// Print the advisory warnings that came back with a valid L1 sidecar.

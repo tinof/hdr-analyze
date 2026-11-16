@@ -11,6 +11,34 @@ use crate::external::{run_command_with_progress, run_command_with_spinner};
 use crate::progress;
 use crate::resume;
 
+use super::hdr10plus_coverage::COVERAGE_FILE;
+
+/// The Annex B stream the HDR10+ path extracts into the temp directory.
+pub(super) const HDR10PLUS_HEVC: &str = "video.hevc";
+/// The log of `hdr10plus_tool extract` in the temp directory.
+pub(super) const HDR10PLUS_TOOL_LOG: &str = "hdr10plus_tool.log";
+/// The log of the `--skip-reorder` retry, kept apart so that the first log keeps the failure.
+pub(super) const HDR10PLUS_SKIP_REORDER_LOG: &str = "hdr10plus_tool_skip_reorder.log";
+/// Written next to the JSON when the `--skip-reorder` retry produced it, so that a resumed run
+/// that reuses the JSON warns again.
+pub(super) const HDR10PLUS_SKIP_REORDER_MARKER: &str = "hdr10plus_metadata.skip_reorder";
+const SKIP_REORDER_WARNING: &str = "HDR10+ metadata extracted with --skip-reorder: it keeps the \
+     order of the bitstream and is not reordered to display order.";
+
+/// Whether the HDR10+ JSON in `temp_dir` came from the `--skip-reorder` retry, this run or the
+/// run whose JSON it reuses.
+pub(super) fn extracted_with_skip_reorder(temp_dir: &Path) -> bool {
+    temp_dir.join(HDR10PLUS_SKIP_REORDER_MARKER).exists()
+}
+
+/// Why an explicit hybrid refuses a `--skip-reorder` JSON, with what converts the file instead.
+pub(super) fn skip_reorder_refusal() -> String {
+    "--hdr10plus-l1 hybrid cannot be used here: the HDR10+ metadata came from the \
+     hdr10plus_tool extract --skip-reorder fallback and is not reordered to display order. \
+     Without --hdr10plus-l1 hybrid the file converts with this metadata and a warning."
+        .to_string()
+}
+
 #[derive(Debug, PartialEq)]
 pub(super) struct Hdr10PlusPeakStats {
     pub(super) max_peak_nits: f64,
@@ -118,7 +146,7 @@ pub(super) fn extract_hdr10plus_metadata(
     resume: bool,
     stall_secs: u64,
 ) -> Result<Option<PathBuf>> {
-    let hevc = temp_dir.join("video.hevc");
+    let hevc = temp_dir.join(HDR10PLUS_HEVC);
     if resume && resume::is_complete(&hevc) {
         progress::print_info("Reusing extracted HEVC stream from a previous run.");
     } else {
@@ -151,31 +179,74 @@ pub(super) fn extract_hdr10plus_metadata(
             return Ok(None);
         }
         resume::mark_done(&hevc)?;
+        // A new stream needs a new payload count.
+        resume::invalidate(&temp_dir.join(COVERAGE_FILE))?;
     }
 
     let json_out = temp_dir.join("hdr10plus_metadata.json");
     if resume && resume::is_complete(&json_out) {
         progress::print_info("Reusing extracted HDR10+ metadata from a previous run.");
+        if extracted_with_skip_reorder(temp_dir) {
+            progress::print_warn(SKIP_REORDER_WARNING);
+        }
         return Ok(Some(json_out));
     }
-    let mut tool = Command::new("hdr10plus_tool");
-    tool.args([
-        "extract",
-        "-i",
-        hevc.to_str().unwrap(),
-        "-o",
-        json_out.to_str().unwrap(),
-    ]);
-
-    if run_command_with_spinner(
-        &mut tool,
-        &temp_dir.join("hdr10plus_tool.log"),
-        "Extracting HDR10+ metadata",
-    )? && json_out.exists()
-        && fs::metadata(&json_out)?.len() > 0
-    {
+    let log = temp_dir.join(HDR10PLUS_TOOL_LOG);
+    if run_hdr10plus_extract(&hevc, &json_out, &log, false)? {
         resume::mark_done(&json_out)?;
         return Ok(Some(json_out));
     }
+    // P5.1: `--skip-reorder` is hdr10plus_tool's workaround for misauthored HEVC files. It runs
+    // only after the normal extraction failed, and a JSON it writes is not reordered.
+    progress::print_warn(&format!(
+        "hdr10plus_tool extract failed (see {}); retrying with --skip-reorder.",
+        log.display()
+    ));
+    let retry_log = temp_dir.join(HDR10PLUS_SKIP_REORDER_LOG);
+    if run_hdr10plus_extract(&hevc, &json_out, &retry_log, true)? {
+        let marker = temp_dir.join(HDR10PLUS_SKIP_REORDER_MARKER);
+        fs::write(&marker, b"").with_context(|| format!("Failed to write {}", marker.display()))?;
+        progress::print_warn(SKIP_REORDER_WARNING);
+        resume::mark_done(&json_out)?;
+        return Ok(Some(json_out));
+    }
+    progress::print_warn(&format!(
+        "The --skip-reorder retry failed too (see {}).",
+        retry_log.display()
+    ));
     Ok(None)
+}
+
+/// One `hdr10plus_tool extract` run; true when it wrote a non-empty JSON. A JSON left by an
+/// earlier run is removed and unsealed first, with its `--skip-reorder` marker, so that only
+/// this run can pass and only the retry leaves a marker.
+fn run_hdr10plus_extract(
+    hevc: &Path,
+    json_out: &Path,
+    log: &Path,
+    skip_reorder: bool,
+) -> Result<bool> {
+    resume::invalidate(json_out)?;
+    let marker = json_out.with_file_name(HDR10PLUS_SKIP_REORDER_MARKER);
+    if marker.exists() {
+        fs::remove_file(&marker)
+            .with_context(|| format!("Failed to remove {}", marker.display()))?;
+    }
+    if json_out.exists() {
+        fs::remove_file(json_out)
+            .with_context(|| format!("Failed to remove {}", json_out.display()))?;
+    }
+    let mut tool = Command::new("hdr10plus_tool");
+    tool.arg("extract");
+    if skip_reorder {
+        tool.arg("--skip-reorder");
+    }
+    tool.arg("-i").arg(hevc).arg("-o").arg(json_out);
+    let message = if skip_reorder {
+        "Extracting HDR10+ metadata with --skip-reorder"
+    } else {
+        "Extracting HDR10+ metadata"
+    };
+    Ok(run_command_with_spinner(&mut tool, log, message)?
+        && fs::metadata(json_out).is_ok_and(|meta| meta.len() > 0))
 }

@@ -149,6 +149,15 @@ question and reframed the remaining gap:
   +80.4/+66.4 codes. Frames with a single extreme-tail pixel intentionally retain the raw peak, and
   per-shot fold-max can select them. Robust mode is therefore explicit opt-in, not the default;
   spatial-support handling requires a separate validated design.
+- **The standard's reduced pixel set explains about half of the clean-source over-read
+  (2026-11-07).** SMPTE ST 2094-10 §6.1.2 defines L1 over non-overlapping 2×2 block averages; the
+  analyzer measures single pixels. On 82 retail shots (Alita ×2, Skyfall ×2, CM v2.9, scored
+  against retail L1 only), the floored per-shot max error, mean signed / MAE, is raw
+  +135.6 / 138.9, 2×2 mean on PQ codes +64.4 / 76.0, 2×2 mean in linear light +66.7 / 78.1.
+  Shots below retail rise from 5 to 9. A 2×2 specular off the block grid reads about 1400 codes
+  low (PQ codes) or 300 low (linear light). The owner chose the linear-light statistic as the L1
+  max target (ROADMAP WS1.5, WS1.6); the method and the rest of the numbers are in
+  [`ROADMAP_LOG.md`](ROADMAP_LOG.md) (2026-11-07).
 
 The v6 `peak_pq_dcip3` and `peak_pq_709` fields remain approximations. They are madVR-only fields and
 are not consumed by the Dolby Vision v5 conversion path.

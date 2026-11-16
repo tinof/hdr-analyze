@@ -10,11 +10,25 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `mkvdovi/src/main.rs`: file discovery and sorting, early `inspect` dispatch, per-file
   orchestration through `pipeline::convert_file`.
 - `rpu_check.rs`: MEL/FEL/P8 classification and RPU diagnostics; it is what detects FEL.
+- `rpu_guard.rs`: `parse_source_rpu_file`, the guarded parse of source RPUs (`rpu_check.rs`). It walks each
+  RPU's header, data mapping, Profile 7 NLQ data and DM payload before `parse_rpu_file` and returns
+  `UnparseableRpu` for a linear-interpolation polynomial piece, a pivot/piece count larger than the
+  RPU, a CM v2.9/v4.0 extension-block count above a ninth of the bits left, or a CM v4.0 L8/L9/L10
+  block length the crate does not know (L8 10/12/13/19/25, L9 1/17, L10 5/21), where
+  `dolby_vision` 3.4 would abort the process under `panic = "abort"` (ROADMAP E15). The format
+  sniff refuses such a file as unsupported with a warning instead of detecting it as HDR10.
+  `parse_source_rpu_bytes` applies the same guard to an `RPU.bin` already in memory and returns
+  each RPU with the exact slice it parsed; it is stricter (bytes before the first start code, an
+  empty file and any refused RPU are errors). The `manifest --rpu` import uses it.
 - `external.rs`: tool checks and invocation.
 - `metadata/`: `CmV40Config`, L2/L5/L9/L11 generation; submodules `format`, `probe`, `rpu_config`,
   `sidecar`, `static_metadata`.
 - `pipeline/`: `convert_file` in `mod.rs`; by phase `temp_dir`, `measure`, `config`, `deliver`;
-  plus `analyzer`, `dovi_steps`, `hdr10plus`.
+  plus `analyzer`, `dovi_steps`, `hdr10plus`, `hdr10plus_coverage` (the HDR10+ payload count, ROADMAP
+  P9.4), `timing` (the source's video timestamps in the mux
+  and the check of the output's, ROADMAP E7.3), `rpu_count` (the output's RPU count against its
+  video frames, E7.2), and `manifest/` (`mkvdovi manifest`: the AU table
+  reader, the manifest build, `import.rs` for `--rpu`, no temp dir; [PLAYBACK_MANIFEST.md](PLAYBACK_MANIFEST.md)).
 - `verify.rs`, `progress.rs`.
 
 ## External tools
@@ -25,7 +39,11 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `dovi_tool` 2.3.2 is the floor: the existing orchestration relies on its `inject-rpu` padding
   fix. 2.3.4+ lets mkvdovi pass the MKV directly to remove/convert/demux
   (`--dovi-input auto|raw|mkv`; auto = on when `dovi_tool --version` reports 2.3.4+), with an
-  automatic per-step fallback to ffmpeg extraction. Direct attempts log to `*_mkv.log` in the temp dir.
+  automatic per-step fallback to ffmpeg extraction. A direct output is accepted only when its
+  access units (ffprobe `-count_packets` on the raw HEVC, `dovi_steps::count_access_units`) equal
+  the source's video packets (`timing::read_video_times`); a mismatch or an unreadable output
+  count removes it and falls back with a warning, and a source whose packets cannot be counted
+  skips the direct read (ROADMAP E7.1). Direct attempts log to `*_mkv.log` in the temp dir.
 - FFmpeg 9's `dovi_split`/`dovi_rpu` filters do not replace `dovi_tool`: they have no profile
   conversion, injection or generation; `dovi_split=mode=bl` is slower than `remove` on the
   direct-MKV path and changes the bytes; `dovi_rpu=strip` misses RPUs before EOS. Evaluation and
@@ -48,6 +66,34 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   `.DV.mkv`. Explicit `--mdfix` allows a DV input and writes a distinct `*.mdfix.DV.mkv` candidate.
 - **A successful conversion deletes the source input by default**; `--keep-source` prevents it.
   All DV and repair inputs keep their source by default.
+  A non-DV source is also kept when the output's video timing was not checked
+  (`finish_success` `timing_checked` in `pipeline/mod.rs`).
+- **Video timestamps (`pipeline/timing.rs`, E7.3).** Both mux sites (`deliver::mux_output` and the
+  MEL fast path's `mux_hevc_with_original` in `dovi_steps.rs`) go through `timing::deliver`. It
+  reads the source's video frame times with ffprobe, Matroska only (mkvmerge may read another
+  container's start differently). A constant-rate source is muxed with the stream's timing and a
+  late start kept by `--sync`; a variable-rate source gets `--timestamps` with a timestamps v2 file
+  (`video.timestamps.txt`) whose on-grid frames sit at exact times on the source's frame-rate grid
+  (ffprobe `avg_frame_rate`). mkvmerge takes the default duration from the file's first intervals
+  and `--default-duration` does not override it, so whole milliseconds would turn 23.976 fps into
+  42 ms (23.81 fps). The output's frame times are then checked against the source's (1 ms
+  tolerance, `TOLERANCE_MS`); a mismatch removes the output, and a constant-rate mux is retried
+  once with the timestamps file; a mismatch with the timestamps file fails the run, so the source
+  is kept. A reused mux of an interrupted run is checked too, and remuxed with the chosen timing
+  when it fails. When the source's times cannot be read (no
+  ffprobe, not Matroska, unreadable), the mux uses the stream's timing, warns and is not checked.
+- **RPU count (`pipeline/rpu_count.rs`, E7.2).** After `timing::deliver`, both mux sites call
+  `rpu_count::check`: the output must carry one RPU per video frame. The frame count comes from the
+  timing check's packet read, else ffprobe or MediaInfo on the output. The RPUs are extracted with
+  `dovi_tool extract-rpu` into `output_rpu.bin` and counted by start code (`rpu_guard::count_rpus`),
+  never parsed. Under `--dovi-input mkv` the direct read of the output decides only when it matches;
+  otherwise, and under `raw`, the output's video stream is extracted by ffmpeg
+  (`output_video.hevc`, removed after the count) and that count decides. dovi_tool's "No RPU was
+  found" is a count of 0. The check fails closed: a differing or unreadable count removes the
+  output and `mux.done` (`timing::discard_output`) and fails the run, so the source is kept. It also
+  withdraws the stream the mux took (`BL_RPU.hevc`, or the MEL path's `P81_discard.hevc`): its
+  `.done` sentinel and the file, only inside the temp dir. A resumed run rebuilds that stream,
+  muxes and counts again. `--verify` still makes its own count.
 - **mkvdovi never encodes video.** Every path copies the video stream bit-exactly. There is no
   compositor, no `composite-pipe`, no `--fel-*`/`--encoder` flag and no Modal/NVENC/libx265/
   VideoToolbox encode; do not add one back.
@@ -81,6 +127,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
     flag. That resolution runs before the fingerprint. A fallback after it (HDR10+ structure, a
     failed analysis, the sidecar, the frame count) keeps the token and relies on the `extra.json`
     comparison below. **Add any new artifact-affecting flag to `resume_settings`.**
+  - The HDR10+ payload count (`hdr10plus_coverage.json`) is sealed with `video.hevc` and changes no
+    artifact, so it adds no token.
   - The fingerprint does not cover the measurements. `config::withdraw_stale_rpu` (called from
     `prepare_configuration`) compares the regenerated `extra.json` (written beside it as `extra.json.next`, renamed only after the
     comparison, so an interruption cannot hide a change) with the one in the temp dir and,
@@ -188,6 +236,30 @@ This section covers the code on each side.
   `config::fall_back_to_hdr10plus`, at every point the hybrid can fail. The frame count is checked
   late on purpose: only the analyzer's demuxed count is reliable. A proof against baselines
   captured before this default (E13) passes `-- --hdr10plus-l1 hdr10plus` for an HDR10+ input.
+- **Payload coverage** (`pipeline/hdr10plus_coverage.rs`, ROADMAP P9.4): `hdr10plus_tool extract`
+  gives a frame without its own HDR10+ payload the previous frame's, and FFmpeg's decoder carries
+  the last payload forward too, so neither shows a gap. mkvdovi scans the `video.hevc` it extracts
+  for the HDR10+ path, streaming and std-only: a picture counts when a prefix SEI before its first
+  slice holds a T.35 message with the HDR10+ identity (the message `hdr10plus_tool` picks). The
+  count is sealed as `hdr10plus_coverage.json` (version 1) and reused on resume; a fresh extraction
+  withdraws it. Next to the extracted metadata, partial coverage warns with the counts under the
+  default and `hdr10plus` and refuses an explicit hybrid before analysis; it never goes through
+  `after_failure`, so the default stays on the hybrid. When `hdr10plus_tool` extracts nothing from
+  a stream with payloads (a gap at the start, two payload NAL units in one picture, a payload
+  after the first slice), the warning names the counts instead of "no dynamic metadata", and an
+  explicit hybrid refuses. Next to the extracted metadata, a scan that fails (an SEI NAL unit over
+  the 256 KiB cap, a malformed stream) warns under the default and `hdr10plus` and refuses an
+  explicit hybrid before analysis (P9.5). When `hdr10plus_tool` extracted nothing, a scan that
+  fails refuses an explicit hybrid too (P9.6), and the default and `hdr10plus` fall back with the
+  "no dynamic metadata" warning. A count it cannot trust otherwise (a frame count other than the
+  metadata's, no payload) only warns.
+- **`--skip-reorder` fallback** (`pipeline/hdr10plus.rs`, ROADMAP P5.1): only after the normal
+  `hdr10plus_tool extract` fails, mkvdovi runs it again with `--skip-reorder`, logged to
+  `hdr10plus_tool_skip_reorder.log` so `hdr10plus_tool.log` keeps the first failure. A JSON from the
+  retry gets the marker `hdr10plus_metadata.skip_reorder`; each extraction run removes the old JSON
+  and marker first, so only the retry leaves one. A resumed run that reuses the JSON warns again,
+  and `measure::acquire_measurements` refuses an explicit hybrid on the marker before the count or
+  analysis; the default and `hdr10plus` proceed with the warning.
 - The panel peak is **not** passed as a `--trim-targets` override.
 - HDR10+ scene peaks above 3× the mastering-display peak produce advisory warnings only. **Never
   add a silent clamp.**
@@ -221,10 +293,25 @@ This section covers the code on each side.
   `--cm-version` (`pipeline::expected_cm_version`: CM v4.0 metadata under v29, none under v40); an
   RPU frame count that differs from the muxed video track (MediaInfo `FrameCount`) or the L1
   sidecar. L6 MaxCLL/MaxFALL 0 in a passed-through Profile 7 MEL RPU is only a warning.
+- Dolby Vision configuration record (`verify/dv_record.rs`, every output): ffprobe reads the
+  record of the first video stream; a Profile other than 8, a missing level, a missing RPU or base
+  layer, an enhancement layer, or a compatibility ID other than 1 (PQ) or 4 (HLG) fails. For a PQ
+  output with another ID it also prints a hint: mkvmerge derives the ID from the HEVC bitstream, so
+  the source VUI probably lacks transfer_characteristics 16. An ffprobe that cannot run, or that
+  reads the stream but shows no record (an older ffprobe does not read it from Matroska), warns and
+  skips the check; `dovi_tool info` and the RPU count still show the output carries Dolby Vision.
 - HLG output: hard-fails when there are no measurements or the sidecar does not load, and checks
   that **every** RPU frame carries the composer the sidecar names (`dovi84_composer::check_rpu_file`).
+- Authored L8 and L10 blocks (`verify/authored_blocks.rs`, every frame, generated and passed-through
+  RPUs): fails two L8 blocks for one `target_display_index`, two L10 blocks for one target index,
+  or an L8 target that is neither a preset (`PRESET_TARGET_DISPLAYS` plus 24 and 25) nor an L10
+  block of the same frame. A generated RPU reuses the parse below; the MEL passthrough RPU is
+  parsed through `rpu_guard::parse_source_rpu_file`. Any parse failure (a guard refusal, or a crate
+  error such as L253) warns and skips these checks. There is no separate L8 field-presence check:
+  the parser reads exactly the fields of the block length, and the guard refuses a length without a
+  layout. A clean run prints "L8 and L10 blocks: consistent on all N frames."
 - Generated RPU (`verify::DeliveryExpectation`; not the MEL passthrough, whose RPU can carry levels
-  the crate cannot parse, such as L253): parses the extracted RPU in-process (frame count from the
+  the crate cannot parse, such as L253, and gets only the L8/L10 parse above): parses the extracted RPU in-process (frame count from the
   parse) and hard-fails a frame whose source range differs from `metadata::expected_source_range`,
   or whose L1 differs from the sidecar scene's L1 after the generator's clamp
   (`ExtMetadataBlockLevel1::from_stats_cm_version(.., V29)`). The clamps themselves are only

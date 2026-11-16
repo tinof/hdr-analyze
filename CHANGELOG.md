@@ -8,6 +8,43 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- mkvdovi `--verify` checks the authored CM v4.0 L8 and L10 blocks on every frame of the output
+  RPU (ROADMAP E17.1). Two L8 blocks for the same target display, two L10 blocks for the same
+  target display, or an L8 target that is neither a preset display (24 and 25 included) nor an
+  L10 block of the same frame fail `--verify`. These blocks come from Dolby Vision inputs on the
+  Profile 7 MEL fast path, where `--verify` read only frame 0 before. The RPU is parsed behind
+  the abort guard; one the `dolby_vision` parser cannot read (an L253 block, for example) skips
+  these checks with a warning. Whether an L8 block's optional fields match its length is not
+  checked separately: the parser reads exactly the fields of the block's length, and the guard
+  refuses a length it has no layout for.
+- mkvdovi `--verify` checks the whole Dolby Vision configuration record of every output (ROADMAP
+  E17.2): Profile 8, a level, RPU and base layer present, no enhancement layer, and compatibility
+  ID 1 for PQ or 4 for HLG. Before, only the HLG ID was read. A PQ output now needs the record
+  too. A wrong field fails `--verify`; a PQ output with another ID also gets a hint about a
+  missing VUI transfer tag. An ffprobe that cannot run, or that shows no record (an older ffprobe
+  does not read it from Matroska), only skips the check with a warning.
+- mkvdovi retries `hdr10plus_tool extract` with `--skip-reorder` when the normal extraction of an
+  HDR10+ input fails (ROADMAP P5.1). The flag is the tool's workaround for misauthored HEVC files.
+  Before, such a file fell back to HDR10 analysis without its HDR10+ metadata. The retry warns,
+  says that its metadata is not reordered to display order, and writes its own log
+  (`hdr10plus_tool_skip_reorder.log`), so `hdr10plus_tool.log` keeps the first failure. A file
+  whose normal extraction works runs the tool once, as before. An explicit `--hdr10plus-l1 hybrid`
+  refuses a `--skip-reorder` JSON before analysis, also one a resumed run reuses; the default and
+  `--hdr10plus-l1 hdr10plus` convert with it and its warning.
+- mkvdovi counts the frames of an HDR10+ input that carry their own HDR10+ payload (ROADMAP
+  P9.4). `hdr10plus_tool` gives a frame without one the previous frame's, so a partial file
+  converted without a word. Partial coverage now warns with the counts and the first gap; an
+  explicit `--hdr10plus-l1 hybrid` refuses it before analysis. A file whose payloads
+  `hdr10plus_tool` cannot extract (for example a gap at the start) is named that way instead of
+  "no dynamic metadata", and an explicit hybrid refuses it. The default stays on the hybrid and
+  delivered L1 does not change.
+- `hdr_analyzer_mvp --peak-estimator st2094-10` (ROADMAP WS1.5, opt-in): the L1 max candidate of
+  the SMPTE ST 2094-10 reduced pixel set, the highest max-RGB of 2×2 block means averaged in
+  linear light from the crop's top-left, identical on CPU and CUDA. It is PQ only and refuses HLG
+  input, `--peak-domain luma` and `--downscale` above 1. The sidecar records
+  `peak_estimator: "st2094-10"`, `--dump-frame-stats` adds `reduced_max_pq` and `reduced_min_pq`,
+  and `l1_diff` names the estimator it scores. The default stays `max`; mkvdovi's hybrid path
+  refuses these measurements until WS1.6.
 - `hdr_analyzer_mvp --au-table` writes `<measurements>.au.json`, the AU table of the playback
   manifest (ROADMAP P15.1, [`docs/PLAYBACK_MANIFEST.md`](docs/PLAYBACK_MANIFEST.md)). It lists every
   video packet in decode order with its pts, size and the CRC-32 of IRAP pictures, plus the source and
@@ -17,10 +54,71 @@ This document provides a historical record of completed milestones, feature impl
   panics (`Error::Manifest`, code 8), and `AuMatcher`, which validates its manifest on
   construction, checks each AU a player reads against the AU table and returns its shot's L1 and
   scene refresh. RPUs built through it equal `dovi_tool` 2.3.4's fixtures byte for byte.
+- `mkvdovi manifest <input> [--out] [--work-dir]` (P15.3) writes the playback manifest
+  `<stem>.dvmanifest.json` of an HDR10 or HLG MKV: the measured per-shot L1, the RPU parameters and
+  the AU table a player checks it against. Its RPUs equal a `--keep-source` conversion's with the
+  same flags, AU for AU. It never converts, muxes or deletes; it refuses HDR10+, Dolby Vision and
+  non-Matroska input before any analysis, and reuses a measurement pair only when it is bound to
+  the file as it is now. `dovi_rpu_builder::VERSION` names the builder in the manifest. An
+  open-GOP cut made by an FFmpeg stream copy, whose leading pictures have negative timestamps,
+  is refused; the message names the `mkvmerge -o <new>.mkv <input>` remux that fixes it, and a
+  new `mkvmerge --split` cut when the remux is refused too (P15.5).
+- `mkvdovi manifest --rpu <RPU.bin>` (P15.4) makes the manifest from an imported `RPU.bin`
+  (display order, as `dovi_tool generate` writes it and `extract-rpu` returns it) instead of a
+  measurement: the shots and RPU parameters come from the file, and the analyzer writes only the
+  AU table. The file is accepted only when the manifest rebuilds every RPU byte for byte; a wrong
+  composer, a wrong count, per-frame trims or L1, or any other difference is refused, naming the
+  first picture and its AU. The manifest has `l1_policy` `rpu-bin`, coverage `approximate`, and
+  `producer.rpu_bin_sha256` in place of the (null) sidecar fields; a measured manifest is written
+  as before. The flags that shape the RPU or the measurement cannot be given with `--rpu`.
+
+### Fixed
+
+- mkvdovi's direct-MKV `dovi_tool` steps (`--dovi-input mkv`, or `auto` with dovi_tool 2.3.4+:
+  the clean base layer of `--mdfix`, and the Profile 7 MEL conversion) no longer accept any
+  non-empty output (ROADMAP E7.1). The output's access units, counted by ffprobe, must equal the
+  source's video packets; an output of another length, or a count that cannot be read, falls back to
+  ffmpeg extraction with a warning that names both counts or the reason. A source whose packets
+  cannot be counted skips the direct read. The check reads the source's video packets once more
+  (0.26 s for a 1200-frame 1080p file) and counts the output stream (about 1 s per GB), on a
+  warm cache.
+- A source whose Dolby Vision RPU has a mapping piece the `dolby_vision` 3.4 parser cannot read
+  (a linear-interpolation polynomial piece, or more pivots or pieces than the RPU holds) no longer
+  aborts mkvdovi and the rest of a multi-file run (ROADMAP E15.1). The file is refused with a
+  warning naming the parse error, and the run continues with the next file.
+- The same refusal now covers RPUs whose CM v2.9 or v4.0 DM metadata declares more extension
+  blocks than the RPU holds, which the parser allocated before reading, or a CM v4.0 level 8, 9 or
+  10 block of a length the parser does not know, including Profile 7 RPUs and RPUs that reuse the
+  previous mapping (ROADMAP E15.2).
+- mkvdovi keeps the source's video timestamps in the output (ROADMAP E7.3). A variable-rate
+  source is muxed with its own frame times (an mkvmerge timestamps file on the source's frame-rate
+  grid), and a late video start is kept (`--sync`); both used to be retimed from 0 at the stream's
+  frame rate. This covers the normal mux and the Profile 7 MEL fast path.
+- Every mux is checked: the output's video frame times must equal the source's within 1 ms. A
+  constant-rate mux that misses is retried once with the timestamps file; a mismatch after the
+  timestamps file fails the run and keeps the source.
+- Every conversion also counts the output's RPUs against its video frames (ROADMAP E7.2), which
+  only `--verify` did before. A count that differs, or one that cannot be read, removes the output
+  and fails the run. The source is kept, and the next run rebuilds the stream it muxed. The count
+  reads the output with `dovi_tool extract-rpu` and, when that read disagrees or under
+  `--dovi-input raw`, from the output's video stream extracted by ffmpeg. On an 8.3 GB one-hour
+  episode it took 20 s with dovi_tool 2.3.4 reading the MKV directly. Under `--dovi-input raw`, or
+  when the direct read disagrees, it took 66 s and wrote a temporary 8.3 GB copy of the video.
 
 ### Changed
 
+- When mkvdovi cannot read the source's video frame times (no `ffprobe` on `PATH`, an input that
+  is not Matroska, such as MP4 or TS, or an unreadable file), it muxes with the stream's own
+  timing, warns, and skips the timing check; a non-DV source is then kept, not deleted.
 - The L1 sidecar is written through a temp file and a rename, so an interrupted run leaves none.
+- An explicit `--hdr10plus-l1 hybrid` now refuses an HDR10+ file whose metadata `hdr10plus_tool`
+  extracted but whose payload coverage cannot be counted (an SEI NAL unit over 256 KiB, a
+  malformed stream) before analysis, as it refuses partial coverage (ROADMAP P9.5). The default and
+  `--hdr10plus-l1 hdr10plus` still only warn.
+- An explicit `--hdr10plus-l1 hybrid` also refuses an HDR10+ file when `hdr10plus_tool` extracts
+  nothing and the payload coverage cannot be counted (ROADMAP P9.6). Before, it fell back to HDR10
+  analysis with the "no dynamic metadata" warning. The refusal names the failed count and the
+  `hdr10plus_tool` log. The default and `--hdr10plus-l1 hdr10plus` keep the warning and the fallback.
 
 ## [0.8.0] - 2026-11-04
 

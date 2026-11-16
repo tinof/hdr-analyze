@@ -6,14 +6,16 @@ use super::config::{commit_config, withdraw_stale_rpu};
 use super::deliver::{extract_base_layer, inject_rpu, mux_output};
 use super::dovi_steps::{
     convert_mel_fast_path, convert_mel_to_profile81, extract_clean_base_layer,
-    feed_mkv_to_dovi_tool, resolve_dovi_input,
+    feed_mkv_to_dovi_tool, parse_packet_count, resolve_dovi_input,
 };
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
+use super::hdr10plus_coverage;
 use super::measure::{
     abort_unsupported, acquire_measurements, find_reusable_measurements, hybrid_refusal,
     total_steps_for, Measured,
 };
 use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
+use super::timing::{Delivery, MuxTiming};
 use super::*;
 use crate::cli::{AnalysisQuality, DoviInput, HwAccel, PeakSource};
 use clap::Parser;
@@ -574,6 +576,15 @@ fn run_finish_success(
     format: HdrFormat,
     create_source: bool,
 ) -> (bool, bool, bool) {
+    run_finish_success_with_timing(flags, format, create_source, true)
+}
+
+fn run_finish_success_with_timing(
+    flags: &[&str],
+    format: HdrFormat,
+    create_source: bool,
+    timing_checked: bool,
+) -> (bool, bool, bool) {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("in.mkv");
     let output = dir.path().join("in.DV.mkv");
@@ -595,8 +606,19 @@ fn run_finish_success(
         &args,
         format,
         Instant::now(),
+        timing_checked,
     );
     (source.exists(), temp.exists(), output.exists())
+}
+
+#[test]
+fn finish_success_keeps_a_non_dv_source_whose_output_timing_was_not_checked() {
+    for format in ALL_HDR_FORMATS.into_iter().filter(|f| !dv_format(*f)) {
+        let (source, temp, output) = run_finish_success_with_timing(&[], format, true, false);
+        assert!(source, "source should be kept for {format:?}");
+        assert!(!temp, "temp dir should be removed for {format:?}");
+        assert!(output, "output must stay for {format:?}");
+    }
 }
 
 #[test]
@@ -1109,6 +1131,136 @@ fn hdr10plus_with_no_dynamic_metadata_leaves_the_hybrid_for_hdr10_analysis() {
     }
 }
 
+/// Seals an HDR10+ payload count of the stream in the temp directory: `own` of 4 frames.
+fn seal_coverage(dir: &Path, own: u64) {
+    let path = dir
+        .join("mkvdovi_temp_in")
+        .join(hdr10plus_coverage::COVERAGE_FILE);
+    let gap = (own < 4).then_some(own);
+    let record = json!({"version": 1, "coverage": {
+        "access_units": 4, "own": own, "gaps": u64::from(own < 4), "longest_gap": 4 - own,
+        "first_gap": gap, "ignored_payloads": 0}});
+    fs::write(&path, record.to_string()).unwrap();
+    resume::mark_done(&path).unwrap();
+}
+
+fn acquire_with_coverage(mode: Hdr10PlusMode, own: u64) -> Result<Option<Measured>> {
+    let (result, _, _) =
+        run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+            seal_hdr10plus(dir, Some(&hdr10plus_for_four_frames()));
+            seal_coverage(dir, own);
+            measurements_for_four_frames(dir);
+        });
+    result
+}
+
+#[test]
+fn partial_hdr10plus_coverage_keeps_the_default_hybrid_and_the_metadata_mode() {
+    let measured = acquire_with_coverage(Hdr10PlusMode::ImplicitHybrid, 3)
+        .unwrap()
+        .expect("the default only warns");
+    // Not `after_failure`: that would leave the hybrid for the metadata and move delivered L1.
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ImplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    let measured = acquire_with_coverage(Hdr10PlusMode::Metadata, 3)
+        .unwrap()
+        .expect("the metadata mode only warns");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+}
+
+#[test]
+fn partial_hdr10plus_coverage_refuses_an_explicit_hybrid_and_full_coverage_does_not() {
+    let refused = acquire_with_coverage(Hdr10PlusMode::ExplicitHybrid, 3);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+    let measured = acquire_with_coverage(Hdr10PlusMode::ExplicitHybrid, 4)
+        .unwrap()
+        .expect("full coverage takes the hybrid");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+}
+
+#[test]
+fn unextracted_hdr10plus_coverage_refuses_an_explicit_hybrid() {
+    if crate::external::find_tool("hdr10plus_tool").is_none() {
+        eprintln!("Skipping unextracted-payload test: hdr10plus_tool not found in PATH");
+        return;
+    }
+    let run = |mode| {
+        let (result, _, _) =
+            run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+                // hdr10plus_tool fails on this stream; the sealed count says 4 frames carry HDR10+.
+                seal_hdr10plus(dir, None);
+                seal_coverage(dir, 4);
+                measurements_for_four_frames(dir);
+            });
+        result
+    };
+    let refused = run(Hdr10PlusMode::ExplicitHybrid);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+    let measured = run(Hdr10PlusMode::ImplicitHybrid)
+        .unwrap()
+        .expect("the default falls back to HDR10 analysis");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Unsupported);
+}
+
+/// `acquire_with_coverage` at full coverage, on a reused JSON that a `--skip-reorder` retry of
+/// an earlier run produced when `skip_reorder`.
+fn acquire_reused_json(mode: Hdr10PlusMode, skip_reorder: bool) -> Result<Option<Measured>> {
+    let (result, _, _) =
+        run_acquire_measurements_in(mode, &ACCURATE, HdrFormat::Hdr10Plus, |dir| {
+            seal_hdr10plus(dir, Some(&hdr10plus_for_four_frames()));
+            seal_coverage(dir, 4);
+            measurements_for_four_frames(dir);
+            if skip_reorder {
+                let marker = dir
+                    .join("mkvdovi_temp_in")
+                    .join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+                fs::write(marker, b"").unwrap();
+            }
+        });
+    result
+}
+
+#[test]
+fn a_reused_skip_reorder_json_refuses_an_explicit_hybrid_and_a_normal_one_does_not() {
+    let refused = acquire_reused_json(Hdr10PlusMode::ExplicitHybrid, true);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+    let measured = acquire_reused_json(Hdr10PlusMode::ExplicitHybrid, false)
+        .unwrap()
+        .expect("a normal extraction takes the hybrid");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+}
+
+#[test]
+fn a_reused_skip_reorder_json_keeps_the_default_hybrid_and_the_metadata_mode() {
+    let measured = acquire_reused_json(Hdr10PlusMode::ImplicitHybrid, true)
+        .unwrap()
+        .expect("the default only warns");
+    // Not `after_failure`: the owner kept the default on the hybrid with the fallback's JSON.
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ImplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    assert!(measured.hdr10plus_json.is_some());
+    let measured = acquire_reused_json(Hdr10PlusMode::Metadata, true)
+        .unwrap()
+        .expect("the metadata mode only warns");
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+    assert!(measured.hdr10plus_json.is_some());
+}
+
+#[test]
+fn the_skip_reorder_refusal_names_the_flag_and_the_way_out() {
+    let refusal = hdr10plus::skip_reorder_refusal();
+    assert!(refusal.contains("--skip-reorder"), "{refusal}");
+    assert!(
+        refusal.contains("Without --hdr10plus-l1 hybrid the file converts"),
+        "{refusal}"
+    );
+}
+
 #[test]
 fn acquire_measurements_refuses_fel() {
     let (result, _, _) = run_acquire_measurements(&[], HdrFormat::DolbyVisionFel, |_| {});
@@ -1396,6 +1548,7 @@ fn mux_output_reuses_a_finished_mux_when_resuming() {
         &temp,
         true,
         &args,
+        &MuxTiming::Stream { sync_ms: 0 },
     )
     .unwrap();
     assert!(muxed);
@@ -1403,12 +1556,16 @@ fn mux_output_reuses_a_finished_mux_when_resuming() {
 }
 
 // Delivery steps against fake external tools. The functions under test spawn `ffmpeg`,
-// `ffprobe`, `mkvmerge` and `dovi_tool` from PATH, and PATH is shared by every test in this
-// binary, so the shims are installed once and pass every call through to the real tool unless
-// one of its arguments lies in a `FakeTools` sandbox that scripts that tool.
+// `ffprobe`, `mkvmerge`, `dovi_tool` and `hdr10plus_tool` from PATH, and PATH is shared by every
+// test in this binary, so the shims are installed once and pass every call through to the real
+// tool unless one of its arguments lies in a `FakeTools` sandbox that scripts that tool.
 
 #[cfg(unix)]
 const SHIMMED_TOOLS: [&str; 4] = ["ffmpeg", "ffprobe", "mkvmerge", "dovi_tool"];
+
+/// Shimmed only when found, so that the tests that do not script it still run without it.
+#[cfg(unix)]
+const OPTIONAL_SHIMMED_TOOLS: [&str; 1] = ["hdr10plus_tool"];
 
 #[cfg(unix)]
 const SANDBOX_PREFIX: &str = "mkvdovi-fake-";
@@ -1417,23 +1574,35 @@ const SANDBOX_PREFIX: &str = "mkvdovi-fake-";
 /// missing: a shim would then hide that from the tests that skip without it.
 #[cfg(unix)]
 fn shims_installed() -> bool {
+    shimmed_tools().is_some()
+}
+
+/// The tools shimmed on PATH, or `None` when one of [`SHIMMED_TOOLS`] is missing.
+#[cfg(unix)]
+fn shimmed_tools() -> Option<&'static [&'static str]> {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::OnceLock;
 
-    static INSTALLED: OnceLock<bool> = OnceLock::new();
-    *INSTALLED.get_or_init(|| {
+    static INSTALLED: OnceLock<Option<Vec<&'static str>>> = OnceLock::new();
+    let installed = INSTALLED.get_or_init(|| {
         let mut real = Vec::new();
         for tool in SHIMMED_TOOLS {
             match crate::external::find_tool(tool) {
                 Some(path) => real.push((tool, path)),
-                None => return false,
+                None => return None,
             }
         }
+        for tool in OPTIONAL_SHIMMED_TOOLS {
+            if let Some(path) = crate::external::find_tool(tool) {
+                real.push((tool, path));
+            }
+        }
+        let tools: Vec<&'static str> = real.iter().map(|&(tool, _)| tool).collect();
         let mut scripts = Vec::new();
         for (tool, real_path) in real {
             // A sandbox call appends its argv to `<root>/fake/<tool>.calls` and runs
             // `<root>/fake/<tool>.sh` with IN (after -i), OUT (after -o, else the last
-            // argument) and LAST set. That script must exit itself.
+            // argument), LAST and REAL (the real tool) set. That script must exit itself.
             let script = format!(
                 r#"#!/bin/sh
 root=
@@ -1451,12 +1620,13 @@ if [ -n "$root" ] && [ -f "$root/fake/{tool}.sh" ]; then
     LAST=$arg
   done
   [ -n "$OUT" ] || OUT=$LAST
+  REAL='{real}'
   . "$root/fake/{tool}.sh"
   exit 99
 fi
-exec '{}' "$@"
+exec '{real}' "$@"
 "#,
-                real_path.display()
+                real = real_path.display()
             );
             scripts.push((tool, script));
         }
@@ -1486,8 +1656,9 @@ exec '{}' "$@"
         let mut dirs = vec![bin];
         dirs.extend(std::env::split_paths(&path));
         std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
-        true
-    })
+        Some(tools)
+    });
+    installed.as_deref()
 }
 
 /// A sandbox holding `in.mkv`, the temp dir `mkvdovi_temp_in` and the output path `in.DV.mkv`.
@@ -1574,6 +1745,31 @@ fn dovi_tool_by_input(mkv_body: &str, raw_body: &str) -> String {
     format!("case \"$IN\" in\n*.mkv)\n{mkv_body}\n;;\nesac\n{raw_body}")
 }
 
+/// ffprobe that reads `frames` video frames, 42 ms apart from 0, from every file but a raw HEVC
+/// stream (the source and the muxed output), and `units` access units from a raw HEVC stream
+/// (a dovi_tool output). `None` makes that read fail.
+#[cfg(unix)]
+fn probes(frames: Option<usize>, units: Option<usize>) -> String {
+    let hevc = units.map_or_else(
+        || "exit 1".to_owned(),
+        |units| format!("echo {units}\n  exit 0"),
+    );
+    let other = frames.map_or_else(
+        || "exit 1".to_owned(),
+        |frames| {
+            let packets: Vec<String> = (0..frames)
+                .map(|frame| format!("{{\"pts\":{},\"duration\":42}}", frame * 42))
+                .collect();
+            format!(
+                "printf '%s' '{{\"packets\":[{}],\"streams\":[{{\"time_base\":\"1/1000\"}}],\
+                 \"format\":{{\"format_name\":\"matroska,webm\"}}}}'\nexit 0",
+                packets.join(",")
+            )
+        },
+    );
+    format!("case \"$LAST\" in\n*.hevc)\n  {hevc} ;;\nesac\n{other}\n")
+}
+
 #[cfg(unix)]
 fn args_with_dovi_input(mode: DoviInput) -> Args {
     let mut args = Args::try_parse_from(["mkvdovi"]).unwrap();
@@ -1602,6 +1798,7 @@ fn run_mel_to_profile81(fake: &FakeTools, mode: DoviInput, resume: bool) -> bool
         resume,
     )
     .unwrap()
+        != Delivery::Failed
 }
 
 #[cfg(unix)]
@@ -1616,6 +1813,7 @@ fn direct_mkv_step_that_succeeds_needs_no_ffmpeg_extraction() {
     else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", &writes("clean"));
     fake.script("ffmpeg", &writes("raw"));
     let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
@@ -1635,6 +1833,7 @@ fn direct_mkv_step_reads_the_mkv_without_resume_although_a_raw_stream_is_sealed(
     ) else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.leave(&fake.temp.join("DV_raw.hevc"), b"old raw", true);
     fake.script("dovi_tool", &writes("clean"));
     fake.script("ffmpeg", &writes("raw"));
@@ -1675,6 +1874,7 @@ fn direct_mkv_step_with_empty_output_falls_back_to_ffmpeg_extraction() {
     else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script(
         "dovi_tool",
         &dovi_tool_by_input(EXITS_WITH_EMPTY_OUTPUT, &writes("clean from raw")),
@@ -1694,6 +1894,7 @@ fn direct_mkv_step_that_fails_after_writing_output_falls_back_to_ffmpeg_extracti
     ) else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script(
         "dovi_tool",
         &dovi_tool_by_input(FAILS_AFTER_PARTIAL_OUTPUT, &writes("clean from raw")),
@@ -1702,6 +1903,138 @@ fn direct_mkv_step_that_fails_after_writing_output_falls_back_to_ffmpeg_extracti
     let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
     assert_eq!(fake.calls("ffmpeg").len(), 1);
     assert_eq!(fs::read(&clean_bl).unwrap(), b"clean from raw");
+}
+
+/// The clean-BL step under `--dovi-input mkv` with a 48-frame source whose direct dovi_tool
+/// output ffprobe counts as `units` access units (`None`: unreadable), and whose raw read
+/// writes "clean from raw". Returns the clean BL's content and the ffmpeg and dovi_tool calls.
+#[cfg(unix)]
+fn clean_base_layer_with_counts(
+    test: &str,
+    frames: Option<usize>,
+    units: Option<usize>,
+) -> Option<(Vec<u8>, Vec<String>, Vec<String>)> {
+    let fake = FakeTools::new(test)?;
+    fake.script("ffprobe", &probes(frames, units));
+    fake.script(
+        "dovi_tool",
+        &dovi_tool_by_input(&writes("clean from mkv"), &writes("clean from raw")),
+    );
+    fake.script("ffmpeg", &writes("raw"));
+    let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
+    assert!(resume::is_complete(&clean_bl));
+    Some((
+        fs::read(&clean_bl).unwrap(),
+        fake.calls("ffmpeg"),
+        fake.calls("dovi_tool"),
+    ))
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_with_a_truncated_output_falls_back_to_ffmpeg_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_with_a_truncated_output_falls_back_to_ffmpeg_extraction",
+        Some(48),
+        Some(30),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 2, "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction",
+        Some(48),
+        Some(50),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 2, "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction",
+        Some(48),
+        Some(48),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 1, "{dovi:?}");
+    assert!(ffmpeg.is_empty(), "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from mkv");
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_whose_output_cannot_be_counted_falls_back_to_ffmpeg_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_whose_output_cannot_be_counted_falls_back_to_ffmpeg_extraction",
+        Some(48),
+        None,
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 2, "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_source_whose_frames_cannot_be_counted_skips_the_direct_mkv_read() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "a_source_whose_frames_cannot_be_counted_skips_the_direct_mkv_read",
+        None,
+        Some(48),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 1, "{dovi:?}");
+    assert!(!called_with(&dovi, ".mkv"), "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_conversion_with_a_truncated_direct_output_muxes_the_extracted_stream() {
+    let Some(fake) =
+        FakeTools::new("mel_conversion_with_a_truncated_direct_output_muxes_the_extracted_stream")
+    else {
+        return;
+    };
+    fake.script("ffprobe", &probes(Some(3), Some(2)));
+    fake.script(
+        "dovi_tool",
+        &dovi_tool_by_input(&writes("p81 from mkv"), &writes("p81 from raw")),
+    );
+    fake.script("ffmpeg", &writes("raw"));
+    fake.script("mkvmerge", &writes("muxed"));
+    assert!(run_mel_to_profile81(&fake, DoviInput::Mkv, true));
+    assert_eq!(fake.calls("ffmpeg").len(), 1);
+    let converted = fake.temp.join("P81_discard.hevc");
+    assert_eq!(fs::read(&converted).unwrap(), b"p81 from raw");
+    assert!(resume::is_complete(&converted));
+    assert_eq!(fake.calls("mkvmerge").len(), 1);
+}
+
+#[test]
+fn packet_count_is_read_from_a_single_number() {
+    assert_eq!(parse_packet_count("48\n"), Ok(48));
+    for output in ["", "N/A\n", "48,\n", "-1\n"] {
+        assert!(parse_packet_count(output).is_err(), "{output:?}");
+    }
 }
 
 #[cfg(unix)]
@@ -1849,6 +2182,7 @@ fn mel_conversion_that_succeeds_seals_the_stream_and_muxes_it() {
     else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", &writes("p81"));
     fake.script("mkvmerge", &writes("muxed"));
     assert!(run_mel_to_profile81(&fake, DoviInput::Mkv, true));
@@ -1867,6 +2201,7 @@ fn mel_conversion_that_fails_is_reported_and_never_muxed() {
     let Some(fake) = FakeTools::new("mel_conversion_that_fails_is_reported_and_never_muxed") else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", FAILS);
     fake.script("ffmpeg", &writes("raw"));
     fake.script("mkvmerge", &writes("muxed"));
@@ -1888,6 +2223,7 @@ fn mel_conversion_is_reused_only_when_sealed_and_resuming() {
         else {
             return;
         };
+        fake.script("ffprobe", &probes(Some(3), Some(3)));
         let converted = fake.temp.join("P81_discard.hevc");
         fake.leave(&converted, b"previous p81", sealed);
         fake.script("dovi_tool", &writes("new p81"));
@@ -1918,6 +2254,7 @@ fn mel_mux_is_reused_only_with_resume_output_and_marker() {
         else {
             return;
         };
+        fake.script("ffprobe", &probes(Some(3), Some(3)));
         fake.leave(&fake.temp.join("P81_discard.hevc"), b"p81", true);
         if output {
             fs::write(&fake.output, b"previous mux").unwrap();
@@ -1941,6 +2278,7 @@ fn mel_mux_failure_is_reported_without_a_mux_marker() {
     let Some(fake) = FakeTools::new("mel_mux_failure_is_reported_without_a_mux_marker") else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", &writes("p81"));
     fake.script("mkvmerge", FAILS_AFTER_PARTIAL_OUTPUT);
     assert!(!run_mel_to_profile81(&fake, DoviInput::Mkv, true));
@@ -1972,7 +2310,7 @@ fn mel_fast_path_without_verify_finishes_and_never_runs_verification() {
     else {
         return;
     };
-    fake.script("dovi_tool", &writes("p81"));
+    script_counts(&fake, 3, 3);
     fake.script("mkvmerge", &writes("muxed"));
     // Verification starts by extracting the muxed video with ffmpeg; make that fail.
     fake.script("ffmpeg", FAILS);
@@ -1991,12 +2329,118 @@ fn mel_fast_path_with_failed_verification_reports_failure_and_keeps_the_temp_dir
     ) else {
         return;
     };
-    fake.script("dovi_tool", &writes("p81"));
+    script_counts(&fake, 3, 3);
     fake.script("mkvmerge", &writes("muxed"));
     fake.script("ffmpeg", FAILS);
     assert!(!run_mel_fast_path(&fake, true));
     assert!(called_with(&fake.calls("ffmpeg"), "verify_video.hevc"));
     assert!(fake.temp.exists());
+    assert!(fake.input.exists());
+}
+
+/// Scripts ffprobe (every file has `frames` video frames, 42 ms apart, and a raw HEVC stream as
+/// many access units) and dovi_tool, whose
+/// `extract-rpu` writes `rpus` RPUs and whose every other call writes `p81`.
+#[cfg(unix)]
+fn script_counts(fake: &FakeTools, frames: usize, rpus: usize) {
+    fake.script("ffprobe", &probes(Some(frames), Some(frames)));
+    fake.script(
+        "dovi_tool",
+        &format!(
+            "case \"$1\" in extract-rpu)\n  printf '{}' > \"$OUT\"\n  exit 0 ;;\nesac\n{}",
+            "\\000\\000\\000\\001\\031\\200".repeat(rpus),
+            writes("p81")
+        ),
+    );
+}
+
+/// Leaves a finished MEL conversion and mux of an earlier run, and an `output_rpu.bin` of
+/// `stale_rpus` RPUs that must not stand in for the output's count.
+#[cfg(unix)]
+fn leave_reusable_mux(fake: &FakeTools, stale_rpus: usize) {
+    fake.leave(&fake.temp.join("P81_discard.hevc"), b"p81", true);
+    fs::write(&fake.output, b"muxed").unwrap();
+    fs::write(fake.temp.join("mux.done"), b"").unwrap();
+    let stale = b"\0\0\0\x01\x19\x80".repeat(stale_rpus);
+    fs::write(fake.temp.join(rpu_count::RPU_FILE), stale).unwrap();
+}
+
+/// A reused mux with fewer RPUs than frames fails the run (ROADMAP E7.2): both reads count 2
+/// RPUs for 3 frames, the output and its sentinel are removed, the source is kept.
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_counts_a_reused_output_and_removes_it_when_rpus_are_missing() {
+    let Some(fake) =
+        FakeTools::new("mel_fast_path_counts_a_reused_output_and_removes_it_when_rpus_are_missing")
+    else {
+        return;
+    };
+    script_counts(&fake, 3, 2);
+    fake.script("mkvmerge", FAILS);
+    fake.script("ffmpeg", &writes("video"));
+    leave_reusable_mux(&fake, 3);
+    assert!(!run_mel_fast_path(&fake, false));
+    assert!(fake.calls("mkvmerge").is_empty(), "the mux is reused");
+    let counts = fake.calls("dovi_tool");
+    assert!(called_with(&counts, "extract-rpu -i ") && called_with(&counts, "in.DV.mkv"));
+    assert!(called_with(&counts, "output_video.hevc"));
+    assert!(called_with(&fake.calls("ffmpeg"), "output_video.hevc"));
+    assert!(!fake.output.exists(), "the output is removed");
+    assert!(
+        !fake.temp.join("mux.done").exists(),
+        "the next run muxes again"
+    );
+    assert!(fake.temp.exists(), "a failed run keeps the temp dir");
+    let converted = fake.temp.join("P81_discard.hevc");
+    assert!(
+        !converted.exists() && !resume::marker_path(&converted).exists(),
+        "the converted stream is withdrawn, so the next run converts again"
+    );
+    assert!(fake.input.exists());
+}
+
+/// More RPUs than video frames fail the run as well: both reads count 4 RPUs for 3 frames.
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_fails_when_the_output_has_more_rpus_than_frames() {
+    let Some(fake) =
+        FakeTools::new("mel_fast_path_fails_when_the_output_has_more_rpus_than_frames")
+    else {
+        return;
+    };
+    script_counts(&fake, 3, 4);
+    fake.script("mkvmerge", &writes("muxed"));
+    fake.script("ffmpeg", &writes("video"));
+    assert!(!run_mel_fast_path(&fake, false));
+    assert!(called_with(&fake.calls("ffmpeg"), "output_video.hevc"));
+    assert!(!fake.output.exists());
+    assert!(!fake.temp.join("mux.done").exists());
+    assert!(fake.input.exists());
+}
+
+/// RPUs that cannot be counted fail the run too; the stale `output_rpu.bin`, which holds the
+/// right count, does not stand in.
+#[cfg(unix)]
+#[test]
+fn mel_fast_path_fails_when_the_output_rpus_cannot_be_counted() {
+    let Some(fake) = FakeTools::new("mel_fast_path_fails_when_the_output_rpus_cannot_be_counted")
+    else {
+        return;
+    };
+    script_counts(&fake, 3, 3);
+    fake.script(
+        "dovi_tool",
+        &format!(
+            "case \"$1\" in extract-rpu) echo 'Error: Invalid input' >&2; exit 1 ;; esac\n{}",
+            writes("p81")
+        ),
+    );
+    fake.script("mkvmerge", FAILS);
+    fake.script("ffmpeg", &writes("video"));
+    leave_reusable_mux(&fake, 3);
+    assert!(!run_mel_fast_path(&fake, false));
+    assert!(!fake.output.exists());
+    assert!(!fake.temp.join("mux.done").exists());
     assert!(fake.input.exists());
 }
 
@@ -2146,6 +2590,7 @@ fn mux_output_is_reused_only_with_resume_output_and_marker() {
             &fake.temp,
             resume_enabled,
             &args,
+            &MuxTiming::Stream { sync_ms: 0 },
         )
         .unwrap();
         let case = format!("resume {resume_enabled}, output {output}, marker {marker}");
@@ -2167,7 +2612,444 @@ fn mux_output_failure_returns_false_without_a_mux_marker() {
     fs::write(&bl_rpu, b"bl+rpu").unwrap();
     fake.script("mkvmerge", FAILS);
     let args = Args::try_parse_from(["mkvdovi"]).unwrap();
-    let muxed = mux_output(fake.input(), &bl_rpu, &fake.output, &fake.temp, true, &args).unwrap();
+    let muxed = mux_output(
+        fake.input(),
+        &bl_rpu,
+        &fake.output,
+        &fake.temp,
+        true,
+        &args,
+        &MuxTiming::Stream { sync_ms: 0 },
+    )
+    .unwrap();
     assert!(!muxed);
     assert!(!fake.temp.join("mux.done").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn mux_output_passes_the_timing_before_the_video_file() {
+    for (timing, expected) in [
+        (MuxTiming::Stream { sync_ms: 0 }, None),
+        (MuxTiming::Stream { sync_ms: 2000 }, Some("--sync 0:2000")),
+        (
+            MuxTiming::File(PathBuf::from("/t/video.timestamps.txt")),
+            Some("--timestamps 0:/t/video.timestamps.txt"),
+        ),
+    ] {
+        let Some(fake) = FakeTools::new("mux_output_passes_the_timing_before_the_video_file")
+        else {
+            return;
+        };
+        let bl_rpu = fake.temp.join("BL_RPU.hevc");
+        fs::write(&bl_rpu, b"bl+rpu").unwrap();
+        fake.script("mkvmerge", &writes("muxed"));
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        let muxed = mux_output(
+            fake.input(),
+            &bl_rpu,
+            &fake.output,
+            &fake.temp,
+            false,
+            &args,
+            &timing,
+        )
+        .unwrap();
+        assert!(muxed);
+        let calls = fake.calls("mkvmerge");
+        let video_then_source = format!("{} --no-video {}", bl_rpu.display(), fake.input());
+        let tail = match expected {
+            Some(option) => format!("{option} {video_then_source}"),
+            None => video_then_source.clone(),
+        };
+        assert_eq!(calls.len(), 1, "{timing:?}");
+        assert!(calls[0].ends_with(&tail), "{timing:?}: {}", calls[0]);
+        if expected.is_none() {
+            assert!(!calls[0].contains("--sync") && !calls[0].contains("--timestamps"));
+        }
+    }
+}
+
+// P5.1: the `hdr10plus_tool extract --skip-reorder` fallback, against a real HDR10+ stream.
+
+/// The frames of [`seal_hdr10plus_stream`]'s stream, the count given to the encoder.
+#[cfg(unix)]
+const HDR10PLUS_STREAM_FRAMES: u64 = 4;
+
+/// Runs `command`; panics with its stderr when it fails.
+#[cfg(unix)]
+fn run_fixture_tool(command: &mut std::process::Command) {
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{command:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A [`FakeTools`] sandbox whose temp dir holds a sealed `video.hevc` of
+/// [`HDR10PLUS_STREAM_FRAMES`] frames with an HDR10+ payload each, encoded by ffmpeg (libx265)
+/// and injected by the real `hdr10plus_tool`. `None` (after a skip message) without the tools.
+#[cfg(unix)]
+fn seal_hdr10plus_stream(test: &str) -> Option<FakeTools> {
+    let fake = FakeTools::new(test)?;
+    if !shimmed_tools().is_some_and(|tools| tools.contains(&"hdr10plus_tool")) {
+        println!("Skipping {test}: hdr10plus_tool not found in PATH");
+        return None;
+    }
+    let encoders = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .unwrap();
+    if !String::from_utf8_lossy(&encoders.stdout).contains("libx265") {
+        println!("Skipping {test}: ffmpeg has no libx265 encoder");
+        return None;
+    }
+    // Built in the sandbox before any tool is scripted, so the shims run the real tools.
+    let plain = fake.dir.path().join("plain.hevc");
+    run_fixture_tool(
+        std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=128x72:r=24",
+                "-frames:v",
+                &HDR10PLUS_STREAM_FRAMES.to_string(),
+                "-c:v",
+                "libx265",
+                "-preset",
+                "ultrafast",
+                "-x265-params",
+                "log-level=error:bframes=0:colorprim=bt2020:transfer=smpte2084:\
+                 colormatrix=bt2020nc",
+                "-pix_fmt",
+                "yuv420p10le",
+                "-f",
+                "hevc",
+                "-y",
+            ])
+            .arg(&plain),
+    );
+    let frame = |index: u64| {
+        json!({
+            "BezierCurveData": {"Anchors": [102, 205, 307, 410, 512, 614, 717, 819, 922],
+                                "KneePointX": 0, "KneePointY": 0},
+            "LuminanceParameters": {
+                "AverageRGB": 300,
+                "LuminanceDistributions": {
+                    "DistributionIndex": [1, 5, 10, 25, 50, 75, 90, 95, 99],
+                    "DistributionValues": [0, 10, 100, 200, 300, 400, 500, 600, 1000],
+                },
+                "MaxScl": [0, 0, 0],
+            },
+            "NumberOfWindows": 1,
+            "TargetedSystemDisplayMaximumLuminance": 400,
+            "SceneFrameIndex": index,
+            "SceneId": 0,
+            "SequenceFrameIndex": index,
+        })
+    };
+    let metadata = json!({
+        "JSONInfo": {"HDR10plusProfile": "B", "Version": "1.0"},
+        "SceneInfo": (0..HDR10PLUS_STREAM_FRAMES).map(frame).collect::<Vec<_>>(),
+        "SceneInfoSummary": {"SceneFirstFrameIndex": [0],
+                             "SceneFrameNumbers": [HDR10PLUS_STREAM_FRAMES]},
+        "ToolInfo": {"Tool": "hdr10plus_tool", "Version": "1.7.2"},
+    });
+    let metadata_path = fake.dir.path().join("hdr10plus.json");
+    fs::write(&metadata_path, metadata.to_string()).unwrap();
+    let hevc = fake.temp.join(hdr10plus::HDR10PLUS_HEVC);
+    run_fixture_tool(
+        std::process::Command::new("hdr10plus_tool")
+            .arg("inject")
+            .arg("-i")
+            .arg(&plain)
+            .arg("-j")
+            .arg(&metadata_path)
+            .arg("-o")
+            .arg(&hevc),
+    );
+    resume::mark_done(&hevc).unwrap();
+    Some(fake)
+}
+
+/// `extract_hdr10plus_metadata` on the sealed stream of `fake`, resuming so that it extracts
+/// from that stream.
+#[cfg(unix)]
+fn extract_sealed_hdr10plus(fake: &FakeTools) -> Option<PathBuf> {
+    hdr10plus::extract_hdr10plus_metadata(fake.input(), &fake.temp, true, 0).unwrap()
+}
+
+#[cfg(unix)]
+fn is_skip_reorder(call: &str) -> bool {
+    call.split(' ').any(|arg| arg == "--skip-reorder")
+}
+
+/// hdr10plus_tool whose normal extraction fails and whose `--skip-reorder` run is the real tool.
+#[cfg(unix)]
+const REORDER_FAILS: &str = r#"case " $* " in *" --skip-reorder "*) exec "$REAL" "$@" ;; esac
+echo 'scripted: reordering failed' >&2
+exit 1
+"#;
+
+#[cfg(unix)]
+#[test]
+fn a_failed_hdr10plus_extract_retries_with_skip_reorder_and_takes_its_json() {
+    let Some(fake) = seal_hdr10plus_stream(
+        "a_failed_hdr10plus_extract_retries_with_skip_reorder_and_takes_its_json",
+    ) else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let json_path = extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+
+    assert_eq!(json_path, fake.temp.join("hdr10plus_metadata.json"));
+    assert!(resume::is_complete(&json_path), "sealed for resume");
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[0]), "{}", calls[0]);
+    assert!(is_skip_reorder(&calls[1]), "{}", calls[1]);
+    // The frame count of the fallback's JSON is the video's: the encoder's count, which the
+    // payload scan of the same stream confirms.
+    assert_eq!(
+        hdr10plus_coverage::scene_info_frames(&json_path),
+        Some(HDR10PLUS_STREAM_FRAMES)
+    );
+    let counted = hdr10plus_coverage::count_sealed(&fake.temp, false).unwrap();
+    assert_eq!(counted.access_units, HDR10PLUS_STREAM_FRAMES);
+    // The first log keeps the failure of the normal extraction.
+    let log = fs::read_to_string(fake.temp.join(hdr10plus::HDR10PLUS_TOOL_LOG)).unwrap();
+    assert!(log.contains("scripted: reordering failed"), "{log}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_resumed_run_keeps_the_skip_reorder_marker_of_the_json_it_reuses() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_resumed_run_keeps_the_skip_reorder_marker_of_the_json_it_reuses")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let marker = fake.temp.join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+    extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+    assert!(marker.exists(), "the fallback marks its JSON");
+
+    // The resumed run reuses the sealed JSON without running the tool, and the marker that
+    // makes it warn again stays.
+    let reused = extract_sealed_hdr10plus(&fake).expect("the sealed JSON is reused");
+    assert_eq!(reused, fake.temp.join("hdr10plus_metadata.json"));
+    assert_eq!(fake.calls("hdr10plus_tool").len(), 2);
+    assert!(
+        marker.exists(),
+        "the reused JSON still came from --skip-reorder"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_normal_extract_after_a_fallback_removes_the_skip_reorder_marker() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_normal_extract_after_a_fallback_removes_the_skip_reorder_marker")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let json_path = extract_sealed_hdr10plus(&fake).expect("the fallback extracts");
+    let marker = fake.temp.join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER);
+    assert!(marker.exists(), "the fallback marks its JSON");
+
+    // A later run re-extracts (the JSON is no longer sealed) and the normal extraction works.
+    resume::invalidate(&json_path).unwrap();
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    extract_sealed_hdr10plus(&fake).expect("the normal extraction works");
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[2]), "{}", calls[2]);
+    assert!(
+        !marker.exists(),
+        "a normal JSON carries no --skip-reorder marker"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_working_hdr10plus_extract_runs_once_without_skip_reorder() {
+    let Some(fake) =
+        seal_hdr10plus_stream("a_working_hdr10plus_extract_runs_once_without_skip_reorder")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    let json_path = extract_sealed_hdr10plus(&fake).expect("the normal extraction works");
+
+    assert!(resume::is_complete(&json_path), "sealed for resume");
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[0]), "{}", calls[0]);
+    assert_eq!(
+        hdr10plus_coverage::scene_info_frames(&json_path),
+        Some(HDR10PLUS_STREAM_FRAMES)
+    );
+    assert!(!fake
+        .temp
+        .join(hdr10plus::HDR10PLUS_SKIP_REORDER_LOG)
+        .exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_hdr10plus_extract_whose_fallback_fails_too_extracts_nothing() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_hdr10plus_extract_whose_fallback_fails_too_extracts_nothing")
+    else {
+        return;
+    };
+    // Each run leaves a partial JSON: neither may pass for an extraction.
+    fake.script(
+        "hdr10plus_tool",
+        r#"printf '{"partial":' > "$OUT"
+case " $* " in *" --skip-reorder "*) echo 'scripted: fallback failed' >&2; exit 1 ;; esac
+echo 'scripted: normal failed' >&2
+exit 1
+"#,
+    );
+    assert_eq!(extract_sealed_hdr10plus(&fake), None);
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(is_skip_reorder(&calls[1]), "{}", calls[1]);
+    assert!(!resume::is_complete(
+        &fake.temp.join("hdr10plus_metadata.json")
+    ));
+    let read = |name| fs::read_to_string(fake.temp.join(name)).unwrap();
+    let normal = read(hdr10plus::HDR10PLUS_TOOL_LOG);
+    assert!(normal.contains("scripted: normal failed"), "{normal}");
+    let fallback = read(hdr10plus::HDR10PLUS_SKIP_REORDER_LOG);
+    assert!(fallback.contains("scripted: fallback failed"), "{fallback}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_partial_json_of_the_failed_extract_does_not_pass_for_the_fallbacks() {
+    let Some(fake) = seal_hdr10plus_stream(
+        "a_partial_json_of_the_failed_extract_does_not_pass_for_the_fallbacks",
+    ) else {
+        return;
+    };
+    // The normal run leaves a partial JSON and fails; the fallback exits 0 and writes nothing.
+    fake.script(
+        "hdr10plus_tool",
+        r#"case " $* " in *" --skip-reorder "*) exit 0 ;; esac
+printf '{"partial":' > "$OUT"
+exit 1
+"#,
+    );
+    assert_eq!(extract_sealed_hdr10plus(&fake), None);
+    assert_eq!(fake.calls("hdr10plus_tool").len(), 2);
+    assert!(!fake.temp.join("hdr10plus_metadata.json").exists());
+}
+
+/// `acquire_measurements` in `mode` on the sealed stream of `fake`, with measurements next to
+/// the input that a hybrid reuses (the input gets the size their sidecar records).
+#[cfg(unix)]
+fn acquire_from_sealed_stream(fake: &FakeTools, mode: Hdr10PlusMode) -> Result<Option<Measured>> {
+    fs::write(&fake.input, b"src").unwrap();
+    measurements_for_four_frames(fake.dir.path());
+    let mut argv = vec!["mkvdovi"];
+    argv.extend_from_slice(&ACCURATE);
+    let args = Args::try_parse_from(argv).unwrap();
+    let (mut total, mut current) = (total_steps_for(HdrFormat::Hdr10Plus), 1);
+    acquire_measurements(
+        fake.input(),
+        &fake.temp,
+        &args,
+        true,
+        None,
+        HdrFormat::Hdr10Plus,
+        mode,
+        None,
+        None,
+        &mut total,
+        &mut current,
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_explicit_hybrid_refuses_the_json_of_the_skip_reorder_fallback")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", REORDER_FAILS);
+    let refused = acquire_from_sealed_stream(&fake, Hdr10PlusMode::ExplicitHybrid);
+    assert!(matches!(refused, Ok(None)), "an explicit hybrid stops");
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert!(is_skip_reorder(&calls[1]), "{}", calls[1]);
+    assert!(fake
+        .temp
+        .join(hdr10plus::HDR10PLUS_SKIP_REORDER_MARKER)
+        .exists());
+    // Refused before the payload count, the first check after the extraction.
+    assert!(!fake.temp.join(hdr10plus_coverage::COVERAGE_FILE).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback() {
+    for (mode, hdr_type) in [
+        (
+            Hdr10PlusMode::ImplicitHybrid,
+            HdrFormat::Hdr10WithMeasurements,
+        ),
+        (Hdr10PlusMode::Metadata, HdrFormat::Hdr10Plus),
+    ] {
+        let Some(fake) = seal_hdr10plus_stream(
+            "the_default_and_the_metadata_mode_take_the_json_of_the_skip_reorder_fallback",
+        ) else {
+            return;
+        };
+        fake.script("hdr10plus_tool", REORDER_FAILS);
+        let measured = acquire_from_sealed_stream(&fake, mode)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{mode:?} converts with the fallback's JSON"));
+
+        assert_eq!(fake.calls("hdr10plus_tool").len(), 2, "{mode:?}");
+        assert_eq!(measured.hdr10plus_mode, mode);
+        assert_eq!(measured.hdr_type, hdr_type, "{mode:?}");
+        assert_eq!(
+            measured.hdr10plus_json,
+            Some(fake.temp.join("hdr10plus_metadata.json")),
+            "{mode:?}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_explicit_hybrid_takes_the_json_of_a_normal_extraction() {
+    let Some(fake) =
+        seal_hdr10plus_stream("an_explicit_hybrid_takes_the_json_of_a_normal_extraction")
+    else {
+        return;
+    };
+    fake.script("hdr10plus_tool", "exec \"$REAL\" \"$@\"\n");
+    let measured = acquire_from_sealed_stream(&fake, Hdr10PlusMode::ExplicitHybrid)
+        .unwrap()
+        .expect("a normal extraction takes the hybrid");
+
+    let calls = fake.calls("hdr10plus_tool");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(!is_skip_reorder(&calls[0]), "{}", calls[0]);
+    assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::ExplicitHybrid);
+    assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
+    assert!(fake.temp.join(hdr10plus_coverage::COVERAGE_FILE).exists());
 }

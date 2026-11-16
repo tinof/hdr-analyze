@@ -1,0 +1,16 @@
+{
+  "review-readonly": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$HOME/.gemini/hooks/review-readonly.py\" || printf '%s\\n' '{\"decision\":\"deny\",\"reason\":\"Read-only reviewer: the command guard failed to run, so the command is refused.\"}'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

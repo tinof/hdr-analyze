@@ -98,7 +98,7 @@ either `mediainfo` or `ffprobe` are on `PATH`, and it stops if one is missing.
 | `mkvmerge` | Final MKV packaging (part of MKVToolNix) | [mkvtoolnix.download](https://mkvtoolnix.download/) |
 | `dovi_tool` | RPU generation, injection and inspection | [github.com/quietvoid/dovi_tool](https://github.com/quietvoid/dovi_tool) |
 | `mediainfo` | Recommended. Source of MaxCLL, MaxFALL and mastering-display luminance for L6, and of mastering primaries for L9 | [mediaarea.net](https://mediaarea.net/en/MediaInfo) |
-| `ffprobe` | Accepted by the startup check in place of MediaInfo, and used for transfer detection. Also required for `inspect` and `--verify`, so keep it on `PATH` even when MediaInfo is installed | Ships with FFmpeg |
+| `ffprobe` | Accepted by the startup check in place of MediaInfo, and used for transfer detection. Also required for `inspect` and `--verify`, and used on every conversion to check the output's video timestamps against the source's, so keep it on `PATH` even when MediaInfo is installed | Ships with FFmpeg |
 | `hdr10plus_tool` | HDR10+ input only | [github.com/quietvoid/hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool) |
 
 Notes:
@@ -106,6 +106,9 @@ Notes:
 - Install MediaInfo for normal conversions. With only `ffprobe`, the startup check passes, but
   `mkvdovi` cannot read the source mastering metadata. L6 then uses default values and L9 assumes
   BT.2020 primaries, each with a warning. `--source-primaries` overrides L9.
+- Without `ffprobe` on `PATH` the startup check still passes with MediaInfo alone, but no run can
+  read the source's video frame times: each conversion muxes with the stream's own timing, warns,
+  skips the timing check and keeps the source. The same holds for a non-Matroska input.
 - `dovi_tool` 2.3.2 is the minimum version. `mkvdovi` relies on its fix for duplicated end padding
   in `inject-rpu`. The startup check does not verify this version, so check it yourself with
   `dovi_tool --version`.

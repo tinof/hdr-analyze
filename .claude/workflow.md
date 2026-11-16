@@ -8,7 +8,7 @@ turns that part off. A diff that touches this file is always Tier 2.
 ## Settings
 
 ```
-contract:       1.1
+contract:       1.2
 repo:           tinof/hdr-analyze
 base:           main
 merge:          squash
@@ -42,6 +42,9 @@ review-surfaces: exec github
 - `tool:rpu_builder_check`: `cargo fmt --manifest-path tools/rpu_builder_check/Cargo.toml -- --check && cargo clippy --manifest-path tools/rpu_builder_check/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/rpu_builder_check/Cargo.toml`; paths `'tools/rpu_builder_check/*.rs'` `'tools/rpu_builder_check/*Cargo.toml'` `'tools/rpu_builder_check/*Cargo.lock'` `'dovi_rpu_builder/'`; where `local`.
 - `gemini-harness`: `.claude/workflows/tests/pre-pr-gemini-test.sh`; paths `'.claude/workflows/pre-pr-gemini.*'` `'.claude/workflows/tests/'` `'.agents/agents/pre-pr-reviewer.md'`; where `local`.
 - `pre-pr-record`: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`; paths `'.claude/skills/pre-pr-review/clear-record.sh'` `'.claude/skills/pre-pr-review/tests/'`; where `local`.
+- `reviewer-yield`: `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh`; paths `'.claude/skills/pre-pr-review/reviewer-yield.sh'` `'.claude/skills/pre-pr-review/tests/'`; where `local`.
+- `rust-check-hook`: `.claude/hooks/tests/rust-check-hold-test.sh`; paths `'.claude/hooks/'`; where `local`.
+- `panel-trigger`: `.claude/workflows/tests/pre-pr-panel-trigger-test.sh`; paths `'.claude/workflows/pre-pr-panel.js'` `'.claude/workflows/tests/pre-pr-panel-trigger-test.sh'`; where `local`.
 
 ## Tier 2 paths
 
@@ -153,6 +156,10 @@ fork delivers. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.
 - Changelog heading for unreleased work: `## [Unreleased]` in `CHANGELOG.md`.
 - The **Release plan** table in `ROADMAP.md` names which steps ship in which release.
 
+## Unattended
+
+none
+
 ## Codex notes
 
 - Codex's sandbox has no GPU and no access to `~/mkvdovi-work`; CUDA parity and corpus checks are decided by
@@ -166,14 +173,37 @@ none
 
 ## Notes
 
+**Hard steps** (`/ship:roadmap-next` step 9.1, and the Fable reviewer of the pre-PR panel). Besides the
+general criteria (a design decision with a real trade-off, a change that must stay consistent across two or
+more components, an unknown root cause, about 300 changed logic lines or more), a step is hard in this
+repository when it holds:
+- numeric work mirrored on CPU and CUDA: `hdr_analyzer_mvp/src/analysis/` with `kernels.cu`, or
+  `dovi84_composer/src/`. The f32 operation order must match on both sides, and `scripts/cuda-parity.sh`
+  proves it;
+- two or more sides of a cross-binary contract (`CLAUDE.md` "Cross-binary contracts"): the analyzer side
+  (`l1_sidecar`, `cli`, `au_table`), the mkvdovi side that reads it (`metadata`, `external`,
+  `pipeline/measure`, `pipeline/manifest`), and `tools/l1_diff`.
+`.claude/workflows/pre-pr-panel.js` reads these two from the paths (`numeric`, `contractSides`); change both
+together. A builder agent (`opus-professor`, `fable-builder`) works under a hold file,
+`<git dir>/claude-builder.<run>.hold`, which `.claude/hooks/rust-check.sh` honors.
+
+`/ship:roadmap-batch` (contract 1.2, owner decisions 2026-11-15). `self-review` is left out on purpose, so
+a batch runs in routed mode: Claude builds, and each PR gets `/ship`'s review by the routing row before it
+merges (Gemini while Codex is disabled). Batch builds only steps tagged `[batch]` in `ROADMAP.md`. It does
+not read the Release plan or the E13 sequencing rule, so a step that either one holds back stays untagged.
+`## Unattended` is `none`: the repository deploys no service, and the pure moves E13.18 and E13.19 keep the
+normal review, because the line-exact move proof lives outside the repository (`/pre-pr-review`, "Pure move").
+
 `## Routing` is the plugin's default table without Gemini (owner decision 2026-10-24). Gemini (agy) had one
-confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the model that might change that,
-Gemini 4 Archon, is not available on this account yet. Gemini stays parked until it is; then the default
-rows come back. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
+confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the Gemini 4 models did not change that:
+on the 14 cases of `.claude/review-eval/cases.json` (24 known defects, 2026-11-14) Hydrogen high reported 1
+as P0/P1 and 2 as minor notes, Argon medium none, Argon high 2 minor in 10 cases, Carbon medium (diff only)
+2 minor in 10 cases, and Hydrogen xhigh 2 P0/P1 and 1 minor in 12 cases. Gemini
+stays parked; the owner decides when a new result justifies the default rows. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
 the round stays Tier 2 as `tier2Mode: single-family`, and both surfaces must complete. A diff that touches
 this file is reviewed under the base's routing and surfaces, and still shows the owner its diff before
 the merge. The standalone
-`/pre-pr-review` Gemini pass is not part of `/ship` and stays as it is; so does the `gemini-harness` entry
+`/pre-pr-review` Gemini pass is not part of `/ship` and runs only with `--gemini`; the `gemini-harness` entry stays
 in `## Gates`, which `/ship` still runs when its paths change.
 
 `review-surfaces: exec github` (contract 1.1, ship plugin 1.3.0): the `codex` reviewer is the local cold
@@ -204,7 +234,9 @@ check of `scripts/ci/check-test-skips.sh`.
 `review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff` and
 `gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push. In CI the
 Rust jobs skip on a PR that changes only `gate-skip` paths, and `gemini-harness` runs only when its paths change.
-`pre-pr-record` (the test of `/pre-pr-review`'s record cleanup) runs only locally, not in CI.
+`pre-pr-record` (the test of `/pre-pr-review`'s record cleanup), `reviewer-yield` (the test of its
+reviewer-yield observer), `rust-check-hook` (the Stop hook's builder-hold test) and `panel-trigger` (the
+panel's Fable decision and gate list, through its `gatesOnly` mode under node) run only locally, not in CI.
 
 `gate-focused` runs `scripts/ci/test-gate.sh` with a test filter: it builds the analyzer next to mkvdovi and
 applies the same skip check, so a focused test that prints `Skipping` fails instead of passing silently. Do not

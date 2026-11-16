@@ -20,10 +20,15 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
 - HDR10: the base layer is copied unchanged. When no compatible measurements exist, `mkvdovi`
   runs `hdr_analyzer_mvp` and supplies its measurements to `dovi_tool generate`.
 - HDR10+: the base layer is copied unchanged. Source HDR10+ metadata is extracted with
-  `hdr10plus_tool`. The file falls back to HDR10
-  analysis only when extraction runs but yields no metadata (the stream carries no dynamic metadata,
-  or the extraction step exits with an error or writes an empty file). `hdr10plus_tool` is not
-  checked at startup, and if it cannot be started the file fails instead of falling back.
+  `hdr10plus_tool`. When extraction runs but yields no metadata (the step exits with an error or
+  writes an empty file), mkvdovi scans the stream for HDR10+ payloads. With none, the file falls
+  back to HDR10 analysis. With payloads that `hdr10plus_tool` could not extract, the default and
+  `--hdr10plus-l1 hdr10plus` warn with the counts and fall back to HDR10 analysis; an explicit
+  `--hdr10plus-l1 hybrid` refuses the file, also when every frame carries a payload.
+  `hdr10plus_tool` is not checked at startup, and if it cannot be started the file fails instead
+  of falling back. mkvdovi also counts the frames that carry their own payload next to extracted
+  metadata (`hdr10plus_tool` gives a frame without one the previous frame's): partial coverage
+  warns with the counts under the default and `hdr10plus`.
   By default (`--hdr10plus-l1 hybrid`) the analyzer also runs and writes its measurements next to
   the input. Scenes are the union of the HDR10+ starts and the analyzer's cuts; the peak per piece
   comes from HDR10+, the average and minimum from the measured frames, and L5 and measured L6 light
@@ -32,8 +37,10 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   uses that path with a warning: `--analysis-quality fast`, `--legacy-madvr-l1`, a missing or older
   analyzer, a malformed HDR10+ scene list (including a first start other than 0), a failed
   analysis, an unusable sidecar, or an HDR10+ frame count other than the stream's. An explicit
-  `--hdr10plus-l1 hybrid` refuses those files (source kept; an older analyzer only when analysis
-  has to run) and cannot be combined with `--legacy-madvr-l1`.
+  `--hdr10plus-l1 hybrid` refuses those files, partial payload coverage, a coverage count that
+  fails (next to extracted metadata, or when `hdr10plus_tool` extracted nothing) and metadata from
+  the `--skip-reorder` retry (source kept; an older analyzer only when analysis has to run) and
+  cannot be combined with `--legacy-madvr-l1`.
 - HLG: the base layer is copied unchanged and the output is Dolby Vision Profile 8.4 (HLG
   backward-compatible). A Profile 8.4 RPU carries a reshaping curve set, the composer, that a Dolby
   Vision decoder uses to turn the HLG signal into PQ. `--hlg-composer` selects it. `preset` is
@@ -238,8 +245,10 @@ When the selected HDR10+ source produces scene L1 peaks above three times the ma
 `mkvdovi` warns and preserves the source metadata. Real sources can contain valid outliers, so peaks
 are never silently clamped.
 
-`hdr10plus_tool extract --skip-reorder` is not currently retried when ordinary extraction fails; that
-fallback remains on the roadmap.
+When ordinary `hdr10plus_tool extract` fails, `mkvdovi` retries it with `--skip-reorder` (the tool's
+workaround for misauthored HEVC files; log `hdr10plus_tool_skip_reorder.log`). That metadata keeps the
+bitstream order and is not reordered to display order. The default and `--hdr10plus-l1 hdr10plus` use
+it with a warning; an explicit `--hdr10plus-l1 hybrid` refuses it before analysis, also on resume.
 
 ## CM v4.0 metadata
 
@@ -334,7 +343,11 @@ the final RPU and validates structured `dovi_tool info --frame 0` JSON: Profile 
 sane L6 metadata, the CM version `--cm-version` asked for (CM v4.0 metadata fails a v29 run, its
 absence fails a v40 run), and required L9/L11/L254 blocks for CM v4.0. It fails when the RPU frame count
 differs from the muxed video track's frame count or from the L1 sidecar, and warns when the output
-and input video frame counts differ. For an RPU that `mkvdovi` generated (every path except the
+and input video frame counts differ. It reads the output's Dolby Vision configuration record with
+ffprobe and fails unless it shows Profile 8, a level, RPU and base layer present, no enhancement
+layer, and compatibility ID 1 for PQ or 4 for HLG; a PQ output with another ID also gets a hint
+that the source VUI probably lacks the PQ transfer tag. When ffprobe cannot run, or shows no record
+(an older ffprobe does not read it from Matroska), the check is skipped with a warning. For an RPU that `mkvdovi` generated (every path except the
 Profile 7 MEL passthrough), the RPU is parsed in-process, which also gives the frame count. Every
 frame must then carry the expected source range: for 8.1 the mastering display range (not checked
 when the mastering values are implausible and `dovi_tool` derives the range from L6, which the
@@ -344,7 +357,10 @@ the maximum); any other difference fails. The output reports how many scenes tho
 per field and by how much (one line per scene with `--verbose`). It also notes scenes whose L1 max
 lies above `source_max_pq`. HDR10+ output from the hybrid is compared with the
 hybrid pieces. HDR10+ output from the metadata path and `--legacy-madvr-l1` output are not compared with
-the measurements, because their L1 does not come from them. For HLG output it also
+the measurements, because their L1 does not come from them. On every frame, generated or passed
+through, it fails two L8 blocks or two L10 blocks for the same target display, and an L8 target that
+is neither a preset display (24 and 25 included) nor an L10 block of the same frame; an RPU the
+`dolby_vision` parser cannot read (an L253 block, for example) skips this check with a warning. For HLG output it also
 fails when no measurements are available or the L1 sidecar does not load, and it checks that every
 RPU frame carries the composer the sidecar names (`dovi84-v3` = preset,
 `dovi84-bt2100-v1-spec420` = bt2100), so a measurement is never paired with an RPU of another composer. Missing source L6 fields or

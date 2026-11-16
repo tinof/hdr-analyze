@@ -290,67 +290,116 @@ fn check_parity(
             "{label}: CPU and CUDA AU tables differ"
         );
     }
-    // Peak candidates and grain statistics per frame. With the robust estimator every column
-    // must be equal: sigma and the effective tail count come from the cross-quad difference
-    // histogram, so this proves the kernel counts like the CPU. Without it the GPU does not
-    // gather that histogram and reports neutral grain statistics.
-    if extra_args.contains(&"robust") {
-        assert_eq!(
-            cpu.frame_stats.lines().count(),
-            frame_count + 1,
-            "{label}: frame-stats rows"
-        );
-        // The last column, the unrounded max-RGB average, comes from an f64 sum on the CPU and a
-        // u64 fixed-point sum (truncated to 2^-32 per pixel) on the GPU, so it agrees only to
-        // within that truncation; every other column must be equal.
-        let split = |row: &str| -> (String, Option<f64>) {
-            match row.rsplit_once(',') {
-                Some((head, last)) => (head.to_string(), last.parse().ok()),
-                None => (row.to_string(), None),
-            }
-        };
-        assert_eq!(
-            cpu.frame_stats.lines().count(),
-            gpu.frame_stats.lines().count(),
-            "{label}: frame statistics differ in length"
-        );
-        for (line, (cpu_row, gpu_row)) in cpu
-            .frame_stats
-            .lines()
-            .zip(gpu.frame_stats.lines())
-            .enumerate()
-        {
-            let ((cpu_head, cpu_avg), (gpu_head, gpu_avg)) = (split(cpu_row), split(gpu_row));
-            let averages_agree = match (cpu_avg, gpu_avg) {
-                (Some(a), Some(b)) => (a - b).abs() <= 1e-9,
-                _ => line == 0 && cpu_row == gpu_row,
-            };
-            assert!(
-                cpu_head == gpu_head && averages_agree,
-                "{label}: frame statistics differ at line {line}:\n  cpu {cpu_row}\n  gpu {gpu_row}"
-            );
-        }
-        let corrected = cpu
-            .frame_stats
-            .lines()
-            .skip(1)
-            .filter(|row| {
-                row.split(',')
-                    .nth(6)
-                    .is_some_and(|value| value != "0.000000000000")
-            })
-            .count();
-        assert!(
-            corrected > 0,
-            "{label}: no frame carries a grain correction"
-        );
-        eprintln!("{label}: {corrected} of {frame_count} frames carry a grain correction");
-    }
+    check_frame_stats(label, &cpu, &gpu, frame_count, extra_args);
     eprintln!(
         "{label}: identical ({frame_count} frames, {} bytes)",
         cpu.bin.len()
     );
     cpu.bin
+}
+
+/// Compares the `--dump-frame-stats` CSVs of a CPU and a CUDA run.
+// Peak candidates and grain statistics per frame. With the robust estimator every column
+// must be equal: sigma and the effective tail count come from the cross-quad difference
+// histogram, so this proves the kernel counts like the CPU. Without it the GPU does not
+// gather that histogram and reports neutral grain statistics. With st2094-10 the
+// reduced-set columns must be equal too: they come from their own kernel.
+fn check_frame_stats(label: &str, cpu: &Run, gpu: &Run, frame_count: usize, extra_args: &[&str]) {
+    let robust = extra_args.contains(&"robust");
+    let reduced_set = extra_args.contains(&"st2094-10");
+    if robust || reduced_set {
+        assert_eq!(
+            cpu.frame_stats.lines().count(),
+            frame_count + 1,
+            "{label}: frame-stats rows"
+        );
+        assert_eq!(
+            cpu.frame_stats.lines().count(),
+            gpu.frame_stats.lines().count(),
+            "{label}: frame statistics differ in length"
+        );
+        let header: Vec<&str> = cpu
+            .frame_stats
+            .lines()
+            .next()
+            .expect("frame-stats header")
+            .split(',')
+            .collect();
+        assert_eq!(
+            gpu.frame_stats.lines().next(),
+            cpu.frame_stats.lines().next(),
+            "{label}: frame-stats headers differ"
+        );
+        let column = |name: &str| {
+            header
+                .iter()
+                .position(|&column| column == name)
+                .unwrap_or_else(|| panic!("{label}: frame-stats CSV has no `{name}` column"))
+        };
+        // The unrounded max-RGB average comes from an f64 sum on the CPU and a u64 fixed-point
+        // sum (truncated to 2^-32 per pixel) on the GPU, so it agrees only to within that
+        // truncation; every other column must be equal.
+        let average = column("avg_max_rgb_pq");
+        for (line, (cpu_row, gpu_row)) in cpu
+            .frame_stats
+            .lines()
+            .zip(gpu.frame_stats.lines())
+            .enumerate()
+            .skip(1)
+        {
+            let (cpu_values, gpu_values): (Vec<&str>, Vec<&str>) =
+                (cpu_row.split(',').collect(), gpu_row.split(',').collect());
+            let agree = cpu_values.len() == header.len()
+                && gpu_values.len() == header.len()
+                && cpu_values.iter().zip(&gpu_values).enumerate().all(|(index, (a, b))| {
+                    if index == average {
+                        let parse = |value: &str| value.parse::<f64>().ok();
+                        matches!((parse(a), parse(b)), (Some(a), Some(b)) if (a - b).abs() <= 1e-9)
+                    } else {
+                        a == b
+                    }
+                });
+            assert!(
+                agree,
+                "{label}: frame statistics differ at line {line}:\n  cpu {cpu_row}\n  gpu {gpu_row}"
+            );
+        }
+        let rows = || {
+            cpu.frame_stats
+                .lines()
+                .skip(1)
+                .map(|row| row.split(',').collect::<Vec<_>>())
+        };
+        if robust {
+            let correction = column("correction_pq");
+            let corrected = rows()
+                .filter(|values| values[correction] != "0.000000000000")
+                .count();
+            assert!(
+                corrected > 0,
+                "{label}: no frame carries a grain correction"
+            );
+            eprintln!("{label}: {corrected} of {frame_count} frames carry a grain correction");
+        }
+        if reduced_set {
+            // The reduced-set maximum is the selected peak, and it never exceeds the raw pixel
+            // maximum (a block mean cannot exceed its brightest pixel's brightest component).
+            let (selected, raw) = (column("selected_pq"), column("raw_max_pq"));
+            let (high, low) = (column("reduced_max_pq"), column("reduced_min_pq"));
+            for values in rows() {
+                let parse = |index: usize| values[index].parse::<f64>().expect("numeric");
+                assert_eq!(
+                    values[selected], values[high],
+                    "{label}: selected is not reduced max"
+                );
+                assert!(
+                    parse(high) > 0.0 && parse(high) <= parse(raw) + 0.5 / 4095.0,
+                    "{label}: {values:?}"
+                );
+                assert!(parse(low) <= parse(high), "{label}: {values:?}");
+            }
+        }
+    }
 }
 
 // One test for all cases: parallel tests would run several CUDA processes at once.
@@ -421,6 +470,17 @@ fn cuda_output_matches_cpu() {
                 &args,
             );
         }
+    }
+
+    // The ST 2094-10 reduced set (PQ only): its own kernel, with crop detection and without.
+    for no_crop in [true, false] {
+        check_parity(
+            &format!("PQ, st2094-10, no_crop={no_crop}"),
+            &pq,
+            "pq",
+            no_crop,
+            &["--peak-estimator", "st2094-10", "--peak-source", "max"],
+        );
     }
 
     // The composer only affects HLG: a PQ run with a non-default composer is unchanged.

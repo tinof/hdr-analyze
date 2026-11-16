@@ -1,8 +1,8 @@
 # Playback manifest (P15)
 
-Status: design written 2026-11-04. The AU table (P15.1) and the manifest schema, parser and matcher
-in `dovi_rpu_builder::manifest` (P15.2) are implemented; `mkvdovi manifest` and the `RPU.bin`
-import are not yet (P15.3, P15.4). Steps: ROADMAP P15.
+Status: design written 2026-11-04. The AU table (P15.1), the manifest schema, parser and matcher
+in `dovi_rpu_builder::manifest` (P15.2), `mkvdovi manifest` (P15.3) and its `RPU.bin` import
+(`--rpu`, P15.4) are implemented. Steps: ROADMAP P15.
 
 ## Purpose
 
@@ -41,10 +41,25 @@ starts any analysis. That is the same pattern as `l1-sidecar-frame-peak`.
 - Refused before analysis: HDR10+ input (the fork has its own HDR10+ provider), Dolby Vision
   input, `--legacy-madvr-l1`, and non-Matroska input.
 - Refused by the packet pass: laced video blocks, a video packet without a pts, and two
-  video packets with the same pts.
-- Imported `RPU.bin` files (P15.4) are accepted only when they are reproducible from the manifest's
-  parameters and shot list, byte for byte for every AU. Storing arbitrary per-AU RPU payloads is
-  a question for a version 2.
+  video packets with the same pts. The analyzer then writes no AU table and `mkvdovi manifest`
+  refuses the file; the measurements and a normal `mkvdovi` conversion are unaffected.
+- One known source of a packet without a pts is an open-GOP cut made by an FFmpeg stream copy:
+  its leading RASL pictures can carry negative Matroska timestamps, and FFmpeg's demuxer gives
+  them no pts. An open-GOP file whose leading pictures carry valid timestamps (tested on an x265 cut
+  muxed by mkvmerge) is accepted.
+- **Decided (P15.5): such a cut stays refused**, measured and `--rpu` alike, and its conversion
+  works as before. Reading the raw Matroska block timestamps in the analyzer was rejected. The
+  refusal names the remedy: `mkvmerge -o <new>.mkv <input>` makes the timestamps non-negative and
+  keeps every packet. The remux works only when the cut's negative timestamps are distinct. On a
+  dev cut with two RASL pictures FFmpeg wrote -42 ms and -41 ms, and the remux was accepted. On
+  synthetic cuts with two or three RASL pictures, FFmpeg n9.0.2 wrote two of them with one
+  timestamp. Their remux is refused (two video packets with one pts), and only a new cut with
+  `mkvmerge --split` helps. `mkvdovi/tests/playback_manifest.rs` and `playback_manifest_rpu.rs`
+  pin the refusal and the remedy on a one-RASL cut. Both tests check that the remux's manifest
+  rebuilds the cut's conversion RPUs byte for byte.
+- Imported `RPU.bin` files (P15.4, "`RPU.bin` import" below) are accepted only when they are
+  reproducible from the manifest's parameters and shot list, byte for byte for every AU. Storing
+  arbitrary per-AU RPU payloads is a question for a version 2.
 
 ## AU table (`.au.json`, version 1)
 
@@ -98,14 +113,19 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
 
 - `format`: `"hdr-analyze.playback-manifest"`, and `version`: 1.
 - `producer`: mkvdovi version, analyzer version (with `+cuda`), sidecar version, AU table version,
-  `dovi_rpu_builder` version, and `sidecar_sha256`.
+  `dovi_rpu_builder` version, and `sidecar_sha256`. Under `l1_policy` `rpu-bin` the two sidecar
+  fields are null and `rpu_bin_sha256` names the imported file; a measured manifest has no
+  `rpu_bin_sha256` key. `validate()` refuses any other combination.
 - `source`: as in the AU table, plus `lookup_key` = SHA-256 of (size as a big-endian u64 ‖ head
-  digest ‖ tail digest). A plain HTTP folder can serve `<lookup_key>.dvmanifest.json`. The player
-  computes the key from one size lookup and two 1 MiB range reads.
+  digest ‖ tail digest), where the digests are their 32 raw bytes, not the hex text: 72 bytes are
+  hashed. A plain HTTP folder can serve `<lookup_key>.dvmanifest.json`. The player computes the
+  key from one size lookup and two 1 MiB range reads.
 - `track`: as in the AU table.
 - `aus`: as in the AU table.
 - `analysis`: `luminance_mapping` (`pq` or the HLG composer name), `downscale`, `sample_rate`,
-  `gpu`, `no_crop`, `crop`, the peak settings and `scene`.
+  `gpu`, `no_crop`, `crop`, the peak and denoise settings (`peak_domain`, `peak_estimator`,
+  `peak_source`, `peak_percentile`, `min_percentile`, `denoise_mode`) and `scene`, copied from the
+  sidecar and the AU table; a field they do not state is left out.
 - `rpu`: everything `RpuParams` needs, written and read by `RpuParams::{to,from}_manifest_json`:
   - `profile`: `"8.1"` or `"8.4"`;
   - `composer`: `"preset"` or `"bt2100"` for 8.4, null for 8.1 (the P8 canary is refused);
@@ -114,7 +134,7 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
     "content_type", "reference_mode", "trim_targets_nits"}`;
   - `level6`: the four `extra.json` fields; `level5`: `{left, right, top, bottom}` or null;
   - `l1_avg_pq_cm_version`: `"V29"` or `"V40"`.
-- `l1_policy`: `"measured"`, or `"rpu-bin"` for P15.4.
+- `l1_policy`: `"measured"`, or `"rpu-bin"` for an imported `RPU.bin` (P15.4).
 - `shots`: parallel arrays `start[]` (presentation index in stream frames, starting at 0),
   `min[]`, `avg[]` and `max[]` (12-bit PQ, unclamped, exactly as mkvdovi's `extra.json` gets
   them).
@@ -128,7 +148,73 @@ extractor knows each block's lace count and rejects the manifest on any laced vi
     server and on-device providers.
 
 **Parity.** For every AU, the builder's `shot(l1).write(scene_refresh)` from the manifest equals
-the RPU NAL that mkvdovi writes for the same file and settings. P15.3 tests this.
+the RPU NAL that mkvdovi writes for the same file and settings. P15.3 tests this
+(`mkvdovi/tests/playback_manifest.rs`): the source's packets go through `AuMatcher` in decode
+order and each built RPU is compared with the RPU of the same AU in the `--keep-source` output,
+for 8.1, 8.4 bt2100, VFR, a non-zero start, an open-GOP cut, CM v2.9, other trims and L9/L11, and a
+letterboxed source (L5).
+
+## `mkvdovi manifest`
+
+`mkvdovi manifest <input> [--out <file>] [--work-dir <dir>]` writes `<stem>.dvmanifest.json` into
+the work directory (default: the input's directory). It also takes the conversion flags that
+change L1 or the RPU, with the conversion's defaults: `--hlg-composer`, `--cm-version`,
+`--content-type`, `--reference-mode`, `--source-primaries`, `--trim-targets`,
+`--analysis-quality`, `--hwaccel`. Code: `mkvdovi/src/pipeline/manifest/`.
+
+- It never creates a temp directory, converts, muxes or deletes. It writes only
+  `<stem>_measurements.bin` with its `.l1.json` and `.au.json`, `<stem>.manifest-analyzer.log`
+  and the manifest (through `<out>.tmp`, created for the run, and a rename; an existing
+  `<out>.tmp` may be another run's, so it is refused, never removed). The analyzer writes the
+  `.l1.json` and `.au.json` through `.tmp` files too. Any of these paths, temp files included,
+  that names the input, also through a symlink or a hard link, is refused.
+- Refused before any analysis: input that is not Matroska (EBML DocType `matroska`), HDR10+,
+  Dolby Vision, an HLG or PQ stream that fails the conversion's colour contracts, an analyzer
+  whose `--help` does not name `au-table-v1`, and a missing `mediainfo` or `dovi_tool` (the
+  format detection needs both to tell Dolby Vision and HDR10+ from HDR10).
+- The measurements are the conversion's (`--transfer hlg`, `--hlg-composer`, the sampling of
+  `--analysis-quality`) plus `--au-table`. A pair already in the work directory is reused only
+  when the sidecar is valid for the input and composer, was sampled exactly as asked, the table
+  is version 1 and bound to these sidecar bytes, its structure passes the parser's AU rules, its
+  source still matches the file, and both count the same pictures and leading pictures.
+  Anything else is reported and analyzed again.
+- The RPU parameters come from the conversion's configuration phase
+  (`pipeline::config::settle_configuration`, `metadata::rpu_params`), so they equal `extra.json`'s,
+  except that an 8.4 manifest names the composer: the conversion installs it after
+  `dovi_tool generate`, and a player has no such step.
+- Coverage is one range over the stream. It is `full` when the files state downscale 1, sample
+  rate 1, `no_crop` false, scene `global`/`hist`/3.0/12, peak domain `max-rgb`, estimator and
+  source `max`, percentile 99.99, minimum percentile 0.1 and denoise `off` (the analyzer defaults
+  mkvdovi runs with); otherwise `approximate`.
+
+### `RPU.bin` import (`--rpu`, P15.4)
+
+`mkvdovi manifest <input> --rpu <RPU.bin>` makes the manifest from an RPU file instead of a
+measurement. Code: `mkvdovi/src/pipeline/manifest/import.rs`.
+
+- The file is read once. The parse goes through the source-RPU guard (`rpu_guard`, ROADMAP E15), and
+  the compared bytes and `producer.rpu_bin_sha256` come from the same buffer. The file is in display
+  order with one RPU per picture, each behind a 4-byte start code, with or without the `7C 01` NAL
+  header (`dovi_tool` writes it without).
+- The parameters come from the first picture's RPU: CM version, L2 trim targets (the roundest whole
+  nits with the same PQ code), L9, L11, L6, L5 (all zero is none) and the 8.1 source range.
+  `l1_avg_pq_cm_version` is V29, whose floor reproduces both generator settings. The profile comes from
+  the input. For HLG, `--hlg-composer` names the composer the file must carry.
+- The shots start at picture 0 and at every picture whose RPU sets `scene_refresh_flag`. Each shot
+  has that RPU's L1, already clamped.
+- The analyzer runs with `--au-table-only` into `<stem>.rpu-import.au.json`, so a measured pair is
+  never replaced. Nothing is measured, and the table is written afresh on every run.
+- Accepted only when the builder rebuilds every picture's RPU byte for byte. Otherwise the refusal
+  names the first picture, its AU in decode order, and what differs: the HLG composer, the
+  scene-refresh flag, L1 (per-frame L1), L2 (per-frame or authored trims), another level, or the
+  header or DM fields. A shot whose L1 lies outside the range `dovi_tool generate` writes is
+  named as such, since no manifest can carry it. A count that differs from the pictures is refused
+  before that.
+- `analysis` states only `luminance_mapping`, and the coverage is `approximate`. The flags that shape
+  the RPU or the measurement (`--cm-version`, `--content-type`, `--reference-mode`,
+  `--source-primaries`, `--trim-targets`, `--analysis-quality`) cannot be given with `--rpu`.
+- No path this run writes may be the input or the RPU file. Hard links are recognised only on Unix,
+  as for the input.
 
 ## Matching rule (`dovi_rpu_builder::manifest`)
 
