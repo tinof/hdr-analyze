@@ -6,6 +6,56 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-16: E17.1 `--verify` checks for authored L8 and L10 blocks (PR #129)
+
+Step: [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
+  `target_display_index` values, duplicate L10 target indices, an L8 target that resolves to
+  neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence
+  disagrees with the block length. First check what the `dolby_vision` crate (3.4.0) already
+  rejects at parse time, and drop the checks it covers. Gate: the item gate.
+
+Gate evidence, PR #129: unit tests in `mkvdovi/src/verify/authored_blocks.rs` round-trip crafted
+RPUs through the crate (`an_authored_rpu_and_a_generated_one_pass`, `a_duplicate_l8_target_fails`,
+`a_duplicate_l10_target_fails`, `an_l8_target_needs_a_preset_or_an_l10_block_of_its_frame`), and
+`verify_fails_on_an_l8_target_that_is_neither_a_preset_nor_an_l10_block` runs `--verify` on a
+generated clip; no existing `--verify` test changed. The field-presence check was dropped: the
+parser reads exactly the fields of the block length and the guard refuses a length without a
+layout. The E13 mkvdovi gate: see the entry "E17.1 parked on a disputed finding" below (16 of 16
+baseline compares identical, every real output consistent). CI green after one rerun of the
+lint job, whose runner failed to install the toolchain. The owner answered "merge anyway" on
+Gemini's DISPUTED P1 (2026-11-16, decision record on #129).
+
+Resolution: `--verify` checks the authored L8 and L10 blocks on every frame; an RPU the crate
+cannot parse skips the checks with a warning.
+
+### 2026-11-16: owner answers after `/ship:roadmap-batch` (no step closed)
+
+The owner took the recommended option on both questions the batch parked. E17.1: merge PR #129
+anyway, with F1 DISPUTED. `CLAUDE.md`: its `--verify` line names the E17.1 checks; to stay within
+24,000 bytes, the LSP position and cold-start detail moved to [`CI.md`](CI.md). Also from the run:
+the batch's self-review changed `/ship:roadmap-batch` (the CI wait takes its SHA from
+`git rev-parse`; a kept branch's old worktree is pruned first) and proposes that `CHANGELOG.md`
+and Markdown docs not block a batch pairing; that one waits for the owner.
+
+#### E17: `--verify` checks for authored CM v4.0 blocks (moved from the roadmap)
+
+- **Status:** Partial. E17.1 is built on `feat/e17-1-verify-authored-blocks` @d1c13d1, PR #129
+  open with `review:needs-human` (resumed 1): its one finding, Gemini P1 F1, is DISPUTED and
+  waits for the owner's merge decision. The DV record check is done (E17.2).
+- **Gate:** each check has a unit test where a crafted RPU fails and a well-formed authored-style
+  RPU passes; the existing `--verify` tests unchanged; the E13 mkvdovi gate passes.
+- [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8
+  `target_display_index` values, duplicate L10 target indices, an L8 target that resolves to
+  neither a preset nor an L10 block of the same frame, and optional L8 fields whose presence
+  disagrees with the block length. First check what the `dolby_vision` crate (3.4.0) already
+  rejects at parse time, and drop the checks it covers. Gate: the item gate.
+- **Decided 2026-11-15 (owner):** L8 targets 24 and 25 are presets (`trim_target_nits`); `--verify`
+  parses the MEL passthrough RPU through `rpu_guard` and warns and skips these checks on a crate limit.
+- **Decided 2026-11-16 (batch, recommended; owner may override):** the checks live in
+  `mkvdovi/src/verify/authored_blocks.rs`, as `verify.rs` is near its 800-line limit; not taken: a
+  split step. Any parse failure skips them with a warning, not only a guard refusal: the crate
+  refuses L253 with a plain error (`cmv40.rs:56-64`); not taken: failing valid MEL outputs.
+
 ### 2026-11-16: E17.1 parked on a disputed finding (batch, no step closed)
 
 `/ship:roadmap-batch` built E17.1 as PR #129 (`feat/e17-1-verify-authored-blocks` @d1c13d1). Its
