@@ -79,6 +79,9 @@ hooks run only where pre-commit is installed
   `${TMPDIR:-/tmp}/claude-rust-check/<session_id>/`. An incremental run takes about 2–4 s on the
   `/mnt/c` checkout. Tests do not run here; they run in the pre-push hook (where installed), the
   pre-PR test gate and CI.
+  The hook runs under macOS `/bin/bash` 3.2: no `mapfile`, no associative arrays, guarded
+  empty-array expansions, regexes in variables. Clippy runs under `timeout` 540 s, else
+  `gtimeout`, else unbounded (the 600 s hook timeout in `settings.json` still stops it).
   While a builder agent works in a checkout (`/ship:roadmap-next` step 9.4: `opus-professor`,
   `fable-builder`), the Stop hook skips that checkout: the skill writes
   `<git dir>/claude-builder.<run>.hold` before the builder starts and deletes it afterwards. The
@@ -87,7 +90,9 @@ hooks run only where pre-commit is installed
   checks them. Each touched file belongs to its own checkout (its git toplevel, not a path
   prefix), so a worktree nested under `.claude/worktrees/<name>` keeps its hold, and the main
   checkout's pass never formats its files. Test:
-  `.claude/hooks/tests/rust-check-hold-test.sh` (gate `rust-check-hook`). The local gate
+  `.claude/hooks/tests/rust-check-hold-test.sh` (gate `rust-check-hook`); it also fails on bash 4
+  syntax in the hook and checks clippy reporting and the timeout fallbacks.
+  `RUST_CHECK_TEST_BASH=/bin/bash` runs the hook under another shell. The local gate
   `panel-trigger` (`.claude/workflows/tests/pre-pr-panel-trigger-test.sh`) runs
   `.claude/workflows/pre-pr-panel.js` in `gatesOnly` mode under node and checks the Fable decision
   and the gate list; it is not in CI.
