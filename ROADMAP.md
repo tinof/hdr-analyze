@@ -151,10 +151,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    until its gate is met. Gate: per item (WS4: blinded A/B on a device; WS1 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); offline work reopened by
     the owner (2026-11-12), `mkvdovi` code after v0.9.0. Gate: none until a step states one.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, P5, WS0, WS6): the
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E17, E18, P3, WS0, WS6): the
     remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
     v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
-    provenance, open-GOP scoring and the HDR10+ extract fallback (E3, E6, E11, P5), `--verify`
+    provenance and open-GOP scoring (E3, E6, E11), `--verify`
     checks for authored CM v4.0 blocks (E17), hot-file byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
 12. **Library and player integration; a new output format** (P16, R3). Added 2026-11-14; ranked
