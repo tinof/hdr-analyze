@@ -6,7 +6,7 @@ use super::config::{commit_config, withdraw_stale_rpu};
 use super::deliver::{extract_base_layer, inject_rpu, mux_output};
 use super::dovi_steps::{
     convert_mel_fast_path, convert_mel_to_profile81, extract_clean_base_layer,
-    feed_mkv_to_dovi_tool, resolve_dovi_input,
+    feed_mkv_to_dovi_tool, parse_packet_count, resolve_dovi_input,
 };
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
 use super::hdr10plus_coverage;
@@ -1745,6 +1745,31 @@ fn dovi_tool_by_input(mkv_body: &str, raw_body: &str) -> String {
     format!("case \"$IN\" in\n*.mkv)\n{mkv_body}\n;;\nesac\n{raw_body}")
 }
 
+/// ffprobe that reads `frames` video frames, 42 ms apart from 0, from every file but a raw HEVC
+/// stream (the source and the muxed output), and `units` access units from a raw HEVC stream
+/// (a dovi_tool output). `None` makes that read fail.
+#[cfg(unix)]
+fn probes(frames: Option<usize>, units: Option<usize>) -> String {
+    let hevc = units.map_or_else(
+        || "exit 1".to_owned(),
+        |units| format!("echo {units}\n  exit 0"),
+    );
+    let other = frames.map_or_else(
+        || "exit 1".to_owned(),
+        |frames| {
+            let packets: Vec<String> = (0..frames)
+                .map(|frame| format!("{{\"pts\":{},\"duration\":42}}", frame * 42))
+                .collect();
+            format!(
+                "printf '%s' '{{\"packets\":[{}],\"streams\":[{{\"time_base\":\"1/1000\"}}],\
+                 \"format\":{{\"format_name\":\"matroska,webm\"}}}}'\nexit 0",
+                packets.join(",")
+            )
+        },
+    );
+    format!("case \"$LAST\" in\n*.hevc)\n  {hevc} ;;\nesac\n{other}\n")
+}
+
 #[cfg(unix)]
 fn args_with_dovi_input(mode: DoviInput) -> Args {
     let mut args = Args::try_parse_from(["mkvdovi"]).unwrap();
@@ -1788,6 +1813,7 @@ fn direct_mkv_step_that_succeeds_needs_no_ffmpeg_extraction() {
     else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", &writes("clean"));
     fake.script("ffmpeg", &writes("raw"));
     let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
@@ -1807,6 +1833,7 @@ fn direct_mkv_step_reads_the_mkv_without_resume_although_a_raw_stream_is_sealed(
     ) else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.leave(&fake.temp.join("DV_raw.hevc"), b"old raw", true);
     fake.script("dovi_tool", &writes("clean"));
     fake.script("ffmpeg", &writes("raw"));
@@ -1847,6 +1874,7 @@ fn direct_mkv_step_with_empty_output_falls_back_to_ffmpeg_extraction() {
     else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script(
         "dovi_tool",
         &dovi_tool_by_input(EXITS_WITH_EMPTY_OUTPUT, &writes("clean from raw")),
@@ -1866,6 +1894,7 @@ fn direct_mkv_step_that_fails_after_writing_output_falls_back_to_ffmpeg_extracti
     ) else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script(
         "dovi_tool",
         &dovi_tool_by_input(FAILS_AFTER_PARTIAL_OUTPUT, &writes("clean from raw")),
@@ -1874,6 +1903,138 @@ fn direct_mkv_step_that_fails_after_writing_output_falls_back_to_ffmpeg_extracti
     let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
     assert_eq!(fake.calls("ffmpeg").len(), 1);
     assert_eq!(fs::read(&clean_bl).unwrap(), b"clean from raw");
+}
+
+/// The clean-BL step under `--dovi-input mkv` with a 48-frame source whose direct dovi_tool
+/// output ffprobe counts as `units` access units (`None`: unreadable), and whose raw read
+/// writes "clean from raw". Returns the clean BL's content and the ffmpeg and dovi_tool calls.
+#[cfg(unix)]
+fn clean_base_layer_with_counts(
+    test: &str,
+    frames: Option<usize>,
+    units: Option<usize>,
+) -> Option<(Vec<u8>, Vec<String>, Vec<String>)> {
+    let fake = FakeTools::new(test)?;
+    fake.script("ffprobe", &probes(frames, units));
+    fake.script(
+        "dovi_tool",
+        &dovi_tool_by_input(&writes("clean from mkv"), &writes("clean from raw")),
+    );
+    fake.script("ffmpeg", &writes("raw"));
+    let clean_bl = run_clean_base_layer(&fake, DoviInput::Mkv, true).unwrap();
+    assert!(resume::is_complete(&clean_bl));
+    Some((
+        fs::read(&clean_bl).unwrap(),
+        fake.calls("ffmpeg"),
+        fake.calls("dovi_tool"),
+    ))
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_with_a_truncated_output_falls_back_to_ffmpeg_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_with_a_truncated_output_falls_back_to_ffmpeg_extraction",
+        Some(48),
+        Some(30),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 2, "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_with_more_access_units_than_frames_falls_back_to_ffmpeg_extraction",
+        Some(48),
+        Some(50),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 2, "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_with_the_source_frame_count_is_accepted_without_extraction",
+        Some(48),
+        Some(48),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 1, "{dovi:?}");
+    assert!(ffmpeg.is_empty(), "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from mkv");
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_mkv_step_whose_output_cannot_be_counted_falls_back_to_ffmpeg_extraction() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "direct_mkv_step_whose_output_cannot_be_counted_falls_back_to_ffmpeg_extraction",
+        Some(48),
+        None,
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 2, "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_source_whose_frames_cannot_be_counted_skips_the_direct_mkv_read() {
+    let Some((clean, ffmpeg, dovi)) = clean_base_layer_with_counts(
+        "a_source_whose_frames_cannot_be_counted_skips_the_direct_mkv_read",
+        None,
+        Some(48),
+    ) else {
+        return;
+    };
+    assert_eq!(dovi.len(), 1, "{dovi:?}");
+    assert!(!called_with(&dovi, ".mkv"), "{dovi:?}");
+    assert_eq!(ffmpeg.len(), 1, "{ffmpeg:?}");
+    assert_eq!(clean, b"clean from raw");
+}
+
+#[cfg(unix)]
+#[test]
+fn mel_conversion_with_a_truncated_direct_output_muxes_the_extracted_stream() {
+    let Some(fake) =
+        FakeTools::new("mel_conversion_with_a_truncated_direct_output_muxes_the_extracted_stream")
+    else {
+        return;
+    };
+    fake.script("ffprobe", &probes(Some(3), Some(2)));
+    fake.script(
+        "dovi_tool",
+        &dovi_tool_by_input(&writes("p81 from mkv"), &writes("p81 from raw")),
+    );
+    fake.script("ffmpeg", &writes("raw"));
+    fake.script("mkvmerge", &writes("muxed"));
+    assert!(run_mel_to_profile81(&fake, DoviInput::Mkv, true));
+    assert_eq!(fake.calls("ffmpeg").len(), 1);
+    let converted = fake.temp.join("P81_discard.hevc");
+    assert_eq!(fs::read(&converted).unwrap(), b"p81 from raw");
+    assert!(resume::is_complete(&converted));
+    assert_eq!(fake.calls("mkvmerge").len(), 1);
+}
+
+#[test]
+fn packet_count_is_read_from_a_single_number() {
+    assert_eq!(parse_packet_count("48\n"), Ok(48));
+    for output in ["", "N/A\n", "48,\n", "-1\n"] {
+        assert!(parse_packet_count(output).is_err(), "{output:?}");
+    }
 }
 
 #[cfg(unix)]
@@ -2021,6 +2182,7 @@ fn mel_conversion_that_succeeds_seals_the_stream_and_muxes_it() {
     else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", &writes("p81"));
     fake.script("mkvmerge", &writes("muxed"));
     assert!(run_mel_to_profile81(&fake, DoviInput::Mkv, true));
@@ -2039,6 +2201,7 @@ fn mel_conversion_that_fails_is_reported_and_never_muxed() {
     let Some(fake) = FakeTools::new("mel_conversion_that_fails_is_reported_and_never_muxed") else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", FAILS);
     fake.script("ffmpeg", &writes("raw"));
     fake.script("mkvmerge", &writes("muxed"));
@@ -2060,6 +2223,7 @@ fn mel_conversion_is_reused_only_when_sealed_and_resuming() {
         else {
             return;
         };
+        fake.script("ffprobe", &probes(Some(3), Some(3)));
         let converted = fake.temp.join("P81_discard.hevc");
         fake.leave(&converted, b"previous p81", sealed);
         fake.script("dovi_tool", &writes("new p81"));
@@ -2090,6 +2254,7 @@ fn mel_mux_is_reused_only_with_resume_output_and_marker() {
         else {
             return;
         };
+        fake.script("ffprobe", &probes(Some(3), Some(3)));
         fake.leave(&fake.temp.join("P81_discard.hevc"), b"p81", true);
         if output {
             fs::write(&fake.output, b"previous mux").unwrap();
@@ -2113,6 +2278,7 @@ fn mel_mux_failure_is_reported_without_a_mux_marker() {
     let Some(fake) = FakeTools::new("mel_mux_failure_is_reported_without_a_mux_marker") else {
         return;
     };
+    fake.script("ffprobe", &probes(Some(3), Some(3)));
     fake.script("dovi_tool", &writes("p81"));
     fake.script("mkvmerge", FAILS_AFTER_PARTIAL_OUTPUT);
     assert!(!run_mel_to_profile81(&fake, DoviInput::Mkv, true));
@@ -2172,19 +2338,12 @@ fn mel_fast_path_with_failed_verification_reports_failure_and_keeps_the_temp_dir
     assert!(fake.input.exists());
 }
 
-/// Scripts ffprobe (every file has `frames` video frames, 42 ms apart) and dovi_tool, whose
+/// Scripts ffprobe (every file has `frames` video frames, 42 ms apart, and a raw HEVC stream as
+/// many access units) and dovi_tool, whose
 /// `extract-rpu` writes `rpus` RPUs and whose every other call writes `p81`.
 #[cfg(unix)]
 fn script_counts(fake: &FakeTools, frames: usize, rpus: usize) {
-    let packets: Vec<String> = (0..frames)
-        .map(|frame| format!("{{\"pts\":{},\"duration\":42}}", frame * 42))
-        .collect();
-    let json = format!(
-        "{{\"packets\":[{}],\"streams\":[{{\"time_base\":\"1/1000\"}}],\
-         \"format\":{{\"format_name\":\"matroska,webm\"}}}}",
-        packets.join(",")
-    );
-    fake.script("ffprobe", &format!("printf '%s' '{json}'\nexit 0\n"));
+    fake.script("ffprobe", &probes(Some(frames), Some(frames)));
     fake.script(
         "dovi_tool",
         &format!(

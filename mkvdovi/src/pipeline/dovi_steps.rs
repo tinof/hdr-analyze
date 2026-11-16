@@ -53,27 +53,29 @@ fn run_dovi_video_step(
 ) -> Result<bool> {
     let raw_sealed = resume_enabled && resume::is_complete(raw_hevc);
     if feed_mkv_to_dovi_tool(args.dovi_input, raw_sealed) {
-        let mut mkv_cmd = build(Path::new(input_file));
-        let mkv_log = temp_dir.join(format!("{log_stem}_mkv.log"));
-        let total = fs::metadata(input_file).ok().map(|m| m.len());
-        let success = run_command_with_progress(
-            &mut mkv_cmd,
-            &mkv_log,
-            message,
-            output,
-            total,
-            args.stall_timeout,
-        )?;
-        let non_empty =
-            output.exists() && fs::metadata(output).map(|m| m.len() > 0).unwrap_or(false);
-        if success && non_empty {
-            return Ok(true);
+        // The direct output is accepted only with the source's frame count (ROADMAP E7.1); a
+        // source whose packets cannot be counted skips the direct read, whose output would be
+        // discarded anyway.
+        match timing::read_video_times(Path::new(input_file)) {
+            Ok(source) => {
+                if run_direct_mkv_step(
+                    input_file,
+                    output,
+                    temp_dir,
+                    args,
+                    log_stem,
+                    message,
+                    source.frames.len(),
+                    &build,
+                )? {
+                    return Ok(true);
+                }
+            }
+            Err(reason) => progress::print_warn(&format!(
+                "The source's video frames could not be counted ({reason}), so dovi_tool's \
+                 direct MKV output could not be checked; using ffmpeg extraction instead."
+            )),
         }
-        let _ = fs::remove_file(output);
-        progress::print_warn(&format!(
-            "dovi_tool could not read the MKV directly (see {}); falling back to ffmpeg extraction.",
-            mkv_log.display()
-        ));
     }
 
     extract_video_hevc(
@@ -97,6 +99,73 @@ fn run_dovi_video_step(
     )?;
     let non_empty = output.exists() && fs::metadata(output).map(|m| m.len() > 0).unwrap_or(false);
     Ok(success && non_empty)
+}
+
+/// Runs the step on the MKV itself. True when dovi_tool succeeded and its output has
+/// `source_frames` access units; otherwise the output is removed and the reason reported.
+fn run_direct_mkv_step(
+    input_file: &str,
+    output: &Path,
+    temp_dir: &Path,
+    args: &Args,
+    log_stem: &str,
+    message: &str,
+    source_frames: usize,
+    build: &impl Fn(&Path) -> Command,
+) -> Result<bool> {
+    let mut mkv_cmd = build(Path::new(input_file));
+    let mkv_log = temp_dir.join(format!("{log_stem}_mkv.log"));
+    let total = fs::metadata(input_file).ok().map(|m| m.len());
+    let success = run_command_with_progress(
+        &mut mkv_cmd,
+        &mkv_log,
+        message,
+        output,
+        total,
+        args.stall_timeout,
+    )?;
+    let non_empty = output.exists() && fs::metadata(output).map(|m| m.len() > 0).unwrap_or(false);
+    let problem = if !(success && non_empty) {
+        format!(
+            "dovi_tool could not read the MKV directly (see {})",
+            mkv_log.display()
+        )
+    } else {
+        match count_access_units(output) {
+            Ok(units) if units == source_frames => return Ok(true),
+            Ok(units) => format!(
+                "dovi_tool's direct MKV output has {units} access units, the source {source_frames} \
+                 video frames"
+            ),
+            Err(reason) => format!(
+                "the access units of dovi_tool's direct MKV output could not be counted ({reason})"
+            ),
+        }
+    };
+    let _ = fs::remove_file(output);
+    progress::print_warn(&format!("{problem}; falling back to ffmpeg extraction."));
+    Ok(false)
+}
+
+/// The access units of a raw HEVC stream: ffprobe's packet count, whose HEVC parser splits the
+/// stream into access units. `Err` says why they could not be counted.
+fn count_access_units(hevc: &Path) -> Result<usize, String> {
+    let mut command = Command::new("ffprobe");
+    command
+        .args(["-v", "error", "-f", "hevc", "-select_streams", "v:0"])
+        .args(["-count_packets", "-show_entries", "stream=nb_read_packets"])
+        .args(["-of", "default=noprint_wrappers=1:nokey=1"])
+        .arg(hevc);
+    let output = external::get_command_output(&mut command)
+        .map_err(|error| format!("ffprobe could not read the stream ({error})"))?;
+    parse_packet_count(&output)
+}
+
+/// [`count_access_units`] from ffprobe's output, a single number.
+pub(super) fn parse_packet_count(output: &str) -> Result<usize, String> {
+    let text = output.trim();
+    text.parse::<usize>()
+        .map_err(|_| format!("ffprobe gave no packet count ({text:?})"))
 }
 
 fn extract_video_hevc(

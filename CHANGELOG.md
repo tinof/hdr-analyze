@@ -65,6 +65,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- mkvdovi's direct-MKV `dovi_tool` steps (`--dovi-input mkv`, or `auto` with dovi_tool 2.3.4+:
+  the clean base layer of `--mdfix`, and the Profile 7 MEL conversion) no longer accept any
+  non-empty output (ROADMAP E7.1). The output's access units, counted by ffprobe, must equal the
+  source's video packets; an output of another length, or a count that cannot be read, falls back to
+  ffmpeg extraction with a warning that names both counts or the reason. A source whose packets
+  cannot be counted skips the direct read. The check reads the source's video packets once more
+  (0.26 s for a 1200-frame 1080p file) and counts the output stream (about 1 s per GB), on a
+  warm cache.
 - A source whose Dolby Vision RPU has a mapping piece the `dolby_vision` 3.4 parser cannot read
   (a linear-interpolation polynomial piece, or more pivots or pieces than the RPU holds) no longer
   aborts mkvdovi and the rest of a multi-file run (ROADMAP E15.1). The file is refused with a

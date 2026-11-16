@@ -273,6 +273,8 @@ fn profile7_mel_fast_path_counts_its_rpus() {
     assert!(run.status.success(), "mkvdovi failed:\n{log}");
     assert!(log.contains("without rebuilding metadata"), "{log}");
     assert!(log.contains(&count_line(FRAMES)), "{log}");
+    // E7.1: the real ffprobe count of dovi_tool's direct MKV output matches, so no fallback.
+    assert!(!log.contains("falling back to ffmpeg extraction"), "{log}");
     assert!(copy.exists(), "a Dolby Vision source is kept");
     assert_eq!(rpu_per_access_unit(&output).len(), FRAMES);
 }

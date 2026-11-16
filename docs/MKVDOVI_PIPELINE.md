@@ -39,7 +39,11 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `dovi_tool` 2.3.2 is the floor: the existing orchestration relies on its `inject-rpu` padding
   fix. 2.3.4+ lets mkvdovi pass the MKV directly to remove/convert/demux
   (`--dovi-input auto|raw|mkv`; auto = on when `dovi_tool --version` reports 2.3.4+), with an
-  automatic per-step fallback to ffmpeg extraction. Direct attempts log to `*_mkv.log` in the temp dir.
+  automatic per-step fallback to ffmpeg extraction. A direct output is accepted only when its
+  access units (ffprobe `-count_packets` on the raw HEVC, `dovi_steps::count_access_units`) equal
+  the source's video packets (`timing::read_video_times`); a mismatch or an unreadable output
+  count removes it and falls back with a warning, and a source whose packets cannot be counted
+  skips the direct read (ROADMAP E7.1). Direct attempts log to `*_mkv.log` in the temp dir.
 - FFmpeg 9's `dovi_split`/`dovi_rpu` filters do not replace `dovi_tool`: they have no profile
   conversion, injection or generation; `dovi_split=mode=bl` is slower than `remove` on the
   direct-MKV path and changes the bytes; `dovi_rpu=strip` misses RPUs before EOS. Evaluation and
