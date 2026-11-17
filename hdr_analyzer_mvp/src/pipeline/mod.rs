@@ -364,6 +364,9 @@ mod scene_cut_tests;
 #[cfg(test)]
 mod crop_space_tests;
 
+#[cfg(test)]
+mod p010_tests;
+
 /// `HDR_ANALYZER_DUMP_MAX_RGB=<dir>`: write every analyzed frame's per-pixel max-RGB values
 /// there, for `scripts/validate_hlg_chroma_siting.sh` to compare the decode pixel by pixel.
 fn max_rgb_dump_dir() -> Option<PathBuf> {

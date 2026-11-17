@@ -63,13 +63,20 @@ pub(super) fn host_view<'a>(
 
 /// Convert (and optionally downscale) a decoded frame to YUV420P10LE, creating the
 /// scaler lazily from the actual input frame format (hardware decoders only reveal
-/// their output format once frames arrive).
-fn scale_to_yuv420p10(
+/// their output format once frames arrive). At downscale 1 a P010 frame (NVDEC) is repacked
+/// instead, without swscale: its codes are the software decoder's, and swscale's conversion
+/// moves them. Returns true when the frame was repacked.
+pub(super) fn scale_to_yuv420p10(
     input: &frame::Video,
     scaler: &mut Option<software::scaling::Context>,
     output: &mut frame::Video,
     downscale: u32,
-) -> Result<()> {
+) -> Result<bool> {
+    if input.format() == format::Pixel::P010LE && downscale <= 1 {
+        repack_p010(input, output)?;
+        *scaler = None;
+        return Ok(true);
+    }
     let target_width = ((input.width() / downscale.max(1)).max(2)) & !1;
     let target_height = ((input.height() / downscale.max(1)).max(2)) & !1;
     let needs_new = match scaler {
@@ -99,7 +106,83 @@ fn scale_to_yuv420p10(
         .as_mut()
         .expect("scaler initialized")
         .run(input, output)
-        .context("Failed to convert analysis frame")
+        .context("Failed to convert analysis frame")?;
+    Ok(false)
+}
+
+/// Copies a P010LE frame (10-bit codes in the high bits, Cb and Cr interleaved) into a
+/// YUV420P10LE frame of the same size, `output` reallocated when it does not fit: each sample
+/// shifted down by 6, Cb and Cr de-interleaved. Odd sizes stay odd, with `div_ceil(2)` chroma,
+/// as software decode outputs them. A frame whose planes do not hold its size is an error.
+fn repack_p010(input: &frame::Video, output: &mut frame::Video) -> Result<()> {
+    let (width, height) = (input.width() as usize, input.height() as usize);
+    if width == 0 || height == 0 || input.planes() < 2 {
+        bail!(
+            "Malformed P010 frame: {width}x{height} with {} planes",
+            input.planes()
+        );
+    }
+    let (chroma_width, chroma_height) = (width.div_ceil(2), height.div_ceil(2));
+    let (luma, luma_stride) = p010_plane(input, 0, width * 2, height)?;
+    let (chroma, chroma_stride) = p010_plane(input, 1, chroma_width * 4, chroma_height)?;
+
+    if output.format() != format::Pixel::YUV420P10LE
+        || output.width() != input.width()
+        || output.height() != input.height()
+    {
+        *output = frame::Video::new(format::Pixel::YUV420P10LE, input.width(), input.height());
+        if output.planes() < 3 {
+            bail!("Failed to allocate a {width}x{height} YUV420P10LE analysis frame");
+        }
+    }
+    let shifted = |sample: &[u8]| (u16::from_le_bytes([sample[0], sample[1]]) >> 6).to_le_bytes();
+    let stride = output.stride(0);
+    let plane = output.data_mut(0);
+    for row in 0..height {
+        let source = &luma[row * luma_stride..][..width * 2];
+        let target = &mut plane[row * stride..][..width * 2];
+        for (target, sample) in target.chunks_exact_mut(2).zip(source.chunks_exact(2)) {
+            target.copy_from_slice(&shifted(sample));
+        }
+    }
+    // Cb is the first sample of each interleaved pair, Cr the second.
+    for (plane_index, offset) in [(1, 0), (2, 2)] {
+        let stride = output.stride(plane_index);
+        let plane = output.data_mut(plane_index);
+        for row in 0..chroma_height {
+            let source = &chroma[row * chroma_stride..][..chroma_width * 4];
+            let target = &mut plane[row * stride..][..chroma_width * 2];
+            for (target, pair) in target.chunks_exact_mut(2).zip(source.chunks_exact(4)) {
+                target.copy_from_slice(&shifted(&pair[offset..offset + 2]));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Plane `index` of a P010 frame and its stride, when it holds `rows` rows of `row_bytes`.
+fn p010_plane(
+    input: &frame::Video,
+    index: usize,
+    row_bytes: usize,
+    rows: usize,
+) -> Result<(&[u8], usize)> {
+    let stride = input.stride(index);
+    // A negative linesize reads as a stride above `isize::MAX` here.
+    if stride < row_bytes || stride > isize::MAX as usize / rows {
+        bail!(
+            "Malformed P010 frame: plane {index} has stride {stride} for {row_bytes} bytes per row"
+        );
+    }
+    let data = input.data(index);
+    let needed = (rows - 1) * stride + row_bytes;
+    if data.len() < needed {
+        bail!(
+            "Malformed P010 frame: plane {index} holds {} bytes, {needed} needed",
+            data.len()
+        );
+    }
+    Ok((data, stride))
 }
 
 fn compute_scene_diff(cli: &Cli, curr_hist: &[f64], prev_hist: &[f64]) -> f64 {
@@ -261,6 +344,7 @@ pub(super) fn run_native_analysis_pipeline(
     let mut device_path_reported = false;
     let mut device_frames = 0u64;
     let mut host_downloads = 0u64;
+    let mut p010_repacked = 0u64;
 
     let start_time = Instant::now();
 
@@ -408,7 +492,13 @@ pub(super) fn run_native_analysis_pipeline(
                 let needs_scaling =
                     host_frame.format() != format::Pixel::YUV420P10LE || downscale > 1;
                 let analysis_frame: &frame::Video = if needs_scaling {
-                    scale_to_yuv420p10(host_frame, &mut cpu_scaler, &mut scaled_frame, downscale)?;
+                    let repacked = scale_to_yuv420p10(
+                        host_frame,
+                        &mut cpu_scaler,
+                        &mut scaled_frame,
+                        downscale,
+                    )?;
+                    p010_repacked += u64::from(repacked);
                     used_scaled = true;
                     &scaled_frame
                 } else {
@@ -533,6 +623,9 @@ pub(super) fn run_native_analysis_pipeline(
         println!(
             "CUDA in-place analysis: {device_frames} NVDEC frames; {host_downloads} downloaded to host memory (crop sampling or fallback)"
         );
+    }
+    if p010_repacked > 0 {
+        println!("NVDEC P010 frames repacked for CPU analysis: {p010_repacked}");
     }
 
     if let Some(monitor) = crop_monitor {
