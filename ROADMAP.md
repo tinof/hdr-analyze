@@ -53,20 +53,27 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-17 at main@a07c7c7)
-<!-- roadmap-next: rev=6 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=b7830504bddd skip=P6.3,P6.4,E8.1,E9.1,WS7.1,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+### Next up (checked 2026-11-17 at main@05133ec)
+<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=1568ee099492 -->
 
-Order: the overdue v0.9.0 plan names P12.1 and E12.2 as its remaining fixes (P6.2 closed), so they go
-before the other priority 4 to 11 steps (skip=).
+Order: the Focus text puts E12.2 first, the last open fix of the overdue v0.9.0; then WS7.1 and
+WS6.10, which unblock priority 3.
 
 1. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
-   step gate. Why: v0.9.0 plan; two designs across analyzer and mkvdovi, so a hard step. Branch:
-   `fix/e12-2-nvdec-cpu-analysis`. Release: patch
+   step gate. Why: v0.9.0's last fix; analyzer and mkvdovi, a hard step. Branch:
+   `fix/e12-2-nvdec-cpu-analysis`. Release: patch (minor if the plan bumps the sidecar version)
+2. **WS7.1 The display-mapping simulator with the per-frame histogram dump** (priority 6). Gate:
+   the item gate. Why: unblocks P10.3, WS7.2, WS1.2, WS1.6, WS2.2. Branch:
+   `feat/ws7-1-display-simulator`. Release: none
+3. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: unblocks the
+   WS6.11 viewing and P10.5's gate. Branch: `feat/ws6-10-pulse-files`. Release: none
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:649`).
-
-**Reassess:** owner-decision (steering 2026-11-17): Focus E12.2, WS7.1, WS6.10; E13.19 can start;
-P12.2 is a new priority-5 step since P12.1 (PR #134), which unblocked E13.14 and E13.17.
+- Recheck before WS7.1: pin libplacebo and re-check the gate numbers after v7.387.0 changed tone
+  mapping ([log](docs/ROADMAP_LOG.md) "libplacebo v7.387.0").
+- Recheck before WS6.10: the same libplacebo pin; `dovi_rpu_builder` clamps L1 (`L1::clamped`,
+  `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
+  RPUs need builder work (Tier 2) or a tool on `dolby_vision`.
 
 ### Waiting for the owner
 
@@ -773,13 +780,12 @@ The detailed gap table and validation method live in
   integer lookup table both sides index). Gate: a test over all 2^20 centred chroma pairs, CPU
   against the kernel's formula, with 0 mismatches; `scripts/cuda-parity.sh` passes; the L1
   regression gate passes without `--update`.
-- **Checked 2026-11-17 @29edbe8:** CPU `auto` is `accurate` (`resolve_analysis_quality`,
-  `mkvdovi/src/pipeline/analyzer.rs:251`). The CPU reader takes separate U/V planes
-  (`analysis/frame/mod.rs:295`), so reading P010 directly needs semi-planar chroma; `median3`
-  also forces CPU analysis on NVDEC frames (`pipeline/analyze.rs:170`). Sidecar reuse
-  (`find_reusable_measurements`, `mkvdovi/src/pipeline/measure.rs:545`) does not tell the NVDEC route
-  apart; E12.2 decides whether old sidecars are re-analyzed. The mkvdovi-only fix leaves `+cuda`
-  fallbacks affected.
+- **Checked 2026-11-17 @05133ec:** a direct P010 read needs semi-planar chroma and `>> 6` (as in
+  `crop.rs:195`) in every CPU reader: `analysis/frame/mod.rs:295`, `compute_hue_histogram`
+  (`histogram.rs:255`), `reduced_set::Planes` (`frame/reduced_set.rs:60`), `apply_median3_denoise`
+  (`frame/mod.rs:243`; `median3` forces CPU on NVDEC, `pipeline/analyze.rs:170`). The sidecar records
+  `gpu`, not the decode route (`l1_sidecar.rs:117`), so reuse (`measure.rs:549`, manifest `reusable_pair`)
+  cannot tell NVDEC sidecars apart. The mkvdovi-only fix leaves `+cuda` fallbacks affected.
 
 ### E13: module size refactor
 
