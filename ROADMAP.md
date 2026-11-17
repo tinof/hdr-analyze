@@ -276,11 +276,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
   E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
   of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
-- **Checked 2026-11-17 @a07c7c7:** the sampled L6 values are not kept: the scan records only
-  `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu` (`:177`) holds only the L6 peak,
-  `Detection` keeps `level5` and `authored` (`pipeline/measure.rs:134`), and `prepare_configuration`
-  (`pipeline/config.rs:40`) gets only `level5` (`pipeline/mod.rs:252`). `mdfix_notice.rs:104` prints the
-  L6 text to change. `rpu-baseline.sh compare` strips the CRC (`:253`): "byte-identical" needs `sha256sum`.
+- **Checked 2026-11-17 @29edbe8:** since P6.2 the sample keeps the source L6 (`SampledRpu.level6`,
+  `mkvdovi/src/rpu_check.rs:182`, `SourceL6` `:189`), but `Detection` (`pipeline/measure.rs:135`) drops it,
+  and `settle_configuration` still reads only the container (`pipeline/config.rs:93-94`).
+  `mdfix_notice.rs:104` prints the L6 text to change. `rpu-baseline.sh compare` strips the CRC (`:253`):
+  "byte-identical" needs `sha256sum`.
 
 ### P14: per-shot dynamic contrast (opt-in)
 
@@ -742,12 +742,13 @@ The detailed gap table and validation method live in
   integer lookup table both sides index). Gate: a test over all 2^20 centred chroma pairs, CPU
   against the kernel's formula, with 0 mismatches; `scripts/cuda-parity.sh` passes; the L1
   regression gate passes without `--update`.
-- **Checked 2026-11-02 @f5f1877:** CPU `auto` is `accurate` (`resolve_analysis_quality`,
-  `mkvdovi/src/pipeline/analyzer.rs:234`). The CPU reader takes separate U/V planes
-  (`analysis/frame/mod.rs:266`), so reading P010 directly needs semi-planar chroma; `median3`
-  also forces CPU analysis on NVDEC frames (`pipeline/analyze.rs:165`). Sidecar reuse
-  (`mkvdovi/src/pipeline/measure.rs:518`) does not tell the NVDEC route apart; E12.2 decides
-  whether old sidecars are re-analyzed. The mkvdovi-only fix leaves `+cuda` fallbacks affected.
+- **Checked 2026-11-17 @29edbe8:** CPU `auto` is `accurate` (`resolve_analysis_quality`,
+  `mkvdovi/src/pipeline/analyzer.rs:251`). The CPU reader takes separate U/V planes
+  (`analysis/frame/mod.rs:295`), so reading P010 directly needs semi-planar chroma; `median3`
+  also forces CPU analysis on NVDEC frames (`pipeline/analyze.rs:170`). Sidecar reuse
+  (`find_reusable_measurements`, `mkvdovi/src/pipeline/measure.rs:545`) does not tell the NVDEC route
+  apart; E12.2 decides whether old sidecars are re-analyzed. The mkvdovi-only fix leaves `+cuda`
+  fallbacks affected.
 
 ### E13: module size refactor
 
