@@ -65,8 +65,8 @@ before the other priority 4 to 11 steps (skip=).
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:649`).
 
-**Reassess:** new-defect (P12.1, PR #134): P12.2 (container-stated minimum truncated by
-`Level6::from_nits`) is a new priority-5 step; P12.1 unblocks E13.14 and E13.17.
+**Reassess:** owner-decision (steering 2026-11-17): Focus E12.2, WS7.1, WS6.10; E13.19 can start;
+P12.2 is a new priority-5 step since P12.1 (PR #134), which unblocked E13.14 and E13.17.
 
 ### Waiting for the owner
 
@@ -79,9 +79,6 @@ release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
-- **E13.19: `feat/dev-corpus` cannot land.** The step, and the `l1_diff` part of E13.20, wait for that
-  branch, but it is local-only behind a pre-push guard (`docs/TESTING.md` §7). The owner restates the
-  condition, for example "rebase the branch after the move" (found 2026-11-01).
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
 
@@ -119,41 +116,79 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
+**Focus (set 2026-11-17):** E12.2, WS7.1, WS6.10; ship the overdue v0.9.0 with its last fix, then
+unblock priority 3: the simulator five steps wait on, and the pulse files for the C9 viewing.
+
 1. **HLG → Profile 8.4 composer** (P8, WS6.9). `--hlg-composer bt2100` is the default (owner);
-   `preset` is the fallback. Gate: the WS6 playback test shows that devices apply a mapping that
+   `preset` is the fallback.
+   Outcome: an HLG file converted to Dolby Vision shows its original's colours and brightness on
+   a Dolby Vision TV.
+   Gate: the WS6 playback test shows that devices apply a mapping that
    is not the preset: met for one device, the LG OLED C9 (2026-10-13), whose `code / 1023`
    question is also answered (WS6.6, 2026-10-29); no second device is available (owner,
    2026-10-17). WS6.9 (the metered per-gain reading) stays on the metered list.
 2. **HDR10+ → Profile 8.1 hybrid mode** (P9): scene list = union of HDR10+ starts and the analyzer's
    cuts (chosen 2026-10-13), peak per piece from HDR10+; average, minimum and crop from pixels; hybrid
-   is the default since the holdout scoring passed (PR #84). Gate: met; the owner decides whether this priority ends.
+   is the default since the holdout scoring passed (PR #84).
+   Outcome: an HDR10+ file converts with the scene peaks its own metadata states; incomplete
+   metadata is never used silently.
+   Gate: met; the priority ended on 2026-11-17 (owner).
 3. **Deliver what was measured** (P10): source range and the measured-against-delivered report
    landed 2026-10-04; open: write L1 in-process (P10.3, max) and the measured minimum (P10.5).
+   Outcome: the brightness values in the delivered file are the measured ones; where the
+   generator changes one, the tool reports it.
    Gate: the WS7 simulator decides P10.3 (owner, 2026-10-17); the owner states P10.5's after WS6.11.
 4. **Narrow code defects** (E8, E9, P6, E7): histogram percentile reader, `--pre-denoise`
-   values. Gate: unit tests for the reader and the option (E8.1, E9.1).
+   values.
+   Outcome: options and readouts do what they say, and a source that contradicts its own
+   metadata gets a warning.
+   Gate: unit tests for the reader and the option (E8.1, E9.1).
 5. **L6 fidelity** (P12): `--mdfix` full regeneration stays (owner, 2026-10-13). Open: a
-   container-stated mastering minimum loses 0.0001 nits in L6 (P12.2). Gate: the P12.2 gate.
+   container-stated mastering minimum loses 0.0001 nits in L6 (P12.2).
+   Outcome: the mastering-display values in the converted file are exactly the ones the source
+   states.
+   Gate: the P12.2 gate.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
-   ColorVideoVDP on a few cuts (WS7.1, WS7.2). Gate: the simulator reproduces the recomputed
-   numbers in WS7.
+   ColorVideoVDP on a few cuts (WS7.1, WS7.2).
+   Outcome: an accuracy change is judged by how much it changes the displayed picture, not only
+   by metadata codes.
+   Gate: the simulator reproduces the recomputed numbers in WS7.
 7. **Test material** (WS8): grain on synthetic highlights, unaligned positions, a same-master grainy
-   twin, transitions. Needed before 9 can be scored. Gate: per item in WS8.
+   twin, transitions. Needed before 9 can be scored.
+   Outcome: every measurement question has test clips with a known right answer, so a change is
+   proven before it ships.
+   Gate: per item in WS8.
 8. **Scene detection** (WS2.1, E4): second signal for whole-picture motion; strong cuts closer than
-   12 frames. Gate: precision and recall against authored shot lists, no loss on the other cuts.
+   12 frames.
+   Outcome: metadata changes exactly where the film cuts, also in fast action and between
+   look-alike shots.
+   Gate: precision and recall against authored shot lists, no loss on the other cuts.
 9. **Research, default unchanged** (WS1, WS2.2, WS2.4, WS4): ST 2094-10 reduced-set and grain-robust
    peak; per-frame L1 inside detected transitions; L4; automatic trims. Each stays opt-in or unbuilt
-   until its gate is met. Gate: per item (WS4: blinded A/B on a device; WS1 and WS2.2–WS2.4: in the items).
+   until its gate is met.
+   Outcome: new peak and transition methods can be tried as options; none becomes the default
+   before it beats the current one on real films.
+   Gate: per item (WS4: blinded A/B on a device; WS1 and WS2.2–WS2.4: in the items).
 10. **Profile 7 FEL** (FEL). See [`docs/FEL_PLAN.md`](docs/FEL_PLAN.md); offline work reopened by
-    the owner (2026-11-12), `mkvdovi` code after v0.9.0. Gate: none until a step states one.
+    the owner (2026-11-12), `mkvdovi` code after v0.9.0.
+    Outcome: a Profile 7 FEL disc plays as Profile 8.1 with as much of the FEL's picture gain as
+    metadata can carry, never re-encoded.
+    Gate: none until a step states one.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E18, P3, WS0, WS6): the
     remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
     v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance and open-GOP scoring (E3, E6, E11), hot-file
     byte budgets (E18). Ranked below 1–10; added
-    2026-10-18 so `/ship:roadmap-next` can reach them (owner). Gate: per item.
-12. **Library and player integration; a new output format** (P16, R3). Added 2026-11-14; ranked
-    last until the owner places them. Gate: per step.
+    2026-10-18 so `/ship:roadmap-next` can reach them (owner).
+    Outcome: the tools stay safe to change and release: CPU and GPU give the same result, and
+    tests catch a regression before a file does.
+    Gate: per item.
+12. **Library and player integration; a new output format** (P16, R3). Added 2026-11-14; kept
+    last for now (owner, 2026-11-17): the Focus pulls single steps forward, and the next steering
+    asks again where it goes.
+    Outcome: a player such as the NuvioTV fork links hdr-analyze as a library and writes Dolby
+    Vision metadata without the command-line tools.
+    Gate: per step.
 
 - **Owner direction (2026-11-14):** hdr-analyze becomes the library for players, the NuvioTV fork
   first: the analysis core as a lib crate and a C ABI built with cargo-c, as `libdovi` is; no
@@ -351,8 +386,12 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - [P16.7][desk] Split the versions as `docs/RELEASING.md` "Library crates" states
   (`Cargo.toml`s, `scripts/ci/release-version-check.sh`, `CLAUDE.md`). Gate: the version check
   passes with both lines and fails on a mismatch in either (test).
+- **Decided 2026-11-17 (owner):** P16.8's gate is the one in its step line.
 - [P16.8][owner] Publish the library crates on crates.io (conditions in `docs/RELEASING.md`).
-  Gate: TODO(owner). Needs: P16.2, P16.7.
+  Gate: the three conditions of `docs/RELEASING.md` "Library crates" hold (the C ABI exists; the
+  NuvioTV fork took one library bump without an API break; the `hdr10plus` pin no longer blocks a
+  consumer), `cargo publish --dry-run` passes for each library crate, and the owner publishes
+  (owner, 2026-11-17). Needs: P16.2, P16.7.
 
 ## `cm_analyze` parity
 
@@ -789,12 +828,14 @@ The detailed gap table and validation method live in
   phase. Needs: P12.1. Gate: the mkvdovi gate.
 - [E13.18][desk] Split `tools/fit_hlg_composer/src/siting.rs` (803 lines, limit 800) as a pure move.
   Gate: `tool:fit_hlg_composer`, and a diff that shows only moved blocks.
-- [E13.19][desk] Split `tools/l1_diff/src/main.rs` (948 lines, limit 800) as a pure move, after the
-  local `feat/dev-corpus` branch that depends on it has landed. Gate: `tool:l1_diff` and the L1
+- **Decided 2026-11-17 (owner):** E13.19 splits now. The local `feat/dev-corpus` branch changes no
+  file under `tools/l1_diff`; `main` is merged into it after the move.
+- [E13.19][desk] Split `tools/l1_diff/src/main.rs` (948 lines, limit 800) as a pure move with the
+  CLI unchanged. Gate: `tool:l1_diff` and the L1
   regression gate without `--update`, and a diff that shows only moved blocks.
 - [E13.20][desk] Function lint in the excluded `tools/` crates: `[lints.clippy] too_many_lines =
   "warn"` in each `Cargo.toml` (the root `clippy.toml` threshold applies), with step-named markers;
-  `l1_diff` (its `main` is 312 lines) after `feat/dev-corpus` has landed. Gate: the `tool:*` gates.
+  `l1_diff` (its `main` is 312 lines) after E13.19. Gate: the `tool:*` gates.
 - [E13.21][gpu] Turn on clippy's `style`, `complexity` and `perf` groups (warn) and fix what they
   report: about 30 warnings at @dc4882d (doc list indentation, empty format literals, a regex
   compiled in a loop, one function with 11 arguments). Gate: fmt, clippy (also `--features cuda`),
