@@ -53,22 +53,21 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-10 at main@efc8306)
-<!-- roadmap-next: rev=3 scope=all config=46c2796993ac probes=gpu:ok,corpus:ok ready=719baa0963f0 skip=P6.3,P6.4 -->
+### Next up (checked 2026-11-17 at main@a07c7c7)
+<!-- roadmap-next: rev=6 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=2f860c928678 skip=P6.3,P6.4,E8.1,E9.1,WS7.1,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
-Order: priority 4 (P9.4, priority 2, closed in PR #109). P6.3 and P6.4 are passed over: the
-v0.9.0 release plan names P6.2 and E7.1. E8.1 and E9.1 move the default `.bin` and are planned
-for a later minor.
+Order: the overdue v0.9.0 plan names P6.2, P12.1 and E12.2 as its remaining fixes, so they go
+before the other priority 4 to 11 steps (skip=).
 
-1. **P6.2 Five source checks, warn-only** (priority 4). Gate: the P6 step 2 gate. Why: in the
-   v0.9.0 plan. Branch: `feat/p6-2-source-checks`. Release: patch
-
-**Reassess:** needs-changed (P9.4, PR #109): this PR retags P6.3, P6.4 and P14.1 from `desk` to
-`corpus`.
-**Reassess:** new-defect (P9.4, PR #109): P9.5, an explicit hybrid refuses a failed coverage
-scan (Codex P1, owner 2026-11-12).
-**Reassess:** needs-changed (P16.3, PR #113): P16.1 now needs the version split P16.7; P16.8
-(crates.io) needs P16.2 and P16.7.
+1. **P6.2 Five source checks, warn-only** (priority 4). Gate: the P6 step 2 gate. Why: highest
+   startable, in the v0.9.0 plan; adds the sampled-L6 threading P12.1 reuses. Branch:
+   `feat/p6-2-source-checks`. Release: patch
+2. **P12.1 Under `--mdfix`, fall back to the source RPU's L6** (priority 5). Gate: the step gate.
+   Why: v0.9.0 plan; unblocks the batch steps E13.14 and E13.17. Branch:
+   `fix/p12-1-mdfix-source-l6`. Release: patch
+3. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
+   step gate. Why: v0.9.0 plan; two designs across analyzer and mkvdovi, so a hard step. Branch:
+   `fix/e12-2-nvdec-cpu-analysis`. Release: patch
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:617`).
 
@@ -105,7 +104,8 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 E12.1); its rc.1 passed the Windows test ([log](docs/ROADMAP_LOG.md) 2026-11-14).
 
 **Next release point:** v0.9.0, a minor: P15's analyzer `--help` contract (`au-table-v1`) is on
-`main`; rule 1 puts it about a week after #91 (2026-11-04). Checked 2026-11-07.
+`main`; rule 1 puts it about a week after #91 (2026-11-04). Overdue on 2026-11-17: P6.2, P12.1 and
+E12.2 are the plan's fixes still open.
 
 | Release | Content | Trigger / gate |
 |---|---|---|
@@ -220,6 +220,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Gate: fixture tests on both sides; RPU baselines byte-identical.
 - [P6.4][corpus] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
   conversion drops. Gate: the item's step 2 gate.
+- **Checked 2026-11-17 @a07c7c7:** C1 and C3 sit behind the early return of `resolve_light_levels`
+  (`mkvdovi/src/metadata/static_metadata.rs:195`); C4 and C7 belong in `pipeline/hdr10plus.rs`
+  (`:48`, `:109`), whose peak check is skipped without `max_dml` (`pipeline/config.rs:148`); C5 needs
+  the sampled L6 threaded out of `Detection` (`pipeline/measure.rs:134`), as P12.1 does.
 
 ### P8: HLG → Profile 8.4 composer
 
@@ -265,7 +269,7 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - **Status:** Open. Defect found 2026-10-15, not fixed; history in
   [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P12.1, for the next patch release.
 - Under `--mdfix` the mastering min/max come from the container or the defaults
-  (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:43-44`),
+  (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:92-93`),
   never from the source RPU's L6. On r5 Inside Out 2 (P8.1, no ST 2086 in the container) the RPU's
   0.0001/1000 nits becomes 0.005/1000 nits and `source_min_pq` 7 becomes 62 on every frame
   (baseline `~/mkvdovi-work/rpu-baseline/0.6.0/mdfix/r5-inside-out-2-mind-console`). The only
@@ -277,12 +281,11 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
   E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
   of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
-- **Checked 2026-11-01 @4e55715:** the sampled L6 values are not kept: the authored-levels scan
-  records only `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu`
-  (`rpu_check.rs:177`) has no L6 field, and `prepare_configuration` (`pipeline/config.rs:30`) gets
-  no sampled metadata, so the fix threads the values through and tests the pipeline wiring. P6.2's
-  C5 reads the same values. `scripts/rpu-baseline.sh compare` strips the CRC (`:253`), so
-  "byte-identical" needs `sha256sum`, against captures taken after P9.3.
+- **Checked 2026-11-17 @a07c7c7:** the sampled L6 values are not kept: the scan records only
+  `acc.l6 = true` (`mkvdovi/src/rpu_check.rs:286`), `SampledRpu` (`:177`) holds only the L6 peak,
+  `Detection` keeps `level5` and `authored` (`pipeline/measure.rs:134`), and `prepare_configuration`
+  (`pipeline/config.rs:40`) gets only `level5` (`pipeline/mod.rs:252`). `mdfix_notice.rs:104` prints the
+  L6 text to change. `rpu-baseline.sh compare` strips the CRC (`:253`): "byte-identical" needs `sha256sum`.
 
 ### P14: per-shot dynamic contrast (opt-in)
 
@@ -529,10 +532,10 @@ The detailed gap table and validation method live in
 - **Gate:** per item: synthetic material comes from a committed, reproducible generator; truth
   files are present; the L1 gate or the development corpus uses the material (owner, 2026-10-17).
 - [WS8.2][corpus] A grainy twin from the same master as the clean one (today "clean is truth"
-  holds only to about ±50 codes). Gate: the item gate.
+  holds only to about ±50 codes). Gate: the item gate. Needs: WS8.4.
 - [WS8.3][corpus] Synthetic cross-dissolves and fades built from real shots (blended in PQ code and
   in linear light) with their intervals as truth, and retail cuts with authored transitions. Gate:
-  the item gate.
+  the item gate. Needs: WS8.4.
 - [WS8.4][desk] A held-out split: synthetic references and open implementations for development,
   licensed reference output for scoring only ([`docs/PROVENANCE.md`](docs/PROVENANCE.md)): it
   scores holdouts that have no retail Dolby Vision, and a frozen estimator report-only, never a
