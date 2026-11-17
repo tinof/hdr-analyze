@@ -162,7 +162,7 @@ fn fill_mastering_from_source_l6(
     }
     (!taken.is_empty()).then(|| {
         format!(
-            "Mastering display {} from the source RPU's L6 (the container states none).",
+            "Mastering display {} from the source RPU's L6 (not stated by the container).",
             taken.join(", ")
         )
     })
@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(
             message,
             "Mastering display peak 1000 nits, minimum 0.0001 nits from the source RPU's L6 \
-             (the container states none)."
+             (not stated by the container)."
         );
     }
 
