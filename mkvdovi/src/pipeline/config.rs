@@ -170,13 +170,15 @@ fn fill_mastering_from_source_l6(
 
 /// The mastering minimum in nits for a raw L6 value in 0.0001 nits, chosen so that
 /// `Level6::from_nits`, which truncates `nits * 10000`, gives `raw` back: `raw / 10000` alone
-/// comes back one lower for some values (29 -> 28.999...).
+/// comes back one lower for some values (29 -> 28.999...). One step to the next `f64` up is
+/// enough for every value up to `Level6::MAX_VALUE`; an exact quotient is kept as it is.
 fn min_dml_nits(raw: u16) -> f64 {
-    let mut nits = f64::from(raw) / 10_000.0;
-    while ((nits * 10_000.0) as u32) < u32::from(raw) {
-        nits = nits.next_up();
+    let nits = f64::from(raw) / 10_000.0;
+    if ((nits * 10_000.0) as u32) < u32::from(raw) {
+        nits.next_up()
+    } else {
+        nits
     }
-    nits
 }
 
 /// The CM v4.0 configuration (L9 primaries, L11 content type), or `None` under `--cm-version v29`.
@@ -637,6 +639,9 @@ mod tests {
                 "raw {raw}"
             );
         }
+        // An exact quotient is kept; only a short one moves up by one step.
+        assert_eq!(min_dml_nits(1), 0.0001);
+        assert_eq!(min_dml_nits(29), (29.0_f64 / 10_000.0).next_up());
         // The plain quotient does not: the reason for `min_dml_nits`.
         let plain = dovi_rpu_builder::Level6::from_nits(29.0 / 10_000.0, 1000.0, 0.0, 0.0);
         assert_eq!(plain.min_display_mastering_luminance, 28);
