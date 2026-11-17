@@ -24,7 +24,7 @@ use crate::cli::{Args, Hdr10PlusL1};
 use crate::external;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
-use crate::rpu_check::{self, AuthoredLevels, Level5Offsets};
+use crate::rpu_check::{self, AuthoredLevels, Level5Offsets, SourceL6};
 
 /// What the analyzer's `--help` names when its L1 sidecar records the per-frame peak and the
 /// applied peak source (sidecar v6). A capability, not a version: later sidecars keep it.
@@ -138,6 +138,9 @@ pub(super) struct Detection {
     /// Authored levels seen in the sample, for the `--mdfix` notice; `None` when the input is not
     /// Dolby Vision or the sample failed.
     pub(super) authored: Option<AuthoredLevels>,
+    /// The source RPU's L6: under `--mdfix` it fills the mastering display the container does
+    /// not state (P12.1).
+    pub(super) level6: Option<SourceL6>,
 }
 
 /// Step 1: samples a Dolby Vision source RPU and reports the detected format.
@@ -166,6 +169,7 @@ pub(super) fn report_detection(
                         .and_then(|l6| source_checks::rpu_l6_against_container(l6, &stated, mdfix)),
                     source_checks::rpu_peak_against_max_cll(&sample.l1_frames, &stated),
                 ];
+                detection.level6 = sample.level6;
                 if let Ok(report) =
                     rpu_check::analyze_rpus(sample.l1_frames, sample.mastering_peak_pq)
                 {

@@ -218,7 +218,8 @@ pub fn manifest_file(manifest_args: &ManifestArgs) -> Result<bool> {
     else {
         return Ok(false);
     };
-    let Some(settled) = settle_configuration(input_file, &args, hlg_composer, &mut measured, None)
+    let Some(settled) =
+        settle_configuration(input_file, &args, hlg_composer, &mut measured, None, None)
     else {
         return Ok(false);
     };

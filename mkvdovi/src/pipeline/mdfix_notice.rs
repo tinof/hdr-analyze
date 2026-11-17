@@ -103,8 +103,9 @@ pub(super) fn mdfix_notice(
     }
     if authored.l6 {
         lines.push(
-            "L6: not taken from the source RPU; the mastering display comes from the container's \
-             HDR10 metadata (or defaults), MaxCLL/MaxFALL from the container or the measurements"
+            "L6: rebuilt; the mastering display comes from the container's HDR10 metadata, else \
+             the source RPU's L6, else defaults; MaxCLL/MaxFALL from the container or the \
+             measurements"
                 .to_string(),
         );
     }
@@ -342,7 +343,12 @@ mod tests {
             "L2 trims for 100 nits: replaced by neutral trims for 100, 600, 1000 nits (--trim-targets)"
         );
         assert_eq!(line(&lines, "L4").unwrap(), "L4: dropped");
-        assert!(line(&lines, "L6").is_some());
+        assert_eq!(
+            line(&lines, "L6").unwrap(),
+            "L6: rebuilt; the mastering display comes from the container's HDR10 metadata, else \
+             the source RPU's L6, else defaults; MaxCLL/MaxFALL from the container or the \
+             measurements"
+        );
         for absent in ["L3", "L5", "L8", "L9", "L10", "L11", "L254", "L255"] {
             assert!(line(&lines, absent).is_none(), "{absent}: {lines:?}");
         }

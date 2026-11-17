@@ -6,6 +6,43 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-17: P12.1 Under `--mdfix`, fall back to the source RPU's L6 (PR #134)
+
+Step: [P12.1][corpus] Under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults.
+  Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
+  E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
+  of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
+
+Item context (moved from the roadmap):
+
+- Under `--mdfix` the mastering min/max come from the container or the defaults
+  (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:92-93`),
+  never from the source RPU's L6. On r5 Inside Out 2 (P8.1, no ST 2086 in the container) the RPU's
+  0.0001/1000 nits becomes 0.005/1000 nits and `source_min_pq` 7 becomes 62 on every frame
+  (baseline `~/mkvdovi-work/rpu-baseline/0.6.0/mdfix/r5-inside-out-2-mind-console`). The only
+  message is a generic "not found" warning.
+- **Gate:** (owner, 2026-10-16) a unit test that is red on the parent; the r5 Inside Out 2
+  `--mdfix` RPU carries the source L6 (0.0001/1000 nits, `source_min_pq` 7); every other RPU
+  baseline byte-identical.
+
+Gate evidence, PR #134 (`~/mkvdovi-work/rpu-baseline/p12-1-branch-0c09722/RESULT.md`, local):
+`mkvdovi/tests/mdfix_source_l6.rs` builds a P8.1 clip without mastering metadata whose RPU L6
+states 1000 / 0.0001 nits; it fails on the parent (L6 minimum 50, not 1) and passes on the branch
+(L6 1000 / 1, `source_min_pq` 7, measured MaxCLL/MaxFALL). Release builds of the branch captured
+the 19 P6.2 cases plus Joker under `--mdfix` at 0c09722: 19 `RPU.bin` sha256-identical to
+main@a07c7c7, only r5 Inside Out 2 `--mdfix` differs (L6 minimum 50 -> 1, `source_min_pq` 62 -> 7
+on all 1514 frames; L1, L6 peak and the measured 794/96 unchanged). r4, r5 and Joker under
+`--mdfix` re-captured at 8bb4acd, identical. `cargo mutants --in-diff`: 30 caught, 0 missed (4
+timeouts in an unbounded loop, replaced; its re-run 10 of 10 caught), then 7 caught, 3 unviable on
+the review fixes. Unit tests: `pipeline::config::tests` (both sides of each rule; every raw minimum
+0..=10000 survives `Level6::from_nits`).
+
+Resolution: under `--mdfix` the source RPU's L6 fills the mastering peak and minimum the container
+does not state, when plausible (peak 100..=10000, minimum 0..=1 nit); otherwise a warning names it.
+MaxCLL/MaxFALL stay container, measured, default (Claude's reading of the gate; the owner can
+change it). New baseline set `~/mkvdovi-work/rpu-baseline/p12-1-f4ce701/` for the E13 gates. Found
+on the way: P12.2 (container-stated minimum truncated by `Level6::from_nits`).
+
 ### 2026-11-17: P6.2 Five source checks, warn-only (PR #133)
 
 Step: [P6.2][corpus] Implement the five picked checks, warn-only: C5 source RPU L6 against the

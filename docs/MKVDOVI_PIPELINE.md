@@ -339,7 +339,12 @@ This section covers the code on each side.
   `metadata::generate_extra_json`); mkvdovi still runs `dovi_tool generate`.
 - **`--mdfix`** regenerates the RPU with `dovi_tool generate`: authored L2 trims are replaced by
   neutral ones, L3 becomes neutral, L4/L8/L10 are dropped (the generator emits none), L5 is one
-  sampled value, and L6 comes from the container, not the source RPU (P12). Under
+  sampled value, and L6 takes the mastering display from the container, else from the sampled
+  source RPU's L6, else the defaults (P12.1); MaxCLL/MaxFALL still come from the container or the
+  measurements. The source L6 is used only when plausible, by the 8.1 source-range rule (peak
+  `dovi_rpu_builder::MASTERING_PEAK_NITS` 100..=10000 nits, minimum `MASTERING_MIN_NITS` 0..=1 nit);
+  otherwise a warning names its values and the defaults apply
+  (`config::fill_mastering_from_source_l6`). Under
   `--cm-version v29` the rebuild is a CM v2.9 RPU: authored L2 is dropped too, and L3, L9, L11 and L254 are
   dropped, not rebuilt. After each "Rebuilding … (--mdfix)." line it prints which authored levels
   it replaces or drops (`pipeline/mdfix_notice.rs`; `-q` hides it). Under v29 the notice names L3,

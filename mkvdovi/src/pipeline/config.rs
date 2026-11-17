@@ -18,7 +18,7 @@ use crate::cli::{Args, CmVersion};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
-use crate::rpu_check::Level5Offsets;
+use crate::rpu_check::{Level5Offsets, SourceL6};
 
 /// What the configuration phase hands to the later steps.
 pub(super) struct Configured {
@@ -38,6 +38,7 @@ pub(super) struct Settled {
 
 /// Writes `extra.json` for `dovi_tool generate`. Settles which L1 sidecar the RPU carries
 /// (`measured.l1_sidecar`). `None`: the phase printed why; `convert_file` returns `Ok(false)`.
+/// `source_l6` is the sampled source RPU's L6 (see `settle_configuration`).
 pub(super) fn prepare_configuration(
     input_file: &str,
     temp_dir: &Path,
@@ -46,10 +47,16 @@ pub(super) fn prepare_configuration(
     hlg_composer: Option<Composer>,
     measured: &mut Measured,
     level5_offsets: Option<Level5Offsets>,
+    source_l6: Option<&SourceL6>,
 ) -> Result<Option<Configured>> {
-    let Some(settled) =
-        settle_configuration(input_file, args, hlg_composer, measured, level5_offsets)
-    else {
+    let Some(settled) = settle_configuration(
+        input_file,
+        args,
+        hlg_composer,
+        measured,
+        level5_offsets,
+        source_l6,
+    ) else {
         return Ok(None);
     };
 
@@ -78,19 +85,27 @@ pub(super) fn prepare_configuration(
 }
 
 /// Static metadata, CM v4.0, the L1 sidecar, L5, the profile and the source range: everything the
-/// RPU parameters need. `None`: refused, the phase printed why.
+/// RPU parameters need. `None`: refused, the phase printed why. Under `--mdfix`, `source_l6` (the
+/// sampled source RPU's L6) fills the mastering display the container does not state, before the
+/// defaults (P12.1).
 pub(super) fn settle_configuration(
     input_file: &str,
     args: &Args,
     hlg_composer: Option<Composer>,
     measured: &mut Measured,
     level5_offsets: Option<Level5Offsets>,
+    source_l6: Option<&SourceL6>,
 ) -> Option<Settled> {
     // Static Metadata
     // MaxCLL / MaxFALL are resolved after the L1 sidecar is loaded: measured values fill what the
     // source does not state.
     let hlg_source = measured.hdr_type == HdrFormat::Hlg;
     let mut static_meta = metadata::read_static_metadata(input_file);
+    match fill_mastering_from_source_l6(&mut static_meta, source_l6, args.mdfix) {
+        Some((Severity::Info, message)) => progress::print_info(&message),
+        Some((Severity::Warn, message)) => progress::print_warn(&message),
+        None => {}
+    }
     metadata::apply_static_defaults(&mut static_meta, &["max_dml", "min_dml"], hlg_source);
 
     let cm_v40_config = cm_v40_config(input_file, args);
@@ -114,6 +129,68 @@ pub(super) fn settle_configuration(
         level5_offsets,
         source_range,
     })
+}
+
+/// P12.1: fills `max_dml` / `min_dml` that the container does not state from the source RPU's L6
+/// and returns the info line naming what it took. The container always wins. The block is used
+/// only when it is a plausible mastering display, by the rule the 8.1 source range applies
+/// (`MASTERING_PEAK_NITS`, `MASTERING_MIN_NITS`); otherwise the defaults apply, as before, and the
+/// returned warning names the values that were not used. MaxCLL / MaxFALL are not taken from the
+/// RPU; they stay with the container or the measurements. Only under `--mdfix` (`mdfix`): without
+/// it no RPU is rebuilt from a Dolby Vision source.
+fn fill_mastering_from_source_l6(
+    meta: &mut HashMap<String, f64>,
+    source_l6: Option<&SourceL6>,
+    mdfix: bool,
+) -> Option<(Severity, String)> {
+    let l6 = source_l6.filter(|_| mdfix)?;
+    if meta.contains_key("max_dml") && meta.contains_key("min_dml") {
+        return None;
+    }
+    let (peak, min) = (f64::from(l6.max_dml_nits), min_dml_nits(l6.min_dml_raw));
+    let min_label = format!("{:.4} nits", f64::from(l6.min_dml_raw) / 10_000.0);
+    let plausible = dovi_rpu_builder::MASTERING_PEAK_NITS.contains(&peak)
+        && dovi_rpu_builder::MASTERING_MIN_NITS.contains(&min);
+    if !plausible {
+        return Some((
+            Severity::Warn,
+            format!(
+                "The source RPU's L6 states a mastering display of {} nits peak, {min_label} \
+                 minimum, which is not plausible (peak 100 to 10000 nits, minimum 0 to 1 nit); \
+                 the new L6 does not take it.",
+                l6.max_dml_nits
+            ),
+        ));
+    }
+    let mut taken = Vec::new();
+    if !meta.contains_key("max_dml") {
+        meta.insert("max_dml".to_string(), peak);
+        taken.push(format!("peak {} nits", l6.max_dml_nits));
+    }
+    if !meta.contains_key("min_dml") {
+        meta.insert("min_dml".to_string(), min);
+        taken.push(format!("minimum {min_label}"));
+    }
+    Some((
+        Severity::Info,
+        format!(
+            "Mastering display {} from the source RPU's L6 (not stated by the container).",
+            taken.join(", ")
+        ),
+    ))
+}
+
+/// The mastering minimum in nits for a raw L6 value in 0.0001 nits, chosen so that
+/// `Level6::from_nits`, which truncates `nits * 10000`, gives `raw` back: `raw / 10000` alone
+/// comes back one lower for some values (29 -> 28.999...). One step to the next `f64` up is
+/// enough for every value up to `Level6::MAX_VALUE`; an exact quotient is kept as it is.
+fn min_dml_nits(raw: u16) -> f64 {
+    let nits = f64::from(raw) / 10_000.0;
+    if ((nits * 10_000.0) as u32) < u32::from(raw) {
+        nits.next_up()
+    } else {
+        nits
+    }
 }
 
 /// The CM v4.0 configuration (L9 primaries, L11 content type), or `None` under `--cm-version v29`.
@@ -436,4 +513,153 @@ pub(super) fn withdraw_stale_rpu(
     // A muxed output from that run carries the old RPU too.
     let _ = fs::remove_file(temp_dir.join("mux.done"));
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The r5 source's L6: 1000 nits, 0.0001 nits, no light levels.
+    const R5_L6: SourceL6 = SourceL6 {
+        max_dml_nits: 1000,
+        min_dml_raw: 1,
+        max_cll: 0,
+        max_fall: 0,
+    };
+
+    fn stated(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
+        pairs.iter().map(|&(k, v)| (k.to_string(), v)).collect()
+    }
+
+    fn info(meta: &mut HashMap<String, f64>, l6: &SourceL6) -> String {
+        match fill_mastering_from_source_l6(meta, Some(l6), true) {
+            Some((Severity::Info, message)) => message,
+            other => panic!("expected an info line for {l6:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn under_mdfix_the_source_l6_fills_a_container_without_mastering_display() {
+        let mut meta = stated(&[("max_cll", 794.0)]);
+        let message = info(&mut meta, &R5_L6);
+        assert_eq!(
+            meta,
+            stated(&[("max_cll", 794.0), ("max_dml", 1000.0), ("min_dml", 0.0001)])
+        );
+        assert_eq!(
+            message,
+            "Mastering display peak 1000 nits, minimum 0.0001 nits from the source RPU's L6 \
+             (not stated by the container)."
+        );
+    }
+
+    #[test]
+    fn without_mdfix_or_without_a_sample_nothing_is_filled() {
+        for (l6, mdfix) in [(Some(&R5_L6), false), (None, true)] {
+            let mut meta = HashMap::new();
+            assert_eq!(fill_mastering_from_source_l6(&mut meta, l6, mdfix), None);
+            assert!(meta.is_empty(), "mdfix={mdfix}");
+        }
+    }
+
+    #[test]
+    fn the_container_wins_for_each_value_it_states() {
+        let mut both = stated(&[("max_dml", 4000.0), ("min_dml", 0.005)]);
+        assert_eq!(
+            fill_mastering_from_source_l6(&mut both, Some(&R5_L6), true),
+            None
+        );
+        assert_eq!(both, stated(&[("max_dml", 4000.0), ("min_dml", 0.005)]));
+        // A container that states both is not compared here (C5 does that): even an
+        // implausible RPU L6 then prints nothing.
+        let implausible = SourceL6 {
+            max_dml_nits: 0,
+            ..R5_L6
+        };
+        assert_eq!(
+            fill_mastering_from_source_l6(&mut both, Some(&implausible), true),
+            None
+        );
+
+        let mut only_max = stated(&[("max_dml", 4000.0)]);
+        let message = info(&mut only_max, &R5_L6);
+        assert_eq!(
+            only_max,
+            stated(&[("max_dml", 4000.0), ("min_dml", 0.0001)])
+        );
+        assert!(message.contains("minimum 0.0001 nits") && !message.contains("peak"));
+
+        let mut only_min = stated(&[("min_dml", 0.005)]);
+        let message = info(&mut only_min, &R5_L6);
+        assert_eq!(only_min, stated(&[("max_dml", 1000.0), ("min_dml", 0.005)]));
+        assert!(message.contains("peak 1000 nits") && !message.contains("minimum"));
+    }
+
+    #[test]
+    fn light_levels_are_never_taken_from_the_rpu() {
+        let l6 = SourceL6 {
+            max_cll: 992,
+            max_fall: 285,
+            ..R5_L6
+        };
+        let mut meta = HashMap::new();
+        info(&mut meta, &l6);
+        assert!(!meta.contains_key("max_cll") && !meta.contains_key("max_fall"));
+    }
+
+    #[test]
+    fn an_implausible_l6_fills_nothing_and_says_so() {
+        // The 8.1 source-range rule: peak 100 to 10000 nits, minimum 0 to 1 nit (raw 10000).
+        for (peak, min_raw) in [(0, 1), (99, 1), (10_001, 1), (1000, 10_001), (50, 0)] {
+            let l6 = SourceL6 {
+                max_dml_nits: peak,
+                min_dml_raw: min_raw,
+                ..R5_L6
+            };
+            let mut meta = stated(&[("max_cll", 794.0)]);
+            match fill_mastering_from_source_l6(&mut meta, Some(&l6), true) {
+                Some((Severity::Warn, message)) => {
+                    assert!(
+                        message.contains(&format!("{peak} nits peak"))
+                            && message.contains("not plausible"),
+                        "{message}"
+                    );
+                }
+                other => panic!("{l6:?}: {other:?}"),
+            }
+            assert_eq!(meta, stated(&[("max_cll", 794.0)]), "{l6:?}");
+        }
+        // The edges of the range are used, and a minimum of 0 is a stated minimum.
+        for (peak, min_raw, min) in [(10_000, 10_000, 1.0), (100, 0, 0.0)] {
+            let l6 = SourceL6 {
+                max_dml_nits: peak,
+                min_dml_raw: min_raw,
+                ..R5_L6
+            };
+            let mut meta = HashMap::new();
+            info(&mut meta, &l6);
+            assert_eq!(
+                meta,
+                stated(&[("max_dml", f64::from(peak)), ("min_dml", min)])
+            );
+        }
+    }
+
+    #[test]
+    fn every_raw_minimum_survives_the_generator_truncation() {
+        for raw in 0..=10_000u16 {
+            let level6 = dovi_rpu_builder::Level6::from_nits(min_dml_nits(raw), 1000.0, 0.0, 0.0);
+            assert_eq!(
+                level6.min_display_mastering_luminance,
+                u32::from(raw),
+                "raw {raw}"
+            );
+        }
+        // An exact quotient is kept; only a short one moves up by one step.
+        assert_eq!(min_dml_nits(1), 0.0001);
+        assert_eq!(min_dml_nits(29), (29.0_f64 / 10_000.0).next_up());
+        // The plain quotient does not: the reason for `min_dml_nits`.
+        let plain = dovi_rpu_builder::Level6::from_nits(29.0 / 10_000.0, 1000.0, 0.0, 0.0);
+        assert_eq!(plain.min_display_mastering_luminance, 28);
+    }
 }

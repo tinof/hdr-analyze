@@ -259,6 +259,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         hlg_composer,
         &mut measured,
         detection.level5,
+        detection.level6.as_ref(),
     )?
     else {
         return Ok(false);
