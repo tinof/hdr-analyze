@@ -8,6 +8,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- mkvdovi warns when a source contradicts itself (ROADMAP P6.2). The five checks only warn; no
+  value and no delivered RPU changes. A Dolby Vision input whose RPU L6 differs from the
+  container's HDR10 metadata (mastering peak at all, minimum by more than 0.0001 nits, MaxCLL or
+  MaxFALL by more than 2 %) gets a warning that says which values `--mdfix` writes. Sampled RPU
+  L1 peaks, HDR10+ peaks (MaxScl or the `--peak-source` peak) and a measured MaxCLL above 1.25 ×
+  the stated MaxCLL warn, as does a stated MaxFALL above the stated MaxCLL. HDR10+ metadata whose
+  MaxScl is 0 on every frame warns under `--peak-source max-scl` or `max-scl-luminance` on the
+  HDR10+ metadata path, where L1 max falls to the 100-nit floor; elsewhere it is an info line.
 - mkvdovi `--verify` checks the authored CM v4.0 L8 and L10 blocks on every frame of the output
   RPU (ROADMAP E17.1). Two L8 blocks for the same target display, two L10 blocks for the same
   target display, or an L8 target that is neither a preset display (24 and 25 included) nor an

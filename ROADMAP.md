@@ -221,9 +221,9 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - [P6.4][corpus] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
   conversion drops. Gate: the item's step 2 gate.
 - **Checked 2026-11-17 @a07c7c7:** C1 and C3 sit behind the early return of `resolve_light_levels`
-  (`mkvdovi/src/metadata/static_metadata.rs:195`); C4 and C7 belong in `pipeline/hdr10plus.rs`
-  (`:48`, `:109`), whose peak check is skipped without `max_dml` (`pipeline/config.rs:148`); C5 needs
-  the sampled L6 threaded out of `Detection` (`pipeline/measure.rs:134`), as P12.1 does.
+  (`mkvdovi/src/metadata/static_metadata.rs:195`); C4 and C7 read the HDR10+ JSON as
+  `pipeline/hdr10plus.rs` (`:109`) does, and under the hybrid a MaxScl of 0 takes the measured peak
+  (`pipeline/hybrid.rs:361`); C5 needs the sampled L6 out of the sample (`pipeline/measure.rs:134`).
 
 ### P8: HLG → Profile 8.4 composer
 

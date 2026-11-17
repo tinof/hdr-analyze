@@ -13,6 +13,7 @@ use super::analyzer::{print_sidecar_advisories, warn_if_gpu_analysis_missing};
 use super::hdr10plus::inspect_hdr10plus_scene_peaks;
 use super::hybrid;
 use super::measure::Measured;
+use super::source_checks::{self, Severity};
 use crate::cli::{Args, CmVersion};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
@@ -100,6 +101,8 @@ pub(super) fn settle_configuration(
     if !load_fresh_sidecar(args, hlg_composer, measured) || !combine_hybrid(args, measured) {
         return None;
     }
+    // After the hybrid: whether dovi_tool reads the HDR10+ peaks depends on the path it settled.
+    check_hdr10plus_source(measured, &static_meta, args);
     let level5_offsets = sidecar_level5(measured, level5_offsets);
     let dv_profile = choose_profile(measured, args)?;
     // `None` is not a refusal: dovi_tool then derives the source range from L6.
@@ -161,6 +164,37 @@ fn warn_on_hdr10plus_peaks(measured: &Measured, static_meta: &HashMap<String, f6
                 "Could not inspect extracted HDR10+ scene peaks: {e}"
             )),
         }
+    }
+}
+
+/// P6.2 C4 (HDR10+ form) and C7: the HDR10+ peaks against the stated MaxCLL, and a MaxScl that is
+/// 0 on every frame. `static_meta` holds only stated light levels here. Warn-only.
+fn check_hdr10plus_source(measured: &Measured, static_meta: &HashMap<String, f64>, args: &Args) {
+    let Some(path) = measured.hdr10plus_json.as_deref() else {
+        return;
+    };
+    let metadata = match fs::File::open(path)
+        .map_err(|e| e.to_string())
+        .and_then(|file| serde_json::from_reader(file).map_err(|e| e.to_string()))
+    {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            progress::print_warn(&format!(
+                "Could not read the HDR10+ metadata for the source checks: {e}"
+            ));
+            return;
+        }
+    };
+    if let Some(warning) =
+        source_checks::hdr10plus_peak_against_max_cll(&metadata, static_meta, args.peak_source)
+    {
+        progress::print_warn(&warning);
+    }
+    let hybrid = measured.hdr10plus_mode.is_hybrid();
+    match source_checks::hdr10plus_max_scl_all_zero(&metadata, args.peak_source, hybrid) {
+        Some((Severity::Warn, message)) => progress::print_warn(&message),
+        Some((Severity::Info, message)) => progress::print_info(&message),
+        None => {}
     }
 }
 
@@ -315,6 +349,21 @@ fn resolve_source_range(
     dv_profile: &str,
     hlg_source: bool,
 ) -> Option<(u16, u16)> {
+    // P6.2 C1 and C3, before measured values or defaults fill what the source does not state.
+    let measured_max_cll = measured
+        .l1_sidecar
+        .as_ref()
+        .and_then(|sidecar| sidecar.measured_light_levels().ok())
+        .and_then(|levels| levels.max_cll);
+    for warning in [
+        source_checks::measured_max_cll_above_stated(static_meta, measured_max_cll),
+        source_checks::stated_fall_above_cll(static_meta),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        progress::print_warn(&warning);
+    }
     for message in
         metadata::resolve_light_levels(static_meta, measured.l1_sidecar.as_ref(), hlg_source)
     {

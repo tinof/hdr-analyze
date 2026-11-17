@@ -22,6 +22,7 @@ mod manifest;
 mod mdfix_notice;
 mod measure;
 mod rpu_count;
+mod source_checks;
 mod temp_dir;
 mod timing;
 
@@ -198,6 +199,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
         detected_hdr_type,
         &colour_warnings,
         custom_composer,
+        args.mdfix,
     );
 
     if abort_unsupported(detected_hdr_type, &temp_dir) {
