@@ -83,6 +83,13 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- `mkvdovi --mdfix` takes the mastering display peak and minimum the container does not state from
+  the sampled source RPU's L6, before the defaults (ROADMAP P12.1). The container always wins;
+  MaxCLL and MaxFALL still come from the container or the measurements. An info line names what was
+  taken. An L6 outside 100 to 10000 nits peak or 0 to 1 nit minimum is not used: a warning names
+  its values and the defaults apply. Delivered RPUs change for `--mdfix` sources whose container
+  states no mastering display: on r5 Inside Out 2 (P8.1) L6 keeps 0.0001 nits instead of 0.005 nits,
+  and `source_min_pq` is 7 instead of 62. The `--mdfix` notice's L6 line names the new order.
 - mkvdovi's direct-MKV `dovi_tool` steps (`--dovi-input mkv`, or `auto` with dovi_tool 2.3.4+:
   the clean base layer of `--mdfix`, and the Profile 7 MEL conversion) no longer accept any
   non-empty output (ROADMAP E7.1). The output's access units, counted by ffprobe, must equal the
