@@ -835,7 +835,7 @@ The detailed gap table and validation method live in
   regression gate without `--update`, and a diff that shows only moved blocks.
 - [E13.20][desk] Function lint in the excluded `tools/` crates: `[lints.clippy] too_many_lines =
   "warn"` in each `Cargo.toml` (the root `clippy.toml` threshold applies), with step-named markers;
-  `l1_diff` (its `main` is 312 lines) after E13.19. Gate: the `tool:*` gates.
+  `l1_diff` (its `main` is 312 lines) after E13.19. Gate: the `tool:*` gates. Needs: E13.19.
 - [E13.21][gpu] Turn on clippy's `style`, `complexity` and `perf` groups (warn) and fix what they
   report: about 30 warnings at @dc4882d (doc list indentation, empty format literals, a regex
   compiled in a loop, one function with 11 arguments). Gate: fmt, clippy (also `--features cuda`),
