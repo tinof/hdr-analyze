@@ -6,6 +6,33 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-17: P6.2 Five source checks, warn-only (PR #133)
+
+Step: [P6.2][corpus] Implement the five picked checks, warn-only: C5 source RPU L6 against the
+  container, C1 measured MaxCLL above 1.25 × the stated MaxCLL, C4 HDR10+ or RPU L1 peak above
+  1.25 × MaxCLL, C7 HDR10+ MaxScl 0 on every frame, C3 stated MaxFALL above MaxCLL. Gate: the
+  item's step 2 gate (each check warns on a clip that has the problem and stays silent on one that
+  does not; all RPU baselines byte-identical).
+
+Gate evidence, PR #133: release builds of main@a07c7c7 and the branch converted 19 cases of the
+development corpus (the E17.2 set of 16, a HotD MEL remux stating MaxCLL 100 / MaxFALL 400, an
+Exodus HDR10 remux stating the same, Alien on the HDR10+ metadata path with `--peak-source
+max-scl`, and Joker with `--mdfix`); `~/mkvdovi-work/rpu-baseline/p6-2-branch/RESULT.md`. Every
+`RPU.bin` is byte-identical (`cmp`, CRC included) and `rpu-baseline.sh compare
+--require-identical-l1` is clean. Warns: C5 on Joker (RPU 992/285, stated 676/87) and the HotD
+remux; C4 (RPU form) on the HotD remux; C4 (HDR10+) on The Shining mountain road (MaxScl 3710,
+histogram 2334, stated 1633); C1 on Deadloch beach (1292 / 973), The Shining mountain road
+(4138 / 1633) and the Exodus remux; C3 on the Exodus remux; C7 on Alien with `max-scl`, whose
+RPU then has L1 max 2081 on every frame. Silent on every other clip; C7 under the default
+histogram peak source prints an info line (Alien ×2, Alita ×2). Under `--mdfix` Joker's new L6 is
+the stated 0.0001/1000, 676/87. Unit tests: `pipeline/source_checks/tests.rs` (both sides of each
+threshold) and `rpu_check::tests::the_sample_keeps_the_source_l6`.
+
+Resolution: mkvdovi warns on the five contradictions and changes nothing. C5 compares the
+mastering minimum exactly, per the C5 row below ("MDL any"); the 2026-10-17 survey list allowed
+one 0.0001-nit unit. C7 runs after the hybrid, which takes the measured peak for a zero MaxScl.
+Not covered in the repo: no test pins C7's place after the hybrid combine.
+
 ### 2026-11-16: E17.1 `--verify` checks for authored L8 and L10 blocks (PR #129)
 
 Step: [E17.1][corpus][batch] Hard-fail `--verify` (`mkvdovi/src/verify.rs`) on duplicate L8

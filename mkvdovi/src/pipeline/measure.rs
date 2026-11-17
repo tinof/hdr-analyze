@@ -18,6 +18,7 @@ use super::hdr10plus::{
 use super::hdr10plus_coverage::{self, Unextracted};
 use super::hybrid;
 use super::mdfix_notice::print_mdfix_notice;
+use super::source_checks;
 use super::{add_optimizer_args, analyzer_executable, is_dolby_vision, FEL_UNSUPPORTED_MESSAGE};
 use crate::cli::{Args, Hdr10PlusL1};
 use crate::external;
@@ -146,6 +147,7 @@ pub(super) fn report_detection(
     hdr_type: HdrFormat,
     colour_warnings: &[String],
     custom_composer: Option<Composer>,
+    mdfix: bool,
 ) -> Detection {
     progress::print_step(1, 0, "Detecting HDR format...");
     let mut detection = Detection::default();
@@ -155,6 +157,15 @@ pub(super) fn report_detection(
             Ok(sample) => {
                 detection.level5 = sample.level5;
                 detection.authored = Some(sample.authored);
+                // P6.2 C5 and C4 (RPU form), against the values the container states.
+                let stated = metadata::read_static_metadata(input_file);
+                let source_warnings = [
+                    sample
+                        .level6
+                        .as_ref()
+                        .and_then(|l6| source_checks::rpu_l6_against_container(l6, &stated, mdfix)),
+                    source_checks::rpu_peak_against_max_cll(&sample.l1_frames, &stated),
+                ];
                 if let Ok(report) =
                     rpu_check::analyze_rpus(sample.l1_frames, sample.mastering_peak_pq)
                 {
@@ -165,6 +176,9 @@ pub(super) fn report_detection(
                             detail, sample.windows_sampled
                         ));
                     }
+                }
+                for warning in source_warnings.into_iter().flatten() {
+                    progress::print_warn(&warning);
                 }
             }
             Err(error) => progress::print_warn(&format!(

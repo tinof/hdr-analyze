@@ -178,8 +178,23 @@ pub struct SampledRpu {
     pub l1_frames: Vec<L1Stats>,
     pub mastering_peak_pq: Option<u16>,
     pub level5: Option<Level5Offsets>,
+    /// The first L6 block in the sampled windows.
+    pub level6: Option<SourceL6>,
     pub windows_sampled: usize,
     pub authored: AuthoredLevels,
+}
+
+/// A source RPU's L6 block, as the RPU stores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceL6 {
+    /// Mastering display peak in nits.
+    pub max_dml_nits: u16,
+    /// Mastering display minimum in units of 0.0001 nits.
+    pub min_dml_raw: u16,
+    /// MaxCLL in nits; 0 means unknown.
+    pub max_cll: u16,
+    /// MaxFALL in nits; 0 means unknown.
+    pub max_fall: u16,
 }
 
 /// Authored metadata seen in the sampled windows that a `--mdfix` rebuild does not keep as it is.
@@ -327,6 +342,7 @@ fn sample_extracted_windows(rpu_paths: impl IntoIterator<Item = PathBuf>) -> Res
     let mut l1_frames = Vec::new();
     let mut mastering_peak_pq = None;
     let mut level5 = None;
+    let mut level6 = None;
     let mut windows_sampled = 0usize;
     let mut authored = AuthoredLevels::default();
     let mut parse_error = None;
@@ -351,6 +367,9 @@ fn sample_extracted_windows(rpu_paths: impl IntoIterator<Item = PathBuf>) -> Res
         if level5.is_none() {
             level5 = rpus.iter().find_map(level5_from_rpu);
         }
+        if level6.is_none() {
+            level6 = rpus.iter().find_map(level6_from_rpu);
+        }
         record_authored_levels(&mut authored, &rpus);
         windows_sampled += 1;
     }
@@ -370,6 +389,7 @@ fn sample_extracted_windows(rpu_paths: impl IntoIterator<Item = PathBuf>) -> Res
         l1_frames,
         mastering_peak_pq,
         level5,
+        level6,
         windows_sampled,
         authored,
     })
@@ -635,6 +655,18 @@ fn level5_from_rpu(rpu: &DoviRpu) -> Option<Level5Offsets> {
     }
 }
 
+fn level6_from_rpu(rpu: &DoviRpu) -> Option<SourceL6> {
+    match rpu.vdr_dm_data.as_ref()?.get_block(6)? {
+        ExtMetadataBlock::Level6(level6) => Some(SourceL6 {
+            max_dml_nits: level6.max_display_mastering_luminance,
+            min_dml_raw: level6.min_display_mastering_luminance,
+            max_cll: level6.max_content_light_level,
+            max_fall: level6.max_frame_average_light_level,
+        }),
+        _ => None,
+    }
+}
+
 fn mastering_peak_from_rpu(rpu: &DoviRpu) -> Option<u16> {
     match rpu.vdr_dm_data.as_ref()?.get_block(6)? {
         ExtMetadataBlock::Level6(level6) => Some(nits_to_pq_12_bit(
@@ -654,7 +686,7 @@ fn collapse_scenes(frames: &[L1Stats]) -> Vec<L1Stats> {
     scenes
 }
 
-fn nits_to_pq_12_bit(nits: f64) -> u16 {
+pub(crate) fn nits_to_pq_12_bit(nits: f64) -> u16 {
     let normalized = (nits / 10_000.0).clamp(0.0, 1.0);
     let m1 = 2610.0 / 16384.0;
     let m2 = 2523.0 / 32.0;
@@ -677,7 +709,7 @@ mod tests {
     use super::*;
     use dolby_vision::rpu::extension_metadata::blocks::{
         ExtMetadataBlockLevel1, ExtMetadataBlockLevel10, ExtMetadataBlockLevel11,
-        ExtMetadataBlockLevel4, ExtMetadataBlockLevel5,
+        ExtMetadataBlockLevel4, ExtMetadataBlockLevel5, ExtMetadataBlockLevel6,
     };
     use dolby_vision::rpu::generate::{GenerateConfig, VideoShot};
     use dolby_vision::rpu::vdr_dm_data::CmVersion as RpuCmVersion;
@@ -1057,6 +1089,46 @@ mod tests {
         let sample = sample_extracted_windows([good.clone(), garbage]).unwrap();
         assert_eq!(sample.windows_sampled, 1);
         assert_eq!(sample.l1_frames.len(), 2);
+    }
+
+    /// P6.2: the sample keeps the L6 block as the RPU stores it (minimum in 0.0001 nits), from
+    /// the first window that has one.
+    #[test]
+    fn the_sample_keeps_the_source_l6() {
+        let dir = tempfile::tempdir().unwrap();
+        let with_l6 = |max, min, cll, fall| {
+            GenerateConfig {
+                length: 2,
+                level6: Some(ExtMetadataBlockLevel6 {
+                    max_display_mastering_luminance: max,
+                    min_display_mastering_luminance: min,
+                    max_content_light_level: cll,
+                    max_frame_average_light_level: fall,
+                }),
+                shots: vec![VideoShot {
+                    duration: 2,
+                    metadata_blocks: vec![ExtMetadataBlock::Level1(ExtMetadataBlockLevel1::new(
+                        0, 2800, 1200,
+                    ))],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+            .generate_rpu_list()
+            .unwrap()
+        };
+        let first = write_rpu_bin(dir.path(), "first.bin", &with_l6(1000, 1, 992, 285));
+        let second = write_rpu_bin(dir.path(), "second.bin", &with_l6(4000, 50, 1633, 114));
+        let sample = sample_extracted_windows([first, second]).unwrap();
+        assert_eq!(
+            sample.level6,
+            Some(SourceL6 {
+                max_dml_nits: 1000,
+                min_dml_raw: 1,
+                max_cll: 992,
+                max_fall: 285,
+            })
+        );
     }
 
     /// E15.1: on the parent commit both functions abort the process (`unimplemented!` in
