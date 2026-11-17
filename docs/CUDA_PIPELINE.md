@@ -230,8 +230,9 @@ The run is NVDEC-bound: downscale 1 and 2 run at the same speed. `--profile-perf
 GPU host before every PR that touches `hdr_analyzer_mvp/src/analysis/`, `kernels.cu` or
 `ffmpeg_io.rs`. Hosted CI has no GPU, so nothing else runs this check.
 
-The script encodes the synthetic clip from `tools/l1_diff/corpus/make_corpus.py` (640x360, 144
-frames, six shots) as HEVC Main10 twice, once tagged PQ and once tagged HLG. It then runs
+The script encodes the synthetic clip from `tools/l1_diff/corpus/make_corpus.py` (640x360, 242
+frames, six shots) as HEVC Main10 twice, once tagged PQ and once tagged HLG, and a third time as
+a letterboxed PQ clip (the corpus drawn 640x264, padded with black bars to 640x360). It then runs
 `hdr_analyzer_mvp/tests/cuda_parity.rs` against a debug build with the `cuda` feature. The HLG clip
 is checked once per Profile 8.4 composer named in `HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS`
 (comma-separated `--hlg-composer` values; the script sets `preset,bt2100`, and unset means every
@@ -253,6 +254,19 @@ st2094-10` on odd crop anchors and sizes, planar and P010, consecutive frames), 
 detection only yields even anchors. libtest exits 0 when its filter matches nothing, so the script
 fails unless exactly one test passed.
 
+`nvdec_cpu_analysis_matches_software_decode` (ROADMAP E12.2) checks CPU analysis of NVDEC frames:
+`--hwaccel cuda` without GPU analysis against `--hwaccel none`. It requires byte-identical `.bin`
+files and sidecars (version 7, `analysis.gpu` false, the composer's mapping), equal frame statistics
+and AU tables, a repack line for every frame on the NVDEC run and none on the software run, and
+the same crop-monitor report with at least one usable scene-cut sample. Its `--no-crop` case
+requires the full frame and no monitor report, and the letterboxed clip with `--crop-probes 0` a
+committed crop smaller than the frame. The `+cuda` pass runs it for `--pre-denoise median3` on both
+clips, the only CPU analysis such a build does under `--hwaccel cuda`; a second pass builds the
+analyzer without the `cuda` feature and runs every case: PQ and HLG (both composers) with crop
+detection, PQ with median3, st2094-10 and `--no-crop`, and the letterboxed clip. The repack count
+is the only proof that NVDEC decoded: the analyzer falls back to software decode when NVDEC does
+not open. The hosted test gates skip both tests of `cuda_parity.rs` by name.
+
 The script fails when `nvidia-smi`, `python3` or an `ffmpeg` with `libx265` is missing, and the
 test fails when the analyzer was built without the `cuda` feature. `--pq <file>` and `--hlg <file>`
 replace a generated clip with a real HEVC 10-bit sample. Run with those options after a change to
@@ -261,8 +275,9 @@ are not set.
 
 What it does not prove:
 
-- The generated clips are small and synthetic, with no letterbox bars. They do not cover 4K
-  frames, real crops, odd pitches, or 8-bit and 12-bit sources.
+- The generated clips are small and synthetic, and only one has letterbox bars. They do not cover
+  4K frames, odd pitches, or 8-bit and 12-bit sources. The CPU analysis of `hevc_cuvid` frames and
+  of a run whose CUDA start fails is not run end to end.
 - It compares the CPU path with the GPU path of one build. It does not compare a build with the
   previous build, so a change that moves both paths the same way passes. The manual check above
   and `tools/l1_diff` cover that.

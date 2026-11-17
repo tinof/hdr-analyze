@@ -83,6 +83,14 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- `hdr_analyzer_mvp --hwaccel cuda` with CPU analysis (a build without the `cuda` feature,
+  `--pre-denoise median3`, or a CUDA start that fails) now measures what software decode measures
+  (ROADMAP E12.2). At `--downscale 1` it copies the NVDEC P010 frames into its analysis frames with
+  each sample shifted down by 6; before, swscale converted them and moved the codes. `.bin` and L1
+  sidecar are byte-identical to `--hwaccel none` on the CUDA parity clips and on one PQ and one HLG
+  cut. Measurements, and the RPU L1 taken from them, change for files analyzed that way. GPU
+  analysis, software decode and `--downscale 2` are unchanged. The analyzer
+  prints how many frames it repacked. `mkvdovi` analyzes such files again (see Changed).
 - `mkvdovi --mdfix` takes the mastering display peak and minimum the container does not state from
   the sampled source RPU's L6, before the defaults (ROADMAP P12.1). The container always wins;
   MaxCLL and MaxFALL still come from the container or the measurements. An info line names what was
@@ -123,6 +131,18 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Changed
 
+- The L1 sidecar is version 7 (ROADMAP E12.2). No field changes: version 7 says that CPU analysis at
+  downscale 1 read the decoder's codes on every decode route. `mkvdovi` and `tools/l1_diff` read
+  versions 1 to 7; `mkvdovi` 0.8.0 does not read version 7 and analyzes again, so update both
+  binaries together. A version 6 or older sidecar does not record which decoder ran, so under
+  `--hwaccel cuda` (which `auto` becomes on an NVIDIA host) `mkvdovi` analyzes again instead of
+  reusing one with CPU analysis at downscale 1, in a conversion and in `mkvdovi manifest`. GPU
+  measurements, downscale 2 and all measurements under `--hwaccel none` stay reusable. An
+  `hdr_analyzer_mvp` that still writes version 6 is refused after its analysis under
+  `--hwaccel cuda`, with the measurements that run wrote removed (the default HDR10+ hybrid takes
+  the metadata path instead); update it or run with `--hwaccel none`. Measurements analyzed on an
+  NVDEC host and copied by hand to a host that runs with `--hwaccel none` are still reused there:
+  delete them to analyze again.
 - When mkvdovi cannot read the source's video frame times (no `ffprobe` on `PATH`, an input that
   is not Matroska, such as MP4 or TS, or an unreadable file), it muxes with the stream's own
   timing, warns, and skips the timing check; a non-DV source is then kept, not deleted.
