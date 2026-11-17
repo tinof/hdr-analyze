@@ -21,7 +21,8 @@ use anyhow::{Context, Result};
 use dovi84_composer::Composer;
 use dovi_rpu_builder::manifest::PlaybackManifest;
 
-use self::au_table::{au_table_path, Pair, AU_TABLE_CAPABILITY};
+pub(super) use self::au_table::au_table_path;
+use self::au_table::{Pair, AU_TABLE_CAPABILITY};
 use self::identity::{is_matroska, is_same_file, FileIdentity};
 use super::analyzer::{
     analysis_sampling, analyzer_executable, measurements_path_in, print_sidecar_advisories,
@@ -29,7 +30,7 @@ use super::analyzer::{
 };
 use super::config::settle_configuration;
 use super::measure::{fresh_analysis_args, Hdr10PlusMode, Measured};
-use crate::cli::{Args, ManifestArgs};
+use crate::cli::{Args, HwAccel, ManifestArgs};
 use crate::external;
 use crate::metadata::{self, HdrFormat, L1Sidecar};
 use crate::progress;
@@ -428,38 +429,47 @@ fn reusable_pair(
         }
         return None;
     }
+    match checked_pair(input_file, args, hlg_composer, paths, identity) {
+        Ok((sidecar, pair, advisories)) => {
+            report_reused_sidecar(&sidecar, &paths.measurements, args);
+            print_sidecar_advisories(&advisories);
+            progress::print_info(&format!(
+                "Reusing the measurements and AU table in {}.",
+                paths.work_dir.display()
+            ));
+            Some((sidecar, pair))
+        }
+        Err(reason) => {
+            progress::print_warn(&format!(
+                "The measurements in {} cannot be reused ({reason}); re-analyzing.",
+                paths.work_dir.display()
+            ));
+            None
+        }
+    }
+}
+
+/// The checks of [`reusable_pair`] on files that exist: the pair and the sidecar's advisories, or
+/// why the pair cannot be reused.
+fn checked_pair(
+    input_file: &str,
+    args: &Args,
+    hlg_composer: Option<Composer>,
+    paths: &Paths,
+    identity: &FileIdentity,
+) -> Result<(L1Sidecar, Pair, Vec<String>), String> {
     let input = Path::new(input_file);
     let expect =
         metadata::SidecarExpectation::for_input(input, metadata::get_frame_count(input_file))
-            .with_hlg_composer(hlg_composer);
-    let reason = match metadata::load_l1_sidecar(&paths.measurements, &expect) {
-        Err(error) => error.to_string(),
-        Ok((sidecar, advisories)) => {
-            let checked = check_sampling(&sidecar, args).and_then(|()| {
-                let pair = Pair::read(&paths.au_table, &paths.sidecar)?;
-                pair.check_source(input, identity)?;
-                pair.check_sidecar(&sidecar)?;
-                Ok(pair)
-            });
-            match checked {
-                Ok(pair) => {
-                    report_reused_sidecar(&sidecar, &paths.measurements, args);
-                    print_sidecar_advisories(&advisories);
-                    progress::print_info(&format!(
-                        "Reusing the measurements and AU table in {}.",
-                        paths.work_dir.display()
-                    ));
-                    return Some((sidecar, pair));
-                }
-                Err(reason) => reason,
-            }
-        }
-    };
-    progress::print_warn(&format!(
-        "The measurements in {} cannot be reused ({reason}); re-analyzing.",
-        paths.work_dir.display()
-    ));
-    None
+            .with_hlg_composer(hlg_composer)
+            .with_nvdec_route(args.hwaccel == HwAccel::Cuda);
+    let (sidecar, advisories) = metadata::load_l1_sidecar(&paths.measurements, &expect)
+        .map_err(|error| error.to_string())?;
+    check_sampling(&sidecar, args)?;
+    let pair = Pair::read(&paths.au_table, &paths.sidecar)?;
+    pair.check_source(input, identity)?;
+    pair.check_sidecar(&sidecar)?;
+    Ok((sidecar, pair, advisories))
 }
 
 /// The pair was sampled exactly as `--analysis-quality` samples: the manifest then describes what

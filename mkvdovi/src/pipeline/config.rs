@@ -12,9 +12,10 @@ use dovi84_composer::Composer;
 use super::analyzer::{print_sidecar_advisories, warn_if_gpu_analysis_missing};
 use super::hdr10plus::inspect_hdr10plus_scene_peaks;
 use super::hybrid;
+use super::manifest::au_table_path;
 use super::measure::Measured;
 use super::source_checks::{self, Severity};
-use crate::cli::{Args, CmVersion};
+use crate::cli::{Args, CmVersion, HwAccel};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
@@ -293,18 +294,33 @@ fn load_fresh_sidecar(
                 "--legacy-madvr-l1: L1 max comes from optimizer targets and L1 avg is a placeholder, not measured values.",
             );
         } else if measured.l1_sidecar.is_none() {
-            // Freshly produced by the analyzer in this run: validate structure and, for HLG, the
-            // luminance mapping (an older analyzer binary would measure without it). The frame
-            // count is the analyzer's own: a v5 sidecar accounts for every picture of the stream
-            // it demuxed, while MediaInfo can report a count estimated from the duration or
-            // copied from stale statistics tags. The inject step still refuses an RPU whose
-            // length differs from the video.
-            let expect = metadata::SidecarExpectation::default().with_hlg_composer(hlg_composer);
+            // Freshly produced by the analyzer in this run: validate structure, for HLG the
+            // luminance mapping (an older analyzer binary would measure without it), and under
+            // --hwaccel cuda that CPU analysis read the NVDEC frames unconverted (sidecar v7;
+            // older analyzers moved their codes). The frame count is the analyzer's own: a v5
+            // sidecar accounts for every picture of the stream it demuxed, while MediaInfo can
+            // report a count estimated from the duration or copied from stale statistics tags.
+            // The inject step still refuses an RPU whose length differs from the video.
+            let expect = metadata::SidecarExpectation::default()
+                .with_hlg_composer(hlg_composer)
+                .with_nvdec_route(args.hwaccel == HwAccel::Cuda);
+            // Measurements refused for the decode route are removed whatever the run does next:
+            // a later run with --hwaccel none would reuse them.
             match metadata::load_l1_sidecar(measurements, &expect) {
                 Ok((sidecar, advisories)) => {
                     print_sidecar_advisories(&advisories);
                     warn_if_gpu_analysis_missing(&sidecar, args);
                     measured.l1_sidecar = Some(sidecar);
+                }
+                Err(error @ metadata::SidecarError::InexactNvdecRoute(_))
+                    if !measured.hdr10plus_mode.is_hybrid() =>
+                {
+                    let removal = remove_inexact_measurements(measurements);
+                    progress::print_error(&format!(
+                        "The analyzer's L1 sidecar cannot be used ({error}). This hdr_analyzer_mvp analyzes NVDEC frames on the CPU through a conversion that moves their codes: update it to one that writes sidecar v{}, or run with --hwaccel none. Also, {removal}.",
+                        metadata::L1_SIDECAR_EXACT_DECODE_VERSION
+                    ));
+                    return false;
                 }
                 Err(error) if measured.hdr_type == HdrFormat::Hlg => {
                     let required = hlg_composer.map_or(
@@ -322,7 +338,11 @@ fn load_fresh_sidecar(
                     return false;
                 }
                 Err(error) if measured.hdr10plus_mode.is_hybrid() => {
-                    let reason = format!("the analyzer's L1 sidecar is unusable ({error})");
+                    let mut reason = format!("the analyzer's L1 sidecar is unusable ({error})");
+                    if matches!(error, metadata::SidecarError::InexactNvdecRoute(_)) {
+                        let removal = remove_inexact_measurements(measurements);
+                        reason.push_str(&format!("; {removal}"));
+                    }
                     if !fall_back_to_hdr10plus(measured, &reason) {
                         return false;
                     }
@@ -337,6 +357,37 @@ fn load_fresh_sidecar(
         }
     }
     true
+}
+
+/// Removes the `.bin`, `.l1.json` and `.au.json` a fresh analysis just wrote after their sidecar
+/// was refused as [`metadata::SidecarError::InexactNvdecRoute`], and returns the clause that
+/// says so. A file that is already gone is not an error.
+fn remove_inexact_measurements(measurements: &Path) -> String {
+    let files = [
+        measurements.to_path_buf(),
+        metadata::l1_sidecar_path(measurements),
+        au_table_path(measurements),
+    ];
+    let failed: Vec<String> = files
+        .iter()
+        .filter_map(|file| match fs::remove_file(file) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                Some(format!("{}: {error}", file.display()))
+            }
+            _ => None,
+        })
+        .collect();
+    if failed.is_empty() {
+        format!(
+            "the measurements this run wrote ('{}' and its sidecars) were removed, so no later run reuses them",
+            measurements.display()
+        )
+    } else {
+        format!(
+            "these measurements could not be removed; delete them before the next run: {}",
+            failed.join("; ")
+        )
+    }
 }
 
 /// HDR10+ hybrid: the RPU's scenes become the union of the HDR10+ scenes and the analyzer's cuts,
@@ -517,6 +568,12 @@ pub(super) fn withdraw_stale_rpu(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use clap::Parser;
+    use serde_json::{json, Value};
+
+    use super::super::measure::{find_reusable_measurements, Hdr10PlusMode};
     use super::*;
 
     /// The r5 source's L6: 1000 nits, 0.0001 nits, no light levels.
@@ -661,5 +718,195 @@ mod tests {
         // The plain quotient does not: the reason for `min_dml_nits`.
         let plain = dovi_rpu_builder::Level6::from_nits(29.0 / 10_000.0, 1000.0, 0.0, 0.0);
         assert_eq!(plain.min_display_mastering_luminance, 28);
+    }
+
+    /// What a fresh analysis of `<dir>/clip.mkv` leaves beside it: the measurements, their
+    /// sidecar `sidecar` (none for `None`) and an AU table.
+    struct FreshAnalysis {
+        dir: tempfile::TempDir,
+    }
+
+    impl FreshAnalysis {
+        fn new(sidecar: Option<&Value>) -> Self {
+            let fresh = Self {
+                dir: tempfile::tempdir().unwrap(),
+            };
+            fs::write(fresh.input(), b"src").unwrap();
+            fs::write(fresh.measurements(), b"bin").unwrap();
+            fs::write(au_table_path(&fresh.measurements()), b"{}").unwrap();
+            if let Some(sidecar) = sidecar {
+                let path = metadata::l1_sidecar_path(&fresh.measurements());
+                fs::write(path, sidecar.to_string()).unwrap();
+            }
+            fresh
+        }
+
+        fn input(&self) -> PathBuf {
+            self.dir.path().join("clip.mkv")
+        }
+
+        fn measurements(&self) -> PathBuf {
+            self.dir.path().join("clip_measurements.bin")
+        }
+
+        /// Whether the measurements, the sidecar and the AU table are still there.
+        fn files(&self) -> [bool; 3] {
+            let measurements = self.measurements();
+            [
+                measurements.exists(),
+                metadata::l1_sidecar_path(&measurements).exists(),
+                au_table_path(&measurements).exists(),
+            ]
+        }
+
+        /// `load_fresh_sidecar` under `--hwaccel <hwaccel>` for an input of `hdr_type`.
+        fn load(
+            &self,
+            hwaccel: &str,
+            hdr_type: HdrFormat,
+            mode: Hdr10PlusMode,
+            hlg_composer: Option<Composer>,
+        ) -> (bool, Measured) {
+            let args = Args::try_parse_from(["mkvdovi", "--hwaccel", hwaccel]).unwrap();
+            let mut measured = Measured {
+                hdr_type,
+                measurements_file: Some(self.measurements()),
+                hdr10plus_json: None,
+                bl_source_file: self.input(),
+                l1_sidecar: None,
+                hdr10plus_mode: mode,
+            };
+            let loaded = load_fresh_sidecar(&args, hlg_composer, &mut measured);
+            (loaded, measured)
+        }
+
+        fn load_pq(&self, hwaccel: &str, mode: Hdr10PlusMode) -> (bool, Measured) {
+            self.load(hwaccel, HdrFormat::Hdr10WithMeasurements, mode, None)
+        }
+    }
+
+    /// A sidecar of `version` for the 4 frames of `clip.mkv`: CPU analysis at downscale 1, PQ or
+    /// HLG through `mapping`, as the analyzer writes it.
+    fn fresh_sidecar(version: u32, mapping: &str) -> Value {
+        let transfer = if mapping == "pq" {
+            "PQ (SMPTE 2084)"
+        } else {
+            "HLG (ARIB STD-B67)"
+        };
+        json!({
+            "version": version,
+            "source": {"file_name": "clip.mkv", "size_bytes": 3, "width": 1920, "height": 1080,
+                       "transfer_function": transfer, "stream_frames": 4,
+                       "leading_skipped_frames": 0},
+            "analysis": {"downscale": 1, "sample_rate": 1, "gpu": false, "no_crop": false,
+                         "luminance_mapping": mapping},
+            "peak_domain": "max-rgb", "peak_estimator": "max", "peak_source": "max",
+            "scenes": [{"start": 0, "end": 3, "min_pq_12bit": 1, "avg_luma_pq_12bit": 500,
+                        "avg_max_rgb_pq_12bit": 520, "max_pq_12bit": 2400}],
+            "frames": {"min_pq_12bit": [1, 1, 1, 1], "avg_max_rgb_pq_12bit": [520, 520, 520, 520],
+                       "max_pq_12bit": [2400, 2300, 2200, 2100]}
+        })
+    }
+
+    const GONE: [bool; 3] = [false, false, false];
+    const KEPT: [bool; 3] = [true, true, true];
+
+    #[test]
+    fn a_fresh_cpu_sidecar_before_v7_under_hwaccel_cuda_is_refused_and_removed() {
+        let pq = fresh_sidecar(6, "pq");
+        for mode in [Hdr10PlusMode::Metadata, Hdr10PlusMode::ExplicitHybrid] {
+            let fresh = FreshAnalysis::new(Some(&pq));
+            let (loaded, measured) = fresh.load_pq("cuda", mode);
+            assert!(!loaded, "{mode:?}");
+            assert!(measured.l1_sidecar.is_none(), "{mode:?}");
+            assert_eq!(fresh.files(), GONE, "{mode:?}");
+        }
+
+        let hlg = fresh_sidecar(6, Composer::Preset.luminance_mapping());
+        let fresh = FreshAnalysis::new(Some(&hlg));
+        let (loaded, _) = fresh.load(
+            "cuda",
+            HdrFormat::Hlg,
+            Hdr10PlusMode::Metadata,
+            Some(Composer::Preset),
+        );
+        assert!(!loaded);
+        assert_eq!(fresh.files(), GONE);
+
+        // The default hybrid goes on with the HDR10+ metadata alone.
+        let fresh = FreshAnalysis::new(Some(&pq));
+        let (loaded, measured) = fresh.load_pq("cuda", Hdr10PlusMode::ImplicitHybrid);
+        assert!(loaded);
+        assert_eq!(measured.hdr10plus_mode, Hdr10PlusMode::Metadata);
+        assert_eq!(measured.hdr_type, HdrFormat::Hdr10Plus);
+        assert!(measured.measurements_file.is_none() && measured.l1_sidecar.is_none());
+        assert_eq!(fresh.files(), GONE);
+    }
+
+    #[test]
+    fn a_fresh_sidecar_the_decode_route_allows_is_loaded_and_kept() {
+        for (version, hwaccel) in [(6, "none"), (7, "cuda"), (7, "none")] {
+            let fresh = FreshAnalysis::new(Some(&fresh_sidecar(version, "pq")));
+            let (loaded, measured) = fresh.load_pq(hwaccel, Hdr10PlusMode::Metadata);
+            assert!(loaded, "v{version} {hwaccel}");
+            assert!(measured.l1_sidecar.is_some(), "v{version} {hwaccel}");
+            assert_eq!(fresh.files(), KEPT, "v{version} {hwaccel}");
+        }
+        let mut gpu = fresh_sidecar(6, "pq");
+        gpu["analysis"]["gpu"] = json!(true);
+        let fresh = FreshAnalysis::new(Some(&gpu));
+        assert!(fresh.load_pq("cuda", Hdr10PlusMode::Metadata).0);
+        assert_eq!(fresh.files(), KEPT);
+    }
+
+    #[test]
+    fn other_fresh_sidecar_failures_under_hwaccel_cuda_keep_their_own_refusal() {
+        // An HLG sidecar measured through the other composer: the mapping refusal, which an
+        // update of the analyzer does not fix, and nothing is removed.
+        let hlg = fresh_sidecar(6, Composer::Preset.luminance_mapping());
+        let fresh = FreshAnalysis::new(Some(&hlg));
+        let (loaded, _) = fresh.load(
+            "cuda",
+            HdrFormat::Hlg,
+            Hdr10PlusMode::Metadata,
+            Some(Composer::Bt2100V1),
+        );
+        assert!(!loaded);
+        assert_eq!(fresh.files(), KEPT);
+
+        let missing = FreshAnalysis::new(None);
+        assert!(!missing.load_pq("cuda", Hdr10PlusMode::Metadata).0);
+        assert_eq!(missing.files(), [true, false, true]);
+
+        let mut invalid = fresh_sidecar(7, "pq");
+        invalid["scenes"] = json!([]);
+        let fresh = FreshAnalysis::new(Some(&invalid));
+        assert!(!fresh.load_pq("cuda", Hdr10PlusMode::Metadata).0);
+        assert_eq!(fresh.files(), KEPT);
+    }
+
+    #[test]
+    fn a_refused_nvdec_analysis_is_not_reused_by_a_retry_with_hwaccel_none() {
+        let fresh = FreshAnalysis::new(Some(&fresh_sidecar(6, "pq")));
+        let input = fresh.input();
+        let none = Args::try_parse_from(["mkvdovi", "--hwaccel", "none"]).unwrap();
+        let reused = || {
+            let (mut measurements_file, mut l1_sidecar) = (None, None);
+            find_reusable_measurements(
+                &input,
+                input.to_str().unwrap(),
+                &none,
+                None,
+                false,
+                &mut measurements_file,
+                &mut l1_sidecar,
+            )
+        };
+        // Left in place, the retry would take these measurements as software decode's.
+        assert!(reused());
+
+        assert!(!fresh.load_pq("cuda", Hdr10PlusMode::Metadata).0);
+        assert_eq!(fresh.files(), GONE);
+        assert!(!reused(), "the retry must analyze afresh");
     }
 }

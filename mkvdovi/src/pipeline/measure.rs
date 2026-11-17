@@ -20,7 +20,7 @@ use super::hybrid;
 use super::mdfix_notice::print_mdfix_notice;
 use super::source_checks;
 use super::{add_optimizer_args, analyzer_executable, is_dolby_vision, FEL_UNSUPPORTED_MESSAGE};
-use crate::cli::{Args, Hdr10PlusL1};
+use crate::cli::{Args, Hdr10PlusL1, HwAccel};
 use crate::external;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
@@ -566,7 +566,8 @@ pub(super) fn find_reusable_measurements(
             input_path,
             metadata::get_frame_count(input_file),
         )
-        .with_hlg_composer(hlg_composer);
+        .with_hlg_composer(hlg_composer)
+        .with_nvdec_route(args.hwaccel == HwAccel::Cuda);
         let mut reused = false;
         for existing in candidates {
             match metadata::load_l1_sidecar(&existing, &expect) {
