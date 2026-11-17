@@ -14,6 +14,15 @@
 //! Without the clips the test skips with a note. With `HDR_ANALYZE_CUDA_PARITY_REQUIRED` set
 //! (any value), a missing variable, a missing file or a build without the `cuda` feature
 //! is a failure. `scripts/cuda-parity.sh` generates the clips and runs this test that way.
+//!
+//! `nvdec_cpu_analysis_matches_software_decode` (ROADMAP E12.2) runs CPU analysis of NVDEC
+//! frames (`--hwaccel cuda` without GPU analysis) against software decode (`--hwaccel none`):
+//! `.bin` and sidecar byte-identical, every NVDEC frame repacked, the same crop-monitor report.
+//! A build without `cuda` runs every case; a `+cuda` build only `--pre-denoise median3`, its one
+//! CPU analysis under `--hwaccel cuda`. It needs the two clips and the letterboxed PQ clip
+//! `HDR_ANALYZE_CUDA_PARITY_LETTERBOX`, and an NVDEC host: without NVDEC the analyzer decodes in
+//! software and the repack count fails the test. `scripts/cuda-parity.sh` runs it with both
+//! builds.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,6 +34,8 @@ const PQ_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_PQ";
 const HLG_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_HLG";
 const HLG_COMPOSERS_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS";
 const REQUIRED_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_REQUIRED";
+/// A PQ clip with black bars, for crop detection on the analysis frame (`--crop-probes 0`).
+const LETTERBOX_VAR: &str = "HDR_ANALYZE_CUDA_PARITY_LETTERBOX";
 
 /// The composers the HLG clip is checked with: [`HLG_COMPOSERS_VAR`], or every composer.
 fn hlg_composers() -> Vec<Composer> {
@@ -42,9 +53,9 @@ fn hlg_composers() -> Vec<Composer> {
         .collect()
 }
 
-/// Why the test cannot run; `None` when both clips and a `+cuda` analyzer are available.
-fn unavailable_reason() -> Option<String> {
-    for var in [PQ_VAR, HLG_VAR] {
+/// Why one of the clip variables `vars` cannot be used; `None` when each names a file.
+fn clips_unavailable(vars: &[&str]) -> Option<String> {
+    for var in vars {
         let Some(value) = std::env::var_os(var) else {
             return Some(format!("{var} is not set"));
         };
@@ -55,23 +66,39 @@ fn unavailable_reason() -> Option<String> {
             ));
         }
     }
+    None
+}
+
+/// The analyzer's `--version` line.
+fn analyzer_version() -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_hdr_analyzer_mvp"))
         .arg("--version")
         .output()
         .expect("run analyzer --version");
-    let version = String::from_utf8_lossy(&output.stdout);
-    if !version.contains("+cuda") {
-        return Some(format!(
-            "analyzer was built without the cuda feature ({})",
-            version.trim()
-        ));
-    }
-    None
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// Why `cuda_output_matches_cpu` cannot run; `None` when both clips and a `+cuda` analyzer are
+/// available.
+fn unavailable_reason() -> Option<String> {
+    clips_unavailable(&[PQ_VAR, HLG_VAR]).or_else(|| {
+        let version = analyzer_version();
+        (!version.contains("+cuda"))
+            .then(|| format!("analyzer was built without the cuda feature ({version})"))
+    })
+}
+
+/// The clip a variable names, after [`clips_unavailable`] checked it.
+fn clip(var: &str) -> PathBuf {
+    PathBuf::from(std::env::var_os(var).expect("checked by clips_unavailable"))
 }
 
 struct Run {
     bin: Vec<u8>,
     sidecar: Value,
+    /// The sidecar as written, for byte comparisons.
+    sidecar_text: String,
+    stdout: String,
     /// `--dump-frame-stats` CSV: peak candidates and grain statistics per frame.
     frame_stats: String,
     /// The `--au-table` output, for MKV clips (ROADMAP P15.1).
@@ -127,6 +154,8 @@ fn run_analyzer(
     Run {
         bin: std::fs::read(bin).expect("read measurements"),
         sidecar: serde_json::from_str(&sidecar_text).expect("parse L1 sidecar"),
+        sidecar_text,
+        stdout: stdout.into_owned(),
         frame_stats: std::fs::read_to_string(&stats_path).expect("read frame stats"),
         au_table: au_table.then(|| {
             let path = PathBuf::from(format!("{}.au.json", bin.display()));
@@ -413,8 +442,8 @@ fn cuda_output_matches_cpu() {
         eprintln!("Skipping: {reason}");
         return;
     }
-    let pq = PathBuf::from(std::env::var_os(PQ_VAR).expect("checked above"));
-    let hlg = PathBuf::from(std::env::var_os(HLG_VAR).expect("checked above"));
+    let pq = clip(PQ_VAR);
+    let hlg = clip(HLG_VAR);
 
     let composers = hlg_composers();
     assert!(
@@ -496,4 +525,220 @@ fn cuda_output_matches_cpu() {
         pq_default == pq_bt2100,
         "PQ: --hlg-composer bt2100 changed the measurements"
     );
+}
+
+/// One configuration of [`nvdec_cpu_analysis_matches_software_decode`].
+struct DecodeCase {
+    label: String,
+    clip: PathBuf,
+    mapping: &'static str,
+    no_crop: bool,
+    args: Vec<&'static str>,
+    /// The clip has black bars, so the committed crop must not be the full frame.
+    letterboxed: bool,
+}
+
+/// The crop-monitor report of a run (`CropStabilityMonitor::report`).
+fn crop_report(run: &Run) -> Vec<&str> {
+    run.stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("Crop stability:") || line.starts_with("Variable active"))
+        .collect()
+}
+
+/// Asserts that NVDEC decode with CPU analysis measures what software decode measures.
+fn check_nvdec_cpu_analysis(case: &DecodeCase) {
+    let label = case.label.as_str();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let run = |name: &str, hwaccel: &str| {
+        run_analyzer(
+            &case.clip,
+            &dir.path().join(name),
+            hwaccel,
+            case.no_crop,
+            &case.args,
+            label,
+        )
+    };
+    let software = run("software.bin", "none");
+    let nvdec = run("nvdec.bin", "cuda");
+
+    for (name, run) in [("software", &software), ("nvdec", &nvdec)] {
+        assert_eq!(run.sidecar["version"], 7, "{label}: {name} sidecar version");
+        assert_eq!(
+            run.sidecar["analysis"]["gpu"],
+            Value::Bool(false),
+            "{label}: the {name} run must be CPU analysis"
+        );
+        assert_eq!(
+            run.sidecar["analysis"]["luminance_mapping"], case.mapping,
+            "{label}: {name} luminance_mapping"
+        );
+    }
+    let frames = software.sidecar["frames"]["min_pq_12bit"]
+        .as_array()
+        .map_or(0, Vec::len);
+    assert!(frames > 0, "{label}: the clip produced no frames");
+    // The analyzer falls back to software decode when NVDEC does not open, so only the count
+    // proves that the --hwaccel cuda run analyzed NVDEC frames.
+    let repacked = format!("NVDEC P010 frames repacked for CPU analysis: {frames}");
+    assert!(
+        nvdec.stdout.lines().any(|line| line.trim() == repacked),
+        "{label}: the --hwaccel cuda run did not repack all {frames} frames from NVDEC:\n{}",
+        nvdec.stdout
+    );
+    assert!(
+        !software.stdout.contains("NVDEC P010 frames repacked"),
+        "{label}: software decode repacked frames"
+    );
+
+    let differences: Vec<String> = ["crop", "light_level", "scenes", "frames"]
+        .into_iter()
+        .flat_map(|section| {
+            section_differences(section, &software.sidecar[section], &nvdec.sidecar[section])
+        })
+        .collect();
+    assert!(
+        software.sidecar_text == nvdec.sidecar_text,
+        "{label}: the sidecars differ:\n  {}",
+        differences.join("\n  ")
+    );
+    assert!(
+        software.bin == nvdec.bin,
+        "{label}: the .bin files differ ({} vs {} bytes)",
+        software.bin.len(),
+        nvdec.bin.len()
+    );
+    assert!(
+        software.frame_stats == nvdec.frame_stats,
+        "{label}: the frame statistics differ"
+    );
+    assert!(
+        software.au_table == nvdec.au_table,
+        "{label}: the AU tables differ"
+    );
+
+    let source = &software.sidecar["source"];
+    let crop = &software.sidecar["crop"];
+    let full_frame = crop["x"] == 0
+        && crop["y"] == 0
+        && crop["width"] == source["width"]
+        && crop["height"] == source["height"];
+    let (software_report, nvdec_report) = (crop_report(&software), crop_report(&nvdec));
+    if case.no_crop {
+        assert!(
+            full_frame,
+            "{label}: --no-crop must keep the full frame, got {crop}"
+        );
+        assert!(
+            software_report.is_empty() && nvdec_report.is_empty(),
+            "{label}: --no-crop must not monitor the crop"
+        );
+    } else {
+        assert_eq!(
+            software_report, nvdec_report,
+            "{label}: the crop-monitor reports differ"
+        );
+        assert!(
+            software_report
+                .first()
+                .is_some_and(|line| !line.contains("no usable scene cuts")),
+            "{label}: no usable scene-cut crop sample: {software_report:?}"
+        );
+        if case.letterboxed {
+            assert!(
+                !full_frame,
+                "{label}: the letterboxed clip committed the full frame"
+            );
+        }
+    }
+    eprintln!(
+        "{label}: identical ({frames} NVDEC frames repacked, crop {}x{}+{}+{})",
+        crop["width"], crop["height"], crop["x"], crop["y"]
+    );
+}
+
+// One test for all cases, like `cuda_output_matches_cpu`: NVDEC runs one process at a time.
+#[test]
+fn nvdec_cpu_analysis_matches_software_decode() {
+    if let Some(reason) = clips_unavailable(&[PQ_VAR, HLG_VAR, LETTERBOX_VAR]) {
+        assert!(
+            std::env::var_os(REQUIRED_VAR).is_none(),
+            "{REQUIRED_VAR} is set but the NVDEC CPU-analysis test cannot run: {reason}"
+        );
+        eprintln!("Skipping: {reason}");
+        return;
+    }
+    let (pq, hlg, letterbox) = (clip(PQ_VAR), clip(HLG_VAR), clip(LETTERBOX_VAR));
+    let case = |label: &str, clip: &Path, mapping, no_crop, args: &[&'static str]| DecodeCase {
+        label: label.to_owned(),
+        clip: clip.to_path_buf(),
+        mapping,
+        no_crop,
+        args: args.to_vec(),
+        letterboxed: false,
+    };
+    let median3 = ["--pre-denoise", "median3"];
+    let composers = hlg_composers();
+    assert!(
+        !composers.is_empty(),
+        "{HLG_COMPOSERS_VAR} names no composer"
+    );
+    let hlg_case = |composer: Composer, extra: &[&'static str], label: &str| {
+        let mut args = vec!["--hlg-composer", composer.cli_name()];
+        args.extend_from_slice(extra);
+        case(
+            &format!("HLG {}{label}", composer.cli_name()),
+            &hlg,
+            composer.luminance_mapping(),
+            false,
+            &args,
+        )
+    };
+
+    let version = analyzer_version();
+    let cases: Vec<DecodeCase> = if version.contains("+cuda") {
+        // Every other case analyzes on the GPU, which `cuda_output_matches_cpu` checks.
+        let mut cases = vec![case("PQ, median3", &pq, "pq", false, &median3)];
+        cases.extend(
+            composers
+                .iter()
+                .map(|&composer| hlg_case(composer, &median3, ", median3")),
+        );
+        cases
+    } else {
+        let mut cases = vec![case("PQ, crop detection", &pq, "pq", false, &[])];
+        cases.extend(
+            composers
+                .iter()
+                .map(|&composer| hlg_case(composer, &[], ", crop detection")),
+        );
+        cases.extend([
+            case("PQ, median3", &pq, "pq", false, &median3),
+            case(
+                "PQ, st2094-10",
+                &pq,
+                "pq",
+                false,
+                &["--peak-estimator", "st2094-10", "--peak-source", "max"],
+            ),
+            case("PQ, --no-crop", &pq, "pq", true, &[]),
+            DecodeCase {
+                letterboxed: true,
+                ..case(
+                    "letterboxed PQ, --crop-probes 0",
+                    &letterbox,
+                    "pq",
+                    false,
+                    &["--crop-probes", "0"],
+                )
+            },
+        ]);
+        cases
+    };
+    eprintln!("NVDEC CPU analysis with {version}: {} cases", cases.len());
+    for case in &cases {
+        check_nvdec_cpu_analysis(case);
+    }
 }
