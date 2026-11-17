@@ -54,21 +54,19 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-17 at main@a07c7c7)
-<!-- roadmap-next: rev=6 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=19885b45de3c skip=P6.3,P6.4,E8.1,E9.1,WS7.1,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
+<!-- roadmap-next: rev=6 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=b7830504bddd skip=P6.3,P6.4,E8.1,E9.1,WS7.1,WS8.4,WS2.1,E4.1,E4.3,E4.4,WS1.1 -->
 
 Order: the overdue v0.9.0 plan names P12.1 and E12.2 as its remaining fixes (P6.2 closed), so they go
 before the other priority 4 to 11 steps (skip=).
 
-1. **P12.1 Under `--mdfix`, fall back to the source RPU's L6** (priority 5). Gate: the step gate.
-   Why: v0.9.0 plan; unblocks the batch steps E13.14 and E13.17. Branch:
-   `fix/p12-1-mdfix-source-l6`. Release: patch
-2. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
+1. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
    step gate. Why: v0.9.0 plan; two designs across analyzer and mkvdovi, so a hard step. Branch:
    `fix/e12-2-nvdec-cpu-analysis`. Release: patch
 
-- Recheck before P12.1: the sample keeps the source L6 since P6.2 (`SampledRpu.level6`,
-  `mkvdovi/src/rpu_check.rs:182`); it still stops at `Detection` (`pipeline/measure.rs:134`).
-- Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:617`).
+- Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:649`).
+
+**Reassess:** new-defect (P12.1, PR #134): P12.2 (container-stated minimum truncated by
+`Level6::from_nits`) is a new priority-5 step; P12.1 unblocks E13.14 and E13.17.
 
 ### Waiting for the owner
 
@@ -103,8 +101,8 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 E12.1); its rc.1 passed the Windows test ([log](docs/ROADMAP_LOG.md) 2026-11-14).
 
 **Next release point:** v0.9.0, a minor: P15's analyzer `--help` contract (`au-table-v1`) is on
-`main`; rule 1 puts it about a week after #91 (2026-11-04). Overdue on 2026-11-17: P12.1 and E12.2
-are the plan's fixes still open (P6.2 closed in PR #133).
+`main`; rule 1 puts it about a week after #91 (2026-11-04). Overdue on 2026-11-17: E12.2 is the
+plan's fix still open (P6.2 closed in PR #133, P12.1 in PR #134).
 
 | Release | Content | Trigger / gate |
 |---|---|---|
@@ -134,8 +132,8 @@ and 7 about how it is judged. The evidence for each priority is in its items and
    Gate: the WS7 simulator decides P10.3 (owner, 2026-10-17); the owner states P10.5's after WS6.11.
 4. **Narrow code defects** (E8, E9, P6, E7): histogram percentile reader, `--pre-denoise`
    values. Gate: unit tests for the reader and the option (E8.1, E9.1).
-5. **`--mdfix` fidelity** (P12): full regeneration stays (owner, 2026-10-13). Open: `--mdfix`
-   ignores the source RPU's L6 (P12.1). Gate: the P12.1 gate.
+5. **L6 fidelity** (P12): `--mdfix` full regeneration stays (owner, 2026-10-13). Open: a
+   container-stated mastering minimum loses 0.0001 nits in L6 (P12.2). Gate: the P12.2 gate.
 6. **Evaluation in displayed-picture units** (WS7): histogram-domain display-mapping simulator, then
    ColorVideoVDP on a few cuts (WS7.1, WS7.2). Gate: the simulator reproduces the recomputed
    numbers in WS7.
@@ -259,23 +257,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   at most 12). WS7 cannot judge it: libplacebo does not read L1 min (split from P10.3, owner,
   2026-11-07). Gate: TODO(owner). Needs: WS6.11.
 
-### P12: `--mdfix` ignores the source RPU's L6
+### P12: L6 mastering display fidelity
 
-- **Status:** Open. Defect found 2026-10-15, not fixed; history in
-  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P12.1, for the next patch release.
-- Under `--mdfix` the mastering min/max come from the container or the defaults
-  (`metadata::read_static_metadata` + `apply_static_defaults`, `mkvdovi/src/pipeline/config.rs:92-93`),
-  never from the source RPU's L6. On r5 Inside Out 2 (P8.1, no ST 2086 in the container) the RPU's
-  0.0001/1000 nits becomes 0.005/1000 nits and `source_min_pq` 7 becomes 62 on every frame
-  (baseline `~/mkvdovi-work/rpu-baseline/0.6.0/mdfix/r5-inside-out-2-mind-console`). The only
-  message is a generic "not found" warning.
-- **Gate:** (owner, 2026-10-16) a unit test that is red on the parent; the r5 Inside Out 2
-  `--mdfix` RPU carries the source L6 (0.0001/1000 nits, `source_min_pq` 7); every other RPU
-  baseline byte-identical.
-- [P12.1][corpus] Under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults.
-  Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
-  E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
-  of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
+- **Status:** Partial. P12.1 closed: `--mdfix` takes the mastering display from the source L6
+  ([log](docs/ROADMAP_LOG.md), PR #134). Open: P12.2, the container-side minimum truncation.
 - **Defect (found 2026-11-17, P12.1):** a container-stated mastering minimum loses 0.0001 nits for 573
   of the 10,001 four-decimal values: `Level6::from_nits` truncates `min_dml * 10000`
   (`dovi_rpu_builder/src/params.rs:138`, called from `mkvdovi/src/metadata/rpu_config.rs:145`), so
@@ -284,11 +269,10 @@ and 7 about how it is judged. The evidence for each priority is in its items and
 - [P12.2][corpus] Write a container-stated mastering minimum to L6 without the truncation loss.
   Gate: a unit test over every four-decimal minimum from 0 to 1 nit; every RPU baseline
   byte-identical (`sha256sum`).
-- **Checked 2026-11-17 @29edbe8:** since P6.2 the sample keeps the source L6 (`SampledRpu.level6`,
-  `mkvdovi/src/rpu_check.rs:182`, `SourceL6` `:189`), but `Detection` (`pipeline/measure.rs:135`) drops it,
-  and `settle_configuration` still reads only the container (`pipeline/config.rs:93-94`).
-  `mdfix_notice.rs:104` prints the L6 text to change. `rpu-baseline.sh compare` strips the CRC (`:253`):
-  "byte-identical" needs `sha256sum`.
+- **Checked 2026-11-17 @d49508f:** the container minimum goes from `read_static_metadata` to
+  `rpu_params` (`mkvdovi/src/metadata/rpu_config.rs:145`) and `Level6::from_nits`, which truncates
+  (`dovi_rpu_builder/src/params.rs:138`); `min_dml_nits` (`pipeline/config.rs:187`) is the
+  conversion P12.1 uses for the source L6.
 
 ### P14: per-shot dynamic contrast (opt-in)
 
