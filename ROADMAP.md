@@ -276,6 +276,14 @@ and 7 about how it is judged. The evidence for each priority is in its items and
   Changes delivered RPUs: own branch (`fix-p12-mdfix-source-l6`), RPU baselines updated; between
   E13 moves. Gate: the item gate, "every other RPU baseline byte-identical" checked with `sha256sum`
   of the `RPU.bin` files (`rpu-baseline.sh compare` ignores the CRC), plus `cargo mutants --in-diff`.
+- **Defect (found 2026-11-17, P12.1):** a container-stated mastering minimum loses 0.0001 nits for 573
+  of the 10,001 four-decimal values: `Level6::from_nits` truncates `min_dml * 10000`
+  (`dovi_rpu_builder/src/params.rs:138`, called from `mkvdovi/src/metadata/rpu_config.rs:145`), so
+  0.0003 nits becomes raw 2. P12.1 converts the source RPU's minimum without the loss
+  (`pipeline/config.rs` `min_dml_nits`); the container path does not. 0.0001 and 0.005 are exact.
+- [P12.2][corpus] Write a container-stated mastering minimum to L6 without the truncation loss.
+  Gate: a unit test over every four-decimal minimum from 0 to 1 nit; every RPU baseline
+  byte-identical (`sha256sum`).
 - **Checked 2026-11-17 @29edbe8:** since P6.2 the sample keeps the source L6 (`SampledRpu.level6`,
   `mkvdovi/src/rpu_check.rs:182`, `SourceL6` `:189`), but `Detection` (`pipeline/measure.rs:135`) drops it,
   and `settle_configuration` still reads only the container (`pipeline/config.rs:93-94`).
@@ -760,7 +768,7 @@ The detailed gap table and validation method live in
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
   at main@e6d63ed in `~/mkvdovi-work/rpu-baseline/refactor-e6d63ed/` (HDR10, HDR10+ captured with
   `-- --hdr10plus-l1 hdr10plus`, HLG, two MEL incl. an open-GOP start; `--mdfix` on MEL and Profile 8; HLG with `--hlg-composer preset`, the
-  path without the RPU rewrite), and
+  path without the RPU rewrite; `mdfix/r5` against `p12-1-f4ce701/` since P12.1), and
   `MKVDOVI_CORPUS_DIR=~/mkvdovi-work/corpus/dev cargo test -p mkvdovi corpus_cuts_are_classified_like_their_manifests`,
   the only test that reaches the Profile 7 MEL/FEL branch of `check_hdr_format`, which the step 3
   moves cut through. Each command's result goes in the move's PR body: the pre-PR panel computes
@@ -768,8 +776,8 @@ The detailed gap table and validation method live in
   would need a baseline-path convention and an update mode for PRs that change the RPU on purpose;
   it is not planned. The mkvdovi gate (E13.12-E13.17, E17.1): fmt, clippy, tests, and
   `scripts/rpu-baseline.sh compare --require-identical-l1` against the `default/`, `mdfix/`,
-  `preset/` and `hdr10plus/` (no-flag) sets of `~/mkvdovi-work/rpu-baseline/0.8.0/` (05a135c; they
-  equal rc.1, 0.7.0 and `p9-3-hybrid-default/`).
+  `preset/` and `hdr10plus/` (no-flag) sets of `~/mkvdovi-work/rpu-baseline/p12-1-f4ce701/` (since
+  P12.1; they equal `0.8.0/` except `mdfix/r5`, which P12.1 changed on purpose).
 - [E13.6][gpu][corpus] Split `run_native_analysis_pipeline` (455 lines, `pipeline/analyze.rs`) by
   phase. Gate: fmt, clippy (also `--features cuda`), tests; the L1 regression gate without
   `--update`; `scripts/cuda-parity.sh` PASS; optimizer-enabled CPU and CUDA `.bin` and sidecar
