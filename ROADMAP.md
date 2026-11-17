@@ -61,7 +61,7 @@ WS6.10, which unblock priority 3.
 
 1. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
    step gate. Why: v0.9.0's last fix; analyzer and mkvdovi, a hard step. Branch:
-   `fix/e12-2-nvdec-cpu-analysis`. Release: patch (minor if the plan bumps the sidecar version)
+   `fix/e12-2-nvdec-cpu-analysis`. Release: minor (sidecar v7)
 2. **WS7.1 The display-mapping simulator with the per-frame histogram dump** (priority 6). Gate:
    the item gate. Why: unblocks P10.3, WS7.2, WS1.2, WS1.6, WS2.2. Branch:
    `feat/ws7-1-display-simulator`. Release: none
@@ -786,6 +786,10 @@ The detailed gap table and validation method live in
   (`frame/mod.rs:243`; `median3` forces CPU on NVDEC, `pipeline/analyze.rs:170`). The sidecar records
   `gpu`, not the decode route (`l1_sidecar.rs:117`), so reuse (`measure.rs:549`, manifest `reusable_pair`)
   cannot tell NVDEC sidecars apart. The mkvdovi-only fix leaves `+cuda` fallbacks affected.
+- **Owner decision 2026-11-17:** plan approved (analyzer repacks NVDEC P010 at downscale 1 instead of
+  swscale); sidecar goes to v7 and mkvdovi re-analyzes, with a warning, a v6 `gpu:false` downscale-1
+  sidecar when `--hwaccel cuda` resolved, in both reuse paths. Builder `opus-professor`. Plan and checks:
+  `~/mkvdovi-work/e12-2/`; the v7 part still needs planning and both plan checks.
 
 ### E13: module size refactor
 
