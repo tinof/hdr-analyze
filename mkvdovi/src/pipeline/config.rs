@@ -101,8 +101,10 @@ pub(super) fn settle_configuration(
     // source does not state.
     let hlg_source = measured.hdr_type == HdrFormat::Hlg;
     let mut static_meta = metadata::read_static_metadata(input_file);
-    if let Some(message) = fill_mastering_from_source_l6(&mut static_meta, source_l6, args.mdfix) {
-        progress::print_info(&message);
+    match fill_mastering_from_source_l6(&mut static_meta, source_l6, args.mdfix) {
+        Some((Severity::Info, message)) => progress::print_info(&message),
+        Some((Severity::Warn, message)) => progress::print_warn(&message),
+        None => {}
     }
     metadata::apply_static_defaults(&mut static_meta, &["max_dml", "min_dml"], hlg_source);
 
@@ -130,42 +132,52 @@ pub(super) fn settle_configuration(
 }
 
 /// P12.1: fills `max_dml` / `min_dml` that the container does not state from the source RPU's L6
-/// and returns the info line naming what it took. The container always wins. A block whose
-/// mastering peak is 0 states no mastering display, and one outside the range an L6 field can
-/// hold (`Level6::MAX_VALUE`) is not used: the defaults apply, as before. MaxCLL / MaxFALL are
-/// not taken from the RPU; they stay with the container or the measurements. Only under
-/// `--mdfix` (`mdfix`): without it no RPU is rebuilt from a Dolby Vision source.
+/// and returns the info line naming what it took. The container always wins. The block is used
+/// only when it is a plausible mastering display, by the rule the 8.1 source range applies
+/// (`MASTERING_PEAK_NITS`, `MASTERING_MIN_NITS`); otherwise the defaults apply, as before, and the
+/// returned warning names the values that were not used. MaxCLL / MaxFALL are not taken from the
+/// RPU; they stay with the container or the measurements. Only under `--mdfix` (`mdfix`): without
+/// it no RPU is rebuilt from a Dolby Vision source.
 fn fill_mastering_from_source_l6(
     meta: &mut HashMap<String, f64>,
     source_l6: Option<&SourceL6>,
     mdfix: bool,
-) -> Option<String> {
+) -> Option<(Severity, String)> {
     let l6 = source_l6.filter(|_| mdfix)?;
-    let limit = dovi_rpu_builder::Level6::MAX_VALUE;
-    let usable = l6.max_dml_nits > 0
-        && u32::from(l6.max_dml_nits) <= limit
-        && u32::from(l6.min_dml_raw) <= limit;
-    if !usable {
+    if meta.contains_key("max_dml") && meta.contains_key("min_dml") {
         return None;
+    }
+    let (peak, min) = (f64::from(l6.max_dml_nits), min_dml_nits(l6.min_dml_raw));
+    let min_label = format!("{:.4} nits", f64::from(l6.min_dml_raw) / 10_000.0);
+    let plausible = dovi_rpu_builder::MASTERING_PEAK_NITS.contains(&peak)
+        && dovi_rpu_builder::MASTERING_MIN_NITS.contains(&min);
+    if !plausible {
+        return Some((
+            Severity::Warn,
+            format!(
+                "The source RPU's L6 states a mastering display of {} nits peak, {min_label} \
+                 minimum, which is not plausible (peak 100 to 10000 nits, minimum 0 to 1 nit); \
+                 the new L6 does not take it.",
+                l6.max_dml_nits
+            ),
+        ));
     }
     let mut taken = Vec::new();
     if !meta.contains_key("max_dml") {
-        meta.insert("max_dml".to_string(), f64::from(l6.max_dml_nits));
+        meta.insert("max_dml".to_string(), peak);
         taken.push(format!("peak {} nits", l6.max_dml_nits));
     }
     if !meta.contains_key("min_dml") {
-        meta.insert("min_dml".to_string(), min_dml_nits(l6.min_dml_raw));
-        taken.push(format!(
-            "minimum {:.4} nits",
-            f64::from(l6.min_dml_raw) / 10_000.0
-        ));
+        meta.insert("min_dml".to_string(), min);
+        taken.push(format!("minimum {min_label}"));
     }
-    (!taken.is_empty()).then(|| {
+    Some((
+        Severity::Info,
         format!(
             "Mastering display {} from the source RPU's L6 (not stated by the container).",
             taken.join(", ")
-        )
-    })
+        ),
+    ))
 }
 
 /// The mastering minimum in nits for a raw L6 value in 0.0001 nits, chosen so that
@@ -519,10 +531,17 @@ mod tests {
         pairs.iter().map(|&(k, v)| (k.to_string(), v)).collect()
     }
 
+    fn info(meta: &mut HashMap<String, f64>, l6: &SourceL6) -> String {
+        match fill_mastering_from_source_l6(meta, Some(l6), true) {
+            Some((Severity::Info, message)) => message,
+            other => panic!("expected an info line for {l6:?}, got {other:?}"),
+        }
+    }
+
     #[test]
     fn under_mdfix_the_source_l6_fills_a_container_without_mastering_display() {
         let mut meta = stated(&[("max_cll", 794.0)]);
-        let message = fill_mastering_from_source_l6(&mut meta, Some(&R5_L6), true).unwrap();
+        let message = info(&mut meta, &R5_L6);
         assert_eq!(
             meta,
             stated(&[("max_cll", 794.0), ("max_dml", 1000.0), ("min_dml", 0.0001)])
@@ -551,9 +570,19 @@ mod tests {
             None
         );
         assert_eq!(both, stated(&[("max_dml", 4000.0), ("min_dml", 0.005)]));
+        // A container that states both is not compared here (C5 does that): even an
+        // implausible RPU L6 then prints nothing.
+        let implausible = SourceL6 {
+            max_dml_nits: 0,
+            ..R5_L6
+        };
+        assert_eq!(
+            fill_mastering_from_source_l6(&mut both, Some(&implausible), true),
+            None
+        );
 
         let mut only_max = stated(&[("max_dml", 4000.0)]);
-        let message = fill_mastering_from_source_l6(&mut only_max, Some(&R5_L6), true).unwrap();
+        let message = info(&mut only_max, &R5_L6);
         assert_eq!(
             only_max,
             stated(&[("max_dml", 4000.0), ("min_dml", 0.0001)])
@@ -561,7 +590,7 @@ mod tests {
         assert!(message.contains("minimum 0.0001 nits") && !message.contains("peak"));
 
         let mut only_min = stated(&[("min_dml", 0.005)]);
-        let message = fill_mastering_from_source_l6(&mut only_min, Some(&R5_L6), true).unwrap();
+        let message = info(&mut only_min, &R5_L6);
         assert_eq!(only_min, stated(&[("max_dml", 1000.0), ("min_dml", 0.005)]));
         assert!(message.contains("peak 1000 nits") && !message.contains("minimum"));
     }
@@ -574,58 +603,45 @@ mod tests {
             ..R5_L6
         };
         let mut meta = HashMap::new();
-        fill_mastering_from_source_l6(&mut meta, Some(&l6), true).unwrap();
+        info(&mut meta, &l6);
         assert!(!meta.contains_key("max_cll") && !meta.contains_key("max_fall"));
     }
 
     #[test]
-    fn an_l6_without_a_usable_mastering_peak_fills_nothing() {
-        let limit = 10_000;
-        for l6 in [
-            SourceL6 {
-                max_dml_nits: 0,
+    fn an_implausible_l6_fills_nothing_and_says_so() {
+        // The 8.1 source-range rule: peak 100 to 10000 nits, minimum 0 to 1 nit (raw 10000).
+        for (peak, min_raw) in [(0, 1), (99, 1), (10_001, 1), (1000, 10_001), (50, 0)] {
+            let l6 = SourceL6 {
+                max_dml_nits: peak,
+                min_dml_raw: min_raw,
                 ..R5_L6
-            },
-            SourceL6 {
-                max_dml_nits: limit + 1,
-                ..R5_L6
-            },
-            SourceL6 {
-                min_dml_raw: limit + 1,
-                ..R5_L6
-            },
-        ] {
-            let mut meta = HashMap::new();
-            assert_eq!(
-                fill_mastering_from_source_l6(&mut meta, Some(&l6), true),
-                None,
-                "{l6:?}"
-            );
-            assert!(meta.is_empty(), "{l6:?}");
+            };
+            let mut meta = stated(&[("max_cll", 794.0)]);
+            match fill_mastering_from_source_l6(&mut meta, Some(&l6), true) {
+                Some((Severity::Warn, message)) => {
+                    assert!(
+                        message.contains(&format!("{peak} nits peak"))
+                            && message.contains("not plausible"),
+                        "{message}"
+                    );
+                }
+                other => panic!("{l6:?}: {other:?}"),
+            }
+            assert_eq!(meta, stated(&[("max_cll", 794.0)]), "{l6:?}");
         }
-        // The edges of the range are usable, and a minimum of 0 is a stated minimum.
-        for (l6, min) in [
-            (
-                SourceL6 {
-                    max_dml_nits: limit,
-                    min_dml_raw: limit,
-                    ..R5_L6
-                },
-                1.0,
-            ),
-            (
-                SourceL6 {
-                    max_dml_nits: 1,
-                    min_dml_raw: 0,
-                    ..R5_L6
-                },
-                0.0,
-            ),
-        ] {
+        // The edges of the range are used, and a minimum of 0 is a stated minimum.
+        for (peak, min_raw, min) in [(10_000, 10_000, 1.0), (100, 0, 0.0)] {
+            let l6 = SourceL6 {
+                max_dml_nits: peak,
+                min_dml_raw: min_raw,
+                ..R5_L6
+            };
             let mut meta = HashMap::new();
-            assert!(fill_mastering_from_source_l6(&mut meta, Some(&l6), true).is_some());
-            assert_eq!(meta["max_dml"], f64::from(l6.max_dml_nits));
-            assert_eq!(meta["min_dml"], min, "{l6:?}");
+            info(&mut meta, &l6);
+            assert_eq!(
+                meta,
+                stated(&[("max_dml", f64::from(peak)), ("min_dml", min)])
+            );
         }
     }
 
