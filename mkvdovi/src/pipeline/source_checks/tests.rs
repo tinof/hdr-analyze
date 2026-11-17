@@ -50,7 +50,7 @@ fn c5_warns_on_the_joker_container_and_names_what_mdfix_writes() {
     assert!(message.contains("keeps the RPU's L6"), "{message}");
     let message = rpu_l6_against_container(&JOKER_L6, &container, true).unwrap();
     assert!(
-        message.contains("--mdfix writes the container's values"),
+        message.contains("Under --mdfix the new L6 takes the container's values"),
         "{message}"
     );
 }

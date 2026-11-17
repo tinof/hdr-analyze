@@ -91,9 +91,9 @@ pub(super) fn rpu_l6_against_container(
         return None;
     }
     let consequence = if mdfix {
-        "--mdfix writes the container's values into the new L6"
+        "Under --mdfix the new L6 takes the container's values"
     } else {
-        "the Dolby Vision output keeps the RPU's L6; HDR10 playback uses the container's values"
+        "The Dolby Vision output keeps the RPU's L6; HDR10 playback uses the container's values"
     };
     Some(format!(
         "The source RPU's L6 disagrees with the container's HDR10 metadata (RPU against \
