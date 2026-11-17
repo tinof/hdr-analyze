@@ -822,6 +822,7 @@ mod tests {
                 None,
                 &mut measured,
                 None,
+                None,
             )
             .unwrap();
             (configured.is_some(), measured)
