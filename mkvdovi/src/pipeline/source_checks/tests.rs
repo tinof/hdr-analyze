@@ -47,13 +47,14 @@ fn c5_warns_on_the_joker_container_and_names_what_mdfix_writes() {
         "{message}"
     );
     assert!(!message.contains("mastering"), "{message}");
+    assert!(message.contains("(RPU against stated)"), "{message}");
     assert!(
-        message.contains("Dolby Vision playback reads the RPU's L6"),
+        message.contains("Dolby Vision playback reads the RPU's L6."),
         "{message}"
     );
     let message = rpu_l6_against_container(&JOKER_L6, &container, true).unwrap();
     assert!(
-        message.contains("Under --mdfix the new L6 takes the container's values"),
+        message.contains("Under --mdfix the new L6 takes the stated values."),
         "{message}"
     );
 }
@@ -72,7 +73,7 @@ fn c5_is_silent_when_the_container_agrees_or_states_nothing() {
 }
 
 #[test]
-fn c5_mastering_peak_differs_at_all_and_minimum_beyond_one_unit() {
+fn c5_mastering_peak_and_minimum_differ_at_all() {
     let mut container = container_matching_joker();
     container.insert("max_dml".into(), 1001.0);
     let message = rpu_l6_against_container(&JOKER_L6, &container, false).unwrap();
@@ -85,18 +86,18 @@ fn c5_mastering_peak_differs_at_all_and_minimum_beyond_one_unit() {
     assert_eq!(rpu_l6_against_container(&JOKER_L6, &container, false), None);
 
     let mut container = container_matching_joker();
-    // One unit of 0.0001 nits is rounding: 0.0002 against the RPU's 0.0001 stays silent.
-    container.insert("min_dml".into(), 0.0002);
+    // Float noise around the RPU's 0.0001 nits is no difference.
+    container.insert("min_dml".into(), 0.000_100_000_01);
     assert_eq!(rpu_l6_against_container(&JOKER_L6, &container, false), None);
-    container.insert("min_dml".into(), 0.0);
-    assert_eq!(rpu_l6_against_container(&JOKER_L6, &container, false), None);
-    // Two units apart is a disagreement.
-    container.insert("min_dml".into(), 0.0003);
-    let message = rpu_l6_against_container(&JOKER_L6, &container, false).unwrap();
-    assert!(
-        message.contains("mastering minimum 0.0001 against 0.0003 nits"),
-        "{message}"
-    );
+    // One unit of 0.0001 nits apart, on either side, is a disagreement (ROADMAP_LOG C5: "MDL any").
+    for (value, label) in [(0.0002, "0.0002"), (0.0, "0.0000")] {
+        container.insert("min_dml".into(), value);
+        let message = rpu_l6_against_container(&JOKER_L6, &container, false).unwrap();
+        assert!(
+            message.contains(&format!("mastering minimum 0.0001 against {label} nits")),
+            "{message}"
+        );
+    }
     // A malformed minimum far above the u16 range still compares.
     container.insert("min_dml".into(), 50.0);
     assert!(rpu_l6_against_container(&JOKER_L6, &container, false).is_some());

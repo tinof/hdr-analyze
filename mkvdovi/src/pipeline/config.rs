@@ -175,8 +175,9 @@ fn check_hdr10plus_source(measured: &Measured, static_meta: &HashMap<String, f64
     };
     let metadata = match fs::File::open(path)
         .map_err(|e| e.to_string())
-        .and_then(|file| serde_json::from_reader(file).map_err(|e| e.to_string()))
-    {
+        .and_then(|file| {
+            serde_json::from_reader(io::BufReader::new(file)).map_err(|e| e.to_string())
+        }) {
         Ok(metadata) => metadata,
         Err(e) => {
             progress::print_warn(&format!(

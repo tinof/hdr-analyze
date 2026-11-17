@@ -18,11 +18,9 @@ use crate::rpu_check::{nits_to_pq_12_bit, L1Stats, SourceL6};
 /// C1 and C4: a peak this many times the stated MaxCLL contradicts it. Chosen from the
 /// development corpus (Fury Road measures 1.01× its MaxCLL near the PQ ceiling), not a spec value.
 const PEAK_RATIO: f64 = 1.25;
-/// C5: MaxCLL and MaxFALL may differ by this fraction of the container value.
+/// C5: MaxCLL and MaxFALL may differ by this fraction of the stated value. The mastering peak and
+/// minimum must match exactly (in nits and in 0.0001 nits, the units the RPU stores).
 const LIGHT_LEVEL_TOLERANCE: f64 = 0.02;
-/// C5: the mastering minimum may differ by one unit of 0.0001 nits (rounding of the container's
-/// decimal value).
-const MIN_DML_TOLERANCE_RAW: i64 = 1;
 
 /// How loud a check's message is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,31 +45,32 @@ fn pq_12_bit_to_nits(code: u16) -> f64 {
     10_000.0 * ((e - c1).max(0.0) / (c2 - c3 * e)).powf(1.0 / m1)
 }
 
-/// C5: the source RPU's L6 against the container's ST 2086 and CTA-861.3 values. A value the
-/// container does not state is not compared (P12 covers that case under `--mdfix`).
+/// C5: the source RPU's L6 against the stated ST 2086 and CTA-861.3 values (the container's, with
+/// a Details.txt MaxCLL/MaxFALL override). A value the source does not state is not compared (P12
+/// covers that case under `--mdfix`).
 pub(super) fn rpu_l6_against_container(
     l6: &SourceL6,
     stated: &HashMap<String, f64>,
     mdfix: bool,
 ) -> Option<String> {
     let mut differences = Vec::new();
-    if let Some(container) = stated_positive(stated, "max_dml") {
-        if l6.max_dml_nits > 0 && container.round() != f64::from(l6.max_dml_nits) {
+    if let Some(value) = stated_positive(stated, "max_dml") {
+        if l6.max_dml_nits > 0 && value.round() != f64::from(l6.max_dml_nits) {
             differences.push(format!(
-                "mastering peak {} against {container} nits",
+                "mastering peak {} against {value} nits",
                 l6.max_dml_nits
             ));
         }
     }
-    if let Some(&container) = stated
+    if let Some(&value) = stated
         .get("min_dml")
         .filter(|v| v.is_finite() && **v >= 0.0)
     {
-        // In i64: a malformed container minimum above 6.5535 nits must not saturate a u16.
-        let container_raw = (container * 10_000.0).round() as i64;
-        if (container_raw - i64::from(l6.min_dml_raw)).abs() > MIN_DML_TOLERANCE_RAW {
+        // In i64: a malformed minimum above 6.5535 nits must not saturate a u16. The rounding
+        // only absorbs float noise: ST 2086 states the minimum in 0.0001 nits.
+        if (value * 10_000.0).round() as i64 != i64::from(l6.min_dml_raw) {
             differences.push(format!(
-                "mastering minimum {:.4} against {container:.4} nits",
+                "mastering minimum {:.4} against {value:.4} nits",
                 f64::from(l6.min_dml_raw) / 10_000.0
             ));
         }
@@ -80,10 +79,10 @@ pub(super) fn rpu_l6_against_container(
         ("MaxCLL", "max_cll", l6.max_cll),
         ("MaxFALL", "max_fall", l6.max_fall),
     ] {
-        if let Some(container) = stated_positive(stated, key) {
+        if let Some(value) = stated_positive(stated, key) {
             let rpu = f64::from(rpu);
-            if rpu > 0.0 && (rpu - container).abs() > LIGHT_LEVEL_TOLERANCE * container {
-                differences.push(format!("{label} {rpu} against {container} nits"));
+            if rpu > 0.0 && (rpu - value).abs() > LIGHT_LEVEL_TOLERANCE * value {
+                differences.push(format!("{label} {rpu} against {value} nits"));
             }
         }
     }
@@ -91,13 +90,13 @@ pub(super) fn rpu_l6_against_container(
         return None;
     }
     let consequence = if mdfix {
-        "Under --mdfix the new L6 takes the container's values"
+        "Under --mdfix the new L6 takes the stated values"
     } else {
-        "Dolby Vision playback reads the RPU's L6, HDR10 playback the container's values"
+        "Dolby Vision playback reads the RPU's L6"
     };
     Some(format!(
-        "The source RPU's L6 disagrees with the container's HDR10 metadata (RPU against \
-         container): {}. {consequence}.",
+        "The source RPU's L6 disagrees with the stated HDR10 metadata (RPU against stated): {}. \
+         {consequence}.",
         differences.join(", ")
     ))
 }
