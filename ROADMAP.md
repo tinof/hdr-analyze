@@ -744,8 +744,8 @@ The detailed gap table and validation method live in
 
 ### E12: CUDA release binaries
 
-- **Status:** Partial. E12.1 landed (PR #86) and waits only for `/ship --step E12.1`; E12.2 closed
-  in PR #136 ([log](docs/ROADMAP_LOG.md), 2026-11-18). Open: E12.3.
+- **Status:** Partial. E12.1 (PR #86) and E12.2 (PR #136) are done, history in
+  [the log](docs/ROADMAP_LOG.md) (2026-11-18). Open: E12.3, the CPU/CUDA hue bin mismatch.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. The kernel
@@ -759,9 +759,6 @@ The detailed gap table and validation method live in
   without libcuda; the Windows archive runs GPU analysis with only the driver present;
   `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
   from `PATH` (Release plan).
-- [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in
-  the plan (embedded PTX, driver only), with the smoke tests, for v0.8.0. Gate: the item gate.
-  Landed: PR #86; gate pending.
 - **Defect (found 2026-11-02, E12.1 research):** the GPU hue bin (f32 `atan2f`,
   `analysis/kernels.cu:513-517`) and the CPU one (f64, `analysis/histogram.rs:304-308`) differ for
   2 of the 2^20 centred chroma pairs, (254, −109) and (508, −218): CPU bin 28, GPU bin 29, within

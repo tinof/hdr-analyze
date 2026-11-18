@@ -6,6 +6,27 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-18: E12.1 Build the CUDA release archives (PR #86)
+
+Step: [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in
+  the plan (embedded PTX, driver only), with the smoke tests, for v0.8.0. Gate: the item gate.
+
+Item gate: the release archives report `+cuda` in `--version` and fall back cleanly to the CPU
+without libcuda; the Windows archive runs GPU analysis with only the driver present;
+`v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
+from `PATH`.
+
+Gate evidence: PR #86 landed 2026-11-02 with the gate pending on the owner's Windows test. The
+`release.yml` smoke tests check `(+cuda)` in each cuda archive's `--version` and run
+`--hwaccel cuda` on the driverless runners, which must fall back to the CPU; they passed in the
+rc.1 tag run 41643296848 (2026-11-03) and the v0.8.0 tag run 41817535981 (2026-11-04). The rc.1
+Windows test passed on 2026-11-04: the Windows zip ran GPU analysis with only the driver and
+matched the Linux `.bin` on one PQ and one HLG clip (log 2026-11-14, Release plan). v0.8.0 shipped
+the cuda archives as Latest on 2026-11-04.
+
+Resolution: the Linux x64 and Windows x64 release analyzers run GPU analysis with only the NVIDIA
+driver (R560 or newer). Open in E12: E12.3.
+
 ### 2026-11-18: E12.2 Make NVDEC decode with CPU analysis match software decode (PR #136)
 
 Step: [E12.2][gpu] Make NVDEC decode with CPU analysis match software decode: read P010 directly at
