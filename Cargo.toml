@@ -12,6 +12,7 @@ exclude = [
     "tools/l1_diff",
     "tools/fit_hlg_composer",
     "tools/rpu_builder_check",
+    "tools/display_sim",
 ]
 
 [profile.release]

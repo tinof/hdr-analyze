@@ -1,0 +1,20 @@
+[package]
+name = "display_sim"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Display-mapping simulator: per-frame PQ histograms and L1 streams through libplacebo 7.387.0's tone curves"
+publish = false
+
+# Outside the workspace: it links libplacebo (LGPL-2.1+) statically and is never distributed.
+# scripts/build-libplacebo.sh builds the pinned version; build.rs refuses any other.
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+
+[build-dependencies]
+cc = "1.2"
+pkg-config = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
