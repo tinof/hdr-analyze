@@ -89,6 +89,10 @@ release:
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
 
+- **E12.2: does a semantics-only sidecar v7 restart the 1.0.0 "sidecar schema and CLI unchanged for one
+  minor cycle" clock?** Options: no, the layout is unchanged; yes, any version bump counts.
+  Recommended: no, because no field changed and readers of v6 read v7 the same way.
+
 ### Metered tests (later)
 
 Tests that need the owner's X-Rite i1Display Pro on the Windows PC. The owner runs them when the
