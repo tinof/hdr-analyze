@@ -71,8 +71,8 @@ Order: the Focus steps that unblock priority 3, WS7.1 then WS6.10 (E12.2 closed 
   `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
   RPUs need builder work (Tier 2) or a tool on `dolby_vision`.
 
-**Reassess:** owner-decision (E12.2, PR #136): sidecar v7 makes v0.9.0's last fix a minor-class
-contract change; the owner is asked whether it restarts the 1.0.0 schema clock.
+**Reassess:** owner-decision (steering 2026-11-18): Focus WS7.1, WS6.10; sidecar v7 (E12.2,
+PR #136) does not restart the 1.0.0 schema clock.
 
 ### Waiting for the owner
 
@@ -87,10 +87,6 @@ release:
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
-
-- **Does a semantics-only sidecar v7 restart the 1.0.0 "sidecar schema and CLI unchanged for one
-  minor cycle" clock?** (from E12.2, PR #136) Options: no, the layout is unchanged; yes, any version bump counts.
-  Recommended: no, because no field changed and readers of v6 read v7 the same way.
 
 ### Metered tests (later)
 
@@ -116,7 +112,7 @@ E12.1); its rc.1 passed the Windows test ([log](docs/ROADMAP_LOG.md) 2026-11-14)
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | next minor (v0.9.0) | P15, E15.1, E15.2, E12.2 (L1 sidecar v7) (merged); PATCH-class fixes merged before it: P12.1 `--mdfix` source L6, E7.1, E7.2, E7.3, P6.2, P9.4 | MINOR, about 2026-11-11 (rule 1); owner decision |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); WS1.5 (opt-in estimator), WS1.6 (default estimator change) | MINOR |
-| 1.0.0 | P8 playback verified on the LG OLED C9 (met 2026-10-13) and the WS6 `code / 1023` question answered (met 2026-10-29, WS6.6); a second device is not required (owner, 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
+| 1.0.0 | P8 playback verified on the LG OLED C9 (met 2026-10-13) and the WS6 `code / 1023` question answered (met 2026-10-29, WS6.6); a second device is not required (owner, 2026-10-17); sidecar schema and CLI unchanged for one minor cycle (the semantics-only sidecar v7 does not restart it: owner, 2026-11-18); no open priority-1 defect | Owner decision |
 
 ## Priorities
 
@@ -126,8 +122,8 @@ improvements with measured evidence; then research. Items 1 to 5 are about what 
 and 7 about how it is judged. The evidence for each priority is in its items and in
 [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#priority-table).
 
-**Focus (set 2026-11-17):** E12.2, WS7.1, WS6.10; ship the overdue v0.9.0 with its last fix, then
-unblock priority 3: the simulator five steps wait on, and the pulse files for the C9 viewing.
+**Focus (set 2026-11-18):** WS7.1, WS6.10; v0.9.0's fixes are merged and its release is the owner's
+call, so unblock priority 3: the simulator five steps wait on, and the pulse files for the C9 viewing.
 
 1. **HLG → Profile 8.4 composer** (P8, WS6.9). `--hlg-composer bt2100` is the default (owner);
    `preset` is the fallback.
@@ -746,6 +742,8 @@ The detailed gap table and validation method live in
 
 - **Status:** Partial. E12.1 (PR #86) and E12.2 (PR #136) are done, history in
   [the log](docs/ROADMAP_LOG.md) (2026-11-18). Open: E12.3, the CPU/CUDA hue bin mismatch.
+- **Decided 2026-11-18 (owner):** E12.2's sidecar v7 changed no field, so it does not restart the
+  1.0.0 "unchanged for one minor cycle" clock (Release plan).
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
   and a clean CPU fallback without libcuda. Windows `--features cuda` passed the owner's
