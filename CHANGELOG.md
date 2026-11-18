@@ -8,6 +8,17 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Added
 
+- `hdr_analyzer_mvp --dump-pq-hist <PATH>` writes every measured frame's 4096-bin PQ histogram of
+  the peak domain (format `pqhist` v1: a 64-byte header, then 16 KiB of pixel counts per frame)
+  for the display simulator (ROADMAP WS7.1). Frames that `--sample-rate` skips repeat the previous
+  record. The `.bin` and the sidecar do not change, and CPU and CUDA write the same bytes. A path
+  that names the input or another file of the run is refused before anything is written.
+- `tools/display_sim` (ROADMAP WS7.1, not part of the release) compares a candidate L1 stream with
+  a reference one as change in displayed luminance. It puts the dump's histograms through
+  libplacebo 7.387.0's spline, st2094-10 and bt2390 curves for 100-, 600- and 1000-nit displays
+  and reports the change at 10, 100 and 200 nits and at the frame peak, the light-weighted change,
+  the clipped share and frame-to-frame steps, per run, shot and frame. It links libplacebo
+  statically; `scripts/build-libplacebo.sh` builds the pinned version.
 - mkvdovi warns when a source contradicts itself (ROADMAP P6.2). The five checks only warn; no
   value and no delivered RPU changes. A Dolby Vision input whose RPU L6 differs from the
   stated HDR10 metadata (mastering peak or minimum at all, MaxCLL or MaxFALL by more than 2 %)

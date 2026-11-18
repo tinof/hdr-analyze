@@ -247,8 +247,25 @@ All of the above scores PQ codes. What a code error costs on a display depends o
 and on whether the shot exceeds the panel: recomputed with open curves for a 1000-nit shot on a
 1000-nit panel, L1 max +75 / +140 codes lowers the peak by 14.6% / 24.4% with libplacebo's spline
 and by 2.5% / 4.5% with the ITU-R BT.2390 EETF, and changes nothing when L1 max stays below the
-panel peak. A display-mapping simulator that reports such numbers per shot is planned (roadmap WS7).
-Open curves are not a Dolby display, and they read only L1 max, L1 avg and the source range.
+panel peak. `tools/display_sim` (roadmap WS7.1) reports such numbers per frame, shot and run from the
+analyzer's PQ histogram dump (`--dump-pq-hist`) and two L1 streams. It links libplacebo 7.387.0
+(`scripts/build-libplacebo.sh`), so its curves are libplacebo's own.
+
+The printed numbers fix their scenario only partly. The tool's gate tests reproduce them within 0.06
+percentage points with a reconstructed one: L1 avg 10 nits, source and display black 0.005 nits,
+libplacebo's default constants with the ITU knee offset 0.5 for BT.2390, and L1 max the un-rounded
+code of 1000 nits (4095 × PQ(1000), about 3078.74) plus the offset. Integer codes stay within 0.1
+points. The spline then gives −3.54 / −5.85 / −7.81 / −14.58 % (+75 codes) and −6.50 / −10.40 /
+−13.65 / −24.38 % (+140) at 10 / 100 / 200 / 1000 nits, and BT.2390 −2.46 % / −4.54 % at the peak.
+On a 600-nit panel an L1 max 100 codes low gives +4.85 / +8.36 / +11.30 % and clips above it.
+
+Open curves are not a Dolby display, and the curve reads only L1 max, L1 avg and the source black.
+libplacebo 7.387.0's renderer also differs from its curve. It maps into a dynamic target with an
+exposure change when the scene average exceeds the display. Under default parameters it also runs
+peak detection on the picture beside the Dolby Vision L1. "libplacebo reads only L1 max/avg and the
+source range" therefore holds for the curve, and for a render only with peak detection off. The
+renderer also falls back to the static HDR10 metadata when L1 max or avg is 0; the simulator uses
+both as given.
 
 For every accuracy change:
 

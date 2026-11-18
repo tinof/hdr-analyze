@@ -31,7 +31,11 @@ how an edit is made; the release workflow is in [RELEASING.md](RELEASING.md).
   them, so the HLG, open-GOP, P7 full-range refusal (`pq_input_contract`) and clip tests passed as
   skips in PR CI.
 - **`l1-regression`:** `scripts/ci/l1-regression-gate.sh` plus fmt/clippy/test for `tools/l1_diff`
-  (outside the workspace); see `CLAUDE.md` "Testing quirks".
+  (outside the workspace); see `CLAUDE.md` "Testing quirks". It also builds libplacebo 7.387.0 with
+  `scripts/build-libplacebo.sh` (meson and ninja in the script's own venv, after
+  `actions/setup-python`) and runs fmt, `clippy --locked` and `test --locked` for
+  `tools/display_sim`. The installed library is cached by runner OS, architecture, image and the
+  script's hash, and saved outside PRs only.
 - **`gemini-harness`** is the fake-agy test of the Gemini pre-PR pass
   (`.claude/workflows/tests/pre-pr-gemini-test.sh`; no Rust).
 - **Security and dependencies:** `cargo audit`, and `cargo deny check` for `advisories` (allowed to

@@ -240,6 +240,8 @@ composer). For each clip and composer, with crop detection and with `--no-crop`,
 (both `--downscale 1 --disable-optimizer`) and requires:
 
 - byte-identical `.bin` files;
+- byte-identical `--dump-pq-hist` files (the per-frame 4096-bin PQ histograms, WS7.1), 64 header
+  bytes plus 16 KiB per frame; a failure names the first differing frame and bin;
 - equal `crop`, `scenes` and `frames` in the two `.l1.json` sidecars;
 - `analysis.gpu` false for the CPU run and true for the CUDA run, so a CPU fallback fails the test;
 - `analysis.luminance_mapping` `pq` for the PQ clip, and for the HLG clip the composer's name:
@@ -250,13 +252,13 @@ the default PQ run: the option must not touch PQ input.
 
 Before the clips, the script runs the in-crate test
 `analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops` (`--peak-estimator
-st2094-10` on odd crop anchors and sizes, planar and P010, consecutive frames), because crop
-detection only yields even anchors. libtest exits 0 when its filter matches nothing, so the script
+st2094-10` on odd crop anchors and sizes, planar and P010, consecutive frames; it also compares the
+4096 histogram bins and their total), because crop detection only yields even anchors. libtest exits 0 when its filter matches nothing, so the script
 fails unless exactly one test passed.
 
 `nvdec_cpu_analysis_matches_software_decode` (ROADMAP E12.2) checks CPU analysis of NVDEC frames:
 `--hwaccel cuda` without GPU analysis against `--hwaccel none`. It requires byte-identical `.bin`
-files and sidecars (version 7, `analysis.gpu` false, the composer's mapping), equal frame statistics
+files, PQ histogram dumps and sidecars (version 7, `analysis.gpu` false, the composer's mapping), equal frame statistics
 and AU tables, a repack line for every frame on the NVDEC run and none on the software run, and
 the same crop-monitor report with at least one usable scene-cut sample. Its `--no-crop` case
 requires the full frame and no monitor report, and the letterboxed clip with `--crop-probes 0` a
