@@ -399,8 +399,9 @@ entirely.
   decode's, and prints `NVDEC P010 frames repacked for CPU analysis: N`. Before sidecar version 7
   these frames went through swscale, which moved the codes; mkvdovi under `--hwaccel cuda`
   re-analyzes such measurements (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md)).
-  Release archives are built without the `cuda` feature, so their analyzer uses the CPU path;
-  GPU analysis needs a source build (see [INSTALLATION.md](INSTALLATION.md#cuda-analysis-build)).
+  The Linux x64 and Windows x64 release archives are built with the `cuda` feature (since 0.8.0);
+  the macOS and Linux ARM64 archives are not, so their analyzer uses the CPU path. Source builds:
+  [INSTALLATION.md](INSTALLATION.md#cuda-analysis-build).
 - `vaapi` / `videotoolbox`: currently log and fall back to software decoding (proper device
   contexts are planned). The pipeline remains fully functional via software decoding everywhere.
 
