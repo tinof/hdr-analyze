@@ -185,8 +185,8 @@ unblock priority 3: the simulator five steps wait on, and the pulse files for th
     metadata can carry, never re-encoded.
     Gate: none until a step states one.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E18, P3, WS0, WS6): the
-    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
-    v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
+    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.3), CI and corpus
+    gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance and open-GOP scoring (E3, E6, E11), hot-file
     byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner).
@@ -744,24 +744,22 @@ The detailed gap table and validation method live in
 
 ### E12: CUDA release binaries
 
-- **Status:** Partial. E12.1 landed (PR #86) and waits only for `/ship --step E12.1`; E12.2 closed
-  in PR #136 ([log](docs/ROADMAP_LOG.md), 2026-11-18). Open: E12.3.
+- **Status:** Partial. E12.1 (PR #86) and E12.2 (PR #136) are done, history in
+  [the log](docs/ROADMAP_LOG.md) (2026-11-18). Open: E12.3, the CPU/CUDA hue bin mismatch.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
-  and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. The kernel
-  ships as PTX that NVRTC 12.6 compiled ahead of time (`analysis/kernels.ptx`, made by
-  `scripts/gen-kernels-ptx.sh`, checked for staleness in CI), loaded through the driver's PTX JIT,
-  so users need only the NVIDIA driver (R560 or newer). This replaces the 2026-10-17 plan to bundle
+  and a clean CPU fallback without libcuda. Windows `--features cuda` passed the owner's
+  `v0.8.0-rc.1` test on 2026-11-04. The kernel ships as PTX that NVRTC 12.6 compiled ahead of
+  time (`analysis/kernels.ptx`, made by `scripts/gen-kernels-ptx.sh`, checked for staleness in
+  CI), loaded through the driver's PTX JIT, so users need only the NVIDIA driver (R560 or newer).
+  This replaces the 2026-10-17 plan to bundle
   the NVRTC DLLs (owner decision 2026-11-02, after the speakrs write-up on shipping prebuilt PTX).
 - **Effect:** NVIDIA release users move from CPU analysis to GPU analysis, mainly for speed (CPU
-  `auto` is `accurate` since P1.1); needs a CHANGELOG entry.
+  `auto` is `accurate` since P1.1); in the CHANGELOG under 0.8.0.
 - **Gate:** the release archives report `+cuda` in `--version` and fall back cleanly to the CPU
   without libcuda; the Windows archive runs GPU analysis with only the driver present;
   `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
   from `PATH` (Release plan).
-- [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in
-  the plan (embedded PTX, driver only), with the smoke tests, for v0.8.0. Gate: the item gate.
-  Landed: PR #86; gate pending.
 - **Defect (found 2026-11-02, E12.1 research):** the GPU hue bin (f32 `atan2f`,
   `analysis/kernels.cu:513-517`) and the CPU one (f64, `analysis/histogram.rs:304-308`) differ for
   2 of the 2^20 centred chroma pairs, (254, −109) and (508, −218): CPU bin 28, GPU bin 29, within
