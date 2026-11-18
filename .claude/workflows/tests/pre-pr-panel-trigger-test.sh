@@ -33,6 +33,11 @@ const cases = [
   ['mkvdovi pipeline alone, hard: true', ['mkvdovi/src/pipeline/convert.rs'], true, true],
   ['RPU builder alone, hard: true', ['dovi_rpu_builder/src/lib.rs'], true, true],
   ['hard as a string is not hard', ['mkvdovi/src/pipeline/convert.rs'], 'true', false],
+  ['PQ histogram dump writer + display_sim reader (two contract sides)', ['hdr_analyzer_mvp/src/pq_hist_dump.rs', 'tools/display_sim/src/hist.rs'], false, true],
+  ['display_sim alone (high-risk, one contract side)', ['tools/display_sim/src/sim.rs'], false, false],
+  ['display_sim alone, hard: true', ['tools/display_sim/src/sim.rs'], true, true],
+  ['libplacebo build script, hard: true (high-risk)', ['scripts/build-libplacebo.sh'], true, true],
+  ['another script, hard: true (not high-risk)', ['scripts/rpu-baseline.sh'], true, false],
 ]
 ;(async () => {
   for (const [name, files, hard, want] of cases) {
@@ -44,6 +49,12 @@ const cases = [
   const g = await run({ base: 'origin/main', files: ['.claude/hooks/rust-check.sh', '.claude/workflows/pre-pr-panel.js'], gatesOnly: true })
   check('gates: the hook path requires rust-check-hook', g.requiredGates.includes('rust-check-hook'))
   check('gates: the panel requires panel-trigger', g.requiredGates.includes('panel-trigger'))
+  for (const f of ['tools/display_sim/src/tm_shim.c', 'scripts/build-libplacebo.sh', 'tools/display_sim/build.rs', 'tools/display_sim/Cargo.lock']) {
+    const t = await run({ base: 'origin/main', files: [f], gatesOnly: true })
+    check(`gates: ${f} requires tool:display_sim`, t.requiredGates.includes('tool:display_sim'))
+  }
+  const o = await run({ base: 'origin/main', files: ['tools/other/src/x.c'], gatesOnly: true })
+  check('gates: a C file of another tool does not require tool:display_sim', !o.requiredGates.includes('tool:display_sim'))
   const d = await run({ base: 'origin/main', files: ['docs/CI.md'], gatesOnly: true })
   check('gates: a docs-only diff requires none', d.requiredGates.length === 0)
   if (fails) { console.log(`${fails} pre-pr-panel trigger test(s) failed`); process.exit(1) }

@@ -243,7 +243,7 @@ that list and step 3's list. Do the same after every later fix round, and run th
 | `clippy-cuda` | `cargo clippy -p hdr_analyzer_mvp --all-targets --features cuda -- -D warnings` |
 | `cuda-parity` | `scripts/cuda-parity.sh` |
 | `l1-regression` | `scripts/ci/l1-regression-gate.sh` (check mode) |
-| `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml` |
+| `tool:<name>` | `cargo fmt/clippy -D warnings/test --manifest-path tools/<name>/Cargo.toml`; `tool:display_sim` first runs `scripts/build-libplacebo.sh` (libplacebo 7.387.0, about 30 s on the first run) and passes `--locked` to clippy and test |
 | `gemini-harness` | `.claude/workflows/tests/pre-pr-gemini-test.sh` (fake agy; about 1 minute) |
 | `pre-pr-record` | `.claude/skills/pre-pr-review/tests/clear-record-test.sh` (a throwaway repo; seconds) |
 | `reviewer-yield` | `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh` (hand-made records; seconds) |

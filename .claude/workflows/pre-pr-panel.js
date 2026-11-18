@@ -42,6 +42,9 @@ for (const f of files) {
   const m = /^tools\/([^/]+)\/(.+)$/.exec(f)
   if (m && /\.rs$|Cargo\.(toml|lock)$/.test(m[2])) gates.add('tool:' + m[1])
 }
+// tools/display_sim also compiles a C shim and links the libplacebo that
+// scripts/build-libplacebo.sh pins, which sets every curve it reports.
+if (any(/^tools\/display_sim\/.*\.c$|^scripts\/build-libplacebo\.sh$/)) gates.add('tool:display_sim')
 // tools/rpu_builder_check builds dovi_rpu_builder by path (and includes its fixture cases), so a
 // library change runs the tool's equivalence tests too.
 if (any(/^dovi_rpu_builder\//)) gates.add('tool:rpu_builder_check')
@@ -59,24 +62,26 @@ const requiredGates = [...gates]
 log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass, record-cleanup, reviewer-yield, hook or panel paths touched)'))
 
 // High-risk paths: the ones that require CUDA parity or the L1 regression gate, plus the
-// cross-binary contract modules named in CLAUDE.md. A module counts as a file or as a directory of
-// submodules (metadata.rs or metadata/), so a split never drops the rule.
+// cross-binary contract modules named in CLAUDE.md, the PQ histogram dump's reader
+// (tools/display_sim) and the libplacebo pin it measures with. A module counts as a file or as a
+// directory of submodules (metadata.rs or metadata/), so a split never drops the rule.
 const riskPaths = cuda || measurement ||
-  any(/^hdr_analyzer_mvp\/src\/l1_sidecar(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)|^dovi_rpu_builder\/src\//)
+  any(/^hdr_analyzer_mvp\/src\/(l1_sidecar|pq_hist_dump)(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)|^dovi_rpu_builder\/src\/|^tools\/display_sim\/|^scripts\/build-libplacebo\.sh$/)
 // Hard diffs (owner decision 2026-11-10: Fable reviews when the difficulty warrants it). Two of
 // the repo's hard criteria (.claude/workflow.md "## Notes") show in the paths, so they never
 // depend on who built the step or on a local log:
 // - numeric work mirrored on CPU and CUDA: the analysis code with its kernel, and the composers;
 // - two or more sides of a cross-binary contract (CLAUDE.md "Cross-binary contracts"): the
-//   analyzer side (L1 sidecar, --version and --help, AU table), the mkvdovi side that reads them,
-//   and tools/l1_diff.
+//   analyzer side (L1 sidecar, --version and --help, AU table, PQ histogram dump), the mkvdovi
+//   side that reads them, tools/l1_diff, and tools/display_sim (the dump's reader).
 // The skill adds `hard: true` for the rest of the rubric: 300 or more changed logic lines, or a
 // judgment item (a design decision with a real trade-off, an unknown root cause).
 const numeric = any(/^hdr_analyzer_mvp\/src\/analysis\/|^dovi84_composer\/src\//)
 const contractSides = [
-  /^hdr_analyzer_mvp\/src\/(l1_sidecar|cli|au_table)(\.rs$|\/)/,
+  /^hdr_analyzer_mvp\/src\/(l1_sidecar|cli|au_table|pq_hist_dump)(\.rs$|\/)/,
   /^mkvdovi\/src\/(metadata|external)(\.rs$|\/)|^mkvdovi\/src\/pipeline\/(measure|manifest)(\.rs$|\/)/,
   /^tools\/l1_diff\//,
+  /^tools\/display_sim\//,
 ].filter(re => any(re)).length
 const hardReason = a.hard === true ? 'hard: true from the skill' : numeric ? 'CPU/CUDA numeric path' :
   contractSides >= 2 ? `${contractSides} sides of a cross-binary contract` : ''
