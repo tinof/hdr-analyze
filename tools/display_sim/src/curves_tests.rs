@@ -101,6 +101,76 @@ fn rows_a_to_g_match_the_standalone_oracle() {
     }
 }
 
+/// The gate scenario as the standalone harness computes it (`harness.c` on v7.387.0): L1 max the
+/// f32 PQ of 1000 nits plus the offset over 4095, avg 10 nits, blacks 0.005, a 1000-nit display;
+/// change against the input nits (the reference is the identity there), four decimals.
+#[rustfmt::skip]
+const HARNESS_GATE_ROWS: [(Curve, f32, [f64; 4]); 6] = [
+    (Curve::Spline, 75.0, [-3.5383, -5.8513, -7.8096, -14.5774]),
+    (Curve::St2094_10, 75.0, [-3.5385, -4.5708, -5.6882, -13.7954]),
+    (Curve::Bt2390, 75.0, [-0.0010, -0.0003, 0.0024, -2.4561]),
+    (Curve::Spline, 140.0, [-6.5001, -10.3991, -13.6483, -24.3785]),
+    (Curve::St2094_10, 140.0, [-6.5001, -8.1980, -10.0132, -22.3032]),
+    (Curve::Bt2390, 140.0, [-0.0010, -0.0003, 0.0024, -4.5369]),
+];
+
+#[test]
+fn the_gate_scenario_matches_the_standalone_harness_to_0_005_points() {
+    let display = |peak| Display {
+        source_black_nits: 0.005,
+        panel_black_nits: 0.005,
+        panel_peak_nits: peak,
+    };
+    let avg_code = nits_to_pq(10.0) * 4095.0;
+    for (curve, offset, row) in HARNESS_GATE_ROWS {
+        let in_max = crate::lp::nits_to_pq(1000.0) + offset / 4095.0;
+        let mapping = Mapping::new(
+            curve,
+            &display(1000.0),
+            &Metadata {
+                max_code: f64::from(in_max) * 4095.0,
+                avg_code,
+            },
+        )
+        .unwrap();
+        for (nits, want) in [10.0, 100.0, 200.0, 1000.0].into_iter().zip(row) {
+            let got = (mapping.displayed_nits(nits_to_pq(nits)) / nits - 1.0) * 100.0;
+            assert!(
+                (got - want).abs() <= 0.005,
+                "{} +{offset} at {nits} nits: {got:.4}% vs the harness {want}%",
+                curve.name()
+            );
+        }
+    }
+    // The 600-nit display, L1 max 100 codes below PQ(1000): candidate over reference.
+    let metadata = |max: f32| Metadata {
+        max_code: f64::from(max) * 4095.0,
+        avg_code,
+    };
+    let peak = crate::lp::nits_to_pq(1000.0);
+    let reference = Mapping::new(Curve::Spline, &display(600.0), &metadata(peak)).unwrap();
+    let candidate = Mapping::new(
+        Curve::Spline,
+        &display(600.0),
+        &metadata(peak - 100.0 / 4095.0),
+    )
+    .unwrap();
+    for (nits, want) in [
+        (10.0, 4.847),
+        (20.0, 4.893),
+        (50.0, 6.293),
+        (100.0, 8.355),
+        (200.0, 11.298),
+    ] {
+        let x = nits_to_pq(nits);
+        let got = (candidate.displayed_nits(x) / reference.displayed_nits(x) - 1.0) * 100.0;
+        assert!(
+            (got - want).abs() <= 0.005,
+            "600 nits, -100 at {nits} nits: {got:.4}%"
+        );
+    }
+}
+
 /// Rows H, I1 and I2 of `harness6.c`: L1 max below the panel peak or a panel black of 0, at
 /// 0.01, 1, 10, 100, 500, 600, 800, 1000 and 1200 nits.
 #[rustfmt::skip]
