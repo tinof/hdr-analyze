@@ -10,8 +10,11 @@ use crate::au_table::{
 };
 use crate::cli::{Cli, PeakDomain, PeakEstimator};
 use crate::ffmpeg_io::{probe_crop, TransferFunction, VideoInfo};
-use crate::l1_sidecar::{write_l1_sidecar, AnalysisMetadata, SidecarProvenance, SourceMetadata};
+use crate::l1_sidecar::{
+    sidecar_path, write_l1_sidecar, AnalysisMetadata, SidecarProvenance, SourceMetadata,
+};
 use crate::optimizer::{run_optimizer_pass, OptimizerProfile};
+use crate::pq_hist_dump::{check_dump_path, DumpHeader, PqHistWriter};
 use crate::writer::write_measurement_file;
 
 mod analyze;
@@ -167,6 +170,13 @@ pub fn run(
         }
     };
     let au_path = au_table_path(Path::new(&output_path));
+    // Before anything is removed or written.
+    check_pq_hist_path(
+        cli,
+        Path::new(input_path),
+        Path::new(&output_path),
+        &au_path,
+    )?;
     remove_stale_au_table(&au_path)?;
     if cli.au_table_only {
         return run_au_table_only(cli, Path::new(input_path), &mut input_context, &au_path);
@@ -176,6 +186,18 @@ pub fn run(
         Some(AuRecorder::new(Path::new(input_path), &input_context)?)
     } else {
         None
+    };
+    let mut pq_hist_dump = match &cli.dump_pq_hist {
+        Some(path) => Some(PqHistWriter::create(
+            path,
+            &DumpHeader {
+                peak_domain,
+                hlg: video_info.transfer_function == TransferFunction::Hlg,
+                sample_rate: cli.sample_rate.max(1),
+                downscale,
+            },
+        )?),
+        None => None,
     };
 
     let initial_crop = if cli.no_crop || cli.crop_probes == 0 {
@@ -231,6 +253,7 @@ pub fn run(
         initial_crop,
         &analysis_options,
         &mut au_recorder,
+        &mut pq_hist_dump,
     )?;
 
     if let Some(path) = &cli.dump_frame_stats {
@@ -335,6 +358,22 @@ pub fn run(
         },
     )?;
     println!("Wrote L1 measurement sidecar: {}", sidecar_path.display());
+    if let (Some(writer), Some(path)) = (pq_hist_dump, &cli.dump_pq_hist) {
+        // A mismatch leaves the unfinished frame count, which every reader refuses.
+        if writer.records() != frames.len() as u64 {
+            anyhow::bail!(
+                "The PQ histogram dump {} holds {} frames, the sidecar {}",
+                path.display(),
+                writer.records(),
+                frames.len()
+            );
+        }
+        let records = writer.finish(stream_frames.leading_skipped)?;
+        println!(
+            "Wrote PQ histogram dump: {} ({records} frames)",
+            path.display()
+        );
+    }
 
     if let Some(recorder) = au_recorder {
         let table = recorder
@@ -366,6 +405,25 @@ mod crop_space_tests;
 
 #[cfg(test)]
 mod p010_tests;
+
+/// `--dump-pq-hist` must not name the input or another file of the run: the dump would
+/// overwrite it, or the run would overwrite the dump.
+fn check_pq_hist_path(cli: &Cli, input: &Path, output: &Path, au_path: &Path) -> Result<()> {
+    let Some(dump) = &cli.dump_pq_hist else {
+        return Ok(());
+    };
+    let sidecar = sidecar_path(output);
+    let mut others = vec![
+        ("input", input),
+        ("measurement file", output),
+        ("L1 sidecar", sidecar.as_path()),
+        ("AU table path", au_path),
+    ];
+    if let Some(stats) = &cli.dump_frame_stats {
+        others.push(("--dump-frame-stats CSV", stats.as_path()));
+    }
+    check_dump_path(dump, &others)
+}
 
 /// `HDR_ANALYZER_DUMP_MAX_RGB=<dir>`: write every analyzed frame's per-pixel max-RGB values
 /// there, for `scripts/validate_hlg_chroma_siting.sh` to compare the decode pixel by pixel.

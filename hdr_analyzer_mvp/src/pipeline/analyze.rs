@@ -24,6 +24,7 @@ use crate::ffmpeg_io::{
 };
 use crate::l1_sidecar::FrameL1Measurement;
 use crate::leading_pictures::{hevc_framing, LeadingPictureScan};
+use crate::pq_hist_dump::PqHistWriter;
 
 /// Create a copy of a MadVRFrame (MadVRFrame doesn't implement Clone)
 fn copy_frame(frame: &MadVRFrame) -> MadVRFrame {
@@ -225,6 +226,7 @@ pub(super) fn run_native_analysis_pipeline(
     initial_crop: Option<CropRect>,
     analysis_options: &FrameAnalysisOptions<'_>,
     au_recorder: &mut Option<AuRecorder>,
+    pq_hist_dump: &mut Option<PqHistWriter>,
 ) -> Result<(
     Vec<MadVRScene>,
     Vec<MadVRFrame>,
@@ -553,10 +555,16 @@ pub(super) fn run_native_analysis_pipeline(
                     frame_result.max_rgb_pixels.as_deref(),
                 )?;
             }
+            if let Some(writer) = pq_hist_dump.as_mut() {
+                writer.write_frame(&frame_result.pq_hist)?;
+            }
             last_l1_measurement = Some(frame_result.l1);
             last_peak_stats = Some(frame_result.peak_stats);
             (frame_result.frame, frame_result.l1, frame_result.peak_stats)
         } else {
+            if let Some(writer) = pq_hist_dump.as_mut() {
+                writer.repeat_last()?;
+            }
             // Use cached frame data for skipped frames
             (
                 copy_frame(last_analyzed_frame.as_ref().unwrap()),

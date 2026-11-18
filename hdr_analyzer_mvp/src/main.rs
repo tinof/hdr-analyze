@@ -11,6 +11,7 @@ mod l1_sidecar;
 mod leading_pictures;
 mod optimizer;
 mod pipeline;
+mod pq_hist_dump;
 mod writer;
 
 use clap::Parser;

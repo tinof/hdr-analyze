@@ -764,6 +764,7 @@ impl GpuAnalyzer {
                 reduced_min_pq,
             },
             max_rgb_pixels,
+            pq_hist,
         })
     }
 }

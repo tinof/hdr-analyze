@@ -177,6 +177,11 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub dump_frame_stats: Option<PathBuf>,
 
+    /// Write every measured frame's 4096-bin PQ histogram of the peak domain (pixel counts,
+    /// `pqhist` v1, 16 KiB per frame) for tools/display_sim. CPU and CUDA write the same bytes.
+    #[arg(long, value_name = "PATH", conflicts_with = "au_table_only")]
+    pub dump_pq_hist: Option<PathBuf>,
+
     /// EMA smoothing beta for histogram bins (0.0-1.0). Lower = more smoothing. 0 disables. Default: 0.1
     #[arg(long, default_value_t = 0.1)]
     pub hist_bin_ema_beta: f64,
