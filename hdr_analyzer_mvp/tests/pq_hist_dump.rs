@@ -340,6 +340,39 @@ fn pq_hist_hlg_and_downscale_are_recorded_in_the_header() {
 }
 
 #[test]
+fn pq_hist_an_untagged_input_is_measured_as_pq_and_recorded_as_transfer_0() {
+    require_ffmpeg!();
+    let dir = tempfile::tempdir().unwrap();
+    let codes = usable_codes();
+    let planes: Vec<Vec<u16>> = (0..2).map(|k| luma_plane(&codes, k)).collect();
+    let clip = dir.path().join("untagged.mkv");
+    encode(&clip, &planes, CB, CR, "unspecified");
+    let output = analyze_in(
+        dir.path(),
+        &[
+            clip.to_str().unwrap(),
+            "-o",
+            "out.bin",
+            "--dump-pq-hist",
+            "out.pqhist",
+        ],
+    );
+    assert_success(&output);
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Transfer function unspecified"),
+        "the clip must take the untagged path"
+    );
+    let dump = Dump::read(&dir.path().join("out.pqhist"));
+    assert_eq!(dump.fields(), (0, 0, 1, 1, 2, 0));
+    for (record, plane) in dump.records.iter().zip(&planes) {
+        assert_eq!(
+            first_difference(record, &expected_histogram(plane, false)),
+            None
+        );
+    }
+}
+
+#[test]
 fn pq_hist_a_dump_path_naming_another_file_of_the_run_is_refused_before_anything_is_written() {
     require_ffmpeg!();
     let dir = tempfile::tempdir().unwrap();
