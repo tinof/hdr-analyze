@@ -132,6 +132,7 @@ jobs:
           workspaces: |
             . -> target
             tools/l1_diff -> target
+            tools/display_sim -> target
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # The FFmpeg CLI encodes the synthetic clip.
       - uses: ./.github/actions/setup-ffmpeg
@@ -143,6 +144,37 @@ jobs:
           cargo fmt --manifest-path tools/l1_diff/Cargo.toml -- --check
           cargo clippy --manifest-path tools/l1_diff/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path tools/l1_diff/Cargo.toml
+      # tools/display_sim (outside the workspace too) links libplacebo 7.387.0, which
+      # scripts/build-libplacebo.sh builds with meson and ninja from its own venv. The installed
+      # static library is cached by runner image and script; only runs outside pull requests save.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: libplacebo cache key
+        id: libplacebo
+        shell: bash
+        env:
+          SCRIPT_HASH: ${{ hashFiles('scripts/build-libplacebo.sh') }}
+        run: echo "key=libplacebo-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-${SCRIPT_HASH}" >> "$GITHUB_OUTPUT"
+      - name: Restore libplacebo
+        id: libplacebo-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/hdr-analyze/libplacebo-v7.387.0
+          key: ${{ steps.libplacebo.outputs.key }}
+      - name: Build libplacebo 7.387.0 (skipped when restored)
+        run: scripts/build-libplacebo.sh
+      - name: Save libplacebo
+        if: github.event_name != 'pull_request' && steps.libplacebo-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/hdr-analyze/libplacebo-v7.387.0
+          key: ${{ steps.libplacebo.outputs.key }}
+      - name: display_sim fmt, clippy, test
+        run: |
+          cargo fmt --manifest-path tools/display_sim/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path tools/display_sim/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path tools/display_sim/Cargo.toml
       - name: Score the synthetic corpus against the committed references
         run: scripts/ci/l1-regression-gate.sh
 
