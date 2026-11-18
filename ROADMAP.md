@@ -185,8 +185,8 @@ unblock priority 3: the simulator five steps wait on, and the pulse files for th
     metadata can carry, never re-encoded.
     Gate: none until a step states one.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E18, P3, WS0, WS6): the
-    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.1, after
-    v0.7.0), CI and corpus gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
+    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.3), CI and corpus
+    gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance and open-GOP scoring (E3, E6, E11), hot-file
     byte budgets (E18). Ranked below 1–10; added
     2026-10-18 so `/ship:roadmap-next` can reach them (owner).
