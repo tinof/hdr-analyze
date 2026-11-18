@@ -6,6 +6,47 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-18: E12.2 Make NVDEC decode with CPU analysis match software decode (PR #136)
+
+Step: [E12.2][gpu] Make NVDEC decode with CPU analysis match software decode: read P010 directly at
+  downscale 1 in the analyzer, or have mkvdovi pass `--hwaccel none` to an analyzer without `+cuda`
+  (NVDEC speed lost). Gate: with `--hwaccel cuda` and an analyzer without `cuda`, `.bin` and sidecar
+  byte-identical to software decode on one PQ and one HLG cut, with a test for both sides.
+
+Item context (moved from the roadmap):
+
+- **Defect (found 2026-11-02, P1.1):** an analyzer without `+cuda` run with `--hwaccel cuda` (what
+  mkvdovi passes on any NVIDIA host, `mkvdovi/src/pipeline/analyzer.rs` `run_hdr_analyzer`) decodes
+  with NVDEC and sends the P010 frames through swscale even at downscale 1
+  (`hdr_analyzer_mvp/src/pipeline/analyze.rs`, `needs_scaling`), so L1 and MaxCLL differ from
+  software decode (MaxCLL 194 against 182 and 903 against 855 nits; log 2026-11-02). It also
+  applies to a `+cuda` build whose CUDA analysis does not start.
+- **Checked 2026-11-17 @05133ec:** a direct P010 read needs semi-planar chroma and `>> 6` (as in
+  `crop.rs:195`) in every CPU reader: `analysis/frame/mod.rs:295`, `compute_hue_histogram`
+  (`histogram.rs:255`), `reduced_set::Planes` (`frame/reduced_set.rs:60`), `apply_median3_denoise`
+  (`frame/mod.rs:243`; `median3` forces CPU on NVDEC, `pipeline/analyze.rs:170`). The sidecar records
+  `gpu`, not the decode route (`l1_sidecar.rs:117`), so reuse (`measure.rs:549`, manifest `reusable_pair`)
+  cannot tell NVDEC sidecars apart. The mkvdovi-only fix leaves `+cuda` fallbacks affected.
+- **Owner decisions 2026-11-17 (final):** the analyzer repacks NVDEC P010 frames at downscale 1
+  instead of swscale; the L1 sidecar goes to v7 (no field changes). Under `--hwaccel cuda` mkvdovi
+  re-analyzes, with a warning, a pre-v7 sidecar whose `analysis` block says `gpu: false` at
+  downscale 1, in both reuse paths; a fresh v6 from an unfixed analyzer is refused after its run
+  and the `.bin`, `.l1.json` and `.au.json` that run wrote are removed. A v1 sidecar (no `analysis`
+  block) is not rejected and keeps its provenance warning. Plan and checks: `~/mkvdovi-work/e12-2/`.
+
+Evidence: on one PQ (1443 frames) and one HLG (1550 frames) development cut, an analyzer built
+without `cuda` wrote byte-identical `.bin` and `.l1.json` under `--hwaccel none` and `--hwaccel
+cuda` (`cmp`), and the cuda run repacked every frame (`~/mkvdovi-work/e12-2/evidence/RESULT.md`).
+`scripts/cuda-parity.sh` passes, with its new pass without `cuda` (test
+`nvdec_cpu_analysis_matches_software_decode`, 7 cases including median3, st2094-10, crop detection
+and a letterboxed `--crop-probes 0` clip). Hermetic tests in `pipeline/p010_tests.rs`; the red run
+(final code without the repack branch) fails T1 at the samples. `scripts/ci/test-gate.sh` (804
+passed), the L1 regression gate without `--update` and the `l1_diff` tests pass. No RPU baseline
+sidecar is CPU at downscale 1, so none needs a refresh. Cold review: Gemini 4 Hydrogen high, LGTM.
+
+Resolution: CPU analysis reads NVDEC frames unconverted; sidecar v7 marks the fix, and mkvdovi
+re-analyzes older full-resolution CPU sidecars on NVIDIA hosts. Open in E12: E12.3.
+
 ### 2026-11-17: P12.1 Under `--mdfix`, fall back to the source RPU's L6 (PR #134)
 
 Step: [P12.1][corpus] Under `--mdfix`, fall back to the sampled source RPU's L6 before the defaults.

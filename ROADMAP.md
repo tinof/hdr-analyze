@@ -54,26 +54,25 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-17 at main@05133ec)
-<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=1568ee099492 -->
+<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=f8357e851fe8 -->
 
-Order: the Focus text puts E12.2 first, the last open fix of the overdue v0.9.0; then WS7.1 and
-WS6.10, which unblock priority 3.
+Order: the Focus steps that unblock priority 3, WS7.1 then WS6.10 (E12.2 closed in PR #136).
 
-1. **E12.2 Make NVDEC decode with CPU analysis match software decode** (priority 11). Gate: the
-   step gate. Why: v0.9.0's last fix; analyzer and mkvdovi, a hard step. Branch:
-   `fix/e12-2-nvdec-cpu-analysis`. Release: minor (sidecar v7)
-2. **WS7.1 The display-mapping simulator with the per-frame histogram dump** (priority 6). Gate:
+1. **WS7.1 The display-mapping simulator with the per-frame histogram dump** (priority 6). Gate:
    the item gate. Why: unblocks P10.3, WS7.2, WS1.2, WS1.6, WS2.2. Branch:
    `feat/ws7-1-display-simulator`. Release: none
-3. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: unblocks the
+2. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: unblocks the
    WS6.11 viewing and P10.5's gate. Branch: `feat/ws6-10-pulse-files`. Release: none
 
-- Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:649`).
+- Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:650`).
 - Recheck before WS7.1: pin libplacebo and re-check the gate numbers after v7.387.0 changed tone
   mapping ([log](docs/ROADMAP_LOG.md) "libplacebo v7.387.0").
 - Recheck before WS6.10: the same libplacebo pin; `dovi_rpu_builder` clamps L1 (`L1::clamped`,
   `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
   RPUs need builder work (Tier 2) or a tool on `dolby_vision`.
+
+**Reassess:** owner-decision (E12.2, PR #136): sidecar v7 makes v0.9.0's last fix a minor-class
+contract change; the owner is asked whether it restarts the 1.0.0 schema clock.
 
 ### Waiting for the owner
 
@@ -89,8 +88,8 @@ release:
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
 
-- **E12.2: does a semantics-only sidecar v7 restart the 1.0.0 "sidecar schema and CLI unchanged for one
-  minor cycle" clock?** Options: no, the layout is unchanged; yes, any version bump counts.
+- **Does a semantics-only sidecar v7 restart the 1.0.0 "sidecar schema and CLI unchanged for one
+  minor cycle" clock?** (from E12.2, PR #136) Options: no, the layout is unchanged; yes, any version bump counts.
   Recommended: no, because no field changed and readers of v6 read v7 the same way.
 
 ### Metered tests (later)
@@ -109,13 +108,13 @@ Which steps ship in which release. Rules for the bump and the timing: [`docs/REL
 E12.1); its rc.1 passed the Windows test ([log](docs/ROADMAP_LOG.md) 2026-11-14).
 
 **Next release point:** v0.9.0, a minor: P15's analyzer `--help` contract (`au-table-v1`) is on
-`main`; rule 1 puts it about a week after #91 (2026-11-04). Overdue on 2026-11-17: E12.2 is the
-plan's fix still open (P6.2 closed in PR #133, P12.1 in PR #134).
+`main`; rule 1 puts it about a week after #91 (2026-11-04). Overdue: every planned fix is merged
+(E12.2 in PR #136, which also bumps the L1 sidecar to v7).
 
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next minor (v0.9.0) | P15, E15.1, E15.2 (merged); PATCH-class fixes merged before it: P12.1 `--mdfix` source L6, E12.2 NVDEC + CPU analysis, E7.1, E7.2, E7.3, P6.2, P9.4 | MINOR, about 2026-11-11 (rule 1); owner decision |
+| next minor (v0.9.0) | P15, E15.1, E15.2, E12.2 (L1 sidecar v7) (merged); PATCH-class fixes merged before it: P12.1 `--mdfix` source L6, E7.1, E7.2, E7.3, P6.2, P9.4 | MINOR, about 2026-11-11 (rule 1); owner decision |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); WS1.5 (opt-in estimator), WS1.6 (default estimator change) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (met 2026-10-13) and the WS6 `code / 1023` question answered (met 2026-10-29, WS6.6); a second device is not required (owner, 2026-10-17); sidecar schema and CLI unchanged for one minor cycle; no open priority-1 defect | Owner decision |
 
@@ -745,9 +744,8 @@ The detailed gap table and validation method live in
 
 ### E12: CUDA release binaries
 
-- **Status:** Partial. E12.1 landed (PR #86: Linux x64 and Windows x64 archives with an embedded PTX
-  kernel, driver only); the `v0.8.0-rc.1` Windows test passed 2026-11-04 (Release plan), so it
-  waits only for `/ship --step E12.1`. Open: E12.2, E12.3.
+- **Status:** Partial. E12.1 landed (PR #86) and waits only for `/ship --step E12.1`; E12.2 closed
+  in PR #136 ([log](docs/ROADMAP_LOG.md), 2026-11-18). Open: E12.3.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
   and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. The kernel
@@ -755,9 +753,8 @@ The detailed gap table and validation method live in
   `scripts/gen-kernels-ptx.sh`, checked for staleness in CI), loaded through the driver's PTX JIT,
   so users need only the NVIDIA driver (R560 or newer). This replaces the 2026-10-17 plan to bundle
   the NVRTC DLLs (owner decision 2026-11-02, after the speakrs write-up on shipping prebuilt PTX).
-- **Effect:** NVIDIA release users move from CPU analysis to GPU analysis: mainly speed, plus the
-  small E12.2 swscale difference in L1 and MaxCLL (CPU `auto` is `accurate` since P1.1); needs a
-  CHANGELOG entry.
+- **Effect:** NVIDIA release users move from CPU analysis to GPU analysis, mainly for speed (CPU
+  `auto` is `accurate` since P1.1); needs a CHANGELOG entry.
 - **Gate:** the release archives report `+cuda` in `--version` and fall back cleanly to the CPU
   without libcuda; the Windows archive runs GPU analysis with only the driver present;
   `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
@@ -765,16 +762,6 @@ The detailed gap table and validation method live in
 - [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in
   the plan (embedded PTX, driver only), with the smoke tests, for v0.8.0. Gate: the item gate.
   Landed: PR #86; gate pending.
-- **Defect (found 2026-11-02, P1.1):** an analyzer without `+cuda` run with `--hwaccel cuda` (what
-  mkvdovi passes on any NVIDIA host, `mkvdovi/src/pipeline/analyzer.rs` `run_hdr_analyzer`) decodes
-  with NVDEC and sends the P010 frames through swscale even at downscale 1
-  (`hdr_analyzer_mvp/src/pipeline/analyze.rs`, `needs_scaling`), so L1 and MaxCLL differ from
-  software decode (MaxCLL 194 against 182 and 903 against 855 nits; log 2026-11-02). It also
-  applies to a `+cuda` build whose CUDA analysis does not start.
-- [E12.2][gpu] Make NVDEC decode with CPU analysis match software decode: read P010 directly at
-  downscale 1 in the analyzer, or have mkvdovi pass `--hwaccel none` to an analyzer without `+cuda`
-  (NVDEC speed lost). Gate: with `--hwaccel cuda` and an analyzer without `cuda`, `.bin` and sidecar
-  byte-identical to software decode on one PQ and one HLG cut, with a test for both sides.
 - **Defect (found 2026-11-02, E12.1 research):** the GPU hue bin (f32 `atan2f`,
   `analysis/kernels.cu:513-517`) and the CPU one (f64, `analysis/histogram.rs:304-308`) differ for
   2 of the 2^20 centred chroma pairs, (254, −109) and (508, −218): CPU bin 28, GPU bin 29, within
@@ -784,17 +771,6 @@ The detailed gap table and validation method live in
   integer lookup table both sides index). Gate: a test over all 2^20 centred chroma pairs, CPU
   against the kernel's formula, with 0 mismatches; `scripts/cuda-parity.sh` passes; the L1
   regression gate passes without `--update`.
-- **Checked 2026-11-17 @05133ec:** a direct P010 read needs semi-planar chroma and `>> 6` (as in
-  `crop.rs:195`) in every CPU reader: `analysis/frame/mod.rs:295`, `compute_hue_histogram`
-  (`histogram.rs:255`), `reduced_set::Planes` (`frame/reduced_set.rs:60`), `apply_median3_denoise`
-  (`frame/mod.rs:243`; `median3` forces CPU on NVDEC, `pipeline/analyze.rs:170`). The sidecar records
-  `gpu`, not the decode route (`l1_sidecar.rs:117`), so reuse (`measure.rs:549`, manifest `reusable_pair`)
-  cannot tell NVDEC sidecars apart. The mkvdovi-only fix leaves `+cuda` fallbacks affected.
-- **Owner decision 2026-11-17:** plan approved (analyzer repacks NVDEC P010 at downscale 1 instead of
-  swscale); sidecar goes to v7 and mkvdovi re-analyzes, with a warning, a v6 `gpu:false` downscale-1
-  sidecar when `--hwaccel cuda` resolved, in both reuse paths. Builder `opus-professor`. Plan and checks:
-  `~/mkvdovi-work/e12-2/`; the v7 part still needs planning and both plan checks.
-
 ### E13: module size refactor
 
 - **Status:** Partial. Steps 2-5, E13.11, E13.15 and E13.16 done, no production file over the
