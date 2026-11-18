@@ -53,16 +53,19 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-17 at main@05133ec)
-<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=f8357e851fe8 -->
+### Next up (checked 2026-11-18 at main@0bf2704)
+<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=f3eac32c5d0b -->
 
-Order: the Focus steps that unblock priority 3, WS7.1 then WS6.10 (E12.2 closed in PR #136).
+Order: the Focus (steering 2026-11-18), WS7.1 then WS6.10, to unblock priority 3.
 
 1. **WS7.1 The display-mapping simulator with the per-frame histogram dump** (priority 6). Gate:
-   the item gate. Why: unblocks P10.3, WS7.2, WS1.2, WS1.6, WS2.2. Branch:
+   the item gate. Why: Focus 1; unblocks P10.3, WS7.2, WS1.2, WS1.6, WS2.2. Branch:
    `feat/ws7-1-display-simulator`. Release: none
-2. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: unblocks the
-   WS6.11 viewing and P10.5's gate. Branch: `feat/ws6-10-pulse-files`. Release: none
+2. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: Focus 2;
+   unblocks the WS6.11 viewing and P10.5's gate. Branch: `feat/ws6-10-pulse-files`. Release: none
+3. **P6.3 Check a Profile 8 record against its RPU** (priority 4). Gate: fixture tests on both
+   sides; RPU baselines byte-identical. Why: first startable step outside the Focus. Branch:
+   `fix/p6-3-p8-record-vs-rpu`. Release: patch
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:650`).
 - Recheck before WS7.1: pin libplacebo and re-check the gate numbers after v7.387.0 changed tone
@@ -70,9 +73,6 @@ Order: the Focus steps that unblock priority 3, WS7.1 then WS6.10 (E12.2 closed 
 - Recheck before WS6.10: the same libplacebo pin; `dovi_rpu_builder` clamps L1 (`L1::clamped`,
   `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
   RPUs need builder work (Tier 2) or a tool on `dolby_vision`.
-
-**Reassess:** owner-decision (steering 2026-11-18): Focus WS7.1, WS6.10; sidecar v7 (E12.2,
-PR #136) does not restart the 1.0.0 schema clock.
 
 ### Waiting for the owner
 
