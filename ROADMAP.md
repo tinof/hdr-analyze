@@ -748,13 +748,14 @@ The detailed gap table and validation method live in
   [the log](docs/ROADMAP_LOG.md) (2026-11-18). Open: E12.3, the CPU/CUDA hue bin mismatch.
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
   macOS already returns an error from `load_cuda_libraries`), smoke-test `--version` for `+cuda`
-  and a clean CPU fallback without libcuda. Windows `--features cuda` is untested. The kernel
-  ships as PTX that NVRTC 12.6 compiled ahead of time (`analysis/kernels.ptx`, made by
-  `scripts/gen-kernels-ptx.sh`, checked for staleness in CI), loaded through the driver's PTX JIT,
-  so users need only the NVIDIA driver (R560 or newer). This replaces the 2026-10-17 plan to bundle
+  and a clean CPU fallback without libcuda. Windows `--features cuda` passed the owner's
+  `v0.8.0-rc.1` test on 2026-11-04. The kernel ships as PTX that NVRTC 12.6 compiled ahead of
+  time (`analysis/kernels.ptx`, made by `scripts/gen-kernels-ptx.sh`, checked for staleness in
+  CI), loaded through the driver's PTX JIT, so users need only the NVIDIA driver (R560 or newer).
+  This replaces the 2026-10-17 plan to bundle
   the NVRTC DLLs (owner decision 2026-11-02, after the speakrs write-up on shipping prebuilt PTX).
 - **Effect:** NVIDIA release users move from CPU analysis to GPU analysis, mainly for speed (CPU
-  `auto` is `accurate` since P1.1); needs a CHANGELOG entry.
+  `auto` is `accurate` since P1.1); in the CHANGELOG under 0.8.0.
 - **Gate:** the release archives report `+cuda` in `--version` and fall back cleanly to the CPU
   without libcuda; the Windows archive runs GPU analysis with only the driver present;
   `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
