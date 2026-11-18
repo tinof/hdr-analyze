@@ -23,7 +23,7 @@ gate-focused:   scripts/ci/test-gate.sh target/test-gate-focused.log <pattern>
 gate-fallback:  none
 gate-skip:      '*.md' 'docs/**'
 ci:             pr-checks
-logic:          '*.rs' '*.cu' 'Cargo.toml' '*/Cargo.toml' '*.sh' '*.js' '*.py'
+logic:          '*.rs' '*.cu' '*.c' 'Cargo.toml' '*/Cargo.toml' '*.sh' '*.js' '*.py'
 tests:          '*/tests/**' '*/tests.rs' '*_tests.rs'
 self-check:     skill:pre-pr-review
 review-surfaces: exec github
@@ -37,6 +37,7 @@ review-surfaces: exec github
 - `cuda-parity`: `scripts/cuda-parity.sh`; paths `'Cargo.toml'` `'Cargo.lock'` `'hdr_analyzer_mvp/Cargo.toml'` `'dovi84_composer/Cargo.toml'` `'.cargo/config.toml'` `'rust-toolchain.toml'` `'hdr_analyzer_mvp/src/analysis/'` `'hdr_analyzer_mvp/src/ffmpeg_io.rs'` `'hdr_analyzer_mvp/src/ffmpeg_io/'` `'hdr_analyzer_mvp/src/pipeline.rs'` `'hdr_analyzer_mvp/src/pipeline/'` `'hdr_analyzer_mvp/src/cli.rs'` `'hdr_analyzer_mvp/src/cli/'` `'hdr_analyzer_mvp/src/crop.rs'` `'hdr_analyzer_mvp/src/crop/'` `'dovi84_composer/src/'` `'scripts/cuda-parity.sh'` `'hdr_analyzer_mvp/tests/cuda_parity.rs'`; where `probe:gpu`.
 - `l1-regression`: `scripts/ci/l1-regression-gate.sh`; paths `'Cargo.toml'` `'Cargo.lock'` `'hdr_analyzer_mvp/Cargo.toml'` `'dovi84_composer/Cargo.toml'` `'.cargo/config.toml'` `'rust-toolchain.toml'` `'hdr_analyzer_mvp/src/'` `'dovi84_composer/src/'` `'tools/l1_diff/'` `'scripts/ci/l1-regression-gate.sh'`; where `local`.
 - `tool:compare_baseline`: `cargo fmt --manifest-path tools/compare_baseline/Cargo.toml -- --check && cargo clippy --manifest-path tools/compare_baseline/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/compare_baseline/Cargo.toml`; paths `'tools/compare_baseline/*.rs'` `'tools/compare_baseline/*Cargo.toml'` `'tools/compare_baseline/*Cargo.lock'`; where `local`.
+- `tool:display_sim`: `scripts/build-libplacebo.sh >/dev/null && cargo fmt --manifest-path tools/display_sim/Cargo.toml -- --check && cargo clippy --locked --manifest-path tools/display_sim/Cargo.toml --all-targets -- -D warnings && cargo test --locked --manifest-path tools/display_sim/Cargo.toml`; paths `'tools/display_sim/*.rs'` `'tools/display_sim/*.c'` `'tools/display_sim/*Cargo.toml'` `'tools/display_sim/*Cargo.lock'` `'scripts/build-libplacebo.sh'`; where `local`.
 - `tool:fit_hlg_composer`: `cargo fmt --manifest-path tools/fit_hlg_composer/Cargo.toml -- --check && cargo clippy --manifest-path tools/fit_hlg_composer/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/fit_hlg_composer/Cargo.toml`; paths `'tools/fit_hlg_composer/*.rs'` `'tools/fit_hlg_composer/*Cargo.toml'` `'tools/fit_hlg_composer/*Cargo.lock'`; where `local`.
 - `tool:l1_diff`: `cargo fmt --manifest-path tools/l1_diff/Cargo.toml -- --check && cargo clippy --manifest-path tools/l1_diff/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/l1_diff/Cargo.toml`; paths `'tools/l1_diff/*.rs'` `'tools/l1_diff/*Cargo.toml'` `'tools/l1_diff/*Cargo.lock'`; where `local`.
 - `tool:rpu_builder_check`: `cargo fmt --manifest-path tools/rpu_builder_check/Cargo.toml -- --check && cargo clippy --manifest-path tools/rpu_builder_check/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path tools/rpu_builder_check/Cargo.toml`; paths `'tools/rpu_builder_check/*.rs'` `'tools/rpu_builder_check/*Cargo.toml'` `'tools/rpu_builder_check/*Cargo.lock'` `'dovi_rpu_builder/'`; where `local`.
@@ -58,6 +59,8 @@ rust-toolchain.toml
 hdr_analyzer_mvp/src/**
 dovi84_composer/src/**
 tools/l1_diff/**
+tools/display_sim/**
+scripts/build-libplacebo.sh
 scripts/ci/l1-regression-gate.sh
 scripts/cuda-parity.sh
 hdr_analyzer_mvp/tests/cuda_parity.rs
@@ -76,8 +79,9 @@ The build inputs can change measured output without a code change. The analyzer,
 the two gate scripts decide the L1 output, CPU/CUDA bit identity and how L1 is scored. The mkvdovi modules
 hold the cross-binary contracts (L1 sidecar, `--help` probes, `+cuda` probe) and the `resume_settings`
 fingerprint; `dovi_rpu_builder` defines mkvdovi's `extra.json` (which resume compares) and the RPUs the NuvioTV
-fork delivers. The set is the `highRisk` set of `.claude/workflows/pre-pr-panel.js`; `l1_sidecar` is inside
-`hdr_analyzer_mvp/src/**`.
+fork delivers. `tools/display_sim` reads the analyzer's PQ histogram dump (`pq_hist_dump`) and reports through
+the libplacebo that `scripts/build-libplacebo.sh` pins. The set is the `highRisk` set of
+`.claude/workflows/pre-pr-panel.js`; `l1_sidecar` and `pq_hist_dump` are inside `hdr_analyzer_mvp/src/**`.
 
 ## Routing
 
@@ -180,9 +184,10 @@ repository when it holds:
 - numeric work mirrored on CPU and CUDA: `hdr_analyzer_mvp/src/analysis/` with `kernels.cu`, or
   `dovi84_composer/src/`. The f32 operation order must match on both sides, and `scripts/cuda-parity.sh`
   proves it;
-- two or more sides of a cross-binary contract (`CLAUDE.md` "Cross-binary contracts"): the analyzer side
-  (`l1_sidecar`, `cli`, `au_table`), the mkvdovi side that reads it (`metadata`, `external`,
-  `pipeline/measure`, `pipeline/manifest`), and `tools/l1_diff`.
+- two or more sides of a cross-binary contract (`CLAUDE.md` "Cross-binary contracts", and the PQ histogram
+  dump of `docs/FORMAT_COMPATIBILITY.md`): the analyzer side (`l1_sidecar`, `cli`, `au_table`,
+  `pq_hist_dump`), the mkvdovi side that reads it (`metadata`, `external`, `pipeline/measure`,
+  `pipeline/manifest`), `tools/l1_diff`, and `tools/display_sim`.
 `.claude/workflows/pre-pr-panel.js` reads these two from the paths (`numeric`, `contractSides`); change both
 together. A builder agent (`opus-professor`, `fable-builder`) works under a hold file,
 `<git dir>/claude-builder.<run>.hold`, which `.claude/hooks/rust-check.sh` honors.
@@ -231,8 +236,8 @@ full cargo gate too. `scripts/ci/test-gate.sh` is the `test` block of `/pre-pr-r
 check of `scripts/ci/check-test-skips.sh`.
 
 `cuda-parity` is not in CI (no GPU runner). Off the CUDA host it stays pending, the PR gets
-`review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff` and
-`gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push. In CI the
+`review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff`,
+`tool:display_sim` and `gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push. In CI the
 Rust jobs skip on a PR that changes only `gate-skip` paths, and `gemini-harness` runs only when its paths change.
 `pre-pr-record` (the test of `/pre-pr-review`'s record cleanup), `reviewer-yield` (the test of its
 reviewer-yield observer), `rust-check-hook` (the Stop hook's builder-hold test) and `panel-trigger` (the
