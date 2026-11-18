@@ -1349,6 +1349,49 @@ fn hdr10plus_hybrid_reanalyzes_measurements_older_than_sidecar_v6() {
     assert_eq!(reuse_measurements(&input, &args, true), (true, true, true));
 }
 
+#[test]
+fn under_hwaccel_cuda_cpu_measurements_before_sidecar_v7_are_re_analyzed() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in.mkv");
+    fs::write(&input, b"src").unwrap();
+    let measurements = dir.path().join("in_measurements.bin");
+    fs::write(&measurements, b"bin").unwrap();
+    let sidecar_path = metadata::l1_sidecar_path(&measurements);
+    let args = |hwaccel| {
+        Args::try_parse_from([
+            "mkvdovi",
+            "--hwaccel",
+            hwaccel,
+            "--analysis-quality",
+            "accurate",
+        ])
+        .unwrap()
+    };
+    let (cuda, none) = (args("cuda"), args("none"));
+    assert_eq!((cuda.hwaccel, none.hwaccel), (HwAccel::Cuda, HwAccel::None));
+
+    // CPU analysis at downscale 1 before v7, as `hybrid_sidecar` writes it.
+    fs::write(&sidecar_path, hybrid_sidecar(6, 1).to_string()).unwrap();
+    for hybrid in [false, true] {
+        assert_eq!(
+            reuse_measurements(&input, &cuda, hybrid),
+            (false, false, false),
+            "hybrid={hybrid}"
+        );
+        assert_eq!(
+            reuse_measurements(&input, &none, hybrid),
+            (true, true, true),
+            "hybrid={hybrid}"
+        );
+    }
+    let mut gpu = hybrid_sidecar(6, 1);
+    gpu["analysis"]["gpu"] = json!(true);
+    fs::write(&sidecar_path, gpu.to_string()).unwrap();
+    assert_eq!(reuse_measurements(&input, &cuda, false), (true, true, true));
+    fs::write(&sidecar_path, hybrid_sidecar(7, 1).to_string()).unwrap();
+    assert_eq!(reuse_measurements(&input, &cuda, false), (true, true, true));
+}
+
 /// A sidecar for a 4-frame `in.mkv`. From version 6 on it records the per-frame peak and the
 /// analyzer's peak source, as the analyzer writes them.
 fn hybrid_sidecar(version: u32, sample_rate: u32) -> serde_json::Value {
@@ -1405,6 +1448,66 @@ fn sealed(temp: &Path) -> [bool; 3] {
         resume::is_complete(&temp.join("BL_RPU.hevc")),
         temp.join("mux.done").exists(),
     ]
+}
+
+/// `extra.json` bytes generated from `sidecar`, as `prepare_configuration` writes them for 8.1.
+fn extra_json_from(sidecar: &serde_json::Value) -> Vec<u8> {
+    let sidecar: metadata::L1Sidecar = serde_json::from_value(sidecar.clone()).unwrap();
+    let meta: std::collections::HashMap<String, f64> = [
+        ("min_dml", 0.0001),
+        ("max_dml", 1000.0),
+        ("max_cll", 1000.0),
+        ("max_fall", 400.0),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value))
+    .collect();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    metadata::generate_extra_json(
+        file.path(),
+        "8.1",
+        &meta,
+        &[100],
+        None,
+        None,
+        Some(&sidecar),
+    )
+    .unwrap();
+    fs::read(file.path()).unwrap()
+}
+
+#[test]
+fn a_re_analysis_that_moves_l1_withdraws_the_rpu_of_an_interrupted_run() {
+    // The RPU of an interrupted run was generated from measurements that went through the old
+    // NVDEC conversion; the re-analysis under v7 reads one scene peak 19 codes lower.
+    let old = hybrid_sidecar(6, 1);
+    let mut new = hybrid_sidecar(7, 1);
+    new["scenes"][0]["max_pq_12bit"] = json!(2381);
+    new["frames"]["max_pq_12bit"][0] = json!(2381);
+    let (old_config, new_config) = (extra_json_from(&old), extra_json_from(&new));
+    assert_ne!(old_config, new_config, "the scene L1 must reach extra.json");
+
+    let temp = interrupted_run(&old_config);
+    let (extra, next) = (
+        temp.path().join("extra.json"),
+        temp.path().join("extra.json.next"),
+    );
+    fs::write(&next, &new_config).unwrap();
+    commit_config(temp.path(), &next, &extra, true).unwrap();
+    assert_eq!(sealed(temp.path()), [false, false, false]);
+    assert_eq!(fs::read(&extra).unwrap(), new_config);
+
+    // A re-analysis that measures the same L1 (here on the GPU) keeps the RPU.
+    let mut same = new.clone();
+    same["analysis"]["gpu"] = json!(true);
+    let temp = interrupted_run(&new_config);
+    let (extra, next) = (
+        temp.path().join("extra.json"),
+        temp.path().join("extra.json.next"),
+    );
+    fs::write(&next, extra_json_from(&same)).unwrap();
+    commit_config(temp.path(), &next, &extra, true).unwrap();
+    assert_eq!(sealed(temp.path()), [true, true, true]);
 }
 
 #[test]

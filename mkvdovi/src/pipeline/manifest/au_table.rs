@@ -21,7 +21,7 @@ pub(super) const AU_TABLE_VERSION: u64 = 1;
 pub(super) const AU_TABLE_CAPABILITY: &str = "au-table-v1";
 
 /// `<measurements>.au.json` (the analyzer's `au_table_path`).
-pub(super) fn au_table_path(measurements: &Path) -> PathBuf {
+pub(in crate::pipeline) fn au_table_path(measurements: &Path) -> PathBuf {
     let mut path = measurements.as_os_str().to_owned();
     path.push(".au.json");
     PathBuf::from(path)

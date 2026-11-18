@@ -32,17 +32,17 @@ cargo install --locked cargo-mutants
 # Before any run: the suite passes with every skip accounted for on this host. pipefail makes
 # a failing cargo test fail the line; without it the pipeline returns tee's status.
 set -o pipefail
-cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu 2>&1 | tee baseline.log \
+cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu --skip nvdec_cpu_analysis_matches_software_decode 2>&1 | tee baseline.log \
   && scripts/ci/check-test-skips.sh baseline.log 'built without HDR10_PLUS|does not accept dhdr10-info'
 # One module; mkvdovi and dovi84_composer need --test-workspace=true, so that the analyzer
 # binary is built next to the mkvdovi tests in the mutant copy and mkvdovi's tests run.
 mkdir -p <dir>/verify
 cargo mutants -f 'mkvdovi/src/verify.rs' --test-workspace=true -j 3 --timeout 600 \
-  -o <dir>/verify -- -- --nocapture --skip cuda_output_matches_cpu
+  -o <dir>/verify -- -- --nocapture --skip cuda_output_matches_cpu --skip nvdec_cpu_analysis_matches_software_decode
 # Changes on a branch only (--nocapture, so the mutant logs show skips):
 mkdir -p <dir>/in-diff
 cargo mutants --in-diff <(git diff origin/main...HEAD) --test-workspace=true -j 3 --timeout 600 \
-  -o <dir>/in-diff -- -- --nocapture --skip cuda_output_matches_cpu
+  -o <dir>/in-diff -- -- --nocapture --skip cuda_output_matches_cpu --skip nvdec_cpu_analysis_matches_software_decode
 ```
 
 - Run modules one after another. One run at `-j 3` with `CARGO_BUILD_JOBS=4` fits a 16-core, 10 GB host.
@@ -103,7 +103,7 @@ These tests print `Skipping` and return when their tools or media are missing. D
 - `mkvdovi/tests/mdfix_source_l6.rs` (P12.1 `--mdfix` mastering display from the source L6) skips on the same tools and sibling analyzer as `rpu_count.rs`.
 - The clip-based unit tests in `mkvdovi/src/metadata/tests.rs` (format detection, static metadata; `missing_clip_tools`) skip without ffmpeg with libx265 or, per test, mediainfo/ffprobe, mkvmerge and dovi_tool (Profile 8.1). `hdr10plus_clip_is_hdr10plus` also skips when libx265 writes no HDR10+ SEI (a build without HDR10_PLUS, for example Ubuntu's). `corpus_cuts_are_classified_like_their_manifests` runs only with `MKVDOVI_CORPUS_DIR` set.
 - `hdr_analyzer_mvp/tests/real_content_consistency.rs` skips without its media, and its reference-bias check without `HDR_ANALYZE_REFERENCE_CSV`/`HDR_ANALYZE_SHOTLIST`.
-- `hdr_analyzer_mvp/tests/cuda_parity.rs` skips without `HDR_ANALYZE_CUDA_PARITY_REQUIRED` and the clips that `scripts/cuda-parity.sh` generates. The script compares CPU and CUDA `.bin` bytes and the sidecar crop/scenes/frames, and asserts `gpu: true`. The HLG clip runs once per composer in `HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS` (the script sets `preset,bt2100`; unset = all), each asserting its `luminance_mapping`, and the PQ clip also runs with `--hlg-composer bt2100`, which must not change its `.bin`. Before the clips the script runs the in-crate GPU test `analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops` (`--peak-estimator st2094-10` on odd crops, which crop detection never yields) and fails unless exactly one test passed. For old-vs-new build comparisons the manual check in `docs/CUDA_PIPELINE.md` still applies.
+- `hdr_analyzer_mvp/tests/cuda_parity.rs` skips without `HDR_ANALYZE_CUDA_PARITY_REQUIRED` and the clips that `scripts/cuda-parity.sh` generates. The script compares CPU and CUDA `.bin` bytes and the sidecar crop/scenes/frames, and asserts `gpu: true`. The HLG clip runs once per composer in `HDR_ANALYZE_CUDA_PARITY_HLG_COMPOSERS` (the script sets `preset,bt2100`; unset = all), each asserting its `luminance_mapping`, and the PQ clip also runs with `--hlg-composer bt2100`, which must not change its `.bin`. Before the clips the script runs the in-crate GPU test `analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops` (`--peak-estimator st2094-10` on odd crops, which crop detection never yields) and fails unless exactly one test passed. `nvdec_cpu_analysis_matches_software_decode` in the same file (ROADMAP E12.2) also needs `HDR_ANALYZE_CUDA_PARITY_LETTERBOX` and an NVDEC host, and skips without the clips: it compares `--hwaccel cuda` with CPU analysis against `--hwaccel none` (byte-identical `.bin` and sidecar, every frame repacked from NVDEC). The script runs it on the `+cuda` build (median3 only) and in a second pass on a build without `cuda` (every case). `scripts/ci/test-gate.sh`, CI and release skip both tests by name. For old-vs-new build comparisons the manual check in `docs/CUDA_PIPELINE.md` still applies.
 - `hdr_analyzer_mvp/tests/highlight_pair.rs` (WS8.1 generator `scripts/corpus/make_highlight_pair.py`) needs python3 and fails without it. `highlight_pair_carries_grain_and_matches_the_standard` skips without ffmpeg with FFV1; `generator_refuses_short_inputs_and_negative_offsets` needs python3 only.
 - Tests and CLI integration use `assert_cmd` + `predicates`.
 

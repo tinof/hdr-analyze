@@ -23,12 +23,13 @@ fallback.
 
 | File | Written by | Contents |
 |---|---|---|
-| `<measurements>.l1.json` | analyzer | the L1 sidecar, version 6, unchanged |
+| `<measurements>.l1.json` | analyzer | the L1 sidecar, version 7 (version 6's layout) |
 | `<measurements>.au.json` | analyzer, with `--au-table` | the AU table (version 1), bound to the sidecar by digest |
 | `<stem>.dvmanifest.json` | `mkvdovi manifest` | the playback manifest (version 1) |
 
-The sidecar schema does not change: the 1.0.0 release row requires it to stay stable for a minor
-cycle. The AU table is a new cross-binary contract. Its writer is `hdr_analyzer_mvp`. Its reader
+The manifest does not change the sidecar layout. Version 7 (ROADMAP E12.2) changes what CPU
+analysis of NVDEC frames measures, not a field. The AU table is a new cross-binary contract. Its
+writer is `hdr_analyzer_mvp`. Its reader
 is mkvdovi, which probes the capability token `au-table-v1` in the analyzer's `--help` before it
 starts any analysis. That is the same pattern as `l1-sidecar-frame-peak`.
 

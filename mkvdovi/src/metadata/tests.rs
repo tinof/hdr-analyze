@@ -682,6 +682,99 @@ fn v2_sidecar_json() -> Value {
     })
 }
 
+/// A PQ sidecar of `version` for 10 frames of `input.mkv`, with `analysis` when given, written
+/// out in full (the rule under test reads `version` and `analysis` only).
+fn route_sidecar(version: u32, analysis: Option<Value>) -> L1Sidecar {
+    let mut json = json!({
+        "version": version,
+        "source": {"file_name": "input.mkv", "size_bytes": 42, "width": 3840, "height": 2160,
+                   "transfer_function": "PQ (SMPTE 2084)", "stream_frames": 10,
+                   "leading_skipped_frames": 0},
+        "scenes": [{"start": 0, "end": 9, "min_pq_12bit": 1, "avg_luma_pq_12bit": 500,
+                    "avg_max_rgb_pq_12bit": 520, "max_pq_12bit": 2400}]
+    });
+    if let Some(analysis) = analysis {
+        json["analysis"] = analysis;
+    }
+    serde_json::from_value(json).unwrap()
+}
+
+#[test]
+fn under_nvdec_a_cpu_sidecar_before_v7_at_downscale_1_is_re_analyzed() {
+    let analysis = |gpu: bool, downscale: u32| {
+        Some(
+            json!({"downscale": downscale, "sample_rate": 1, "gpu": gpu, "no_crop": false,
+                    "luminance_mapping": "pq"}),
+        )
+    };
+    let validate = |version, analysis, nvdec_route| {
+        validate_l1_sidecar(
+            &route_sidecar(version, analysis),
+            &SidecarExpectation::default().with_nvdec_route(nvdec_route),
+        )
+    };
+    for version in [5, 6] {
+        let error = validate(version, analysis(false, 1), true).unwrap_err();
+        assert!(
+            matches!(error, SidecarError::InexactNvdecRoute(v) if v == version),
+            "v{version}: {error:?}"
+        );
+        assert!(
+            error.to_string().contains(&format!(
+                "L1 sidecar v{version} records CPU analysis at downscale 1"
+            )) && error.to_string().contains("re-analysis required"),
+            "{error}"
+        );
+        // Without NVDEC the same sidecar is software decode's and is reused.
+        assert!(
+            validate(version, analysis(false, 1), false).is_ok(),
+            "v{version}"
+        );
+        // GPU analysis never went through the conversion; downscale 2 converts on both routes.
+        assert!(
+            validate(version, analysis(true, 1), true).is_ok(),
+            "v{version}"
+        );
+        assert!(
+            validate(version, analysis(false, 2), true).is_ok(),
+            "v{version}"
+        );
+        // Without provenance nothing says it was CPU analysis.
+        assert!(validate(version, None, true).is_ok(), "v{version}");
+    }
+    assert!(validate(7, analysis(false, 1), true).is_ok());
+    assert!(validate(1, None, true).is_ok());
+    for nvdec_route in [true, false] {
+        assert!(matches!(
+            validate(8, analysis(false, 1), nvdec_route),
+            Err(SidecarError::UnsupportedVersion(8))
+        ));
+    }
+}
+
+#[test]
+fn under_nvdec_an_hlg_mapping_mismatch_is_named_before_the_decode_route() {
+    let mut json = v3_hlg_sidecar_json();
+    json["version"] = json!(6);
+    json["source"]["stream_frames"] = json!(20);
+    json["source"]["leading_skipped_frames"] = json!(0);
+    json["analysis"]["gpu"] = json!(false);
+    let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
+    let expect = |composer| {
+        SidecarExpectation::default()
+            .with_hlg_composer(Some(composer))
+            .with_nvdec_route(true)
+    };
+    assert!(matches!(
+        validate_l1_sidecar(&sidecar, &expect(Composer::Preset)),
+        Err(SidecarError::InexactNvdecRoute(6))
+    ));
+    assert!(matches!(
+        validate_l1_sidecar(&sidecar, &expect(Composer::Bt2100V1)),
+        Err(SidecarError::LuminanceMappingMismatch(_))
+    ));
+}
+
 #[test]
 fn per_frame_averages_and_peak_settings_are_read_but_not_validated() {
     // Sidecars without them (every fixture above) still load; the hybrid checks their lengths.
@@ -729,6 +822,7 @@ fn current_sidecar_matching_the_input_validates_without_advisories() {
         size_bytes: Some(42),
         frames: Some(20),
         hlg_composer: None,
+        nvdec_route: false,
     };
     assert!(validate_l1_sidecar(&sidecar, &expect).unwrap().is_empty());
     assert!(sidecar
@@ -756,6 +850,7 @@ fn sidecar_for_a_different_input_is_rejected() {
         size_bytes: Some(43),
         frames: None,
         hlg_composer: None,
+        nvdec_route: false,
     };
     assert!(matches!(
         validate_l1_sidecar(&sidecar, &expect),

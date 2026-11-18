@@ -56,11 +56,13 @@ pub fn find_details_file(input_file: &Path) -> Option<PathBuf> {
 }
 
 /// Per-scene L1 statistics from the analyzer's `<measurements>.l1.json` sidecar.
-/// Versions 1 to 6 are accepted; version 2 adds provenance and a full-resolution crop,
+/// Versions 1 to 7 are accepted; version 2 adds provenance and a full-resolution crop,
 /// version 3 adds `analysis.luminance_mapping` (`"pq"` or a [`Composer::luminance_mapping`] name),
 /// version 4 stores unfiltered averages (same layout), and version 5 records the stream's
 /// picture count and the undecodable leading pictures before the first measured frame, and
-/// version 6 adds a per-frame peak and the analyzer's applied peak source.
+/// version 6 adds a per-frame peak and the analyzer's applied peak source. Version 7 changes no
+/// field: its CPU analysis at downscale 1 reads NVDEC frames unconverted
+/// ([`L1_SIDECAR_EXACT_DECODE_VERSION`]).
 #[derive(Debug, Default, Deserialize)]
 pub struct L1Sidecar {
     pub version: u32,
@@ -140,7 +142,13 @@ pub struct L1SidecarAnalysis {
 }
 
 /// Newest sidecar version this build reads.
-pub const L1_SIDECAR_MAX_VERSION: u32 = 6;
+pub const L1_SIDECAR_MAX_VERSION: u32 = 7;
+
+/// From this version on, CPU analysis of a 10-bit 4:2:0 source at downscale 1 reads the decoder's
+/// codes unconverted on every decode route. Before it, the analyzer converted NVDEC frames with
+/// swscale for CPU analysis, which moves the codes, and the sidecar does not say which decoder
+/// ran; [`SidecarExpectation::nvdec_route`] re-analyzes such sidecars.
+pub const L1_SIDECAR_EXACT_DECODE_VERSION: u32 = 7;
 
 /// From this version on the sidecar has a per-frame peak and the analyzer's applied peak source.
 pub const L1_SIDECAR_FRAME_PEAK_VERSION: u32 = 6;
@@ -346,6 +354,8 @@ pub enum SidecarError {
     Invalid(String),
     #[error("L1 sidecar {0} (re-analysis required)")]
     LuminanceMappingMismatch(String),
+    #[error("L1 sidecar v{0} records CPU analysis at downscale 1, which before v7 moved the codes of NVDEC-decoded frames, and this run decodes with NVDEC (re-analysis required)")]
+    InexactNvdecRoute(u32),
 }
 
 /// What the caller knows about the input the sidecar must describe. Leave fields `None` for a
@@ -360,6 +370,11 @@ pub struct SidecarExpectation {
     /// HLG source through that Dolby Vision 8.4 composer (exact name). When `None`, a Dolby
     /// Vision 8.4 mapped sidecar is rejected.
     pub hlg_composer: Option<Composer>,
+    /// True when this run decodes with NVDEC (`--hwaccel cuda`): a sidecar older than
+    /// [`L1_SIDECAR_EXACT_DECODE_VERSION`] with CPU analysis at downscale 1 may come from the
+    /// inexact NVDEC conversion, so it is rejected. GPU analysis, a downscale above 1 and a
+    /// sidecar without `analysis` (version 1) pass.
+    pub nvdec_route: bool,
 }
 
 impl SidecarExpectation {
@@ -372,6 +387,7 @@ impl SidecarExpectation {
             size_bytes: fs::metadata(input).ok().map(|meta| meta.len()),
             frames,
             hlg_composer: None,
+            nvdec_route: false,
         }
     }
 
@@ -379,6 +395,12 @@ impl SidecarExpectation {
     /// [`SidecarExpectation::hlg_composer`]).
     pub fn with_hlg_composer(mut self, hlg_composer: Option<Composer>) -> Self {
         self.hlg_composer = hlg_composer;
+        self
+    }
+
+    /// Set whether this run decodes with NVDEC (see [`SidecarExpectation::nvdec_route`]).
+    pub fn with_nvdec_route(mut self, nvdec_route: bool) -> Self {
+        self.nvdec_route = nvdec_route;
         self
     }
 }
@@ -497,6 +519,7 @@ pub fn validate_l1_sidecar(
         return Err(SidecarError::UnsupportedVersion(sidecar.version));
     }
     check_luminance_mapping(sidecar, expect.hlg_composer)?;
+    check_decode_route(sidecar, expect.nvdec_route)?;
     let invalid = |reason: String| Err(SidecarError::Invalid(reason));
     let Some(first) = sidecar.scenes.first() else {
         return invalid("no scenes".into());
@@ -591,6 +614,20 @@ pub fn validate_l1_sidecar(
         }
     }
     Ok(advisories)
+}
+
+/// A sidecar older than [`L1_SIDECAR_EXACT_DECODE_VERSION`] with CPU analysis at downscale 1 is
+/// rejected when this run decodes with NVDEC (`nvdec_route`): its frames may have come through
+/// the analyzer's old swscale conversion of NVDEC frames, which the sidecar does not record.
+fn check_decode_route(sidecar: &L1Sidecar, nvdec_route: bool) -> Result<(), SidecarError> {
+    let cpu_full_resolution = sidecar
+        .analysis
+        .as_ref()
+        .is_some_and(|analysis| !analysis.gpu && analysis.downscale == 1);
+    if nvdec_route && sidecar.version < L1_SIDECAR_EXACT_DECODE_VERSION && cpu_full_resolution {
+        return Err(SidecarError::InexactNvdecRoute(sidecar.version));
+    }
+    Ok(())
 }
 
 /// HLG measurements are only valid when taken through the Dolby Vision 8.4 reconstruction of the

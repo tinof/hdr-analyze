@@ -3,8 +3,8 @@
 # /pre-pr-review step 5. It builds the current analyzer next to the debug mkvdovi that the
 # integration tests run, runs the workspace tests and fails on a failed build, a failed test or
 # a `Skipping` line outside the allow-list of scripts/ci/check-test-skips.sh, plus the libx265
-# HDR10+ skips that CI also allows (Ubuntu's libx265 has no HDR10_PLUS). The CUDA parity test
-# is skipped by name: its own gate (scripts/cuda-parity.sh) runs it.
+# HDR10+ skips that CI also allows (Ubuntu's libx265 has no HDR10_PLUS). The two CUDA parity
+# tests (cuda_parity.rs) are skipped by name: their own gate (scripts/cuda-parity.sh) runs them.
 #
 # Usage: scripts/ci/test-gate.sh [log file] [test filter]   (default log: target/test-gate.log)
 # With a filter it runs only the matching tests, with the same build and skip check: the
@@ -19,7 +19,7 @@ mkdir -p "$(dirname "$log")"
 rm -f "$log"
 
 # The log goes to a file, not through a pipe, so the exit status is cargo's.
-cargo build -p hdr_analyzer_mvp && cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu ${filter:+"$filter"} > "$log" 2>&1
+cargo build -p hdr_analyzer_mvp && cargo test --workspace -- --nocapture --skip cuda_output_matches_cpu --skip nvdec_cpu_analysis_matches_software_decode ${filter:+"$filter"} > "$log" 2>&1
 gate_rc=$?
 if [ ! -s "$log" ]; then
     echo 'the build failed before the tests ran'

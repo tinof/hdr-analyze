@@ -10,6 +10,12 @@ use crate::analysis::histogram::pq_to_nits;
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
+/// Version 7 changes no field. From it on, CPU analysis of a 10-bit 4:2:0 source at downscale 1
+/// reads the decoder's codes unconverted on every decode route: an NVDEC P010 frame is repacked
+/// (`pipeline::analyze::scale_to_yuv420p10`), so `--hwaccel cuda` without GPU analysis measures
+/// what software decode measures. Up to version 6 such frames went through swscale, which moved
+/// the codes; mkvdovi re-analyzes a version 6 or older sidecar with `analysis.gpu: false` at
+/// downscale 1 when it decodes with NVDEC.
 /// Version 6 adds `frames.max_pq_12bit`, the frame peak that each scene's `max_pq_12bit` is the
 /// maximum of, and `peak_source`, the histogram source that frame peak follows: `"max"`,
 /// `"histogram99"` or `"histogram999"` (`pipeline::scenes::applied_peak_source_for`). `"max"` is
@@ -40,7 +46,7 @@ use crate::crop::CropRect;
 /// (`dovi84_composer::LEGACY_LUMINANCE_MAPPINGS`), and the version stays 5. Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
-pub const L1_SIDECAR_VERSION: u32 = 6;
+pub const L1_SIDECAR_VERSION: u32 = 7;
 
 /// Coordinate space of `L1Sidecar::crop` since version 2.
 pub const CROP_SPACE_FULL: &str = "full";
@@ -398,7 +404,7 @@ mod tests {
         .unwrap();
 
         let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-        assert_eq!(json["version"], 6);
+        assert_eq!(json["version"], L1_SIDECAR_VERSION);
         assert_eq!(json["source"]["stream_frames"], 4);
         assert_eq!(json["source"]["leading_skipped_frames"], 2);
         // The measurements are zero and the (smoothed) madVR frame averages are 0.2 and 0.3:
@@ -478,7 +484,7 @@ mod tests {
         .unwrap();
 
         let json: serde_json::Value = serde_json::from_reader(File::open(path).unwrap()).unwrap();
-        assert_eq!(json["version"], 6);
+        assert_eq!(json["version"], L1_SIDECAR_VERSION);
         assert_eq!(json["peak_source"], "histogram99");
         // 0.6 and 0.25 of 4095.
         assert_eq!(

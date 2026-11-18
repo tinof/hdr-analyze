@@ -187,10 +187,10 @@ The field-by-field schema per version is in FORMAT_COMPATIBILITY.md ("L1 measure
 This section covers the code on each side.
 
 - The analyzer writes per-scene L1 stats to `<measurements>.l1.json`
-  (`hdr_analyzer_mvp/src/l1_sidecar.rs`, currently `version: 6`); mkvdovi reads it through
+  (`hdr_analyzer_mvp/src/l1_sidecar.rs`, currently `version: 7`); mkvdovi reads it through
   `metadata::load_l1_sidecar` for source-honest per-scene L1. Version 2's full-resolution `crop`
   becomes mkvdovi's L5 offsets.
-- **Versions accepted:** mkvdovi and `tools/l1_diff` accept 1–6 (`metadata::L1_SIDECAR_MAX_VERSION`).
+- **Versions accepted:** mkvdovi and `tools/l1_diff` accept 1–7 (`metadata::L1_SIDECAR_MAX_VERSION`).
   mkvdovi reuses a pre-v4 sidecar with an advisory about smoothed averages, and a pre-v5 sidecar
   only on an exact MediaInfo frame count. A missing, invalid or unknown-version sidecar produces a
   visible warning and re-analysis, never a silent fallback. A schema change must bump the version
@@ -206,6 +206,18 @@ This section covers the code on each side.
   (`pipeline::scenes::applied_peak_source_for`). `hybrid::check_measurements` needs v6 and `max`, so
   older measurements are re-analyzed for the hybrid and reused otherwise. The sidecar's
   `peak_source` is the analyzer's flag, not mkvdovi's `--peak-source`, which selects an HDR10+ statistic.
+- **Decode route (v7):** the layout is v6's. From v7 the analyzer's CPU analysis at downscale 1
+  repacks NVDEC P010 frames (`pipeline::analyze::scale_to_yuv420p10`) instead of converting them
+  with swscale, so `--hwaccel cuda` without GPU analysis measures what software decode measures.
+  Under `--hwaccel cuda`, `SidecarExpectation::nvdec_route` makes `validate_l1_sidecar` reject an
+  older sidecar with `analysis.gpu: false` at downscale 1 (`SidecarError::InexactNvdecRoute`),
+  after the HLG mapping check. The two reuse paths (`measure::find_reusable_measurements`, the
+  manifest's `checked_pair`) re-analyze. `config::load_fresh_sidecar` refuses such a fresh sidecar
+  from an analyzer without the repack (the default HDR10+ hybrid falls back to the metadata) and
+  removes the `.bin`, `.l1.json` and `.au.json` that run wrote, so a retry with `--hwaccel none`
+  cannot reuse them. `verify.rs` never sets the route. The resume fingerprint does not cover the
+  measurements; `withdraw_stale_rpu` withdraws an RPU built before a re-analysis changed
+  `extra.json`.
 - **Stream frames (v5):** an open-GOP cut at a CRA starts with RASL pictures that no decoder
   outputs, but `dovi_tool inject-rpu` maps RPU `n` to presentation picture `n`, and those pictures
   come first. The analyzer counts them from the packets' NAL types (`leading_pictures.rs`) and fails

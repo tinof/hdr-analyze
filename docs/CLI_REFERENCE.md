@@ -12,7 +12,7 @@ All defaults below are taken directly from `--help`; run `<binary> --help` to co
 
 Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file plus an
 analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics and
-provenance (sidecar version 6: analyzer version, input identity, sampling settings, full-resolution
+provenance (sidecar version 7: analyzer version, input identity, sampling settings, full-resolution
 crop, `analysis.luminance_mapping`, the stream frame count with the leading pictures no decoder
 outputs, `source.stream_frames` / `source.leading_skipped_frames`, the per-frame peak
 `frames.max_pq_12bit`, and the applied `peak_source`). Inputs tagged with a non-HDR
@@ -364,8 +364,8 @@ integrity, `target_nits` stats (if the optimizer was enabled), and FALL-header /
   `/usr/lib/wsl/lib/nvidia-smi`) → behaves as `--hwaccel cuda`.
 - Otherwise → behaves as `--hwaccel none` (today's CPU pipeline).
 - `--analysis-quality auto` (the default) resolves to `accurate` on every host, with or without GPU
-  analysis, so a file gets the same L1 as GPU analysis (exception: an analyzer without `+cuda` with
-  `--hwaccel cuda`, ROADMAP E12.2). Full-resolution CPU analysis takes about two to
+  analysis, so a file gets the same L1 as GPU analysis, also from an analyzer without `+cuda` with
+  `--hwaccel cuda`. Full-resolution CPU analysis takes about two to
   three times as long as `balanced`; `--analysis-quality balanced` keeps the faster half-resolution
   run. `mkvdovi` warns when `--hwaccel cuda` meets an analyzer without `+cuda`, and after a run that
   expected GPU analysis but was analyzed on the CPU.
@@ -393,9 +393,15 @@ entirely.
   CUDA work, and GPU failures with software-decoded frames, fall back to host-memory or CPU
   analysis mid-run. Setting `HDR_ANALYZER_CUDA_HOST_FRAMES` (to any
   value) forces the download path, for parity checks. Without the `cuda` build feature,
-  `--hwaccel cuda` still attempts hardware decode and otherwise behaves as before.
-  Release archives are built without the `cuda` feature, so their analyzer uses the CPU path;
-  GPU analysis needs a source build (see [INSTALLATION.md](INSTALLATION.md#cuda-analysis-build)).
+  `--hwaccel cuda` still attempts hardware decode and otherwise behaves as before. When the CPU
+  analyzes NVDEC frames (no `cuda` feature, `--pre-denoise median3`, a CUDA start that fails), it
+  copies the P010 codes unconverted at `--downscale 1`, so `.bin` and sidecar equal software
+  decode's, and prints `NVDEC P010 frames repacked for CPU analysis: N`. Before sidecar version 7
+  these frames went through swscale, which moved the codes; mkvdovi under `--hwaccel cuda`
+  re-analyzes such measurements (see [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md)).
+  The Linux x64 and Windows x64 release archives are built with the `cuda` feature (since 0.8.0);
+  the macOS and Linux ARM64 archives are not, so their analyzer uses the CPU path. Source builds:
+  [INSTALLATION.md](INSTALLATION.md#cuda-analysis-build).
 - `vaapi` / `videotoolbox`: currently log and fall back to software decoding (proper device
   contexts are planned). The pipeline remains fully functional via software decoding everywhere.
 

@@ -107,8 +107,7 @@ For HDR10/HLG analysis, `--analysis-quality` selects:
 | `accurate` | full | every frame |
 
 The default `auto` resolves to `accurate` on every host, so a file gets the same L1 with or without
-GPU analysis (exception: an analyzer without `+cuda` with `--hwaccel cuda` decodes with NVDEC and
-converts through swscale; ROADMAP E12.2). On the CPU it takes about two to three times as long as `balanced`; `balanced` is
+GPU analysis, and with NVDEC or software decode. On the CPU it takes about two to three times as long as `balanced`; `balanced` is
 faster but misreads small highlights, high and low, and gives no measured MaxCLL.
 
 The analyzer still computes its dynamic `target_nits` optimizer for the madVR `.bin`, but `mkvdovi`
@@ -177,14 +176,28 @@ in the RPU's presentation order, so measured frame `i` is stream frame `i + lead
 analyzer refuses a stream that loses any other picture, for example one that does not start at a
 random access picture.
 
-Version 6 (current) adds `frames.max_pq_12bit` and `peak_source`. Each scene's `max_pq_12bit` is the
+Version 6 adds `frames.max_pq_12bit` and `peak_source`. Each scene's `max_pq_12bit` is the
 maximum of its frames in the new array. `peak_source` is what the frame peak follows: `max`,
 `histogram99` or `histogram999`. `max` is the direct peak of `peak_domain` and `peak_estimator`. The
 value records what was applied, not what was asked for: `--peak-source` works only in the histogram
 smoothing pass, so with `--hist-bin-ema-beta 0` and `--hist-temporal-median 0` it stays `max`, and an
 unknown name is applied, and recorded, as `max`.
 
-`mkvdovi` accepts versions 1–6. `--hdr10plus-l1 hybrid` needs version 6 with a max-RGB domain and
+Version 7 (current) changes no field. From it on, CPU analysis of a 10-bit 4:2:0 source at
+`--downscale 1` reads the decoder's codes unconverted on every decode route. With `--hwaccel cuda`
+and CPU analysis (an analyzer without `+cuda`, `--pre-denoise median3`, a CUDA start that fails),
+the analyzer copies the NVDEC P010 frames into its analysis frames with each sample shifted down by
+6; up to version 6 it converted them with swscale, which moved the codes. A version 6 or older
+sidecar does not record which decoder ran.
+
+`mkvdovi` accepts versions 1–7. When it decodes with NVDEC (`--hwaccel cuda`, which `auto` becomes on
+an NVIDIA host), it analyzes again instead of reusing a version 6 or older sidecar with
+`analysis.gpu: false` at downscale 1, in a conversion and in `mkvdovi manifest`. GPU analysis,
+downscale 2 and a sidecar without `analysis` (version 1) stay reusable, and with `--hwaccel none`
+every such sidecar does. A fresh version 6 sidecar of that kind, from an analyzer without the
+repack, is refused after the analysis, and mkvdovi removes the `.bin`, `.l1.json` and `.au.json` that
+run wrote; the default HDR10+ hybrid takes the metadata path instead. `--verify` does not check the
+decode route. `--hdr10plus-l1 hybrid` needs version 6 or later with a max-RGB domain and
 `max` estimator and source. It re-analyzes anything else with a warning, because a piece without a
 usable HDR10+ peak takes the largest peak of its own frames. That peak is still a measurement: analysis at
 `--downscale 2` (`--analysis-quality balanced`), or with `--pre-denoise median3` can miss a small

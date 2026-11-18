@@ -12,18 +12,18 @@ use super::build::{analysis, manifest, quality_class, Inputs};
 use super::identity::{
     hex, is_matroska_header, is_same_file, sha256_hex, FileIdentity, CHUNK_BYTES,
 };
-use super::{check_sampling, write_manifest, Paths};
+use super::{check_sampling, checked_pair, reusable_pair, write_manifest, Paths};
 use crate::cli::Args;
 use crate::metadata::{CmV40Config, L1Sidecar};
 use crate::pipeline::config::Settled;
 
 const DIGEST_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-/// A sidecar as the analyzer writes it (version 6, default settings), with `leading` RASL
+/// A sidecar as the analyzer writes it (version 7, default settings), with `leading` RASL
 /// pictures and two scenes over `measured` frames.
 fn sidecar_json(leading: u64, measured: u64) -> Value {
     json!({
-        "version": 6,
+        "version": 7,
         "analyzer_version": "0.8.0",
         "source": {"file_name": "clip.mkv", "size_bytes": 1000, "width": 256, "height": 144,
                    "transfer_function": "PQ (SMPTE 2084)", "stream_frames": leading + measured,
@@ -614,7 +614,7 @@ fn shots_move_back_by_the_leading_pictures_and_the_producer_is_named() {
     );
     assert_eq!(built.producer.rpu_bin_sha256, None);
     assert_eq!(built.producer.au_table_version, 1);
-    assert_eq!(built.producer.sidecar_version, Some(6));
+    assert_eq!(built.producer.sidecar_version, Some(7));
     assert_eq!(
         built.producer.rpu_builder_version,
         dovi_rpu_builder::VERSION
@@ -711,4 +711,48 @@ fn shots_that_do_not_cover_the_table_are_refused() {
         format!("{error:#}").contains("cover 24 pictures"),
         "{error:#}"
     );
+}
+
+#[test]
+fn under_hwaccel_cuda_a_cpu_pair_before_sidecar_v7_is_re_analyzed() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("clip.mkv");
+    std::fs::write(&input, vec![0u8; 1000]).unwrap();
+    let identity = FileIdentity::of(&input).unwrap();
+    let input_file = input.to_str().unwrap();
+    let paths = Paths::new(input_file, Some(dir.path()), None);
+    std::fs::write(&paths.measurements, b"bin").unwrap();
+    // The pair for `sidecar`: the table bound to its bytes and to this input.
+    let write_pair = |sidecar: &Value| {
+        let bytes = serde_json::to_vec(sidecar).unwrap();
+        let mut table = table_json(&bytes, 24, 0);
+        table["source"]["head_sha256"] = json!(hex(&identity.head));
+        table["source"]["tail_sha256"] = json!(hex(&identity.tail));
+        std::fs::write(&paths.sidecar, &bytes).unwrap();
+        std::fs::write(&paths.au_table, serde_json::to_vec(&table).unwrap()).unwrap();
+    };
+    let args = |hwaccel| Args::try_parse_from(["mkvdovi", "--hwaccel", hwaccel]).unwrap();
+    let checked = |sidecar: &Value, hwaccel| {
+        write_pair(sidecar);
+        checked_pair(input_file, &args(hwaccel), None, &paths, &identity).map(|_| ())
+    };
+
+    // CPU analysis at downscale 1, as `sidecar_json` records it, from an analyzer before v7.
+    let mut v6 = sidecar_json(0, 24);
+    v6["version"] = json!(6);
+    let reason = checked(&v6, "cuda").unwrap_err();
+    assert!(
+        reason.contains("L1 sidecar v6 records CPU analysis at downscale 1")
+            && reason.contains("this run decodes with NVDEC"),
+        "{reason}"
+    );
+    assert_eq!(checked(&v6, "none"), Ok(()));
+    let mut gpu = v6.clone();
+    gpu["analysis"]["gpu"] = json!(true);
+    assert_eq!(checked(&gpu, "cuda"), Ok(()));
+    assert_eq!(checked(&sidecar_json(0, 24), "cuda"), Ok(()));
+
+    write_pair(&v6);
+    assert!(reusable_pair(input_file, &args("cuda"), None, &paths, &identity).is_none());
+    assert!(reusable_pair(input_file, &args("none"), None, &paths, &identity).is_some());
 }
