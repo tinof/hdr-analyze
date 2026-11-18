@@ -146,8 +146,9 @@ impl Dump {
         self.reader
             .read_exact(&mut self.buffer)
             .with_context(|| format!("reading pqhist record {}", self.read))?;
-        for (count, bytes) in counts.iter_mut().zip(self.buffer.chunks_exact(4)) {
-            *count = u32::from_le_bytes(bytes.try_into().expect("4 bytes"));
+        let (words, _) = self.buffer.as_chunks::<4>();
+        for (count, bytes) in counts.iter_mut().zip(words) {
+            *count = u32::from_le_bytes(*bytes);
         }
         self.read += 1;
         Ok(true)
