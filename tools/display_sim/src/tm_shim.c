@@ -7,8 +7,9 @@
  * (src/shaders/colorspace.c, pl_shader_color_map_ex, before its dynamic target), restated here
  * from that code's behaviour, not copied:
  *   1. the source and display ranges as pl_color_space_nominal_luma_ex leaves them: values
- *      clamped to [PL_COLOR_HDR_BLACK nits, PQ 1], a zero black read as PL_COLOR_HDR_BLACK, the
- *      average clamped to [black, peak] and 0 when absent;
+ *      clamped to [PL_COLOR_HDR_BLACK nits, PQ 1], 0 read as absent, a black at or above the
+ *      peak dropping both, an absent peak read as the PQ peak and an absent black as
+ *      PL_COLOR_HDR_BLACK, the average clamped to [black, peak] and 0 when absent;
  *   2. pl_tone_map_params_infer;
  *   3. a peak or black within 1e-6 PQ of the other side's taken over;
  *   4. a black at or below PL_COLOR_HDR_BLACK set to 0 (the renderer's signal-black rule);
@@ -90,9 +91,16 @@ struct tm_ctx *tm_new(const char *curve, float src_black_nits, float src_max_pq,
         return NULL;
 
     const float hdr_min = nits_to_pq(PL_COLOR_HDR_BLACK);
-    const float in_min = src_black_nits > 0 ? clampf(nits_to_pq(src_black_nits), hdr_min, 1.0f)
-                                            : hdr_min;
-    const float in_max = clampf(src_max_pq, hdr_min, 1.0f);
+    /* As pl_color_space_nominal_luma_ex: 0 means absent, a black at or above the peak (or at the
+     * PQ maximum) drops both, then an absent peak is the PQ peak and an absent black hdr_min. */
+    float in_min = src_black_nits > 0 ? clampf(nits_to_pq(src_black_nits), hdr_min, 1.0f) : 0.0f;
+    float in_max = src_max_pq > 0 ? clampf(src_max_pq, hdr_min, 1.0f) : 0.0f;
+    if ((in_max > 0 && in_min >= in_max) || in_min >= 1.0f)
+        in_min = in_max = 0.0f;
+    if (in_max <= 0)
+        in_max = 1.0f;
+    if (in_min <= 0)
+        in_min = hdr_min;
     const float out_min = panel_black_nits > 0
                               ? clampf(nits_to_pq(panel_black_nits), hdr_min, 1.0f)
                               : hdr_min;

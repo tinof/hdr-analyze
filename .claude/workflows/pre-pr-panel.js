@@ -33,7 +33,7 @@ if (workspaceRust) { gates.add('fmt'); gates.add('clippy'); gates.add('test') }
 // Build inputs that can change measured output without touching Cargo.lock: the workspace and crate
 // manifests (features, dependency versions, profiles), compiler flags and the toolchain.
 const BUILD = /^Cargo\.(toml|lock)$|^hdr_analyzer_mvp\/Cargo\.toml$|^dovi84_composer\/Cargo\.toml$|^\.cargo\/config\.toml$|^rust-toolchain\.toml$/
-const cuda = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/(analysis\/|(ffmpeg_io|pipeline|cli|crop)(\.rs$|\/))|^dovi84_composer\/src\/|^scripts\/cuda-parity\.sh$|^hdr_analyzer_mvp\/tests\/cuda_parity\.rs$/)
+const cuda = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/(analysis\/|(ffmpeg_io|pipeline|cli|crop|pq_hist_dump)(\.rs$|\/))|^dovi84_composer\/src\/|^scripts\/cuda-parity\.sh$|^hdr_analyzer_mvp\/tests\/(cuda_parity|pq_hist_dump)\.rs$/)
 if (cuda) { gates.add('clippy-cuda'); gates.add('cuda-parity') }
 // Measurement change: anything that can move the analyzer's L1 output or how it is scored.
 const measurement = any(BUILD) || any(/^hdr_analyzer_mvp\/src\/|^dovi84_composer\/src\/|^tools\/l1_diff\/|^scripts\/ci\/l1-regression-gate\.sh$/)

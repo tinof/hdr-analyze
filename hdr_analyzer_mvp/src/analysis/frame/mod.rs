@@ -93,7 +93,7 @@ pub struct AnalyzedFrame {
     /// pixel of the crop rect, row by row; NaN where a pixel was not analyzed.
     pub max_rgb_pixels: Option<Vec<f32>>,
     /// The 4096-bin histogram of the peak domain (`pixel_pq_bin`), pixel counts before any
-    /// smoothing; equal on CPU and CUDA. `--dump-pq-hist` writes it.
+    /// smoothing; equal on CPU and CUDA at `--downscale 1`. `--dump-pq-hist` writes it.
     pub pq_hist: Vec<u64>,
 }
 

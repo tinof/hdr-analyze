@@ -11,7 +11,8 @@
 //! pixels whose peak-domain PQ value rounds to `b / 4095` (the histogram both backends build
 //! before any smoothing). Record `i` is measured frame `i`, sidecar frame `i` and stream frame
 //! `i + leading_skipped`. A frame that `--sample-rate` skips repeats the previous record. The
-//! header names no backend, so CPU and CUDA dumps of one input are byte-identical.
+//! header names no backend, so at `--downscale 1` CPU and CUDA dumps of one input are
+//! byte-identical (`scripts/cuda-parity.sh` checks it); above 1 the backends sample differently.
 
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};

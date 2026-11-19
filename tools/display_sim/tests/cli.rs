@@ -364,3 +364,41 @@ fn invalid_numbers_are_refused_before_libplacebo_runs() {
     refused(&with(&["--step-threshold", "NaN"]), "--step-threshold NaN");
     refused(&with(&["--curves", "hable"]), "invalid value 'hable'");
 }
+
+#[test]
+fn a_frames_csv_that_names_an_input_is_refused_and_leaves_it_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let dump = write(root, "dump.pqhist", dump_bytes(1, 0));
+    let reference = write(root, "reference.csv", csv(0, &[("2800", "1500")]));
+    write(root, "candidate.csv", csv(0, &[("2800", "1500")]));
+    std::fs::create_dir(root.join("sub")).unwrap();
+    let with = |csv_path: &str| {
+        run(
+            root,
+            &[
+                "--dump",
+                "dump.pqhist",
+                "--reference",
+                "reference.csv",
+                "--candidate",
+                "candidate.csv",
+                "--frames-csv",
+                csv_path,
+            ],
+        )
+    };
+    let dump_before = std::fs::read(&dump).unwrap();
+    let reference_before = std::fs::read(&reference).unwrap();
+    refused(
+        &with("dump.pqhist"),
+        "--frames-csv dump.pqhist is the --dump input",
+    );
+    refused(&with("sub/../reference.csv"), "is the --reference input");
+    refused(&with("./candidate.csv"), "is the --candidate input");
+    assert_eq!(std::fs::read(&dump).unwrap(), dump_before);
+    assert_eq!(std::fs::read(&reference).unwrap(), reference_before);
+    // Another path still works.
+    stdout(&with("sub/frames.csv"));
+    assert!(root.join("sub/frames.csv").exists());
+}

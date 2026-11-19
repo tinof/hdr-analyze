@@ -19,12 +19,16 @@ pub fn limits(version: &str) -> Vec<String> {
     [
         "display_sim (ROADMAP WS7.1): candidate L1 against reference L1 as change in displayed luminance.",
         "Limits: open curves are not a Dolby display. This is the tone curve of libplacebo 7.387.0",
-        "alone, with its parameters set as its renderer sets them. The 7.387.0 renderer also maps into",
-        "a dynamic target with an exposure change when the scene average exceeds the display, and under",
-        "default parameters runs peak detection on the picture beside the Dolby Vision L1; neither is",
-        "modelled, so a libplacebo render can differ. The curve reads only L1 max and avg (L1 max as",
+        "alone, with its parameters set as its renderer sets them. The 7.387.0 renderer also maps every",
+        "frame with an average whose L1 max exceeds the display peak by more than a few codes into a",
+        "dynamic target and scales the whole picture by an exposure change (1000-nit display, L1 avg",
+        "10 nits: target 1027 nits, exposure 0.973), and under default parameters runs peak detection",
+        "on the picture beside the Dolby Vision L1; neither is modelled, so a libplacebo render",
+        "differs from these numbers. The curve reads only L1 max and avg (L1 max as",
         "luminance) and the source black: trims, L1 min, L4 and L11 cannot be evaluated. L1 values are",
-        "used as given; the renderer falls back to static HDR10 metadata when L1 max or avg is 0.",
+        "used as given; the renderer falls back to static HDR10 metadata when L1 max or avg is 0. An",
+        "L1 max of 0, or one at or below the source black, reads as the PQ peak (10,000 nits), as the",
+        "renderer's last fallback does.",
     ]
     .iter()
     .map(|line| (*line).to_owned())

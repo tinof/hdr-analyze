@@ -308,6 +308,48 @@ fn parameters_follow_the_renderer() {
     assert_eq!(zero.output_min, 0.0);
 }
 
+/// libplacebo 7.387.0 `pl_color_space_nominal_luma_ex` (src/colorspace.c:901-916): a peak of 0 is
+/// absent and falls back to the PQ peak (1.0) while the black stays; a black at or above a
+/// nonzero peak drops both, so the black becomes `PL_COLOR_HDR_BLACK` (1e-6 nits), which the
+/// renderer's signal-black rule then reads as 0. Expected values come from that code, not from
+/// the shim.
+#[test]
+fn an_absent_or_inverted_l1_max_falls_back_to_the_pq_peak() {
+    for (label, max_code, source_black, expected_min) in [
+        ("L1 max 0", 0.0, 0.005, nits_to_pq(0.005) as f32),
+        ("L1 max below the source black", 50.0, 0.1, 0.0),
+        (
+            "L1 max at the source black",
+            nits_to_pq(0.1) * 4095.0,
+            0.1,
+            0.0,
+        ),
+    ] {
+        for curve in [Curve::Spline, Curve::St2094_10, Curve::Bt2390] {
+            let params = Mapping::new(
+                curve,
+                &Display {
+                    source_black_nits: source_black,
+                    panel_black_nits: 0.005,
+                    panel_peak_nits: 1000.0,
+                },
+                &Metadata {
+                    max_code,
+                    avg_code: 0.0,
+                },
+            )
+            .unwrap()
+            .params();
+            assert_eq!(params.input_max, 1.0, "{label}, {curve:?}: input_max");
+            assert!(
+                (params.input_min - expected_min).abs() < 1e-6,
+                "{label}, {curve:?}: input_min {} != {expected_min}",
+                params.input_min
+            );
+        }
+    }
+}
+
 fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)

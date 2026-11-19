@@ -53,6 +53,10 @@ const cases = [
     const t = await run({ base: 'origin/main', files: [f], gatesOnly: true })
     check(`gates: ${f} requires tool:display_sim`, t.requiredGates.includes('tool:display_sim'))
   }
+  for (const f of ['hdr_analyzer_mvp/src/pq_hist_dump.rs', 'hdr_analyzer_mvp/src/pq_hist_dump/mod.rs', 'hdr_analyzer_mvp/tests/pq_hist_dump.rs']) {
+    const c = await run({ base: 'origin/main', files: [f], gatesOnly: true })
+    check(`gates: ${f} requires cuda-parity and clippy-cuda`, c.requiredGates.includes('cuda-parity') && c.requiredGates.includes('clippy-cuda'))
+  }
   const o = await run({ base: 'origin/main', files: ['tools/other/src/x.c'], gatesOnly: true })
   check('gates: a C file of another tool does not require tool:display_sim', !o.requiredGates.includes('tool:display_sim'))
   const d = await run({ base: 'origin/main', files: ['docs/CI.md'], gatesOnly: true })

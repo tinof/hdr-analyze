@@ -149,6 +149,9 @@ fn read_inputs(args: &Args) -> Result<Inputs> {
 
 /// Refuses every invalid number before libplacebo sees it.
 fn check_args(args: &Args) -> Result<Vec<Display>> {
+    if let Some(csv) = &args.frames_csv {
+        check_frames_csv_path(csv, args)?;
+    }
     ensure!(!args.curves.is_empty(), "--curves names no curve");
     ensure!(!args.panels.is_empty(), "--panels names no display");
     ensure!(
@@ -167,6 +170,42 @@ fn check_args(args: &Args) -> Result<Vec<Display>> {
             display.validate().map(|()| display)
         })
         .collect()
+}
+
+/// Refuses a `--frames-csv` path that names one of the inputs: creating the CSV would truncate
+/// it. The inputs exist, so they compare canonicalized; the CSV compares by its canonicalized
+/// directory and file name (it may not exist yet).
+fn check_frames_csv_path(csv: &Path, args: &Args) -> Result<()> {
+    let csv_dir = match csv.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let Some(name) = csv.file_name() else {
+        anyhow::bail!("--frames-csv {} names no file", csv.display());
+    };
+    let csv_target = match csv_dir.canonicalize() {
+        Ok(dir) => dir.join(name),
+        // A missing directory holds no input; FramesCsv::create reports it.
+        Err(_) => return Ok(()),
+    };
+    let csv_target = csv_target.canonicalize().unwrap_or(csv_target);
+    let mut inputs = vec![
+        ("--dump", &args.dump),
+        ("--reference", &args.reference),
+        ("--candidate", &args.candidate),
+    ];
+    if let Some(shots) = &args.per_shot {
+        inputs.push(("--per-shot", shots));
+    }
+    for (flag, input) in inputs {
+        if input.canonicalize().is_ok_and(|path| path == csv_target) {
+            anyhow::bail!(
+                "--frames-csv {} is the {flag} input; choose another path",
+                csv.display()
+            );
+        }
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {

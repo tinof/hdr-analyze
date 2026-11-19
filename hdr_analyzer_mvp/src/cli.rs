@@ -178,7 +178,8 @@ pub struct Cli {
     pub dump_frame_stats: Option<PathBuf>,
 
     /// Write every measured frame's 4096-bin PQ histogram of the peak domain (pixel counts,
-    /// `pqhist` v1, 16 KiB per frame) for tools/display_sim. CPU and CUDA write the same bytes.
+    /// `pqhist` v1, 16 KiB per frame) for tools/display_sim. At `--downscale 1` CPU and CUDA
+    /// write the same bytes; above 1 the backends sample differently.
     #[arg(long, value_name = "PATH", conflicts_with = "au_table_only")]
     pub dump_pq_hist: Option<PathBuf>,
 
