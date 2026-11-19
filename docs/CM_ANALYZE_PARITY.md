@@ -260,12 +260,17 @@ points. The spline then gives −3.54 / −5.85 / −7.81 / −14.58 % (+75 code
 On a 600-nit panel an L1 max 100 codes low gives +4.85 / +8.36 / +11.30 % and clips above it.
 
 Open curves are not a Dolby display, and the curve reads only L1 max, L1 avg and the source black.
-libplacebo 7.387.0's renderer also differs from its curve. It maps into a dynamic target with an
-exposure change when the scene average exceeds the display. Under default parameters it also runs
+libplacebo 7.387.0's renderer also differs from its curve. Every frame with an average whose L1
+max exceeds the display peak by more than a few codes goes into a dynamic target, and the whole
+picture is scaled by an exposure change: the target is a smooth maximum of the display peak and
+the average minus 0.09 PQ (softness 0.04), so it always lies a little above the peak. For the gate
+scenario above (1000-nit display, L1 avg 10 nits) the target is 1027 nits and the exposure 0.973,
+a linear scale of the whole picture by 2.7 %. Under default parameters it also runs
 peak detection on the picture beside the Dolby Vision L1. "libplacebo reads only L1 max/avg and the
 source range" therefore holds for the curve, and for a render only with peak detection off. The
-renderer also falls back to the static HDR10 metadata when L1 max or avg is 0; the simulator uses
-both as given.
+renderer also falls back to the static HDR10 metadata when L1 max or avg is 0, which the simulator
+does not have: it reads an L1 max of 0, or one at or below the source black, as the PQ peak
+(10,000 nits), as the renderer's last fallback does.
 
 For every accuracy change:
 

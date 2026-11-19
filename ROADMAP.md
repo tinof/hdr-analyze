@@ -72,7 +72,8 @@ Order: the Focus (steering 2026-11-18), WS7.1 then WS6.10, to unblock priority 3
   mapping ([log](docs/ROADMAP_LOG.md) "libplacebo v7.387.0").
 - Recheck before WS6.10: the same libplacebo pin; `dovi_rpu_builder` clamps L1 (`L1::clamped`,
   `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
-  RPUs need builder work (Tier 2) or a tool on `dolby_vision`.
+  RPUs need builder work (Tier 2) or a tool on `dolby_vision`. Renders need peak detection off;
+  an L1 avg of 0 makes the renderer fall back to the static HDR10 metadata.
 
 ### Waiting for the owner
 
@@ -554,7 +555,9 @@ The detailed gap table and validation method live in
   next to the simulator's numbers for the same cuts (owner, 2026-10-17). Needs: WS7.1.
 - **Limits to state with every result:** open curves are not a Dolby display; libplacebo reads only
   L1 max/avg and the source range, so trims, L1 min, L4 and L11 cannot be evaluated in the open;
-  pin the libplacebo version; host limits in [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#ws7-open).
+  libplacebo is pinned at 7.387.0 (`scripts/build-libplacebo.sh`); a render matches the curve only
+  with peak detection off ([`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md)); host limits in
+  [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#ws7-open).
 
 ### WS8: test material
 

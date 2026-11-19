@@ -241,7 +241,8 @@ composer). For each clip and composer, with crop detection and with `--no-crop`,
 
 - byte-identical `.bin` files;
 - byte-identical `--dump-pq-hist` files (the per-frame 4096-bin PQ histograms, WS7.1), 64 header
-  bytes plus 16 KiB per frame; a failure names the first differing frame and bin;
+  bytes plus 16 KiB per frame (CPU = CUDA holds at `--downscale 1` only); a failure names the first
+  differing frame and bin;
 - equal `crop`, `scenes` and `frames` in the two `.l1.json` sidecars;
 - `analysis.gpu` false for the CPU run and true for the CUDA run, so a CPU fallback fails the test;
 - `analysis.luminance_mapping` `pq` for the PQ clip, and for the HLG clip the composer's name:

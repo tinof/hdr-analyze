@@ -251,8 +251,10 @@ Little-endian:
 Record `i` is measured frame `i`, sidecar frame `i` and stream frame `i + leading skipped`. Bin `b`
 counts the pixels whose peak-domain PQ value rounds to `b / 4095` (the f32 rounding both backends
 share), before the histogram smoothing pass, which touches only the madVR histogram. A frame that
-`--sample-rate` skips repeats the previous record. The header names no backend, so CPU and CUDA
-dumps of one input are byte-identical (`scripts/cuda-parity.sh` checks it). A reader refuses the
+`--sample-rate` skips repeats the previous record. The header names no backend, so at
+`--downscale 1` CPU and CUDA dumps of one input are byte-identical (`scripts/cuda-parity.sh`
+checks it); above 1 the GPU strides the full frame and the CPU resizes it, so they differ. A
+reader refuses the
 unfinished frame count, any other header value and a file that is not exactly
 `64 + frames × 16384` bytes long.
 
