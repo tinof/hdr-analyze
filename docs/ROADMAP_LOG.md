@@ -6,6 +6,48 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-19: E13.14 Split `acquire_measurements` by phase (PR #141)
+
+Step: - [E13.14][corpus][batch] Split `acquire_measurements` (`mkvdovi/src/pipeline/measure.rs`, 221 lines) by
+  phase; `fresh_analysis_args` (`:617`), shared with `mkvdovi manifest`, stays as it is.
+  Needs: P12.1. Gate: the mkvdovi gate.
+
+Gate evidence, PR #141: fmt, clippy and `scripts/ci/test-gate.sh` (816 passed, no test edited) and
+green CI. The RPU-baseline part ran on the branch's release build with a `--features cuda`
+analyzer, before and after the rebase onto E13.17: all 16 `rpu-baseline.sh compare
+--require-identical-l1` runs against `~/mkvdovi-work/rpu-baseline/p12-1-f4ce701/` passed and every
+`RPU.bin` was byte-identical. The own-log diff against `p12-1-f4ce701/` differs on 13 inputs in two
+message texts that main changed after that capture (`sidecar v6` to `v7`, PR #136; the merged
+P12.1 wording "(not stated by the container)"); against a capture from main@89f6432
+(`main-89f6432/`) the own log lines are identical on all 16. Evidence: `e13-14-042a92f/` and
+`e13-14-831b67f/` (rebased). Built by `/ship:roadmap-batch`; self-check four Opus lenses and
+Fable 5.2 (no finding), Gemini 4 Neon high review LGTM, with one P2 note (`extract_hdr10plus`
+takes `total_steps` by `&mut` and only reads it).
+
+Resolution: `acquire_measurements` builds `Measured` and calls one private function per phase
+(`extract_hdr10plus`, `measure_hdr10plus_hybrid`, `rebuild_mel`, `rebuild_profile8`,
+`reuse_or_analyze`); the `#[expect]` marker is gone. `fresh_analysis_args` is unchanged, now at
+`measure.rs:749`; the file has 786 lines. The two `--mdfix` rebuild bodies stay duplicated, a
+candidate for a later simplification. No unit test reaches their success path; the two `mdfix/`
+baseline inputs cover it.
+
+### 2026-11-19: E13.17 Split `mdfix_notice` by phase (PR #142)
+
+Step: - [E13.17][corpus][batch] Split `mdfix_notice` (`mkvdovi/src/pipeline/mdfix_notice.rs`, 160 lines) by
+  phase. Needs: P12.1. Gate: the mkvdovi gate.
+
+Gate evidence, PR #142: fmt, clippy and `scripts/ci/test-gate.sh` (816 passed, no test edited; the
+13 `mdfix_notice` tests unchanged) and green CI. The RPU-baseline part ran as for E13.14: all 16
+compares against `p12-1-f4ce701/` passed with byte-identical `RPU.bin`, and the own log lines equal
+the capture from main@89f6432 on all 16 (two inputs under `--mdfix`). Evidence: `e13-17-49f6b07/`.
+Built by `/ship:roadmap-batch`; self-check four Opus lenses (no finding), Gemini 4 Neon high
+review LGTM.
+
+Resolution: `mdfix_notice` builds the header and calls `push_l2_to_l8_lines`, `push_l9_lines` and
+`push_l10_to_l255_lines` in the old level order; `unsampled_notice` gives the line for a source
+RPU that could not be sampled. The `#[expect]` marker is gone. Open in E13: E13.6-E13.10, E13.12,
+E13.13 and E13.18-E13.21.
+
 ### 2026-11-19: WS7.1 The display-mapping simulator with the per-frame histogram dump (PR #140)
 
 Step: [WS7.1][gpu] The simulator, with the analyzer's per-frame histogram dump it needs (a

@@ -64,7 +64,6 @@ Order: the Focus (steering 2026-11-18), WS7.1 then WS6.10, to unblock priority 3
    sides; RPU baselines byte-identical. Why: first startable step outside the Focus. Branch:
    `fix/p6-3-p8-record-vs-rpu`. Release: patch
 
-- Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:650`).
 - Recheck before WS6.10: the same libplacebo pin; `dovi_rpu_builder` clamps L1 (`L1::clamped`,
   `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
   RPUs need builder work (Tier 2) or a tool on `dolby_vision`. Renders need peak detection off;
@@ -769,9 +768,9 @@ The detailed gap table and validation method live in
   regression gate passes without `--update`.
 ### E13: module size refactor
 
-- **Status:** Partial. Steps 2-5, E13.11, E13.15 and E13.16 done, no production file over the
-  800-line limit; history in [the log](docs/ROADMAP_LOG.md). Open: E13.6-E13.10, E13.12-E13.14 and
-  E13.17-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
+- **Status:** Partial. Steps 2-5, E13.11 and E13.14-E13.17 done, no production file over the
+  800-line limit; history in [the log](docs/ROADMAP_LOG.md). Open: E13.6-E13.10, E13.12, E13.13 and
+  E13.18-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
 - **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
@@ -807,11 +806,6 @@ The detailed gap table and validation method live in
   281 lines. Gate: the mkvdovi gate.
 - [E13.13][corpus] Split `verify_post_mux_with_options` (`mkvdovi/src/verify.rs`, 256 lines) by
   phase. Gate: the mkvdovi gate.
-- [E13.14][corpus][batch] Split `acquire_measurements` (`mkvdovi/src/pipeline/measure.rs`, 221 lines) by
-  phase; `fresh_analysis_args` (`:617`), shared with `mkvdovi manifest`, stays as it is.
-  Needs: P12.1. Gate: the mkvdovi gate.
-- [E13.17][corpus][batch] Split `mdfix_notice` (`mkvdovi/src/pipeline/mdfix_notice.rs`, 160 lines) by
-  phase. Needs: P12.1. Gate: the mkvdovi gate.
 - [E13.18][desk] Split `tools/fit_hlg_composer/src/siting.rs` (803 lines, limit 800) as a pure move.
   Gate: `tool:fit_hlg_composer`, and a diff that shows only moved blocks.
 - **Decided 2026-11-17 (owner):** E13.19 splits now. The local `feat/dev-corpus` branch changes no
