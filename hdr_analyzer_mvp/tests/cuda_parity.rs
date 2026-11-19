@@ -15,6 +15,9 @@
 //! (any value), a missing variable, a missing file or a build without the `cuda` feature
 //! is a failure. `scripts/cuda-parity.sh` generates the clips and runs this test that way.
 //!
+//! Every run also writes `--dump-pq-hist` (ROADMAP WS7.1): the 4096-bin PQ histograms must be
+//! byte-identical too, 64 header bytes plus 16 KiB per frame.
+//!
 //! `nvdec_cpu_analysis_matches_software_decode` (ROADMAP E12.2) runs CPU analysis of NVDEC
 //! frames (`--hwaccel cuda` without GPU analysis) against software decode (`--hwaccel none`):
 //! `.bin` and sidecar byte-identical, every NVDEC frame repacked, the same crop-monitor report.
@@ -103,6 +106,26 @@ struct Run {
     frame_stats: String,
     /// The `--au-table` output, for MKV clips (ROADMAP P15.1).
     au_table: Option<Value>,
+    /// The `--dump-pq-hist` output (ROADMAP WS7.1).
+    pq_hist: Vec<u8>,
+}
+
+/// Where two `--dump-pq-hist` files differ (frame and bin), or a wrong length; `None` if equal
+/// and `frames` long.
+fn pq_hist_difference(a: &[u8], b: &[u8], frames: usize) -> Option<String> {
+    let expected = 64 + frames * 16_384;
+    if a.len() != expected || b.len() != expected {
+        return Some(format!(
+            "{} and {} bytes, {expected} expected",
+            a.len(),
+            b.len()
+        ));
+    }
+    let byte = a.iter().zip(b).position(|(x, y)| x != y)?;
+    Some(match byte.checked_sub(64) {
+        None => format!("header byte {byte}"),
+        Some(offset) => format!("frame {}, bin {}", offset / 16_384, offset % 16_384 / 4),
+    })
 }
 
 fn run_analyzer(
@@ -127,6 +150,8 @@ fn run_analyzer(
     }
     command.args(extra_args);
     command.arg("--dump-frame-stats").arg(&stats_path);
+    let pq_hist_path = PathBuf::from(format!("{}.pqhist", bin.display()));
+    command.arg("--dump-pq-hist").arg(&pq_hist_path);
     let au_table = clip
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("mkv"));
@@ -163,6 +188,7 @@ fn run_analyzer(
                 .unwrap_or_else(|error| panic!("{label}: read {}: {error}", path.display()));
             serde_json::from_str(&text).expect("parse AU table")
         }),
+        pq_hist: std::fs::read(&pq_hist_path).expect("read PQ histogram dump"),
     }
 }
 
@@ -303,6 +329,9 @@ fn check_parity(
         cpu.bin.len(),
         gpu.bin.len()
     );
+    if let Some(difference) = pq_hist_difference(&cpu.pq_hist, &gpu.pq_hist, frame_count) {
+        panic!("{label}: CPU and CUDA PQ histogram dumps differ: {difference}");
+    }
     // The AU table comes from packets and the decoder's output pts, so NVDEC must give the same
     // table as software decode. Only the sidecar digest differs (`analysis.gpu`).
     if let (Some(cpu_table), Some(gpu_table)) = (&cpu.au_table, &gpu.au_table) {
@@ -610,6 +639,9 @@ fn check_nvdec_cpu_analysis(case: &DecodeCase) {
         software.bin.len(),
         nvdec.bin.len()
     );
+    if let Some(difference) = pq_hist_difference(&software.pq_hist, &nvdec.pq_hist, frames) {
+        panic!("{label}: the PQ histogram dumps differ: {difference}");
+    }
     assert!(
         software.frame_stats == nvdec.frame_stats,
         "{label}: the frame statistics differ"

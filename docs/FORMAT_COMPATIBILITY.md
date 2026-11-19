@@ -224,6 +224,40 @@ output is the pictures in pts order (after the skipped leading pictures), so a p
 presentation index is its pts rank. Every analyzer run removes an AU table left by an earlier run.
 Schema and rules: [`PLAYBACK_MANIFEST.md`](PLAYBACK_MANIFEST.md).
 
+### PQ histogram dump
+
+`hdr_analyzer_mvp --dump-pq-hist <PATH>` writes format `pqhist` version 1, read by
+`tools/display_sim` (ROADMAP WS7.1). Writer `hdr_analyzer_mvp/src/pq_hist_dump.rs`, reader
+`tools/display_sim/src/hist.rs`: a layout change bumps the version and changes both in the same PR.
+Little-endian:
+
+| Offset | Type | Field |
+|-------:|------|-------|
+| 0 | 6 bytes | magic `PQHIST` |
+| 6 | u16 | version, 1 |
+| 8 | u32 | header bytes, 64 |
+| 12 | u32 | bins, 4096 |
+| 16 | u32 | bytes per count, 4 |
+| 20 | u32 | peak domain: 0 max-RGB, 1 luma |
+| 24 | u32 | transfer: 0 PQ (also an untagged input), 1 HLG measured through the Profile 8.4 decode |
+| 28 | u32 | sample rate (`--sample-rate`, at least 1) |
+| 32 | u32 | downscale (the effective `--downscale`) |
+| 36 | u32 | reserved, 0 |
+| 40 | u64 | frame count; `u64::MAX` until the run finishes |
+| 48 | u64 | leading skipped frames (the sidecar's `leading_skipped_frames`) |
+| 56 | 8 bytes | reserved, 0 |
+| 64 | frames × 4096 × u32 | one record per measured frame |
+
+Record `i` is measured frame `i`, sidecar frame `i` and stream frame `i + leading skipped`. Bin `b`
+counts the pixels whose peak-domain PQ value rounds to `b / 4095` (the f32 rounding both backends
+share), before the histogram smoothing pass, which touches only the madVR histogram. A frame that
+`--sample-rate` skips repeats the previous record. The header names no backend, so at
+`--downscale 1` CPU and CUDA dumps of one input are byte-identical (`scripts/cuda-parity.sh`
+checks it); above 1 the GPU strides the full frame and the CPU resizes it, so they differ. A
+reader refuses the
+unfinished frame count, any other header value and a file that is not exactly
+`64 + frames × 16384` bytes long.
+
 ## HDR10+ peak mapping
 
 For HDR10+ input, the selected peak source gives the peak of each hybrid piece. Under

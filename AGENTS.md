@@ -13,7 +13,9 @@ in its prompt. CLAUDE.md does not repeat it.
   `metadata::L1_SIDECAR_MAX_VERSION` and by `tools/l1_diff`), the analyzer's `--version` `+cuda`
   probe, the `Composer::luminance_mapping` names, and the analyzer `--help` options that mkvdovi
   probes (`external::analyzer_lists_option`), and the AU table (`hdr_analyzer_mvp/src/au_table.rs`,
-  version 1, token `au-table-v1`; schema in `docs/PLAYBACK_MANIFEST.md`). A change on one side only is P1. Safe path: change
+  version 1, token `au-table-v1`; schema in `docs/PLAYBACK_MANIFEST.md`), and the PQ histogram dump
+  (`hdr_analyzer_mvp/src/pq_hist_dump.rs`, `pqhist` version 1, read by `tools/display_sim/src/hist.rs`;
+  schema in `docs/FORMAT_COMPATIBILITY.md`). A change on one side only is P1. Safe path: change
   the writer and every reader in the same PR; for the sidecar, also bump its version.
 - **CPU and CUDA analysis stay bit-identical, and resumed runs never reuse stale output.**
   `hdr_analyzer_mvp/src/analysis/kernels.cu` and its Rust mirror keep the same f32 operation

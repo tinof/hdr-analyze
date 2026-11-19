@@ -53,26 +53,26 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-17 at main@05133ec)
-<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=f8357e851fe8 -->
+### Next up (checked 2026-11-18 at main@0bf2704)
+<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=fd9d1776acc8 -->
 
-Order: the Focus steps that unblock priority 3, WS7.1 then WS6.10 (E12.2 closed in PR #136).
+Order: the Focus (steering 2026-11-18), WS7.1 then WS6.10, to unblock priority 3.
 
-1. **WS7.1 The display-mapping simulator with the per-frame histogram dump** (priority 6). Gate:
-   the item gate. Why: unblocks P10.3, WS7.2, WS1.2, WS1.6, WS2.2. Branch:
-   `feat/ws7-1-display-simulator`. Release: none
-2. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: unblocks the
-   WS6.11 viewing and P10.5's gate. Branch: `feat/ws6-10-pulse-files`. Release: none
+1. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: Focus 2;
+   unblocks the WS6.11 viewing and P10.5's gate. Branch: `feat/ws6-10-pulse-files`. Release: none
+2. **P6.3 Check a Profile 8 record against its RPU** (priority 4). Gate: fixture tests on both
+   sides; RPU baselines byte-identical. Why: first startable step outside the Focus. Branch:
+   `fix/p6-3-p8-record-vs-rpu`. Release: patch
 
 - Recheck before E13.14: `mkvdovi manifest` shares `fresh_analysis_args` (`mkvdovi/src/pipeline/measure.rs:650`).
-- Recheck before WS7.1: pin libplacebo and re-check the gate numbers after v7.387.0 changed tone
-  mapping ([log](docs/ROADMAP_LOG.md) "libplacebo v7.387.0").
 - Recheck before WS6.10: the same libplacebo pin; `dovi_rpu_builder` clamps L1 (`L1::clamped`,
   `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
-  RPUs need builder work (Tier 2) or a tool on `dolby_vision`.
+  RPUs need builder work (Tier 2) or a tool on `dolby_vision`. Renders need peak detection off;
+  an L1 avg of 0 makes the renderer fall back to the static HDR10 metadata.
 
-**Reassess:** owner-decision (steering 2026-11-18): Focus WS7.1, WS6.10; sidecar v7 (E12.2,
-PR #136) does not restart the 1.0.0 schema clock.
+**Reassess:** plan-changed (WS7.1, PR #140): a libplacebo 7.387.0 render applies a dynamic target
+and an exposure change even on the WS7 gate scenario (target 1027 nits, exposure 0.973) and runs
+peak detection by default, so WS7.2's renders need peak detection off and must state the exposure.
 
 ### Waiting for the owner
 
@@ -535,8 +535,8 @@ The detailed gap table and validation method live in
 
 ### WS7: evaluation in displayed-picture units
 
-- **Status:** Open. Nothing has shipped; history in [the log](docs/ROADMAP_LOG.md) (2026-10-29).
-  Open: WS7.1, then WS7.2.
+- **Status:** Partial. The display-mapping simulator and the analyzer's histogram dump shipped
+  (WS7.1, [log](docs/ROADMAP_LOG.md) 2026-11-19). Open: WS7.2.
 - **Plan:** (1) a histogram-domain display-mapping simulator in a tool crate outside the workspace:
   per-frame PQ histograms and an L1 stream through libplacebo's spline, the SMPTE ST 2094-10 curve
   and the ITU-R BT.2390 EETF for 100-, 600- and 1000-nit panels, comparing candidate with reference
@@ -547,14 +547,14 @@ The detailed gap table and validation method live in
   ([`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md)): for a 1000-nit shot on a 1000-nit
   panel, L1 max +75 / +140 codes costs 14.6% / 24.4% at the peak with the spline, and nothing while
   L1 max stays below the panel peak.
-- [WS7.1][gpu] The simulator, with the analyzer's per-frame histogram dump it needs (a
-  `cuda-parity` path). Gate: the item gate.
 - [WS7.2][corpus] ColorVideoVDP on a few cuts. Gate: ColorVideoVDP JOD scores for candidate against
   reference metadata on three development cuts, renderer and versions pinned, recorded in the log
   next to the simulator's numbers for the same cuts (owner, 2026-10-17). Needs: WS7.1.
 - **Limits to state with every result:** open curves are not a Dolby display; libplacebo reads only
   L1 max/avg and the source range, so trims, L1 min, L4 and L11 cannot be evaluated in the open;
-  pin the libplacebo version; host limits in [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#ws7-open).
+  libplacebo is pinned at 7.387.0 (`scripts/build-libplacebo.sh`); a render matches the curve only
+  with peak detection off ([`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md)); host limits in
+  [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#ws7-open).
 
 ### WS8: test material
 

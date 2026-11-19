@@ -92,6 +92,9 @@ pub struct AnalyzedFrame {
     /// With `FrameAnalysisOptions::dump_max_rgb`: the max-RGB value (normalized PQ) of every
     /// pixel of the crop rect, row by row; NaN where a pixel was not analyzed.
     pub max_rgb_pixels: Option<Vec<f32>>,
+    /// The 4096-bin histogram of the peak domain (`pixel_pq_bin`), pixel counts before any
+    /// smoothing; equal on CPU and CUDA at `--downscale 1`. `--dump-pq-hist` writes it.
+    pub pq_hist: Vec<u64>,
 }
 
 fn mean_or_zero(sum: f64, count: u64) -> f64 {
@@ -583,6 +586,8 @@ pub fn analyze_native_frame_cropped(
             reduced_min_pq,
         },
         max_rgb_pixels,
+        // Moved in after its last read above.
+        pq_hist: (accumulator.pq_hist as Box<[u64]>).into_vec(),
     })
 }
 

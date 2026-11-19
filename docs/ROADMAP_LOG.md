@@ -6,6 +6,38 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-19: WS7.1 The display-mapping simulator with the per-frame histogram dump (PR #140)
+
+Step: [WS7.1][gpu] The simulator, with the analyzer's per-frame histogram dump it needs (a
+  `cuda-parity` path). Gate: the item gate.
+
+Item gate: the simulator reproduces the numbers recomputed on 2026-10-03
+([`CM_ANALYZE_PARITY.md`](CM_ANALYZE_PARITY.md)): for a 1000-nit shot on a 1000-nit panel, L1 max
++75 / +140 codes costs 14.6% / 24.4% at the peak with the spline, and nothing while L1 max stays
+below the panel peak.
+
+Owner decisions (2026-11-18): link libplacebo 7.387.0 (commit 275f7dea) instead of re-implementing
+the curves; libplacebo's forms of st2094-10 and BT.2390; "reproduces" means within ±0.06 pp of the
+printed numbers; the curve alone, with the render caveat in the limits; the pqhist dump registered
+as a cross-binary contract (AGENTS.md, `.claude/workflow.md`, no CLAUDE.md line); a
+`tool:display_sim` gate.
+
+Gate evidence: `tools/display_sim` `gate_tests` (PR #140): spline −3.54 / −5.85 / −7.81 / −14.58 %
+(+75 codes) and −6.50 / −10.40 / −13.65 / −24.38 % (+140) at 10 / 100 / 200 / 1000 nits; BT.2390
+−2.46 % / −4.54 % at the peak and under 0.005 % below; a 600-nit panel with L1 max 100 codes low
++4.85 / +8.36 / +11.30 %; exactly 0 below the panel peak on all three curves. `scripts/cuda-parity.sh`
+on the RTX 4070: CPU, CUDA and NVDEC dumps byte-identical at `--downscale 1`. The L1 regression
+gate passed without `--update`. Local evidence: `~/mkvdovi-work/ws7-1-2026-11-18/evidence/`.
+
+Findings for later steps: the 7.387.0 renderer maps every frame with an average whose L1 max
+exceeds the display peak by more than a few codes into a dynamic target (1000-nit display, L1 avg
+10 nits: 1027 nits, exposure 0.973) and runs peak detection by default; an L1 avg of 0 makes it fall
+back to static HDR10 metadata. WS7.2 and WS6.10 renders need peak detection off.
+
+Resolution: `hdr_analyzer_mvp --dump-pq-hist` writes per-frame 4096-bin PQ histograms (pqhist v1),
+and `tools/display_sim` reports candidate against reference L1 as change in displayed light, clipped
+share and steps on 100, 600 and 1000-nit displays. Open in WS7: WS7.2.
+
 ### 2026-11-18: E12.1 Build the CUDA release archives (PR #86)
 
 Step: [E12.1][gpu] Build the Linux x64 and Windows x64 release archives with `--features cuda` as in

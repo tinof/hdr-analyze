@@ -264,6 +264,12 @@ refresh, check that `ls -la ~/.local/bin | grep -E 'mkvdovi|hdr_analyzer|verifie
   same way for every cargo run on that host: `~/.cargo/config.toml` there has `[env] CC = "clang"`
   (since 2026-10-13), which covers shells, hooks and systemd units. Do not move that into the
   repo's `.cargo/config.toml`: CI and the Windows build must keep their own compiler.
+- **`tools/display_sim` needs libplacebo 7.387.0.** `scripts/build-libplacebo.sh` clones and builds
+  it (static, no GPU backends) into `~/.cache/hdr-analyze/libplacebo-v7.387.0`, where the tool's
+  `build.rs` looks; `LIBPLACEBO_PREFIX` moves it. It needs git, python3 with `venv` (or uv),
+  pkg-config and a C/C++ compiler, and runs meson and ninja from its own venv. Tested on the WSL2
+  host only; on the Oracle ARM host meson must use clang (`CC=clang CXX=clang++`, as for cargo
+  above). The analyzer and mkvdovi do not need it.
 
 ## Checking the install
 

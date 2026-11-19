@@ -18,6 +18,7 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("--peak-estimator"))
         .stdout(predicate::str::contains("--peak-percentile"))
         .stdout(predicate::str::contains("--dump-frame-stats"))
+        .stdout(predicate::str::contains("--dump-pq-hist"))
         .stdout(predicate::str::contains("--hlg-composer"))
         // mkvdovi probes the help for the mapping names (its analyzer contract).
         .stdout(predicate::str::contains(
@@ -31,6 +32,21 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("l1-sidecar-frame-peak"))
         .stdout(predicate::str::contains("au-table-v1"))
         .stdout(predicate::str::contains("--au-table-only"));
+}
+
+#[test]
+fn test_dump_pq_hist_conflicts_with_au_table_only() {
+    analyzer_cmd()
+        .args([
+            "--dump-pq-hist",
+            "out.pqhist",
+            "--au-table-only",
+            "input.mkv",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"))
+        .stderr(predicate::str::contains("--au-table-only"));
 }
 
 #[test]

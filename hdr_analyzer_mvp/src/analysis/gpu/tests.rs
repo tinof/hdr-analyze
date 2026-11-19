@@ -341,7 +341,8 @@ fn driver_version_refuses_older_than_cuda_12_6() {
 /// `--peak-estimator st2094-10` on the GPU against the CPU path, on crops the analyzer's crop
 /// detection never produces (odd anchor, odd size, so partial edge blocks), for planar and P010
 /// input, over consecutive frames whose peak falls and whose minimum rises (the kernel's result
-/// words must be cleared per frame). Needs a CUDA device; `scripts/cuda-parity.sh` runs it with
+/// words must be cleared per frame). The 4096-bin PQ histograms (`--dump-pq-hist`) must match
+/// bin for bin and count every pixel of the crop. Needs a CUDA device; `scripts/cuda-parity.sh` runs it with
 /// `HDR_ANALYZE_CUDA_PARITY_REQUIRED`, under which a missing device fails.
 #[cfg(feature = "cuda")]
 #[test]
@@ -405,14 +406,26 @@ fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
     for crop in &crops {
         let mut previous: Option<(f64, f64)> = None;
         for (level, lift) in [(900, 120), (500, 300), (250, 400)] {
-            let cpu = analyze_native_frame_cropped(&planar(level, lift), crop, &options)
-                .expect("CPU analysis")
-                .peak_stats;
+            let cpu_frame = analyze_native_frame_cropped(&planar(level, lift), crop, &options)
+                .expect("CPU analysis");
+            let cpu = cpu_frame.peak_stats;
+            // The `--dump-pq-hist` histogram counts every pixel of the crop once.
+            assert_eq!(
+                cpu_frame.pq_hist.iter().sum::<u64>(),
+                u64::from(crop.width * crop.height),
+                "{crop:?}: CPU histogram total"
+            );
             for (layout, frame) in [("planar", planar(level, lift)), ("p010", p010(level, lift))] {
-                let gpu_stats = gpu
+                let gpu_frame = gpu
                     .analyze(&frame, crop, 1, &options)
-                    .expect("GPU analysis")
-                    .peak_stats;
+                    .expect("GPU analysis");
+                let first_difference = (0..cpu_frame.pq_hist.len())
+                    .find(|&bin| gpu_frame.pq_hist.get(bin) != cpu_frame.pq_hist.get(bin));
+                assert!(
+                    first_difference.is_none() && gpu_frame.pq_hist.len() == cpu_frame.pq_hist.len(),
+                    "{layout} {crop:?} level {level}: PQ histograms differ, first at bin {first_difference:?}"
+                );
+                let gpu_stats = gpu_frame.peak_stats;
                 assert_eq!(
                     (
                         gpu_stats.reduced_max_pq.to_bits(),
