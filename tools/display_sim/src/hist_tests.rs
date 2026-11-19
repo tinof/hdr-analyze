@@ -76,6 +76,13 @@ fn malformed_headers_are_refused() {
     huge[40..48].copy_from_slice(&(u64::MAX - 1).to_le_bytes());
     let error = parse_header(&huge, THREE_FRAMES).unwrap_err().to_string();
     assert!(error.contains("overflows"), "{error}");
+    // A leading-picture count whose sum with the frames overflows: stream frame numbers would wrap.
+    let mut leading = FINISHED_HEADER;
+    leading[48..56].copy_from_slice(&u64::MAX.to_le_bytes());
+    let error = parse_header(&leading, THREE_FRAMES)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("leading"), "{error}");
 }
 
 #[test]

@@ -150,3 +150,32 @@ fn shot_lists_are_shifted_by_the_leading_pictures() {
         assert!(error.contains(message), "{text:?}: {error}");
     }
 }
+
+/// Frame labels and the leading-picture count come from files, so sums of them must not panic
+/// (debug) or wrap (release): an overflow is refused like any other mismatch.
+#[test]
+fn overflowing_labels_and_counts_are_refused_not_wrapped() {
+    let wrap = parse_csv(&format!(
+        "frame,min_pq,max_pq,avg_pq\n{},10,3000,1500\n0,10,3000,1500\n",
+        u64::MAX
+    ))
+    .unwrap();
+    assert!(align(&wrap, 2, 0)
+        .unwrap_err()
+        .to_string()
+        .contains("count up by one"));
+    let last = parse_csv(&format!(
+        "frame,min_pq,max_pq,avg_pq\n{},10,3000,1500\n",
+        u64::MAX
+    ))
+    .unwrap();
+    assert!(align(&last, 1, 0).is_err());
+    assert!(align(&rows(0..2), 2, usize::MAX)
+        .unwrap_err()
+        .to_string()
+        .contains("overflow"));
+    assert!(parse_shots("0\n", 2, usize::MAX)
+        .unwrap_err()
+        .to_string()
+        .contains("overflow"));
+}

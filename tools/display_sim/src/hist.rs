@@ -97,13 +97,18 @@ pub fn parse_header(bytes: &[u8; HEADER_BYTES], file_len: u64) -> Result<Header>
         file_len == expected,
         "the pqhist dump is {file_len} bytes; {frames} frames need {expected}"
     );
+    let leading_skipped = u64_at(bytes, 48);
+    ensure!(
+        frames.checked_add(leading_skipped).is_some(),
+        "the pqhist leading-picture count {leading_skipped} overflows with {frames} frames"
+    );
     Ok(Header {
         peak_domain,
         hlg,
         sample_rate,
         downscale,
         frames,
-        leading_skipped: u64_at(bytes, 48),
+        leading_skipped,
     })
 }
 

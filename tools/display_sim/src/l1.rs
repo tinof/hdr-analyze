@@ -84,7 +84,7 @@ pub fn align(rows: &[L1Row], frames: usize, leading: usize) -> Result<Stream> {
         bail!("the CSV has no frames");
     };
     for pair in rows.windows(2) {
-        if pair[1].frame != pair[0].frame + 1 {
+        if pair[0].frame.checked_add(1) != Some(pair[1].frame) {
             bail!(
                 "line {}: frame {} follows frame {}; frame labels must count up by one",
                 pair[1].line,
@@ -94,8 +94,12 @@ pub fn align(rows: &[L1Row], frames: usize, leading: usize) -> Result<Stream> {
         }
     }
     let first_label = usize::try_from(first.frame).context("frame label too large")?;
-    let end_label = first_label + rows.len();
-    let stream = frames + leading;
+    let end_label = first_label
+        .checked_add(rows.len())
+        .context("frame labels overflow")?;
+    let stream = frames
+        .checked_add(leading)
+        .context("frame and leading-picture counts overflow")?;
     let (skip, coordinates) = if first_label <= leading && end_label == stream {
         (leading - first_label, Coordinates::Stream)
     } else if leading > 0 && first_label == 0 && rows.len() == frames {
@@ -154,7 +158,9 @@ fn name(coordinates: Coordinates) -> &'static str {
 /// frame per line, from 0, strictly increasing; a last line equal to the stream frame count
 /// (the dovi_tool sentinel) is dropped. Shots inside the leading pictures are dropped.
 pub fn parse_shots(text: &str, frames: usize, leading: usize) -> Result<Vec<Range<usize>>> {
-    let stream = frames + leading;
+    let stream = frames
+        .checked_add(leading)
+        .context("frame and leading-picture counts overflow")?;
     let mut starts = Vec::new();
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();
