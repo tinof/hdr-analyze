@@ -243,7 +243,6 @@ pub(super) fn total_steps_for(hdr_type: HdrFormat) -> u8 {
 
 /// Extracts HDR10+ metadata, rebuilds a Dolby Vision base layer under `--mdfix`, and reuses or
 /// generates measurements. `None`: the phase printed why; `convert_file` returns `Ok(false)`.
-#[expect(clippy::too_many_lines, reason = "E13.14: split by phase")]
 pub(super) fn acquire_measurements(
     input_file: &str,
     temp_dir: &Path,
@@ -257,290 +256,390 @@ pub(super) fn acquire_measurements(
     total_steps: &mut u8,
     current_step: &mut u8,
 ) -> Result<Option<Measured>> {
-    let input_path = Path::new(input_file);
-    let mut hdr_type = hdr_type;
-    let mut measurements_file: Option<PathBuf> = None;
-    let mut hdr10plus_json: Option<PathBuf> = None;
-    let mut bl_source_file = PathBuf::from(input_file);
-    let mut hdr10plus_mode = hdr10plus_mode;
-
-    // Measured L1 sidecar, loaded when existing measurements are reused (validated against the
-    // input) or right after a fresh analyzer run.
-    let mut l1_sidecar: Option<metadata::L1Sidecar> = None;
+    let mut measured = Measured {
+        hdr_type,
+        measurements_file: None,
+        hdr10plus_json: None,
+        bl_source_file: PathBuf::from(input_file),
+        // Measured L1 sidecar, loaded when existing measurements are reused (validated against
+        // the input) or right after a fresh analyzer run.
+        l1_sidecar: None,
+        hdr10plus_mode,
+    };
 
     // --- Format-specific metadata extraction ---
     // Pre-handle HDR10+ to allow fallback to HDR10Unsupported if metadata is missing
-    if hdr_type == HdrFormat::Hdr10Plus {
-        *current_step += 1;
-        progress::print_step(
-            *current_step,
-            *total_steps,
-            "Extracting HEVC stream for HDR10+ analysis...",
-        );
-        match extract_hdr10plus_metadata(input_file, temp_dir, resume_enabled, args.stall_timeout) {
-            Ok(Some(json_path)) => {
-                // P5.1: the `--skip-reorder` fallback keeps the bitstream order; an explicit
-                // hybrid refuses it before any count or analysis, the other modes warned.
-                if hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid
-                    && extracted_with_skip_reorder(temp_dir)
-                {
-                    progress::print_error(&skip_reorder_refusal());
-                    return Ok(None);
-                }
-                // Printed here: a file with no dynamic metadata takes neither HDR10+ path.
-                if let Some(notice) = hdr10plus_notice {
-                    progress::print_warn(notice);
-                }
-                // P9.4: hdr10plus_tool fills a frame without its own payload from the previous
-                // one; partial coverage or a failed count warns, and refuses only an explicit
-                // hybrid (P9.4, P9.5).
-                if !hdr10plus_coverage::check_extracted(
-                    temp_dir,
-                    &json_path,
-                    resume_enabled,
-                    hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid,
-                ) {
-                    return Ok(None);
-                }
-                // Before the analysis: an unusable structure should not cost a full run.
-                if hdr10plus_mode.is_hybrid() {
-                    if let Err(reason) = hybrid::check_hdr10plus_file(&json_path) {
-                        let Some(mode) = hdr10plus_mode.after_failure(&reason) else {
-                            return Ok(None);
-                        };
-                        hdr10plus_mode = mode;
-                    }
-                }
-                hdr10plus_json = Some(json_path);
-            }
-            Ok(None) => {
-                match hdr10plus_coverage::check_unextracted(
-                    temp_dir,
-                    resume_enabled,
-                    hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid,
-                ) {
-                    Unextracted::Refused(reason) => {
-                        progress::print_error(&hdr10plus_coverage::unextracted_refusal(&reason));
-                        return Ok(None);
-                    }
-                    Unextracted::Unreadable(warning) => progress::print_warn(&warning),
-                    Unextracted::NoPayloads => progress::print_warn(
-                        "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis.",
-                    ),
-                }
-                if hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid {
-                    progress::print_info(
-                        "--hdr10plus-l1 hybrid: without HDR10+ metadata the measured L1 alone is used.",
-                    );
-                }
-                hdr_type = HdrFormat::Hdr10Unsupported;
-                hdr10plus_mode = Hdr10PlusMode::Metadata;
-            }
-            Err(error) => {
-                progress::print_error(&format!("HDR10+ metadata extraction failed: {error:#}"));
-                return Ok(None);
-            }
-        }
+    if measured.hdr_type == HdrFormat::Hdr10Plus
+        && !extract_hdr10plus(
+            input_file,
+            temp_dir,
+            args,
+            resume_enabled,
+            hdr10plus_notice,
+            &mut measured,
+            total_steps,
+            current_step,
+        )
+    {
+        return Ok(None);
     }
 
     // Logic branching
-    match hdr_type {
-        HdrFormat::Hdr10Plus if hdr10plus_mode.is_hybrid() => {
-            // The HDR10+ metadata stays for the peaks; average, minimum and crop are measured.
-            // `convert_file` settled a sampling that skips frames before any temp work.
-            progress::print_info(
-                "HDR10+ hybrid: measuring the input for its average, minimum and active area (--hdr10plus-l1 hdr10plus skips this).",
-            );
-            let reuse = find_reusable_measurements(
-                input_path,
-                input_file,
-                args,
-                None,
-                true,
-                &mut measurements_file,
-                &mut l1_sidecar,
-            );
-            if reuse {
-                progress::print_info("Using existing measurements file.");
-                hdr_type = HdrFormat::Hdr10WithMeasurements;
-            } else {
-                // Without this check the run would end in `hybrid::check_measurements` after a
-                // full analysis, and that analysis would replace any measurements already here.
-                // The default checked this in `resolve_hdr10plus_mode`.
-                if hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid && !analyzer_records_frame_peak()
-                {
-                    progress::print_error(
-                        "--hdr10plus-l1 hybrid needs an hdr_analyzer_mvp that records the \
-                         per-frame peak (sidecar v6), and this analyzer's --help does not name \
-                         it; rebuild or update hdr_analyzer_mvp.",
-                    );
-                    return Ok(None);
-                }
-                // Counted as an HDR10 analysis: `total_steps_for(Hdr10Plus)` has no analysis step.
-                let analysis = run_fresh_analysis(
-                    input_file,
-                    temp_dir,
-                    args,
-                    HdrFormat::Hdr10WithMeasurements,
-                    false,
-                    None,
-                    total_steps,
-                    current_step,
-                );
-                match (analysis, hdr10plus_mode) {
-                    (Ok(Some(measurements)), _) => {
-                        measurements_file = Some(measurements);
-                        hdr_type = HdrFormat::Hdr10WithMeasurements;
-                    }
-                    (Ok(None), Hdr10PlusMode::ExplicitHybrid) => return Ok(None),
-                    (Err(error), Hdr10PlusMode::ExplicitHybrid) => return Err(error),
-                    (Ok(None), mode) => {
-                        hdr10plus_mode = mode
-                            .after_failure("the analysis failed")
-                            .unwrap_or(Hdr10PlusMode::Metadata);
-                    }
-                    (Err(error), mode) => {
-                        hdr10plus_mode = mode
-                            .after_failure(&format!("the analysis failed ({error:#})"))
-                            .unwrap_or(Hdr10PlusMode::Metadata);
-                    }
-                }
-            }
-        }
+    let proceed = match measured.hdr_type {
+        HdrFormat::Hdr10Plus if measured.hdr10plus_mode.is_hybrid() => measure_hdr10plus_hybrid(
+            input_file,
+            temp_dir,
+            args,
+            &mut measured,
+            total_steps,
+            current_step,
+        )?,
         HdrFormat::Hdr10Plus => {
             // Metadata already extracted above
+            true
         }
-        HdrFormat::DolbyVisionMel => {
-            // Without --mdfix, convert_file took the fast path (convert_mel_fast_path) before
-            // this phase.
-            progress::print_info(
-                "Rebuilding Profile 7 MEL metadata from fresh base-layer measurements (--mdfix).",
-            );
-            print_mdfix_notice(authored, args, input_file);
-            let clean_bl = extract_clean_base_layer(
-                input_file,
-                temp_dir,
-                "Extracting Dolby Vision HEVC stream",
-                args,
-                resume_enabled,
-            )?;
-            bl_source_file = clean_bl.clone();
-
-            let mut extra_args = Vec::new();
-            add_optimizer_args(&mut extra_args, args);
-            // Analyze the original container, not the raw Annex B stream: without a container
-            // duration the seek-based crop probes are unavailable and the in-stream fallback
-            // can commit a degenerate active area on dark openings. MEL base-layer pixels are
-            // identical in the source.
-            measurements_file = run_hdr_analyzer(input_file, temp_dir, &extra_args, args)?;
-            if measurements_file.is_none() {
-                return Ok(None);
-            }
-            hdr_type = HdrFormat::Hdr10WithMeasurements;
-        }
+        HdrFormat::DolbyVisionMel => rebuild_mel(
+            input_file,
+            temp_dir,
+            args,
+            resume_enabled,
+            authored,
+            &mut measured,
+        )?,
         // Refused by reject_unsupported_input before the temp directory was touched.
         HdrFormat::DolbyVisionFel => bail!(FEL_UNSUPPORTED_MESSAGE),
-        HdrFormat::DolbyVisionP8 => {
-            if !args.mdfix {
-                progress::print_warn(
-                    "Profile 8 input is already converted; use `inspect` or --mdfix to rebuild metadata.",
-                );
-                return Ok(None);
-            }
-
-            // A Profile 8.4 base layer is HLG; rebuilding it would put a PQ (8.1) RPU on it.
-            if metadata::has_hlg_transfer(input_file) {
-                progress::print_error("Profile 8.4 (HLG base layer) --mdfix is not supported yet.");
-                return Ok(None);
-            }
-
-            progress::print_info(
-                "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
-            );
-            print_mdfix_notice(authored, args, input_file);
-            let clean_bl = extract_clean_base_layer(
+        HdrFormat::DolbyVisionP8 => rebuild_profile8(
+            input_file,
+            temp_dir,
+            args,
+            resume_enabled,
+            authored,
+            &mut measured,
+        )?,
+        HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
+            reuse_or_analyze(
                 input_file,
                 temp_dir,
-                "Extracting Profile 8 HEVC stream",
-                args,
-                resume_enabled,
-            )?;
-            bl_source_file = clean_bl.clone();
-
-            let mut extra_args = Vec::new();
-            add_optimizer_args(&mut extra_args, args);
-            // Same rationale as the MEL path: analyze the container so crop probing can seek.
-            measurements_file = run_hdr_analyzer(input_file, temp_dir, &extra_args, args)?;
-            if measurements_file.is_none() {
-                return Ok(None);
-            }
-            hdr_type = HdrFormat::Hdr10WithMeasurements;
-        }
-        HdrFormat::Hdr10WithMeasurements | HdrFormat::Hdr10Unsupported | HdrFormat::Hlg => {
-            // HLG goes to Profile 8.4: the base layer is the untouched source, and L1 must be
-            // measured through the Dolby Vision 8.4 reconstruction of the selected composer
-            // (sidecar v3+, `Composer::luminance_mapping`).
-            let hlg = hdr_type == HdrFormat::Hlg;
-            if hlg && args.legacy_madvr_l1 {
-                progress::print_error(
-                    "--legacy-madvr-l1 is not supported for HLG input: Profile 8.4 needs L1 measured through the Dolby Vision 8.4 mapping.",
-                );
-                return Ok(None);
-            }
-            // Reuse existing measurements only when their L1 sidecar is valid for this input
-            // (or the user explicitly asked for the legacy optimizer-target path). Every
-            // candidate is tried in turn, so a stale shared file cannot shadow a valid one.
-            let reuse = find_reusable_measurements(
-                input_path,
-                input_file,
                 args,
                 hlg_composer,
-                false,
-                &mut measurements_file,
-                &mut l1_sidecar,
-            );
-
-            if reuse {
-                if hlg {
-                    // HLG's step count assumes a fresh analysis.
-                    *total_steps -= 1;
-                }
-                progress::print_info("Using existing measurements file.");
-                if args.boost_experimental {
-                    progress::print_warn(
-                        "Experimental boost requested, but using existing measurements.",
-                    );
-                }
-            } else {
-                match run_fresh_analysis(
-                    input_file,
-                    temp_dir,
-                    args,
-                    hdr_type,
-                    hlg,
-                    hlg_composer,
-                    total_steps,
-                    current_step,
-                )? {
-                    Some(measurements) => measurements_file = Some(measurements),
-                    None => return Ok(None),
-                }
-            }
+                &mut measured,
+                total_steps,
+                current_step,
+            )?
         }
         HdrFormat::Unsupported => {
             // Already handled above
             unreachable!();
         }
+    };
+
+    Ok(proceed.then_some(measured))
+}
+
+/// The HDR10+ extraction step: keeps the metadata, or falls back to an HDR10 analysis when the
+/// input has none. False: the phase printed why; `acquire_measurements` returns `None`.
+fn extract_hdr10plus(
+    input_file: &str,
+    temp_dir: &Path,
+    args: &Args,
+    resume_enabled: bool,
+    hdr10plus_notice: Option<&str>,
+    measured: &mut Measured,
+    total_steps: &mut u8,
+    current_step: &mut u8,
+) -> bool {
+    *current_step += 1;
+    progress::print_step(
+        *current_step,
+        *total_steps,
+        "Extracting HEVC stream for HDR10+ analysis...",
+    );
+    match extract_hdr10plus_metadata(input_file, temp_dir, resume_enabled, args.stall_timeout) {
+        Ok(Some(json_path)) => {
+            // P5.1: the `--skip-reorder` fallback keeps the bitstream order; an explicit
+            // hybrid refuses it before any count or analysis, the other modes warned.
+            if measured.hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid
+                && extracted_with_skip_reorder(temp_dir)
+            {
+                progress::print_error(&skip_reorder_refusal());
+                return false;
+            }
+            // Printed here: a file with no dynamic metadata takes neither HDR10+ path.
+            if let Some(notice) = hdr10plus_notice {
+                progress::print_warn(notice);
+            }
+            // P9.4: hdr10plus_tool fills a frame without its own payload from the previous
+            // one; partial coverage or a failed count warns, and refuses only an explicit
+            // hybrid (P9.4, P9.5).
+            if !hdr10plus_coverage::check_extracted(
+                temp_dir,
+                &json_path,
+                resume_enabled,
+                measured.hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid,
+            ) {
+                return false;
+            }
+            // Before the analysis: an unusable structure should not cost a full run.
+            if measured.hdr10plus_mode.is_hybrid() {
+                if let Err(reason) = hybrid::check_hdr10plus_file(&json_path) {
+                    let Some(mode) = measured.hdr10plus_mode.after_failure(&reason) else {
+                        return false;
+                    };
+                    measured.hdr10plus_mode = mode;
+                }
+            }
+            measured.hdr10plus_json = Some(json_path);
+        }
+        Ok(None) => {
+            match hdr10plus_coverage::check_unextracted(
+                temp_dir,
+                resume_enabled,
+                measured.hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid,
+            ) {
+                Unextracted::Refused(reason) => {
+                    progress::print_error(&hdr10plus_coverage::unextracted_refusal(&reason));
+                    return false;
+                }
+                Unextracted::Unreadable(warning) => progress::print_warn(&warning),
+                Unextracted::NoPayloads => progress::print_warn(
+                    "HDR10+ tagged but no dynamic metadata found. Falling back to HDR10 analysis.",
+                ),
+            }
+            if measured.hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid {
+                progress::print_info(
+                    "--hdr10plus-l1 hybrid: without HDR10+ metadata the measured L1 alone is used.",
+                );
+            }
+            measured.hdr_type = HdrFormat::Hdr10Unsupported;
+            measured.hdr10plus_mode = Hdr10PlusMode::Metadata;
+        }
+        Err(error) => {
+            progress::print_error(&format!("HDR10+ metadata extraction failed: {error:#}"));
+            return false;
+        }
+    }
+    true
+}
+
+/// The HDR10+ hybrid: reuses or generates measurements beside the extracted metadata. False:
+/// the phase printed why; `acquire_measurements` returns `None`.
+fn measure_hdr10plus_hybrid(
+    input_file: &str,
+    temp_dir: &Path,
+    args: &Args,
+    measured: &mut Measured,
+    total_steps: &mut u8,
+    current_step: &mut u8,
+) -> Result<bool> {
+    // The HDR10+ metadata stays for the peaks; average, minimum and crop are measured.
+    // `convert_file` settled a sampling that skips frames before any temp work.
+    progress::print_info(
+        "HDR10+ hybrid: measuring the input for its average, minimum and active area (--hdr10plus-l1 hdr10plus skips this).",
+    );
+    let reuse = find_reusable_measurements(
+        Path::new(input_file),
+        input_file,
+        args,
+        None,
+        true,
+        &mut measured.measurements_file,
+        &mut measured.l1_sidecar,
+    );
+    if reuse {
+        progress::print_info("Using existing measurements file.");
+        measured.hdr_type = HdrFormat::Hdr10WithMeasurements;
+    } else {
+        // Without this check the run would end in `hybrid::check_measurements` after a
+        // full analysis, and that analysis would replace any measurements already here.
+        // The default checked this in `resolve_hdr10plus_mode`.
+        if measured.hdr10plus_mode == Hdr10PlusMode::ExplicitHybrid
+            && !analyzer_records_frame_peak()
+        {
+            progress::print_error(
+                "--hdr10plus-l1 hybrid needs an hdr_analyzer_mvp that records the \
+                 per-frame peak (sidecar v6), and this analyzer's --help does not name \
+                 it; rebuild or update hdr_analyzer_mvp.",
+            );
+            return Ok(false);
+        }
+        // Counted as an HDR10 analysis: `total_steps_for(Hdr10Plus)` has no analysis step.
+        let analysis = run_fresh_analysis(
+            input_file,
+            temp_dir,
+            args,
+            HdrFormat::Hdr10WithMeasurements,
+            false,
+            None,
+            total_steps,
+            current_step,
+        );
+        match (analysis, measured.hdr10plus_mode) {
+            (Ok(Some(measurements)), _) => {
+                measured.measurements_file = Some(measurements);
+                measured.hdr_type = HdrFormat::Hdr10WithMeasurements;
+            }
+            (Ok(None), Hdr10PlusMode::ExplicitHybrid) => return Ok(false),
+            (Err(error), Hdr10PlusMode::ExplicitHybrid) => return Err(error),
+            (Ok(None), mode) => {
+                measured.hdr10plus_mode = mode
+                    .after_failure("the analysis failed")
+                    .unwrap_or(Hdr10PlusMode::Metadata);
+            }
+            (Err(error), mode) => {
+                measured.hdr10plus_mode = mode
+                    .after_failure(&format!("the analysis failed ({error:#})"))
+                    .unwrap_or(Hdr10PlusMode::Metadata);
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// Profile 7 MEL under `--mdfix`: extracts the base layer and measures it afresh. False: the
+/// phase printed why; `acquire_measurements` returns `None`.
+fn rebuild_mel(
+    input_file: &str,
+    temp_dir: &Path,
+    args: &Args,
+    resume_enabled: bool,
+    authored: Option<&AuthoredLevels>,
+    measured: &mut Measured,
+) -> Result<bool> {
+    // Without --mdfix, convert_file took the fast path (convert_mel_fast_path) before
+    // this phase.
+    progress::print_info(
+        "Rebuilding Profile 7 MEL metadata from fresh base-layer measurements (--mdfix).",
+    );
+    print_mdfix_notice(authored, args, input_file);
+    let clean_bl = extract_clean_base_layer(
+        input_file,
+        temp_dir,
+        "Extracting Dolby Vision HEVC stream",
+        args,
+        resume_enabled,
+    )?;
+    measured.bl_source_file = clean_bl.clone();
+
+    let mut extra_args = Vec::new();
+    add_optimizer_args(&mut extra_args, args);
+    // Analyze the original container, not the raw Annex B stream: without a container
+    // duration the seek-based crop probes are unavailable and the in-stream fallback
+    // can commit a degenerate active area on dark openings. MEL base-layer pixels are
+    // identical in the source.
+    measured.measurements_file = run_hdr_analyzer(input_file, temp_dir, &extra_args, args)?;
+    if measured.measurements_file.is_none() {
+        return Ok(false);
+    }
+    measured.hdr_type = HdrFormat::Hdr10WithMeasurements;
+    Ok(true)
+}
+
+/// Profile 8 under `--mdfix`: refuses an 8.4 input, else extracts the base layer and measures it
+/// afresh. False: the phase printed why; `acquire_measurements` returns `None`.
+fn rebuild_profile8(
+    input_file: &str,
+    temp_dir: &Path,
+    args: &Args,
+    resume_enabled: bool,
+    authored: Option<&AuthoredLevels>,
+    measured: &mut Measured,
+) -> Result<bool> {
+    if !args.mdfix {
+        progress::print_warn(
+            "Profile 8 input is already converted; use `inspect` or --mdfix to rebuild metadata.",
+        );
+        return Ok(false);
     }
 
-    Ok(Some(Measured {
-        hdr_type,
-        measurements_file,
-        hdr10plus_json,
-        bl_source_file,
-        l1_sidecar,
-        hdr10plus_mode,
-    }))
+    // A Profile 8.4 base layer is HLG; rebuilding it would put a PQ (8.1) RPU on it.
+    if metadata::has_hlg_transfer(input_file) {
+        progress::print_error("Profile 8.4 (HLG base layer) --mdfix is not supported yet.");
+        return Ok(false);
+    }
+
+    progress::print_info(
+        "Rebuilding Profile 8 metadata from fresh base-layer measurements (--mdfix).",
+    );
+    print_mdfix_notice(authored, args, input_file);
+    let clean_bl = extract_clean_base_layer(
+        input_file,
+        temp_dir,
+        "Extracting Profile 8 HEVC stream",
+        args,
+        resume_enabled,
+    )?;
+    measured.bl_source_file = clean_bl.clone();
+
+    let mut extra_args = Vec::new();
+    add_optimizer_args(&mut extra_args, args);
+    // Same rationale as the MEL path: analyze the container so crop probing can seek.
+    measured.measurements_file = run_hdr_analyzer(input_file, temp_dir, &extra_args, args)?;
+    if measured.measurements_file.is_none() {
+        return Ok(false);
+    }
+    measured.hdr_type = HdrFormat::Hdr10WithMeasurements;
+    Ok(true)
+}
+
+/// HDR10 and HLG: reuses measurements whose L1 sidecar is valid for this input, else generates
+/// them. False: the phase printed why; `acquire_measurements` returns `None`.
+fn reuse_or_analyze(
+    input_file: &str,
+    temp_dir: &Path,
+    args: &Args,
+    hlg_composer: Option<Composer>,
+    measured: &mut Measured,
+    total_steps: &mut u8,
+    current_step: &mut u8,
+) -> Result<bool> {
+    // HLG goes to Profile 8.4: the base layer is the untouched source, and L1 must be
+    // measured through the Dolby Vision 8.4 reconstruction of the selected composer
+    // (sidecar v3+, `Composer::luminance_mapping`).
+    let hlg = measured.hdr_type == HdrFormat::Hlg;
+    if hlg && args.legacy_madvr_l1 {
+        progress::print_error(
+            "--legacy-madvr-l1 is not supported for HLG input: Profile 8.4 needs L1 measured through the Dolby Vision 8.4 mapping.",
+        );
+        return Ok(false);
+    }
+    // Reuse existing measurements only when their L1 sidecar is valid for this input
+    // (or the user explicitly asked for the legacy optimizer-target path). Every
+    // candidate is tried in turn, so a stale shared file cannot shadow a valid one.
+    let reuse = find_reusable_measurements(
+        Path::new(input_file),
+        input_file,
+        args,
+        hlg_composer,
+        false,
+        &mut measured.measurements_file,
+        &mut measured.l1_sidecar,
+    );
+
+    if reuse {
+        if hlg {
+            // HLG's step count assumes a fresh analysis.
+            *total_steps -= 1;
+        }
+        progress::print_info("Using existing measurements file.");
+        if args.boost_experimental {
+            progress::print_warn("Experimental boost requested, but using existing measurements.");
+        }
+    } else {
+        match run_fresh_analysis(
+            input_file,
+            temp_dir,
+            args,
+            measured.hdr_type,
+            hlg,
+            hlg_composer,
+            total_steps,
+            current_step,
+        )? {
+            Some(measurements) => measured.measurements_file = Some(measurements),
+            None => return Ok(false),
+        }
+    }
+    Ok(true)
 }
 
 /// Tries every existing measurements candidate in turn and keeps the first whose L1 sidecar is
