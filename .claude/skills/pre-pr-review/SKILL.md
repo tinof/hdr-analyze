@@ -93,6 +93,7 @@ since 2026-11-14 (owner): on the 14 cases of `.claude/review-eval/cases.json` (2
 `gemini-4-hydrogen-high` reported 1 as P0/P1 and 2 as minor notes in 39 minutes, with no false
 alarm on the controls. Argon medium found none, Argon high 2 minor in 10 cases, Carbon medium
 (diff only) 2 minor in 10 cases, Hydrogen xhigh 2 P0/P1 and 1 minor in 12 cases.
+Since 2026-11-19 (owner) the pass runs `gemini-4-neon-high`, not yet measured on these cases.
 
 Skip it too when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run, as a background Bash:
 
@@ -100,7 +101,7 @@ Skip it too when every scope file matches `\.md$|^docs/|^LICENSE`. Otherwise run
 .claude/workflows/pre-pr-gemini.sh origin/<base> <scratchpad> <scratchpad>/prepr-scope.md
 ```
 
-The script runs `agy` (Antigravity CLI) with `gemini-4-hydrogen-high` in print mode, which
+The script runs `agy` (Antigravity CLI) with `gemini-4-neon-high` in print mode, which
 denies every file write and read outside the workspace, and with the repo agent
 `.agents/agents/pre-pr-reviewer.md` (tools `view_file`, `run_command`, `finish`). Its
 `run_command` goes through the read-only guard `~/.gemini/hooks/review-readonly.py`, which allows
