@@ -89,14 +89,14 @@ if want ok; then
     check_sh "print mode stays read-only" 'grep -qx -- --sandbox "$fake/a1.args" && grep -qx plan "$fake/a1.args"'
     check_sh "agy runs with AGY_ORCHESTRATOR=claude" 'grep -qx claude "$fake/a1.orchestrator"'
     check_sh "agy runs under the timeout backstop" '[ "$(command cat "$fake/a1.parent")" = timeout ]'
-    check_sh "default model passed to agy" '[ "$(model_arg)" = gemini-4-hydrogen-high ]'
-    check "default model recorded" '.model == "gemini-4-hydrogen-high"'
+    check_sh "default model passed to agy" '[ "$(model_arg)" = gemini-4-neon-high ]'
+    check "default model recorded" '.model == "gemini-4-neon-high"'
 fi
 
 if want model; then
     run_case model ok PRE_PR_GEMINI_MODEL=fake-model-x
     check_sh "PRE_PR_GEMINI_MODEL overrides the default" '[ "$(model_arg)" = fake-model-x ]'
-    check_sh "the default model is not passed" '! grep -qx gemini-4-hydrogen-high "$fake/a1.args"'
+    check_sh "the default model is not passed" '! grep -qx gemini-4-neon-high "$fake/a1.args"'
     check "override recorded" '.ok == true and .model == "fake-model-x"'
 fi
 
