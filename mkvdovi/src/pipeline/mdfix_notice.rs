@@ -40,28 +40,13 @@ pub(super) fn print_mdfix_notice(authored: Option<&AuthoredLevels>, args: &Args,
 /// The notice lines: a header, then one line per authored level the rebuild does not keep.
 /// `None`: the source RPU could not be sampled; the header lists what `--mdfix` always does.
 /// `resolved_primaries`: the L9 index a CM v4.0 rebuild writes; `None` when it is not known.
-#[expect(clippy::too_many_lines, reason = "E13.17: split by phase")]
 pub(super) fn mdfix_notice(
     authored: Option<&AuthoredLevels>,
     args: &Args,
     resolved_primaries: Option<u8>,
 ) -> Vec<String> {
     let Some(authored) = authored else {
-        return vec![format!(
-            "--mdfix rebuilds the whole RPU (L1 is measured again). The source RPU could not be \
-             sampled, so in general: {}, L5 is reduced to one active area, and L6 comes from the \
-             container and the measurements.",
-            match args.cm_version {
-                CmVersion::V40 => {
-                    "authored L2 trims are replaced by neutral trims, L3 becomes neutral, L4, L8, \
-                     L10 and L255 are dropped, L9, L11 and L254 are rebuilt"
-                }
-                CmVersion::V29 => {
-                    "authored L2 trims are dropped, L3, L8, L9, L10, L11 and L254 are dropped \
-                     (a CM v2.9 RPU has no CM v4.0 levels), L4 and L255 are dropped"
-                }
-            }
-        )];
+        return vec![unsampled_notice(args)];
     };
     let windows = authored.windows;
     let mut lines = vec![format!(
@@ -71,6 +56,40 @@ pub(super) fn mdfix_notice(
     )];
     let v40 = args.cm_version == CmVersion::V40;
 
+    push_l2_to_l8_lines(&mut lines, authored, args, v40);
+    push_l9_lines(&mut lines, authored, args, v40, resolved_primaries);
+    push_l10_to_l255_lines(&mut lines, authored, args, v40);
+    if lines.len() == 1 {
+        lines[0] = format!(
+            "--mdfix rebuilds the whole RPU (L1 is measured again). No other authored metadata \
+             that the rebuild drops was seen in {windows} sampled window{} of the source RPU.",
+            if windows == 1 { "" } else { "s" }
+        );
+    }
+    lines
+}
+
+/// The single notice line when the source RPU could not be sampled.
+fn unsampled_notice(args: &Args) -> String {
+    format!(
+        "--mdfix rebuilds the whole RPU (L1 is measured again). The source RPU could not be \
+         sampled, so in general: {}, L5 is reduced to one active area, and L6 comes from the \
+         container and the measurements.",
+        match args.cm_version {
+            CmVersion::V40 => {
+                "authored L2 trims are replaced by neutral trims, L3 becomes neutral, L4, L8, \
+                 L10 and L255 are dropped, L9, L11 and L254 are rebuilt"
+            }
+            CmVersion::V29 => {
+                "authored L2 trims are dropped, L3, L8, L9, L10, L11 and L254 are dropped \
+                 (a CM v2.9 RPU has no CM v4.0 levels), L4 and L255 are dropped"
+            }
+        }
+    )
+}
+
+/// The lines for L2, L3, L4, L5, L6 and L8.
+fn push_l2_to_l8_lines(lines: &mut Vec<String>, authored: &AuthoredLevels, args: &Args, v40: bool) {
     if !authored.l2_trims.is_empty() {
         let source = nits_list(authored.l2_trims.iter().map(|&pq| pq_label(pq)));
         lines.push(if v40 {
@@ -117,6 +136,17 @@ pub(super) fn mdfix_notice(
             .collect();
         lines.push(format!("L8 trims for {}: dropped", targets.join(", ")));
     }
+}
+
+/// The L9 line: dropped under CM v2.9; under CM v4.0 the authored primaries that differ from
+/// `resolved_primaries`, or a rebuild note when those are not known.
+fn push_l9_lines(
+    lines: &mut Vec<String>,
+    authored: &AuthoredLevels,
+    args: &Args,
+    v40: bool,
+    resolved_primaries: Option<u8>,
+) {
     if !authored.l9.is_empty() && !v40 {
         lines.push(format!(
             "L9 primaries {}: {V29_DROPPED}",
@@ -150,6 +180,15 @@ pub(super) fn mdfix_notice(
             )),
         }
     }
+}
+
+/// The lines for L10, L11, L254 and L255.
+fn push_l10_to_l255_lines(
+    lines: &mut Vec<String>,
+    authored: &AuthoredLevels,
+    args: &Args,
+    v40: bool,
+) {
     if !authored.l10_targets.is_empty() {
         let indices = join(authored.l10_targets.keys().map(|index| index.to_string()));
         lines.push(format!("L10 custom target displays {indices}: dropped"));
@@ -193,14 +232,6 @@ pub(super) fn mdfix_notice(
     if authored.l255 {
         lines.push("L255: dropped".to_string());
     }
-    if lines.len() == 1 {
-        lines[0] = format!(
-            "--mdfix rebuilds the whole RPU (L1 is measured again). No other authored metadata \
-             that the rebuild drops was seen in {windows} sampled window{} of the source RPU.",
-            if windows == 1 { "" } else { "s" }
-        );
-    }
-    lines
 }
 
 fn join(items: impl Iterator<Item = String>) -> String {
