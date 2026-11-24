@@ -54,18 +54,19 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-25 at main@c8a9b4f)
-<!-- roadmap-next: rev=7 scope=all config=0c8d247b8c5a probes=gpu:ok,corpus:ok ready=41c122e8c206 -->
+<!-- roadmap-next: rev=7 scope=all config=0c8d247b8c5a probes=gpu:ok,corpus:ok ready=2c70e206e4e0 -->
 
-Order: the Focus (steering 2026-11-18); WS7.1 is done, so WS6.10 is the one Focus step.
+Order: the Focus (steering 2026-11-18); WS7.1 and WS6.10 are done, so the queue follows.
 
-1. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: the Focus;
-   unblocks the WS6.11 viewing and P10.5's gate. Branch: `docs/ws6-10-pulse-files`. Release: none
-2. **P10.3 Decide whether to write L1 in-process** (priority 3). Gate: the step gate. Why: the
+1. **P10.3 Decide whether to write L1 in-process** (priority 3). Gate: the step gate. Why: the
    highest startable step outside the Focus, unblocked by WS7.1; see its Checked bullet first.
    Branch: `docs/p10-3-unclamped-l1`. Release: none
-3. **P6.3 Check a Profile 8 record against its RPU** (priority 4). Gate: fixture tests on both
+2. **P6.3 Check a Profile 8 record against its RPU** (priority 4). Gate: fixture tests on both
    sides; RPU baselines byte-identical. Why: the next conversion fix. Branch:
    `fix/p6-3-p8-record-vs-rpu`. Release: patch
+
+**Reassess:** owner-decision (WS6.10, PR #146): the pulse files are on forplex, so WS6.11 waits
+for the owner's C9 viewing, and the Focus has no startable step left.
 
 ### Waiting for the owner
 
@@ -503,9 +504,9 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open. The `code / 1023` question is answered for the C9 and the bt2100 fit stays
-  ([log](docs/ROADMAP_LOG.md), 2026-10-29). Open: WS6.1, WS6.9 (metered; method in
-  [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests"), WS6.10, WS6.11.
+- **Status:** Open. The `code / 1023` question is answered for the C9 and the bt2100 fit stays;
+  the pulse files are built ([log](docs/ROADMAP_LOG.md), 2026-11-25). Open: WS6.1, WS6.9
+  (metered; method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests"), WS6.11 (owner).
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -529,25 +530,8 @@ The detailed gap table and validation method live in
   (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
   tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
   rules (`PREREG.md` draft 2). Needs: WS6.8. Landed: PR #80; gate pending.
-- [WS6.10][desk] Pulse files, one per level: a fixed pattern under RPUs that alternate one level
-  (L1 min, max, avg; each L2 target; L6; L11) and a null-RPU control, from `dovi_rpu_builder`, as a
-  Plex show. Gate: libplacebo pulses on L1 max and avg and is steady on the control.
 - [WS6.11][owner][reassess] View the pulse files on the LG OLED C9. Gate: pulse or steady per
   level, recorded in the log. Needs: WS6.10.
-- **Checked 2026-11-25 @c8a9b4f:** the 7.387.0 pin is a curve-only build (no Vulkan, no libdovi:
-  `scripts/build-libplacebo.sh:29`); the renders run through ffmpeg n9.0.2's vf_libplacebo,
-  v7.374.0, so its version goes into `versions.txt`. `dovi_rpu_builder` clamps L1
-  (`builder.rs:48`) and writes only neutral L2 (`params.rs:87`). Renders need `peak_detect=0`, a
-  tone-mapping curve (not the clip recipe) and an L1 avg above 0.
-- **Decided 2026-11-25 (agent, recommended; owner may override):** the WS6.10 generator stays in
-  the work directory, as WS6.8's did: each frame's RPU comes from `dovi_rpu_builder` and one level
-  is then edited with `dolby_vision`; no builder API change, not an in-repo tool.
-- **Decided 2026-11-25 (agent, recommended; owner may override):** the "null-RPU control" is the
-  base RPU held constant, with scene refresh on the same frames as the pulse files, so a refresh
-  flicker cannot read as a level response; not a file without an RPU.
-- **Decided 2026-11-25 (agent, recommended; owner may override):** one knob per level: L2 pulses
-  `trim_slope` 2048 → 3072 per target, L6 the mastering peak and MaxCLL, L11 `content_type` and
-  `whitepoint` together; not every L2 field.
 
 ### WS7: evaluation in displayed-picture units
 

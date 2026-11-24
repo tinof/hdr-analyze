@@ -6,6 +6,45 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-25: WS6.10 Pulse files, one per level (PR #146)
+
+Step: - [WS6.10][desk] Pulse files, one per level: a fixed pattern under RPUs that alternate one level
+  (L1 min, max, avg; each L2 target; L6; L11) and a null-RPU control, from `dovi_rpu_builder`, as a
+  Plex show. Gate: libplacebo pulses on L1 max and avg and is steady on the control.
+
+Gate evidence, PR #146: one lossless 4K PQ pattern (12 greys from 0.05 to 1000 nits, four from 1500
+to 4000 nits, six BT.2020 colours) is the base layer of nine 30 s files. Each pulse file alternates
+one level every 2 s: L1 max 3696 ↔ 3079 codes, L1 avg 1500 ↔ 2400, L1 min 0 ↔ 1000; `trim_slope`
+2048 ↔ 3072 of the 100-, 600- and 1000-nit L2 targets; L6 mastering peak and MaxCLL 4000 ↔ 1000
+nits; L11 `content_type` 1 ↔ 2 with `whitepoint` 0 ↔ 8. Base L1 is 0 / 1500 / 3696. Renders with
+ffmpeg n9.0.2's vf_libplacebo v7.374.0 (`peak_detect=0`, spline curve, SDR BT.2020 target) of the
+middle frame of four phases: the 100-nit grey moves +4259 (16-bit) under the L1 max pulse and
+−8152 under the L1 avg pulse; the control's four renders are byte-identical, and so are those of
+L1 min, the three L2 files, L6 and L11 (libplacebo does not read them). Per file: the extracted RPU
+equals the written one byte for byte, the base layer equals the pattern's (slice data and
+parameter sets), all 750 decoded frames equal the pattern frame, every frame matches the plan and
+differs from the control only in the pulsed level in phase B, and `dovi_tool info` shows only the
+intended fields changed. The container record reads Profile 8.1, `dvhe.08.07`, BL+RPU. Evidence:
+`~/mkvdovi-work/ws6-pulse-2026-11-25/` (`run.sh`, `gate.txt`, `build_checks.txt`, `versions.txt`;
+the episode key stays there to keep the viewing blind). Delivered to forplex as "WS6 Pulse",
+Season 01.
+
+Decisions (agent, recommended; owner may override), moved from the item:
+- The generator stays in the work directory, as WS6.8's did: each frame's RPU comes from
+  `dovi_rpu_builder` and one level is then edited with `dolby_vision`; no builder API change, not
+  an in-repo tool.
+- The "null-RPU control" is the base RPU held constant, with scene refresh on the same frames as
+  the pulse files, so a refresh flicker cannot read as a level response; not a file without an RPU.
+- One knob per level: L2 pulses `trim_slope` per target, L6 the mastering peak and MaxCLL, L11
+  `content_type` and `whitepoint` together (a pulse there will not tell which field acted); not
+  every L2 field.
+
+Checked 2026-11-25 @c8a9b4f: the 7.387.0 pin of `scripts/build-libplacebo.sh` is a curve-only build
+(no Vulkan, no libdovi, `:29`), so renders run through ffmpeg's vf_libplacebo 7.374.0; renders need
+`peak_detect=0`, a tone-mapping curve (not the clip recipe) and an L1 avg above 0.
+
+Resolution: the pulse files are built and handed off; WS6.11 (the owner's C9 viewing) is next.
+
 ### 2026-11-19: E13.14 Split `acquire_measurements` by phase (PR #141)
 
 Step: - [E13.14][corpus][batch] Split `acquire_measurements` (`mkvdovi/src/pipeline/measure.rs`, 221 lines) by
