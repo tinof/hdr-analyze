@@ -76,6 +76,12 @@ result.
 - **Control.** One file in the group is the normal mkvdovi output for the same base layer.
 - **No plain HLG file as a reference through Plex.** In P8, Plex played a plain HLG file as SDR,
   so a plain HLG file only goes in when the player path is known to signal HLG.
+- **Pulse files** (WS6.10, 2026-11-25). A test of whether a level is applied alternates that one
+  level every 2 s over one still pattern, and every file, the control included, sets scene
+  refresh on the same frames. Its reference render uses `peak_detect=0` and the spline curve
+  with an SDR target, since clip tone mapping cannot respond to L1. ffmpeg n9.0.2's
+  vf_libplacebo is v7.374.0, not the 7.387.0 that `scripts/build-libplacebo.sh` pins for the
+  curves.
 - **Reference renders.** libplacebo with pinned settings: `apply_dolbyvision=1`,
   `upscaler=bilinear`, clip tone mapping and clip gamut mapping for numeric checks. The libplacebo
   version goes into `versions.txt`. With its default chroma upscaler, vf_libplacebo v7.374.0

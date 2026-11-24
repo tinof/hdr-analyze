@@ -77,6 +77,9 @@ eyes or hardware after a startable step has prepared it, a gate not stated, and 
 release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
+- **WS6.11: view the pulse files** (forplex "WS6 Pulse", Season 01, 9 episodes of 30 s; its
+  `VIEWING_GUIDE.txt`), built by WS6.10 on 2026-11-25; episode key, gate renders and `run.sh` in
+  `~/mkvdovi-work/ws6-pulse-2026-11-25/`.
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
@@ -536,6 +539,15 @@ The detailed gap table and validation method live in
   v7.374.0, so its version goes into `versions.txt`. `dovi_rpu_builder` clamps L1
   (`builder.rs:48`) and writes only neutral L2 (`params.rs:87`). Renders need `peak_detect=0`, a
   tone-mapping curve (not the clip recipe) and an L1 avg above 0.
+- **Decided 2026-11-25 (agent, recommended; owner may override):** the WS6.10 generator stays in
+  the work directory, as WS6.8's did: each frame's RPU comes from `dovi_rpu_builder` and one level
+  is then edited with `dolby_vision`; no builder API change, not an in-repo tool.
+- **Decided 2026-11-25 (agent, recommended; owner may override):** the "null-RPU control" is the
+  base RPU held constant, with scene refresh on the same frames as the pulse files, so a refresh
+  flicker cannot read as a level response; not a file without an RPU.
+- **Decided 2026-11-25 (agent, recommended; owner may override):** one knob per level: L2 pulses
+  `trim_slope` 2048 → 3072 per target, L6 the mastering peak and MaxCLL, L11 `content_type` and
+  `whitepoint` together; not every L2 field.
 
 ### WS7: evaluation in displayed-picture units
 
