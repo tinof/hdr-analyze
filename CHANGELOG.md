@@ -95,6 +95,10 @@ This document provides a historical record of completed milestones, feature impl
 
 ### Fixed
 
+- `hdr_analyzer_mvp` builds against FFmpeg 9.1 again (Homebrew's current FFmpeg). `ffmpeg-next`
+  9.0.0 → 9.1.0 and `ffmpeg-sys-next` 9.0.0 → 9.1.1; the `ffmpeg-next` requirement is now 9.1.
+  Before, bindgen failed on FFmpeg 9.1's `hwcontext_cuda.h` and the 9.1 enum variants broke the
+  build. Analysis output is unchanged.
 - `hdr_analyzer_mvp --hwaccel cuda` with CPU analysis (a build without the `cuda` feature,
   `--pre-denoise median3`, or a CUDA start that fails) now measures what software decode measures
   (ROADMAP E12.2). At `--downscale 1` it copies the NVDEC P010 frames into its analysis frames with
