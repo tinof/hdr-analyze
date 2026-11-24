@@ -53,25 +53,20 @@ confirms the block instead of re-ranking unless something changed (its ready que
 `file:line`) on each examined item lets a later run re-check only what changed since that commit.
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
-### Next up (checked 2026-11-18 at main@0bf2704)
-<!-- roadmap-next: rev=7 scope=all config=15c89b466bfb probes=gpu:ok,corpus:ok ready=fd9d1776acc8 -->
+### Next up (checked 2026-11-25 at main@c8a9b4f)
+<!-- roadmap-next: rev=7 scope=all config=0c8d247b8c5a probes=gpu:ok,corpus:ok ready=2c70e206e4e0 -->
 
-Order: the Focus (steering 2026-11-18), WS7.1 then WS6.10, to unblock priority 3.
+Order: the Focus (steering 2026-11-18); WS7.1 and WS6.10 are done, so the queue follows.
 
-1. **WS6.10 Pulse files, one per level** (priority 11). Gate: the step gate. Why: Focus 2;
-   unblocks the WS6.11 viewing and P10.5's gate. Branch: `feat/ws6-10-pulse-files`. Release: none
+1. **P10.3 Decide whether to write L1 in-process** (priority 3). Gate: the step gate. Why: the
+   highest startable step outside the Focus, unblocked by WS7.1; see its Checked bullet first.
+   Branch: `docs/p10-3-unclamped-l1`. Release: none
 2. **P6.3 Check a Profile 8 record against its RPU** (priority 4). Gate: fixture tests on both
-   sides; RPU baselines byte-identical. Why: first startable step outside the Focus. Branch:
+   sides; RPU baselines byte-identical. Why: the next conversion fix. Branch:
    `fix/p6-3-p8-record-vs-rpu`. Release: patch
 
-- Recheck before WS6.10: the same libplacebo pin; `dovi_rpu_builder` clamps L1 (`L1::clamped`,
-  `dovi_rpu_builder/src/builder.rs:48`) and writes only neutral L2 (`params.rs:87`), so the pulse
-  RPUs need builder work (Tier 2) or a tool on `dolby_vision`. Renders need peak detection off;
-  an L1 avg of 0 makes the renderer fall back to the static HDR10 metadata.
-
-**Reassess:** plan-changed (WS7.1, PR #140): a libplacebo 7.387.0 render applies a dynamic target
-and an exposure change even on the WS7 gate scenario (target 1027 nits, exposure 0.973) and runs
-peak detection by default, so WS7.2's renders need peak detection off and must state the exposure.
+**Reassess:** owner-decision (WS6.10, PR #146): the pulse files are on forplex, so WS6.11 waits
+for the owner's C9 viewing, and the Focus has no startable step left.
 
 ### Waiting for the owner
 
@@ -83,6 +78,9 @@ eyes or hardware after a startable step has prepared it, a gate not stated, and 
 release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
+- **WS6.11: view the pulse files** (forplex "WS6 Pulse", Season 01, 9 episodes of 30 s; its
+  `VIEWING_GUIDE.txt`), built by WS6.10 on 2026-11-25; episode key, gate renders and `run.sh` in
+  `~/mkvdovi-work/ws6-pulse-2026-11-25/`.
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
 - **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
   C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
@@ -253,10 +251,11 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
   Gate: fixture tests on both sides; RPU baselines byte-identical.
 - [P6.4][corpus] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
   conversion drops. Gate: the item's step 2 gate.
-- **Checked 2026-11-17 @a07c7c7:** C1 and C3 sit behind the early return of `resolve_light_levels`
-  (`mkvdovi/src/metadata/static_metadata.rs:195`); C4 and C7 read the HDR10+ JSON as
-  `pipeline/hdr10plus.rs` (`:109`) does, and under the hybrid a MaxScl of 0 takes the measured peak
-  (`pipeline/hybrid.rs:361`); C5 needs the sampled L6 out of the sample (`pipeline/measure.rs:134`).
+- **Checked 2026-11-25 @c8a9b4f:** P6.2's anchors hold (`static_metadata.rs:195`,
+  `pipeline/hdr10plus.rs:109`, `pipeline/hybrid.rs:361`); the sampled L6 moved to
+  `pipeline/measure.rs:172` in E13.14. For P6.3: `check_hdr_format` returns `DolbyVisionP8` from
+  the MediaInfo text alone, before any RPU is read (`mkvdovi/src/metadata/format.rs:55`), so its
+  tests need a record that contradicts the RPU, not only the post-mux `--verify` check.
 
 ### P8: HLG → Profile 8.4 composer
 
@@ -296,6 +295,11 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
 - [P10.5][owner] Decide whether the measured L1 minimum reaches the RPU (`dovi_tool generate` writes
   at most 12). WS7 cannot judge it: libplacebo does not read L1 min (split from P10.3, owner,
   2026-11-07). Gate: TODO(owner). Needs: WS6.11.
+- **Checked 2026-11-25 @c8a9b4f:** the simulator may not reach P10.3's gate: it raises the input
+  peak to the panel peak (`tools/display_sim/src/tm_shim.c:132`), and an L1 max below the panel
+  peak changes nothing on every curve (`gate_tests.rs:149`). A sub-100-nit max clamped to 2081
+  codes stays at or below the 100-, 600- and 1000-nit panels, so first find a scenario where the
+  clamp shows; if none exists, the gate is the owner's to restate.
 
 ### P12: L6 mastering display fidelity
 
@@ -500,9 +504,9 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open. The `code / 1023` question is answered for the C9 and the bt2100 fit stays
-  ([log](docs/ROADMAP_LOG.md), 2026-10-29). Open: WS6.1, WS6.9 (metered; method in
-  [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests"), WS6.10, WS6.11.
+- **Status:** Open. The `code / 1023` question is answered for the C9 and the bt2100 fit stays;
+  the pulse files are built ([log](docs/ROADMAP_LOG.md), 2026-11-25). Open: WS6.1, WS6.9
+  (metered; method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests"), WS6.11 (owner).
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -526,9 +530,6 @@ The detailed gap table and validation method live in
   (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
   tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
   rules (`PREREG.md` draft 2). Needs: WS6.8. Landed: PR #80; gate pending.
-- [WS6.10][desk] Pulse files, one per level: a fixed pattern under RPUs that alternate one level
-  (L1 min, max, avg; each L2 target; L6; L11) and a null-RPU control, from `dovi_rpu_builder`, as a
-  Plex show. Gate: libplacebo pulses on L1 max and avg and is steady on the control.
 - [WS6.11][owner][reassess] View the pulse files on the LG OLED C9. Gate: pulse or steady per
   level, recorded in the log. Needs: WS6.10.
 
@@ -554,6 +555,9 @@ The detailed gap table and validation method live in
   libplacebo is pinned at 7.387.0 (`scripts/build-libplacebo.sh`); a render matches the curve only
   with peak detection off ([`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md)); host limits in
   [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md#ws7-open).
+- **Checked 2026-11-25 @c8a9b4f:** from WS7.1 (PR #140): a 7.387.0 render maps a frame whose L1 max
+  exceeds the display peak into a dynamic target with an exposure change (1027 nits, exposure
+  0.973 on the gate scenario), so WS7.2 states the exposure of every render.
 
 ### WS8: test material
 
