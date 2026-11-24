@@ -1,6 +1,6 @@
 ---
 name: ship-reviewer
-description: Read-only Gemini code reviewer for the /ship pre-merge review (scripts/agy-review.sh of the ship skill). Selected only with --agent; never delegate to it.
+description: Read-only Gemini code reviewer for the /ship:land pre-merge review (scripts/agy-review.sh of the ship skill). Selected only with --agent; never delegate to it.
 tools:
   - view_file
   - run_command

@@ -1,6 +1,6 @@
 # Workflow contract
 
-What `/ship`, `/ship:roadmap-next` and `/ship:roadmap-init` need to know about this repository. The schema,
+What `/ship:land`, `/ship:roadmap-next` and `/ship:roadmap-init` need to know about this repository. The schema,
 with every key and section, is `~/.claude/skills/ship/reference/contract.md`. Keep every `##` heading
 exactly as written: the skills look sections up by name. A missing section, or one whose body is `none`,
 turns that part off. A diff that touches this file is always Tier 2.
@@ -193,7 +193,7 @@ together. A builder agent (`opus-professor`, `fable-builder`) works under a hold
 `<git dir>/claude-builder.<run>.hold`, which `.claude/hooks/rust-check.sh` honors.
 
 `/ship:roadmap-batch` (contract 1.2, owner decisions 2026-11-15). `self-review` is left out on purpose, so
-a batch runs in routed mode: Claude builds, and each PR gets `/ship`'s review by the routing row before it
+a batch runs in routed mode: Claude builds, and each PR gets `/ship:land`'s review by the routing row before it
 merges (Gemini while Codex is disabled). Batch builds only steps tagged `[batch]` in `ROADMAP.md`. It does
 not read the Release plan or the E13 sequencing rule, so a step that either one holds back stays untagged.
 `## Unattended` is `none`: the repository deploys no service, and the pure moves E13.18 and E13.19 keep the
@@ -208,24 +208,24 @@ stays parked; the owner decides when a new result justifies the default rows. Ti
 the round stays Tier 2 as `tier2Mode: single-family`, and both surfaces must complete. A diff that touches
 this file is reviewed under the base's routing and surfaces, and still shows the owner its diff before
 the merge. The standalone
-`/pre-pr-review` Gemini pass is not part of `/ship` and runs only with `--gemini`; the `gemini-harness` entry stays
-in `## Gates`, which `/ship` still runs when its paths change.
+`/pre-pr-review` Gemini pass is not part of `/ship:land` and runs only with `--gemini`; the `gemini-harness` entry stays
+in `## Gates`, which `/ship:land` still runs when its paths change.
 
 `review-surfaces: exec github` (contract 1.1, ship plugin 1.3.0): the `codex` reviewer is the local cold
 `codex exec` pass and Codex's GitHub review (`chatgpt-codex-connector[bot]`, connected for this repo at
-chatgpt.com/settings/code-review on 2026-10-24). Automatic review did not fire on #70 or #71, so `/ship`
+chatgpt.com/settings/code-review on 2026-10-24). Automatic review did not fire on #70 or #71, so `/ship:land`
 waits a minute and then posts one `@codex review` per reviewed head. The GitHub review is not cold: it
 reads the PR text and `AGENTS.md`. It needs a check suite on the head for its push time; the CI
 `changes` job gives every PR one. A fix diff (step 9) is re-reviewed on exec only.
 
 `## Gates` and `## Tier 2 paths` copy the path rules of `.claude/workflows/pre-pr-panel.js` (the gate set
 near the top, `highRisk` below it). Keep the two in sync: a path added on one side goes to the other in the
-same PR. `/pre-pr-review` standalone still computes its gates from the workflow; `/ship` reads them here.
+same PR. `/pre-pr-review` standalone still computes its gates from the workflow; `/ship:land` reads them here.
 
 The `## Code Review Rules` section of `AGENTS.md` is the one source of repo review rules for Codex: its
 GitHub review reads it natively, and the `/pre-pr-review` Codex pass takes it from the base. The `contracts`
 lens in `.claude/workflows/pre-pr-panel.js` covers the same contracts for the Claude panel and stays as it
-is. The review eval that was to decide whether `/ship`'s exec prompt also carries these rules
+is. The review eval that was to decide whether `/ship:land`'s exec prompt also carries these rules
 (`.claude/review-eval/cases.json`) was stopped at 13 of 56 runs on 2026-10-25 to save Codex quota, so
 the exec prompt stays without them (`--no-rules`); the status and how to resume are in
 `~/mkvdovi-work/review-eval/2026-10-24/STATUS.md`. When a rule changes, check the lens in the same PR.
@@ -237,7 +237,7 @@ check of `scripts/ci/check-test-skips.sh`.
 
 `cuda-parity` is not in CI (no GPU runner). Off the CUDA host it stays pending, the PR gets
 `review:needs-human`, and the owner decides. `clippy-cuda`, `l1-regression`, `tool:l1_diff`,
-`tool:display_sim` and `gemini-harness` also run in CI; they are `local` so that a failure stops `/ship` before the push. In CI the
+`tool:display_sim` and `gemini-harness` also run in CI; they are `local` so that a failure stops `/ship:land` before the push. In CI the
 Rust jobs skip on a PR that changes only `gate-skip` paths, and `gemini-harness` runs only when its paths change.
 `pre-pr-record` (the test of `/pre-pr-review`'s record cleanup), `reviewer-yield` (the test of its
 reviewer-yield observer), `rust-check-hook` (the Stop hook's builder-hold test) and `panel-trigger` (the

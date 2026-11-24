@@ -29,7 +29,7 @@ env:
 jobs:
   # Which jobs this run needs (scripts/ci/ci-changes.sh). A pull request that changes only
   # Markdown, docs/ or LICENSE skips the Rust jobs, and this job is then its one passing check
-  # (/ship needs at least one). push and workflow_dispatch run everything, the weekly schedule
+  # (/ship:land needs at least one). push and workflow_dispatch run everything, the weekly schedule
   # only the advisory jobs. When the file list cannot be read, every job runs.
   changes:
     name: Changes
