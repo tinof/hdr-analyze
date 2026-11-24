@@ -12,7 +12,7 @@ how an edit is made; the release workflow is in [RELEASING.md](RELEASING.md).
   (Ubuntu/macOS/Windows) side by side. The build does not wait for test.
 - **`changes`** (`scripts/ci/ci-changes.sh`, tested by `scripts/ci/tests/ci-changes-test.sh` in the
   same job) reads the PR's files. A PR that changes only `*.md`, `docs/` or `LICENSE` (the
-  `gate-skip` set) skips every Rust job, and `changes` is then its one passing check. `/ship` needs
+  `gate-skip` set) skips every Rust job, and `changes` is then its one passing check. `/ship:land` needs
   at least one check, so never move this filtering to workflow-level `paths:`. `gemini-harness`
   runs only when its gate paths change; `cargo audit`/`cargo deny` on PRs only when a manifest, a
   `Cargo.lock` or `deny.toml` changes. When the file list cannot be read, every job runs.
@@ -104,7 +104,7 @@ hooks run only where pre-commit is installed
   wired in `~/.claude/settings.json`) reads `.claude/workflow.md` "## Size limits" and notes a
   touched `.rs` file over 800 code lines, or `CLAUDE.md`, `AGENTS.md` or `ROADMAP.md` over its byte
   budget, once per session; it never blocks. It is not part of this
-  repo: a host without the synced plugin gets no note, and `/ship` still runs the same check.
+  repo: a host without the synced plugin gets no note, and `/ship:land` still runs the same check.
 - **Kernel PTX check:** the lint job installs the NVRTC 12.6.77 pip wheel, pinned by hash in
   `scripts/ci/nvrtc-requirements.txt`, and runs `scripts/gen-kernels-ptx.sh --check`: the
   committed `hdr_analyzer_mvp/src/analysis/kernels.ptx` must be that NVRTC's output for

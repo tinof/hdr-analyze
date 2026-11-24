@@ -27,7 +27,7 @@ steps from before the step format are cited in the log as "<item> step <n>", not
 |---|---|
 | `desk` | Code or doc work; needs nothing |
 | `owner` | Needs the owner: a decision, material or a test only they can run |
-| `reassess` | A stop point: its outcome decides what follows, so `/ship` writes a **Reassess** line in Next up when it closes the step and the next `/ship:roadmap-next` re-plans |
+| `reassess` | A stop point: its outcome decides what follows, so `/ship:land` writes a **Reassess** line in Next up when it closes the step and the next `/ship:roadmap-next` re-plans |
 | `gpu` | Needs probe `gpu` (the RTX 4070 CUDA host): the step touches a `cuda-parity` path or its gate runs `scripts/cuda-parity.sh` |
 | `corpus` | Needs probe `corpus`: the gate is scored on real content (`~/mkvdovi-work/corpus/dev`; the RPU baselines run on its cuts) |
 | `batch` | Fit for an unattended `/ship:roadmap-batch` run (owner, 2026-11-15) |
@@ -38,7 +38,7 @@ steps from before the step format are cited in the log as "<item> step <n>", not
   measurements are in
   [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) (the progress-log table and the Done notes moved there
   on 2026-10-26).
-- When a step ships, `/ship` removes its line, updates the item's status, and adds the step's full
+- When a step ships, `/ship:land` removes its line, updates the item's status, and adds the step's full
   text with the gate evidence to [`docs/ROADMAP_LOG.md`](docs/ROADMAP_LOG.md) under
   `## <date>: <ID> <title> (PR #<n>)`.
 - A step whose gate needs evidence that does not exist yet stays, with `Landed: PR #<n>; gate
@@ -46,7 +46,7 @@ steps from before the step format are cited in the log as "<item> step <n>", not
 - Measurements go to the log or to the doc the item links, not into the item. An item with no
   steps left moves to the log.
 
-**Next up** is a checkpoint. When a step ships, `/ship` removes it from Next up and promotes the
+**Next up** is a checkpoint. When a step ships, `/ship:land` removes it from Next up and promotes the
 rest, or writes a **Reassess** line when what it learned changes the plan; `/ship:roadmap-next`
 confirms the block instead of re-ranking unless something changed (its ready queue,
 `~/.claude/skills/ship/scripts/roadmap-ready.sh`, decides). A **Checked** bullet (date, commit,

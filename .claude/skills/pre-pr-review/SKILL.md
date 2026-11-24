@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), with `--gemini` a Gemini 4 Neon pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), with `--gemini` a Gemini 4 Neon pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent update the docs. /ship:land step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [--gemini] [item ID]"
 disable-model-invocation: true
 ---
@@ -10,19 +10,19 @@ disable-model-invocation: true
 **Modes.**
 - **Standalone:** the user typed `/pre-pr-review $ARGUMENTS`. Run every step, including the
   Codex pass of step 2, the Gemini pass only with `--gemini`, and the gates in step 5. End as step 8 says.
-- **Self-check mode:** `/ship` step 3b told you to follow this file (`self-check: skill:pre-pr-review`
+- **Self-check mode:** `/ship:land` step 3b told you to follow this file (`self-check: skill:pre-pr-review`
   in `.claude/workflow.md`, and Claude built the code). Run steps 1, 3, 4, 6, 7 and 8: the Claude
-  panel and the docs keeper. Skip step 2 (Codex and Gemini): `/ship` runs the cross-family review
-  itself. Skip step 5: `/ship` runs `gate` and the `## Gates` of `.claude/workflow.md` after this
-  file, on the code with your fixes. A blocker from step 4 stops `/ship` before its gate.
+  panel and the docs keeper. Skip step 2 (Codex and Gemini): `/ship:land` runs the cross-family review
+  itself. Skip step 5: `/ship:land` runs `gate` and the `## Gates` of `.claude/workflow.md` after this
+  file, on the code with your fixes. A blocker from step 4 stops `/ship:land` before its gate.
 - **What this review is.** A builder self-check on Claude-built code. Its lenses add coverage but
-  never replace `/ship`'s cross-family review.
+  never replace `/ship:land`'s cross-family review.
 
-Both modes end with the record in step 8. `/ship` step 3b reuses that record instead of
-running this review again while HEAD is unchanged, so a standalone run followed by `/ship`
+Both modes end with the record in step 8. `/ship:land` step 3b reuses that record instead of
+running this review again while HEAD is unchanged, so a standalone run followed by `/ship:land`
 costs one review, not two.
 
-The user's command (`/pre-pr-review` or `/ship`) is the opt-in for the `pre-pr-panel` review run
+The user's command (`/pre-pr-review` or `/ship:land`) is the opt-in for the `pre-pr-panel` review run
 in step 3 (and its resume in step 4); in standalone mode also for the Gemini pass in step 2b (with `--gemini`) and
 the `gatesOnly` calls in step 5, which start no agents.
 Codex runs read-only and follows `~/.claude/rules/codex-routing.md` (`command codex`). Gemini runs
@@ -37,7 +37,7 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
    head names). Then commit the task's staged, unstaged and untracked files in the base's commit
    style (`git log --oneline -15 origin/<base>`). Leave out untracked files that do not clearly
    belong (downloads, media, logs, scratch output). If you cannot tell, ask once. Never delete
-   them. In self-check mode, `/ship` step 1 has already done this.
+   them. In self-check mode, `/ship:land` step 1 has already done this.
    Scope = `git diff --name-only origin/<base>...HEAD`.
    Then remove any record for this HEAD (step 8), so a run that stops early cannot leave an
    older, reusable one behind: `.claude/skills/pre-pr-review/clear-record.sh` (it resolves the
@@ -45,7 +45,7 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
    check). A non-zero exit stops the review here: a record it could not remove would be reused.
    Its test: `.claude/skills/pre-pr-review/tests/clear-record-test.sh`.
 3. Item ID: the argument, else from the branch name or the commit messages, else ask once. In
-   self-check mode `/ship` passes the step ID; with `/ship --step none` it passes its spec file
+   self-check mode `/ship:land` passes the step ID; with `/ship:land --step none` it passes its spec file
    (`<scratch>/ship-spec.md`) instead: use that paragraph as the item and the acceptance gate, and
    skip item 4 below (the ROADMAP.md lookup).
 4. Read the item's section in `ROADMAP.md`: note the step being closed and its **acceptance
@@ -55,7 +55,7 @@ read-only through `.claude/workflows/pre-pr-gemini.sh`. Claude makes every fix.
    gate. Every reviewer, Claude or Codex, gets this same scope.
 6. Write `<scratchpad>/prepr-spec.md`: the item's section from `ROADMAP.md` verbatim (heading,
    status, the step being closed, its acceptance gate). The panel's spec lens reviews the diff
-   against it. With `/ship --step none`, use `<scratch>/ship-spec.md` itself as the spec file.
+   against it. With `/ship:land --step none`, use `<scratch>/ship-spec.md` itself as the spec file.
 
 ## 2. External passes (standalone mode only)
 
@@ -162,7 +162,7 @@ Opus skeptic; a skeptic refutes only a failure that cannot happen and otherwise 
 `priority` is the skeptic's and `finderPriority` the finder's), `refuted` (claims a
 skeptic refuted; they go into the step 8 record), `unverified` and
 `requiredGates` (computed in code from the file list). Do not choose the gates by judgment; use
-that list. In self-check mode ignore it: `/ship` takes its gates from `.claude/workflow.md`.
+that list. In self-check mode ignore it: `/ship:land` takes its gates from `.claude/workflow.md`.
 
 **Pure move.** Add `"kind": "pure-move"`, `"moveProof": "<absolute path of the proof dir>"` and
 `"moveFiles": [<paths>]` to the args only when all of these hold. Otherwise omit all three and
@@ -223,7 +223,7 @@ spec lens and Fable. The gates and the item's acceptance checks (`rpu-baseline c
    blocker here: it goes into the record and the report, for the owner to see before the merge.
 4. Call the `advisor` tool once with the merged list before you settle on the fixes.
 5. Fix the confirmed findings; add a regression test where the defect is testable. In
-   self-check mode commit the fixes now (step 6 gives the message); `/ship` gates them.
+   self-check mode commit the fixes now (step 6 gives the message); `/ship:land` gates them.
 
 ## 5. Gates, on the final code (standalone mode only)
 
@@ -274,14 +274,14 @@ report it as passed.
 
 **Acceptance gate.** The commands above do not prove the step's acceptance gate (a corpus score,
 precision/recall, a playback result). The evidence must be in the PR body or in
-`docs/ROADMAP_LOG.md`. `/ship` step 10 closes the step only with it; the docs keeper never closes
+`docs/ROADMAP_LOG.md`. `/ship:land` step 10 closes the step only with it; the docs keeper never closes
 a step.
 
 ## 6. Docs
 
 Run the `docs-keeper` agent (Agent tool, `subagent_type: "docs-keeper"`) with: the scope file,
 the item and step, the fixes made, the gate results (standalone mode; in self-check mode say
-that `/ship` runs the gates after it), and whether the acceptance-gate evidence exists and where. Read its diff (`git diff -- '*.md'`) before you commit it; revert any edit you
+that `/ship:land` runs the gates after it), and whether the acceptance-gate evidence exists and where. Read its diff (`git diff -- '*.md'`) before you commit it; revert any edit you
 cannot verify against the code.
 
 Commits, in both modes and this order: the code fixes (before the gates of step 5 in standalone
@@ -305,19 +305,19 @@ its verdicts in the report. It counts the records written so far; this review's 
 in step 8, and its findings table already shows what Fable found this time. A beyond-Opus finding is a confirmed
 one that no Opus lens also reported. Say in one line per new beyond-Opus finding whether it
 mattered (recorded priorities can understate it). At "candidate for removal" (10 runs, no
-beyond-Opus finding at P0-P2), name it in the report and in `/ship`'s handoff; the owner decides,
+beyond-Opus finding at P0-P2), name it in the report and in `/ship:land`'s handoff; the owner decides,
 do not remove it here. Its test: `.claude/skills/pre-pr-review/tests/reviewer-yield-test.sh`.
 For Gemini, give its cost next to its yield: the records' `geminiCost` summed (seconds, attempts,
 thinking tokens; say when any of them is `partial`).
 
 ## 8. Record
 
-The record lets `/ship` step 3b skip a second review of the same commit. It also carries what
-`/ship` needs if it has to rerun the docs keeper later in another session.
+The record lets `/ship:land` step 3b skip a second review of the same commit. It also carries what
+`/ship:land` needs if it has to rerun the docs keeper later in another session.
 
 **Tree check.** The review and the gates ran on the working tree, so the record is valid only if
 that tree was HEAD. This check is mechanical, not a judgment of which files belong to the task,
-and `/ship` step 3b runs the same one. Both commands must print nothing:
+and `/ship:land` step 3b runs the same one. Both commands must print nothing:
 
 ```bash
 git status --porcelain --untracked-files=no
@@ -330,9 +330,9 @@ prints anything, write no record, and say which files in the report.
 Standalone mode: the `docs: …` commit after the gates may change only Markdown files:
 `git diff --name-only <gatedCommit> HEAD` must list only `*.md`. `<gatedCommit>` is the sha saved
 in step 5, never one looked up afterwards. Otherwise write no record. Self-check mode skips this
-check: `/ship` gates HEAD after this file.
+check: `/ship:land` gates HEAD after this file.
 
-Use the **full** sha and an **absolute** path. `/ship` looks the record up with
+Use the **full** sha and an **absolute** path. `/ship:land` looks the record up with
 `git rev-parse HEAD`, and the Write tool needs an absolute path:
 
 ```bash
@@ -342,7 +342,7 @@ echo "$D/$S.json"
 ```
 
 The common dir is shared by every worktree of the repo and is never committed. The copies are
-needed because the scratchpad belongs to one session, and `/ship` usually runs in another.
+needed because the scratchpad belongs to one session, and `/ship:land` usually runs in another.
 Then write the echoed path with the Write tool:
 
 ```json
@@ -366,19 +366,19 @@ Then write the echoed path with the Write tool:
 
 - `requiredGates` is the union from step 5, and `gateResults` has one entry for each of its
   gates. In self-check mode `gatedCommit` is `null`, `requiredGates` is `[]` and `gateResults`
-  is `{}`: `/ship` runs and records the gates.
+  is `{}`: `/ship:land` runs and records the gates.
 - `findings` has one entry per defect after the duplicate merge in step 4.2, with **every**
   reviewer that reported it in `finders` (`correctness`, `contracts`, `tests-and-gates`, `spec`,
   `move-integrity`, `fable`, `gemini`, `codex-focused`; `sonnet` in records before 2026-11-10). It includes the workflow's `refuted`
   claims (verdict `refuted`) and the ones you rejected, so a finder's false alarms count too.
 - `complete` is false when a Claude reviewer was still missing after the resume in step 4. `reviewers`, `geminiPass`, `geminiReason` and `geminiCost` are informational and do not affect reuse. `geminiCost` comes from the Gemini result: `seconds`, the length of `attempts`, and `usage` (`thinking_tokens`, `output_tokens`, `partial`); omit it when the pass was skipped.
 - `deferredP0P1` and `rejectedP0P1` do not block reuse. The owner sees them in the report.
-- Write the record also when there are blockers. `/ship` reads it and refuses to reuse it.
-- `/ship` step 3b reuses a record when `complete` is true, `blockers` is empty and
+- Write the record also when there are blockers. `/ship:land` reads it and refuses to reuse it.
+- `/ship:land` step 3b reuses a record when `complete` is true, `blockers` is empty and
   `unfixedConfirmedP0P1` is 0. It ignores the gate fields and runs its own gates.
 
-Standalone mode ends by naming the next command, `/ship --step <ID>`. When the record is reusable
+Standalone mode ends by naming the next command, `/ship:land --step <ID>`. When the record is reusable
 (`complete` true, no blockers, `unfixedConfirmedP0P1` 0), add: "It reuses
 this review while HEAD stays at <short sha>; a new commit makes it run the review again."
 Otherwise name what blocks reuse (no record and why, or the blockers), and say that
-`/ship` will stop on it or run the review again.
+`/ship:land` will stop on it or run the review again.
