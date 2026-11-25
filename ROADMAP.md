@@ -67,6 +67,8 @@ Order: the Focus (steering 2026-11-18); WS7.1 and WS6.10 are done, so the queue 
 
 **Reassess:** owner-decision (WS6.10, PR #146): the pulse files are on forplex, so WS6.11 waits
 for the owner's C9 viewing, and the Focus has no startable step left.
+**Reassess:** stop-point (WS6.11, PR #148): the C9 applies L1 min but no per-scene L2 trim, L6
+or L11, so P10.5's gate is the owner's to state and generated L2 trims would not show on it.
 
 ### Waiting for the owner
 
@@ -78,12 +80,10 @@ eyes or hardware after a startable step has prepared it, a gate not stated, and 
 release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
-- **WS6.11: view the pulse files** (forplex "WS6 Pulse", Season 01, 9 episodes of 30 s; its
-  `VIEWING_GUIDE.txt`), built by WS6.10 on 2026-11-25; episode key, gate renders and `run.sh` in
-  `~/mkvdovi-work/ws6-pulse-2026-11-25/`.
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
-- **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
-  C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
+- **P10.5: the gate for a measured L1 minimum.** WS6.11 showed that the C9 reacts to L1 min: the
+  darkest four greys change with it (owner, 2026-11-25). The owner states the gate; WS7 cannot
+  judge the minimum (owner, 2026-11-07).
 
 ### Metered tests (later)
 
@@ -505,9 +505,9 @@ The detailed gap table and validation method live in
 
 ### WS6: final-RPU corpus and playback procedure
 
-- **Status:** Open. The `code / 1023` question is answered for the C9 and the bt2100 fit stays;
-  the pulse files are built ([log](docs/ROADMAP_LOG.md), 2026-11-25). Open: WS6.1, WS6.9
-  (metered; method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests"), WS6.11 (owner).
+- **Status:** Open. `code / 1023` holds on the C9, and the pulse viewing showed it applies L1 but
+  not L2, L6 or L11 per scene ([log](docs/ROADMAP_LOG.md), 2026-11-25). Open: WS6.1, WS6.9
+  (metered; method in [`docs/PLAYBACK.md`](docs/PLAYBACK.md) "Metered tests").
 - Final-RPU regression corpus covering grain, saturated highlights, raised blacks, fades, flashes,
   rapid cuts and changing aspect ratios; checks run on the RPU extracted from the muxed file.
 - A Shield/TV playback procedure comparing matched material from the same master, recording player,
@@ -531,8 +531,6 @@ The detailed gap table and validation method live in
   (arm A: 911.6 under `code / 1023`, 912.4 under `code / 1024`, 912.2 under a 12-bit `4·code / 4095`
   tunnel), the slope the gain-dependent shift; the outcome follows the probe's pre-registered
   rules (`PREREG.md` draft 2). Needs: WS6.8. Landed: PR #80; gate pending.
-- [WS6.11][owner][reassess] View the pulse files on the LG OLED C9. Gate: pulse or steady per
-  level, recorded in the log. Needs: WS6.10.
 
 ### WS7: evaluation in displayed-picture units
 

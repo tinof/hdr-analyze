@@ -67,6 +67,46 @@ dependency in a shipped binary that CI cannot test, the removed backend's mechan
 web endpoint called from Rust (the owner's account would pay for and receive other people's
 files).
 
+### 2026-11-25: WS6.11 View the pulse files on the LG OLED C9 (PR #148)
+
+Step: - [WS6.11][owner][reassess] View the pulse files on the LG OLED C9. Gate: pulse or steady per
+  level, recorded in the log. Needs: WS6.10.
+
+Viewed: the nine WS6.10 pulse files (forplex "WS6 Pulse", Season 01), built from hdr-analyze
+c8a9b4f (`dovi_rpu_builder`) with dovi_tool 2.3.4; no mkvdovi run. Section 0: player Plex on the
+Shield TV Pro, TV LG OLED C9, picture mode Dolby Vision Cinema ("on the same devices as always,
+Dolby Vision activated (Cinema)"); Shield software, TV firmware, HDMI path and room light not
+recorded. Dolby Vision active on every file.
+
+The owner's words per file, as reported:
+- E01 (L6, mastering peak and MaxCLL 4000 ↔ 1000 nits): "Steady, no change".
+- E02 (L1 avg 1500 ↔ 2400 codes): "Top and bottom row switch to brighter every few seconds".
+- E03 (L2 600-nit target, `trim_slope` 2048 ↔ 3072): "Steady, no change".
+- E04 (L11 `content_type` 1 ↔ 2, `whitepoint` 0 ↔ 8): "Steady, no change".
+- E05 (L1 min 0 ↔ 1000 codes): "Top row, from left the first 4 batches change brightness every
+  few seconds".
+- E06 (L2 100-nit target): "Steady, no change".
+- E07 (L1 max 4000 ↔ 1000 nits): "Considerable boost on brightness on all rows, but the darker
+  batches stays about the same".
+- E08 (L2 1000-nit target): "Steady, no change".
+- E09 (control): not reported.
+
+Outcome, from the guide's pre-registered table: L1 max, avg and min pulse, so the chain applies
+dynamic L1 frame by frame, the minimum included (the four patches are the 0.05, 0.5, 2 and 5-nit
+greys); for P10.5 the measured L1 minimum can matter on the C9. None of the three L2 files pulses:
+the C9 does not use the L2 trims on this path. L6 and L11 are steady: no per-scene response, which
+does not show that the TV never reads them (it may read L6 once). The control was not reported;
+the five steady files carry its scene refresh cadence, so a refresh flicker does not explain the
+three L1 pulses.
+
+Not covered: other devices, players and picture modes; which phase of each pulse is brighter; L2
+fields other than `trim_slope`; which of the two L11 fields would act. Work directory:
+`~/mkvdovi-work/ws6-pulse-2026-11-25/` (`RESULT.txt` holds the report verbatim, `episodes.txt` the
+key).
+
+Resolution: the C9 applies L1 (min included) per scene and ignores per-scene L2 trims, L6 and
+L11; P10.5's gate is the owner's to state.
+
 ### 2026-11-25: WS6.10 Pulse files, one per level (PR #146)
 
 Step: - [WS6.10][desk] Pulse files, one per level: a fixed pattern under RPUs that alternate one level

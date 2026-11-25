@@ -81,7 +81,9 @@ result.
   refresh on the same frames. Its reference render uses `peak_detect=0` and the spline curve
   with an SDR target, since clip tone mapping cannot respond to L1. ffmpeg n9.0.2's
   vf_libplacebo is v7.374.0, not the 7.387.0 that `scripts/build-libplacebo.sh` pins for the
-  curves.
+  curves. Result (WS6.11, 2026-11-25, C9 through Shield Plex, DV Cinema): L1 max, avg and min
+  pulsed; L2 trims, L6 and L11 stayed steady, which means no per-scene response, not that the TV
+  never reads them. The control was not reported.
 - **Reference renders.** libplacebo with pinned settings: `apply_dolbyvision=1`,
   `upscaler=bilinear`, clip tone mapping and clip gamut mapping for numeric checks. The libplacebo
   version goes into `versions.txt`. With its default chroma upscaler, vf_libplacebo v7.374.0
