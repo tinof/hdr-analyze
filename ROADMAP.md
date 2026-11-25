@@ -177,8 +177,9 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
     Outcome: a Profile 7 FEL disc plays as Profile 8.1 with as much of the FEL's picture gain as
     metadata can carry, never re-encoded.
     Gate: none until a step states one.
-11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E18, P3, WS0, WS6): the
-    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.3), CI and corpus
+11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E18, E19, P3, WS0, WS6): the
+    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.3), remote GPU
+    measurement (E19, owner, 2026-11-25), CI and corpus
     gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance and open-GOP scoring (E3, E6, E11), hot-file
     byte budgets (E18). Ranked below 1–10; added
@@ -891,6 +892,31 @@ The detailed gap table and validation method live in
   which collects Trim steps.
 - **Gate:** the roadmap at or under its byte budget, with nothing lost (moved text in
   `docs/ROADMAP_LOG.md`) and the ready queue unchanged.
+
+### E19: remote GPU measurement (Modal)
+
+- **Status:** Open (owner, 2026-11-25). Measurements made on another machine are reused today:
+  `<stem>_measurements.bin` and its `.l1.json` beside the same file (name and size) skip the
+  local analysis. Study, test and numbers: [log](docs/ROADMAP_LOG.md) 2026-11-25.
+- **Scope (owner, 2026-11-25):** a script outside the shipped binaries and two flags that make
+  it safe. No Modal or Python call inside `mkvdovi` or the analyzer; no shared endpoint. The
+  upload is the cost: it pays off when the upload rate is above the file's bitrate × (CPU fps ÷
+  video fps).
+- [E19.1][gpu] Analyzer `--require-gpu`: under `--hwaccel cuda`, fail instead of falling back to
+  CPU analysis or software decode (`pipeline/analyze.rs`, `ffmpeg_io.rs`). Gate: on a host
+  without CUDA the flag exits non-zero and writes no `.bin` (test, red on the parent); without
+  the flag nothing changes (the L1 gate without `--update`, `scripts/cuda-parity.sh`).
+- [E19.2][desk] `mkvdovi --require-measurements`: refuse, naming the reason, instead of analyzing
+  when no measurements beside the input validate; warn when a reused sidecar's
+  `analyzer_version` is not mkvdovi's version. Gate: tests red on the parent for a wrong-size
+  sidecar (refusal, no analyzer run) and for a version mismatch (warning).
+- [E19.3][desk] `tools/modal_measure/` (Python, the user's own Modal account): upload the file
+  to a Volume, measure on a T4 with the release archive of the local `mkvdovi --version` and
+  `--require-gpu`, fetch the two files beside the input, check them, delete the upload;
+  `docs/INSTALLATION.md` gets the steps and the break-even rule. Gate: on one HLG file,
+  `mkvdovi --require-measurements` converts without analysis and its RPU equals a local CPU
+  run's; upload, T4 and total times in the log (one T4 run, about $0.10, the owner's account).
+  Needs: E19.1, E19.2.
 
 ## Explicit non-goals
 

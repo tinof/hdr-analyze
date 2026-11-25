@@ -6,6 +6,58 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-25: E19 remote GPU measurement, study and reuse test (no step closed)
+
+Question (owner): can the Modal GPU measurement that the owner's add-on runs for the NuvioTV fork
+be built into hdr-analyze, so a host with a weak CPU measures in minutes? Answer: yes, with one
+limit, the upload. The owner chose a script outside the binaries plus two safety flags (E19.1 to
+E19.3) and ranked E19 in the engineering backlog.
+
+Reuse test, run on 2026-11-25 with 0.8.0 on a 6 s synthetic 720p25 HLG clip (150 frames):
+`mkvdovi manifest --work-dir` measured it on the Mac (CPU) and on the RTX 4070 host
+(`--hwaccel cuda`, 150 NVDEC frames analyzed in place). Only `clip_measurements.bin` and its
+`.l1.json` were copied beside a byte-identical copy of the clip in another directory. A plain
+`mkvdovi clip.mkv --keep-source` there printed "Using existing measurements file" for both sets
+and ran no analysis. The two `.bin` files are byte-identical, and the two converted files carry
+the same RPU (equal SHA-256 of `dovi_tool extract-rpu`). Evidence:
+`~/mkvdovi-work/e19-reuse-2026-11-25/` on the MacBook (`X` CPU measurement, `G` CUDA measurement,
+`Y` and `Z` the two conversions with their logs).
+
+What the code fixes:
+
+- A sidecar is tied to its input by file name and byte size only
+  (`mkvdovi/src/metadata/sidecar.rs`, the `source` check in the validation), and the analyzer
+  records the file it opened (`hdr_analyzer_mvp/src/pipeline/mod.rs`, `SourceMetadata`). So the
+  whole file is uploaded under its own name; a video-only remux would not validate.
+- Measurements that do not validate lead to a local analysis with a warning, never a refusal
+  (hence E19.2). `analyzer_version` is written but read only for the provenance line (E19.2).
+- `--hwaccel cuda` falls back to CPU analysis or software decode with a message
+  (`pipeline/analyze.rs`, `ffmpeg_io.rs`), so a paid GPU can measure on its CPU; the add-on's
+  worker scrapes the log wording to catch it (hence E19.1).
+- The rule written when the Modal backend left (`docs/MKVDOVI_PIPELINE.md`, "mkvdovi never
+  encodes video") bans remote encoding, not remote measurement.
+- Modal Functions are Python only and there is no Rust SDK, so each user needs a Modal account,
+  a token and the Python client. The Linux x64 release archive already carries the CUDA
+  analyzer, so a Modal image can install it instead of compiling.
+
+Numbers. Measured by the add-on's worker in November 2026 (prices of 2026-11-23), source fetched
+from a URL at datacenter speed: an 8.06 GB, 58-minute 4K25 HLG episode downloaded in 103 s and measured by
+`mkvdovi manifest` on a T4 in about 292 s; a 62,000-frame job costs about $0.07 (T4 $0.59/h).
+The only CPU figure is 17 fps at 4K on an unrecorded machine (`docs/PERFORMANCE.md`), about 86
+minutes for that episode. Not measured: any home upload rate, any weak-CPU rate, the T4 rate on
+HDR10, and Modal's upload limits and resume behaviour.
+
+Break-even. Upload time grows with bytes and CPU time with frames, so remote measurement wins
+when the upload rate is above the file's bitrate × (CPU fps ÷ video fps). For the episode above
+(18.5 Mbit/s) at 17 fps that is about 13 Mbit/s: an assumed 50 Mbit/s line gives about 27
+minutes against 86, a 10 Mbit/s line is slower than the CPU. An assumed 60 GB, 2-hour UHD remux
+(67 Mbit/s) needs more than 50 Mbit/s to gain anything. A file on a datacenter host gains most.
+
+Shapes not taken: a `mkvdovi` flag that shells out to the `modal` CLI (a Python and cloud
+dependency in a shipped binary that CI cannot test, the removed backend's mechanism); a shared
+web endpoint called from Rust (the owner's account would pay for and receive other people's
+files).
+
 ### 2026-11-25: WS6.10 Pulse files, one per level (PR #146)
 
 Step: - [WS6.10][desk] Pulse files, one per level: a fixed pattern under RPUs that alternate one level
