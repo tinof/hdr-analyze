@@ -78,12 +78,10 @@ eyes or hardware after a startable step has prepared it, a gate not stated, and 
 release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
-- **WS6.11: view the pulse files** (forplex "WS6 Pulse", Season 01, 9 episodes of 30 s; its
-  `VIEWING_GUIDE.txt`), built by WS6.10 on 2026-11-25; episode key, gate renders and `run.sh` in
-  `~/mkvdovi-work/ws6-pulse-2026-11-25/`.
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
-- **P10.5: the gate for a measured L1 minimum.** The owner states it once WS6.11 shows whether the
-  C9 reacts to L1 min; WS7 cannot judge the minimum (owner, 2026-11-07).
+- **P10.5: the gate for a measured L1 minimum.** WS6.11 showed that the C9 reacts to L1 min: the
+  darkest four greys change with it (owner, 2026-11-25). The owner states the gate; WS7 cannot
+  judge the minimum (owner, 2026-11-07).
 
 ### Metered tests (later)
 
