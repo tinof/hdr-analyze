@@ -11,7 +11,7 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 Question (owner): can the Modal GPU measurement that the owner's add-on runs for the NuvioTV fork
 be built into hdr-analyze, so a host with a weak CPU measures in minutes? Answer: yes, with one
 limit, the upload. The owner chose a script outside the binaries plus two safety flags (E19.1 to
-E19.3) and ranked E19 in the engineering backlog.
+E19.4) and ranked E19 in the engineering backlog.
 
 Reuse test, run on 2026-11-25 with 0.8.0 on a 6 s synthetic 720p25 HLG clip (150 frames):
 `mkvdovi manifest --work-dir` measured it on the Mac (CPU) and on the RTX 4070 host
@@ -33,7 +33,11 @@ What the code fixes:
   (hence E19.2). `analyzer_version` is written but read only for the provenance line (E19.2).
 - `--hwaccel cuda` falls back to CPU analysis or software decode with a message
   (`pipeline/analyze.rs`, `ffmpeg_io.rs`), so a paid GPU can measure on its CPU; the add-on's
-  worker scrapes the log wording to catch it (hence E19.1).
+  worker scrapes the log wording to catch it (hence E19.1). mkvdovi builds the analyzer command
+  itself (`mkvdovi/src/pipeline/analyzer.rs`, `run_hdr_analyzer_at`) and passes no extra flag
+  through, so E19.1 adds the flag on both sides.
+- A CUDA build writes `analyzer_version` as `<version> (+cuda)` (`hdr_analyzer_mvp/src/cli.rs`,
+  `VERSION`), so E19.2 compares the version without that suffix.
 - The rule written when the Modal backend left (`docs/MKVDOVI_PIPELINE.md`, "mkvdovi never
   encodes video") bans remote encoding, not remote measurement.
 - Modal Functions are Python only and there is no Rust SDK, so each user needs a Modal account,
@@ -41,17 +45,22 @@ What the code fixes:
   analyzer, so a Modal image can install it instead of compiling.
 
 Numbers. Measured by the add-on's worker in November 2026 (prices of 2026-11-23), source fetched
-from a URL at datacenter speed: an 8.06 GB, 58-minute 4K25 HLG episode downloaded in 103 s and measured by
-`mkvdovi manifest` on a T4 in about 292 s; a 62,000-frame job costs about $0.07 (T4 $0.59/h).
+from a URL at datacenter speed: an 8.06 GB, 58-minute 4K25 HLG episode downloaded in 103 s and
+measured by `mkvdovi manifest` on a T4 in about 292 s; a 62,000-frame job costs about $0.07 (T4
+$0.59/h).
 The only CPU figure is 17 fps at 4K on an unrecorded machine (`docs/PERFORMANCE.md`), about 86
 minutes for that episode. Not measured: any home upload rate, any weak-CPU rate, the T4 rate on
 HDR10, and Modal's upload limits and resume behaviour.
 
-Break-even. Upload time grows with bytes and CPU time with frames, so remote measurement wins
-when the upload rate is above the file's bitrate × (CPU fps ÷ video fps). For the episode above
-(18.5 Mbit/s) at 17 fps that is about 13 Mbit/s: an assumed 50 Mbit/s line gives about 27
-minutes against 86, a 10 Mbit/s line is slower than the CPU. An assumed 60 GB, 2-hour UHD remux
-(67 Mbit/s) needs more than 50 Mbit/s to gain anything. A file on a datacenter host gains most.
+Break-even. Remote measurement wins when the upload time plus the T4 time is below the local CPU
+time. Upload time grows with bytes and CPU time with frames, so without the T4 time the rule is:
+upload rate above the file's bitrate × (CPU fps ÷ video fps). The T4 time and the container
+start raise that threshold by roughly a tenth. For the episode above (18.5 Mbit/s, 25 fps) at
+17 fps the rule gives 12.6 Mbit/s, and about 13 Mbit/s with the measured T4 time: an assumed
+50 Mbit/s line gives about 27 minutes against 86, a 10 Mbit/s line is slower than the CPU. An
+assumed 60 GB, 2-hour UHD remux at 24 fps (67 Mbit/s) gives 47 Mbit/s by the rule and about 52
+with an assumed T4 rate of 190 fps on HDR10, so a 50 Mbit/s line gains nothing. A file on a
+datacenter host gains most.
 
 Shapes not taken: a `mkvdovi` flag that shells out to the `modal` CLI (a Python and cloud
 dependency in a shipped binary that CI cannot test, the removed backend's mechanism); a shared

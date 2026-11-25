@@ -897,26 +897,30 @@ The detailed gap table and validation method live in
 
 - **Status:** Open (owner, 2026-11-25). Measurements made on another machine are reused today:
   `<stem>_measurements.bin` and its `.l1.json` beside the same file (name and size) skip the
-  local analysis. Study, test and numbers: [log](docs/ROADMAP_LOG.md) 2026-11-25.
+  local analysis. Study, reuse test, numbers and the break-even rule:
+  [log](docs/ROADMAP_LOG.md) 2026-11-25.
 - **Scope (owner, 2026-11-25):** a script outside the shipped binaries and two flags that make
-  it safe. No Modal or Python call inside `mkvdovi` or the analyzer; no shared endpoint. The
-  upload is the cost: it pays off when the upload rate is above the file's bitrate × (CPU fps ÷
-  video fps).
-- [E19.1][gpu] Analyzer `--require-gpu`: under `--hwaccel cuda`, fail instead of falling back to
-  CPU analysis or software decode (`pipeline/analyze.rs`, `ffmpeg_io.rs`). Gate: on a host
-  without CUDA the flag exits non-zero and writes no `.bin` (test, red on the parent); without
-  the flag nothing changes (the L1 gate without `--update`, `scripts/cuda-parity.sh`).
+  it safe. No Modal or Python call inside `mkvdovi` or the analyzer; no shared endpoint.
+- [E19.1][gpu] `--require-gpu` on the analyzer and, passed through, on `mkvdovi` (convert and
+  `manifest`; an analyzer whose `--help` lacks it is refused): every fallback to CPU analysis or
+  software decode (`pipeline/analyze.rs`, `ffmpeg_io.rs`) becomes an error. Gate: tests red on
+  the parent: without CUDA the run fails with the GPU error and writes no `.bin`, also under
+  `--pre-denoise median3`; mkvdovi passes the flag on; without it nothing changes (the L1 gate
+  without `--update`, `scripts/cuda-parity.sh`).
 - [E19.2][desk] `mkvdovi --require-measurements`: refuse, naming the reason, instead of analyzing
   when no measurements beside the input validate; warn when a reused sidecar's
-  `analyzer_version` is not mkvdovi's version. Gate: tests red on the parent for a wrong-size
-  sidecar (refusal, no analyzer run) and for a version mismatch (warning).
+  `analyzer_version`, without its ` (+cuda)`, is not mkvdovi's version. Gate: tests red on the
+  parent: a wrong-size sidecar gives the refusal message and no analyzer run; a version mismatch
+  warns, a matching `(+cuda)` one does not.
 - [E19.3][desk] `tools/modal_measure/` (Python, the user's own Modal account): upload the file
-  to a Volume, measure on a T4 with the release archive of the local `mkvdovi --version` and
-  `--require-gpu`, fetch the two files beside the input, check them, delete the upload;
-  `docs/INSTALLATION.md` gets the steps and the break-even rule. Gate: on one HLG file,
+  to a Volume, run `mkvdovi manifest --hwaccel cuda --require-gpu` from the release archive of
+  the local `mkvdovi --version` on a T4, fetch the two files beside the input, check them,
+  delete the upload; `docs/INSTALLATION.md` gets the steps and the break-even rule. Gate: a new
+  `tool:modal_measure` gate (contract and panel together) whose tests run the check and cleanup
+  logic against a fake Modal client. Needs: E19.1, E19.2.
+- [E19.4][owner] One paid T4 run (about $0.10, the owner's account) on an HLG file. Gate:
   `mkvdovi --require-measurements` converts without analysis and its RPU equals a local CPU
-  run's; upload, T4 and total times in the log (one T4 run, about $0.10, the owner's account).
-  Needs: E19.1, E19.2.
+  run's; upload, T4 and total times in the log. Needs: E19.3.
 
 ## Explicit non-goals
 
