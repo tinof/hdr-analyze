@@ -71,8 +71,9 @@ the Next up block (promotes it, or writes a Reassess line).
   sentence, table cell or command that the diff made wrong, in place, everywhere it appears. Keep
   the section order, the headings, the image embeds, `<details>` blocks and a Mermaid diagram's
   `classDef` lines; in a diagram, fix only the label or edge that is now wrong. Image files under
-  `assets/readme/` are not yours to edit: `rg -n '<old value>' assets/readme`, and report a hit as a
-  gap so the caller rebuilds the asset. Add no section, badge or diagram; a change that needs one
+  `assets/readme/` are not yours to edit. When that directory exists, run
+  `rg -n '<old value>' assets/readme` and report a hit as a gap so the caller rebuilds the asset; a
+  missing directory means there is no asset to check. Add no section, badge or diagram; a change that needs one
   is a gap. A redesign of the page is `/readme`'s job, not yours.
 - Keep each doc's voice: short declarative sentences, numbers with units, dates as YYYY-MM-DD.
   Wrap prose at about 100 columns; no line over 200 characters.

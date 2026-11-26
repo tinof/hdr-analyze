@@ -1,6 +1,6 @@
 ---
 name: docs-keeper
-description: Fallback docs writer for this repo, used by the pre-pr-review skill when the agy docs-writer (Gemini) cannot run. Brings the docs in line with a finished code change. Given the review scope (base, diff, files), the roadmap item and step, the gate results and where the acceptance-gate evidence is, it edits CHANGELOG.md, CLAUDE.md, docs/*.md and stale text in ROADMAP.md, never code, and never closes a roadmap step (/ship:land step 10 does).
+description: Fallback docs writer for this repo, used by the pre-pr-review skill when the agy docs-writer (Gemini, on the model that `gemini-model.sh docs` prints) cannot run. Brings the docs in line with a finished code change. Given the review scope (base, diff, files), the roadmap item and step, the gate results and where the acceptance-gate evidence is, it edits CHANGELOG.md, CLAUDE.md, README.md (facts only, by the README rule), docs/*.md and stale text in ROADMAP.md, never code, and never closes a roadmap step (/ship:land step 10 does).
 model: opus
 effort: low
 tools: Read, Grep, Glob, Bash, Edit

@@ -280,9 +280,8 @@ a step.
 ## 6. Docs
 
 The docs rules are `.claude/docs-rules.md`. Gemini writes the docs through agy (the `docs-writer`
-agent of tinof/antigravity-config; owner, 2026-11-25), on the model that step 1 prints: Gemini 4
-Neon since 2026-11-26. The `docs-keeper` agent is the fallback. Whoever writes, you check every
-line.
+agent of tinof/antigravity-config; owner, 2026-11-25), on the model that step 1 prints. The
+`docs-keeper` agent is the fallback. Whoever writes, you check every line.
 
 1. **Pick the writer.** `~/.claude/skills/ship/scripts/gemini-model.sh docs` prints a model ID, or
    `fallback` when the shared Gemini quota is under 15%: a low pool is kept for the cold review,
