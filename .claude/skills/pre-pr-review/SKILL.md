@@ -298,16 +298,20 @@ the fallback. Whoever writes, you check every line.
    Markdown file while it runs:
    `AGY_TASK_AGENT=docs-writer AGY_TASK_MODEL=<model> ~/.claude/skills/agy-delegate/scripts/agy-task.sh "$PWD" <scratchpad>/docs-brief.md <scratchpad>/docs-writer`.
    `<scratchpad>/docs-writer.result.json` with `ok: false` (quota, stall, timeout, denied): undo its
-   partial edits (`git checkout -- <each path in docs-writer.diff>`) and go to 4. Never rerun it on
-   another Gemini model.
+   partial edits with `git apply -R <scratchpad>/docs-writer.diff` and go to 4. The diff is taken
+   against the tree as it was before the run, so the reverse removes a file the writer created and
+   keeps edits that were there before; `git checkout -- <path>` does neither. If it does not apply,
+   stop and report a blocker. Never rerun the writer on another Gemini model.
 4. **Fallback.** Run the `docs-keeper` agent (Agent tool, `subagent_type: "docs-keeper"`) with the
    inputs of 2. Say in the report why Gemini did not write the docs.
 5. **Check.** After an agy run, `rg '^diff --git' <scratchpad>/docs-writer.diff` must name only
-   `*.md` files; undo anything else and report it as a blocker. Use the diff, not `files` in the
+   `*.md` files; undo anything else (`git apply -R --include=<path> <scratchpad>/docs-writer.diff`)
+   and report it as a blocker. Use the diff, not `files` in the
    result: that list also holds edits the writer's guard refused. Read the `gaps` of its report
    (`docs-writer.report.md`) and make the edits you can verify, among them any it could not make in
-   `AGENTS.md` or under `.claude/`. For either writer, read `git diff -- '*.md'` before you commit;
-   revert any edit you cannot verify against the code.
+   `AGENTS.md` or under `.claude/`. For either writer, read `git diff -- '*.md'` before you commit,
+   and every new file `git status --porcelain -- '*.md'` lists as untracked: the diff does not show
+   those. Revert any edit you cannot verify against the code.
 
 Commits, in both modes and this order: the code fixes (before the gates of step 5 in standalone
 mode) as `fix: address pre-PR review` with a one-line list of the findings, then the docs edits
