@@ -194,7 +194,7 @@ together. A builder agent (`opus-professor`, `fable-builder`) works under a hold
 
 `/ship:roadmap-batch` (contract 1.2, owner decisions 2026-11-15). `self-review` is left out on purpose, so
 a batch runs in routed mode: Claude builds, and each PR gets `/ship:land`'s review by the routing row before it
-merges (Gemini while Codex is disabled). Batch builds only steps tagged `[batch]` in `ROADMAP.md`. It does
+merges (the plugin's review stand-in while Codex is disabled). Batch builds only steps tagged `[batch]` in `ROADMAP.md`. It does
 not read the Release plan or the E13 sequencing rule, so a step that either one holds back stays untagged.
 `## Unattended` is `none`: the repository deploys no service, and the pure moves E13.18 and E13.19 keep the
 normal review, because the line-exact move proof lives outside the repository (`/pre-pr-review`, "Pure move").
@@ -204,7 +204,10 @@ confirmed finding, a docs P1 on PR #70, in about 25 review runs, and the Gemini 
 on the 14 cases of `.claude/review-eval/cases.json` (24 known defects, 2026-11-14) Hydrogen high reported 1
 as P0/P1 and 2 as minor notes, Argon medium none, Argon high 2 minor in 10 cases, Carbon medium (diff only)
 2 minor in 10 cases, and Hydrogen xhigh 2 P0/P1 and 1 minor in 12 cases. Gemini
-stays parked; the owner decides when a new result justifies the default rows. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
+stays parked; the owner decides when a new result justifies the default rows. While Codex is disabled, the
+plugin reads every `codex` cell as its review stand-in (`review-rules.md`, "Review stand-in"): the
+CodeRabbit CLI during its trial (owner decision 2026-11-26, to about 2026-12-10). On 10 of the 14 cases it
+caught 6 of the 20 known defects there. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
 the round stays Tier 2 as `tier2Mode: single-family`, and both surfaces must complete. A diff that touches
 this file is reviewed under the base's routing and surfaces, and still shows the owner its diff before
 the merge. The standalone
