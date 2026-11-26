@@ -1,8 +1,9 @@
 # Docs rules
 
 How this repo's Markdown docs are brought in line with a finished code change. Two writers work
-from this file: the agy `docs-writer` agent on Gemini 4 Hydrogen (the default; the
-`pre-pr-review` skill, step 6, puts this file into its brief) and the `docs-keeper` agent
+from this file: the agy `docs-writer` agent on Gemini (the default, on the model that
+`~/.claude/skills/ship/scripts/gemini-model.sh docs` prints; the `pre-pr-review` skill, step 6,
+puts this file into its brief) and the `docs-keeper` agent
 (`.claude/agents/docs-keeper.md`, the fallback).
 
 You update documentation so it matches the code on this branch. You edit Markdown files only.
@@ -31,6 +32,7 @@ the Next up block (promotes it, or writes a Reassess line).
 | Any step of a roadmap item | Nothing: `/ship:land` step 10 closes the step. Fix only text in `ROADMAP.md` that the diff makes wrong (a path, a flag, a line reference), not the step line, Status or Next up. |
 | The step's full story, measurements, numbers | Nothing in `docs/ROADMAP_LOG.md`: `/ship:land` step 10 writes the step's entry. Name the evidence in your output so the caller can put it in the PR body. |
 | User-visible behavior, flags, defaults, refusals | `CHANGELOG.md` `[Unreleased]`, in the section style already used there. |
+| A fact `README.md` states: a capability, an install step, a required tool, a Compatibility row, a headline number, a limitation | `README.md`, by the **README** rule below. |
 | A CLI flag or its help text | `docs/CLI_REFERENCE.md`; compare with the `--help` text (in the brief, or `target/debug/<bin> --help` when you can run it). |
 | What inputs are accepted, refused or converted | `docs/FORMAT_COMPATIBILITY.md`. |
 | A new or changed rule: a cross-binary contract, an invariant ("never", "must", "keep X ahead of Y"), a gate, a command | `CLAUDE.md`, the section that already covers the topic, as one sentence plus a pointer to the doc that explains it. Edit the sentence that is now wrong; do not append a second, contradicting one. |
@@ -65,6 +67,13 @@ the Next up block (promotes it, or writes a Reassess line).
   only with it.
 - Search before you write: `rg` the old name, flag, value or version across `*.md` and fix every
   stale mention in scope, not only the first.
+- **README.** `README.md` is a designed page that also ships in every release archive. Fix the
+  sentence, table cell or command that the diff made wrong, in place, everywhere it appears. Keep
+  the section order, the headings, the image embeds, `<details>` blocks and a Mermaid diagram's
+  `classDef` lines; in a diagram, fix only the label or edge that is now wrong. Image files under
+  `assets/readme/` are not yours to edit: `rg -n '<old value>' assets/readme`, and report a hit as a
+  gap so the caller rebuilds the asset. Add no section, badge or diagram; a change that needs one
+  is a gap. A redesign of the page is `/readme`'s job, not yours.
 - Keep each doc's voice: short declarative sentences, numbers with units, dates as YYYY-MM-DD.
   Wrap prose at about 100 columns; no line over 200 characters.
 - Do not invent numbers, results or dates. If a fact is not in the diff or the inputs, leave it
