@@ -6,10 +6,22 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Fixed
+
+- mkvdovi muxes a constant-rate source at the source's rate when its video stream states another
+  one (ROADMAP E7.4), for example 30 fps in the VUI of a 25 fps file. Before the first mux it reads
+  the stream's frame rate with `mkvmerge -J` (none stated means mkvmerge's 25 fps); when the
+  source's frames would drift more than 3 ms from it by the last frame, the first mux takes the
+  source's timestamps and says so. Such a file used to be muxed once at the wrong rate, discarded
+  by the timing check and muxed again.
+
 ### Changed
 
 - Release archives now include `assets/` (`assets/readme/hero.svg`) next to `README.md` and
   `docs/`, so the embedded README image displays in an extracted archive.
+- `--verify` pipes ffmpeg's raw HEVC straight into `dovi_tool extract-rpu` and no longer writes a
+  full-size copy of the video to the temp dir (ROADMAP E7.4). The extraction took about 17 s on a
+  99,175-frame 4K episode.
 
 ## [0.9.0] - 2026-11-26
 

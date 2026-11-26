@@ -72,8 +72,12 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   MEL fast path's `mux_hevc_with_original` in `dovi_steps.rs`) go through `timing::deliver`. It
   reads the source's video frame times with ffprobe, Matroska only (mkvmerge may read another
   container's start differently). A constant-rate source is muxed with the stream's timing and a
-  late start kept by `--sync`; a variable-rate source gets `--timestamps` with a timestamps v2 file
-  (`video.timestamps.txt`) whose on-grid frames sit at exact times on the source's frame-rate grid
+  late start kept by `--sync`, unless the stream states another rate (E7.4): `mkvmerge -J` on the
+  raw HEVC gives its `default_duration` (none means mkvmerge's 25 fps, `MKVMERGE_DEFAULT_FRAME_MS`),
+  and when the source's measured mean frame interval (not ffprobe `avg_frame_rate`) would drift
+  more than 3 ms (`STREAM_DRIFT_MS`) from it by the last frame, `timing::first_timing` picks the
+  timestamps file for the first mux and prints both rates. A variable-rate source gets
+  `--timestamps` with a timestamps v2 file (`video.timestamps.txt`) whose on-grid frames sit at exact times on the source's frame-rate grid
   (ffprobe `avg_frame_rate`). mkvmerge takes the default duration from the file's first intervals
   and `--default-duration` does not override it, so whole milliseconds would turn 23.976 fps into
   42 ms (23.81 fps). The output's frame times are then checked against the source's (1 ms
@@ -330,6 +334,10 @@ This section covers the code on each side.
   reported.
 - The pipeline passes no sidecar for HDR10+ on the metadata path and under
   `--legacy-madvr-l1`, because then the RPU's L1 does not come from it.
+- RPU extraction (E7.4): ffmpeg writes the output's raw HEVC to stdout and `dovi_tool
+  extract-rpu -` reads it into `verify_rpu.bin` (`external::run_piped_commands`); no full-size
+  `verify_video.hevc` is written. A stale `verify_rpu.bin` is removed first. A consumer that exits
+  early gives ffmpeg a broken pipe, so the pair cannot hang. About 17 s on a 99,175-frame 4K episode.
 
 ## RPU generation
 
