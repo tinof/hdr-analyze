@@ -6,6 +6,30 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-26
+
+### Upgrade notes
+
+- **Update `mkvdovi` and `hdr_analyzer_mvp` together:** the analyzer writes L1 sidecar version 7,
+  which `mkvdovi` 0.8.0 does not read, and `mkvdovi` 0.9.0 refuses an analyzer that still writes
+  version 6 under `--hwaccel cuda`.
+- **Some measurements are analyzed again:** under `--hwaccel cuda` (what `auto` becomes on an
+  NVIDIA host), a version 6 or older sidecar from CPU analysis at downscale 1 is not reused.
+- **Interrupted conversions start again:** the resume fingerprint holds the mkvdovi version, so a
+  `mkvdovi_temp_*` directory left by 0.8.0 is discarded. Measurements next to the input are kept.
+- **Output changes:** L1 from CPU analysis of NVDEC-decoded frames at downscale 1 now equals
+  software decode; `--mdfix` sources whose container states no mastering display take the
+  mastering peak and minimum from a plausible source RPU L6; video timestamps keep the source's
+  frame times and start.
+- **New run failures:** a conversion fails and keeps the source when its output RPU count differs
+  from its video frames or cannot be read, or when its muxed frame times still miss the source's
+  by more than 1 ms with the timestamps file. When mkvdovi cannot read the source's frame times, a
+  non-DV source is kept, not deleted.
+- **New refusals and `--verify` failures:** an explicit `--hdr10plus-l1 hybrid` refuses HDR10+
+  metadata with partial, unextractable or uncountable payload coverage, or extracted with
+  `--skip-reorder`, before analysis; the default still converts with a warning. `--verify` now fails a wrong Dolby Vision
+  configuration record on PQ outputs too, and duplicate or orphan L8/L10 blocks on any frame.
+
 ### Added
 
 - `hdr_analyzer_mvp --dump-pq-hist <PATH>` writes every measured frame's 4096-bin PQ histogram of

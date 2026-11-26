@@ -94,18 +94,16 @@ under "Waiting for the owner", which is the list `/ship:roadmap-next` reads.
 ### Release plan (2026-11-04)
 
 Which steps ship in which release. Rules for the bump and the timing: [`docs/RELEASING.md`](docs/RELEASING.md).
-`/ship:roadmap-next` keeps this table current. Latest release: v0.8.0 (2026-11-04; P1.1, P9.2, P9.3 and
-E12.1); its rc.1 passed the Windows test ([log](docs/ROADMAP_LOG.md) 2026-11-14).
+`/ship:roadmap-next` keeps this table current. Latest release: v0.9.0 (2026-11-26; P15, E15.1, E15.2, E12.2
+and the batched fixes); v0.8.0 (2026-11-04) shipped P1.1, P9.2, P9.3 and E12.1.
 
-**Next release point:** v0.9.0, a minor: P15's analyzer `--help` contract (`au-table-v1`) is on
-`main`; rule 1 puts it about a week after #91 (2026-11-04). Overdue: every planned fix is merged
-(E12.2 in PR #136, which also bumps the L1 sidecar to v7).
+**Next release point:** a batched patch when fixes have collected (rule 2), or a minor when a step
+tagged `Release: minor` merges.
 
 | Release | Content | Trigger / gate |
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
-| next minor (v0.9.0) | P15, E15.1, E15.2, E12.2 (L1 sidecar v7) (merged); PATCH-class fixes merged before it: P12.1 `--mdfix` source L6, E7.1, E7.2, E7.3, P6.2, P9.4 | MINOR, about 2026-11-11 (rule 1); owner decision |
-| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); WS1.5 (opt-in estimator), WS1.6 (default estimator change) | MINOR |
+| a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); WS1.6 (default estimator change; the opt-in WS1.5 shipped in v0.9.0) | MINOR |
 | 1.0.0 | P8 playback verified on the LG OLED C9 (met 2026-10-13) and the WS6 `code / 1023` question answered (met 2026-10-29, WS6.6); a second device is not required (owner, 2026-10-17); sidecar schema and CLI unchanged for one minor cycle (the semantics-only sidecar v7 does not restart it: owner, 2026-11-18); no open priority-1 defect | Owner decision |
 
 ## Priorities
