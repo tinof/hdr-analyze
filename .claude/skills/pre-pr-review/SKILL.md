@@ -310,8 +310,8 @@ the fallback. Whoever writes, you check every line.
    result: that list also holds edits the writer's guard refused. Read the `gaps` of its report
    (`docs-writer.report.md`) and make the edits you can verify, among them any it could not make in
    `AGENTS.md` or under `.claude/`. For either writer, read `git diff -- '*.md'` before you commit,
-   and every new file `git status --porcelain -- '*.md'` lists as untracked: the diff does not show
-   those. Revert any edit you cannot verify against the code.
+   and every file that `docs-writer.diff` marks `new file mode`: it is untracked, so `git diff` does
+   not show it. Revert any edit you cannot verify against the code.
 
 Commits, in both modes and this order: the code fixes (before the gates of step 5 in standalone
 mode) as `fix: address pre-PR review` with a one-line list of the findings, then the docs edits
