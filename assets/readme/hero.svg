@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">HDR-Analyze</title>
+  <desc id="hero-desc">HDR-Analyze: the SMPTE ST 2084 PQ transfer curve plotted over luminance in nits with a scene's L1 minimum, average and maximum marked on it. Converts HDR10, HDR10+ and HLG video to Profile 8.1 or 8.4 Dolby Vision MKVs without re-encoding.</desc>
+  <defs>
+    <linearGradient id="under-curve" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb000" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffb000" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="380" rx="24" fill="#0b0d10"/>
+  <g id="title-block">
+    <text x="64" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="2.5" fill="#9aa1ab">OPEN-SOURCE HDR ANALYSIS CLI</text>
+    <text x="62" y="168" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="72" font-weight="700" letter-spacing="-1.5" fill="#f4f1ea">HDR-Analyze</text>
+    <text x="64" y="216" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" fill="#f4f1ea" fill-opacity="0.86">Measures HDR10, HDR10+ and HLG video</text>
+    <text x="64" y="250" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" fill="#f4f1ea" fill-opacity="0.86">and converts it to Dolby Vision</text>
+    <text x="64" y="284" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" fill="#f4f1ea" fill-opacity="0.86">without re-encoding the picture.</text>
+    <rect x="64" y="302" width="40" height="3" fill="#ffb000"/>
+    <text x="64" y="336" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#9aa1ab">HDR10 · HDR10+ · HLG → Profile 8.1 / 8.4 MKV</text>
+  </g>
+  <g id="proof">
+    <text x="700" y="62" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#9aa1ab">PQ signal over luminance in nits</text>
+    <line x1="700" y1="292.0" x2="1136" y2="292.0" stroke="#252a32" stroke-width="1"/>
+    <line x1="700" y1="240.0" x2="1136" y2="240.0" stroke="#252a32" stroke-width="1"/>
+    <line x1="700" y1="188.0" x2="1136" y2="188.0" stroke="#252a32" stroke-width="1"/>
+    <line x1="700" y1="136.0" x2="1136" y2="136.0" stroke="#252a32" stroke-width="1"/>
+    <line x1="700" y1="84.0" x2="1136" y2="84.0" stroke="#252a32" stroke-width="1"/>
+    <line x1="700.0" y1="84" x2="700.0" y2="292" stroke="#252a32" stroke-width="1"/>
+    <line x1="772.7" y1="84" x2="772.7" y2="292" stroke="#252a32" stroke-width="1"/>
+    <line x1="845.3" y1="84" x2="845.3" y2="292" stroke="#252a32" stroke-width="1"/>
+    <line x1="918.0" y1="84" x2="918.0" y2="292" stroke="#252a32" stroke-width="1"/>
+    <line x1="990.7" y1="84" x2="990.7" y2="292" stroke="#252a32" stroke-width="1"/>
+    <line x1="1063.3" y1="84" x2="1063.3" y2="292" stroke="#252a32" stroke-width="1"/>
+    <line x1="1136.0" y1="84" x2="1136.0" y2="292" stroke="#252a32" stroke-width="1"/>
+    <path d="M700.0,287.5 L706.1,287.1 L712.1,286.6 L718.2,286.1 L724.2,285.5 L730.3,284.9 L736.3,284.2 L742.4,283.5 L748.4,282.7 L754.5,281.9 L760.6,281.0 L766.6,280.1 L772.7,279.0 L778.7,277.9 L784.8,276.8 L790.8,275.6 L796.9,274.3 L802.9,272.9 L809.0,271.4 L815.1,269.9 L821.1,268.2 L827.2,266.5 L833.2,264.7 L839.3,262.8 L845.3,260.8 L851.4,258.7 L857.4,256.6 L863.5,254.3 L869.6,251.9 L875.6,249.5 L881.7,246.9 L887.7,244.3 L893.8,241.5 L899.8,238.7 L905.9,235.8 L911.9,232.8 L918.0,229.7 L924.1,226.5 L930.1,223.2 L936.2,219.8 L942.2,216.4 L948.3,212.9 L954.3,209.3 L960.4,205.6 L966.4,201.9 L972.5,198.1 L978.6,194.2 L984.6,190.3 L990.7,186.3 L996.7,182.3 L1002.8,178.2 L1008.8,174.1 L1014.9,169.9 L1020.9,165.7 L1027.0,161.5 L1033.1,157.2 L1039.1,152.9 L1045.2,148.6 L1051.2,144.3 L1057.3,140.0 L1063.3,135.6 L1069.4,131.3 L1075.4,126.9 L1081.5,122.6 L1087.6,118.2 L1093.6,113.9 L1099.7,109.5 L1105.7,105.2 L1111.8,100.9 L1117.8,96.7 L1123.9,92.4 L1129.9,88.2 L1136.0,84.0 L1136.0,292.0 L700.0,292.0 Z" fill="url(#under-curve)"/>
+    <path d="M700.0,287.5 L706.1,287.1 L712.1,286.6 L718.2,286.1 L724.2,285.5 L730.3,284.9 L736.3,284.2 L742.4,283.5 L748.4,282.7 L754.5,281.9 L760.6,281.0 L766.6,280.1 L772.7,279.0 L778.7,277.9 L784.8,276.8 L790.8,275.6 L796.9,274.3 L802.9,272.9 L809.0,271.4 L815.1,269.9 L821.1,268.2 L827.2,266.5 L833.2,264.7 L839.3,262.8 L845.3,260.8 L851.4,258.7 L857.4,256.6 L863.5,254.3 L869.6,251.9 L875.6,249.5 L881.7,246.9 L887.7,244.3 L893.8,241.5 L899.8,238.7 L905.9,235.8 L911.9,232.8 L918.0,229.7 L924.1,226.5 L930.1,223.2 L936.2,219.8 L942.2,216.4 L948.3,212.9 L954.3,209.3 L960.4,205.6 L966.4,201.9 L972.5,198.1 L978.6,194.2 L984.6,190.3 L990.7,186.3 L996.7,182.3 L1002.8,178.2 L1008.8,174.1 L1014.9,169.9 L1020.9,165.7 L1027.0,161.5 L1033.1,157.2 L1039.1,152.9 L1045.2,148.6 L1051.2,144.3 L1057.3,140.0 L1063.3,135.6 L1069.4,131.3 L1075.4,126.9 L1081.5,122.6 L1087.6,118.2 L1093.6,113.9 L1099.7,109.5 L1105.7,105.2 L1111.8,100.9 L1117.8,96.7 L1123.9,92.4 L1129.9,88.2 L1136.0,84.0" fill="none" stroke="#f4f1ea" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+    <line x1="750.8" y1="282.4" x2="750.8" y2="292" stroke="#f4f1ea" stroke-width="1.5" stroke-dasharray="3 5" stroke-opacity="0.7"/>
+    <circle cx="750.8" cy="282.4" r="7" fill="#0b0d10" stroke="#f4f1ea" stroke-width="3"/>
+    <text x="744.8" y="258.4" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" font-weight="600" fill="#f4f1ea">L1 min</text>
+    <line x1="936.5" y1="219.6" x2="936.5" y2="292" stroke="#f4f1ea" stroke-width="1.5" stroke-dasharray="3 5" stroke-opacity="0.7"/>
+    <circle cx="936.5" cy="219.6" r="7" fill="#0b0d10" stroke="#f4f1ea" stroke-width="3"/>
+    <text x="924.5" y="203.6" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" font-weight="600" fill="#f4f1ea">L1 avg</text>
+    <line x1="1063.3" y1="135.6" x2="1063.3" y2="292" stroke="#ffb000" stroke-width="1.5" stroke-dasharray="3 5" stroke-opacity="0.7"/>
+    <circle cx="1063.3" cy="135.6" r="7" fill="#0b0d10" stroke="#ffb000" stroke-width="3"/>
+    <text x="1049.3" y="119.6" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" font-weight="600" fill="#ffb000">L1 max</text>
+    <text x="700.0" y="322" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#9aa1ab">0.01</text>
+    <text x="845.3" y="322" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#9aa1ab">1</text>
+    <text x="990.7" y="322" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#9aa1ab">100</text>
+    <text x="1136" y="322" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#9aa1ab">10,000</text>
+  </g>
+</svg>
