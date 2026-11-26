@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), with `--gemini` a Gemini 4 Neon pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has Gemini 4 Hydrogen (the agy docs-writer agent; fallback: the docs-keeper agent) update the docs. /ship:land step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), with `--gemini` a Gemini 4 Neon pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has Gemini (the agy docs-writer agent; fallback: the docs-keeper agent) update the docs. /ship:land step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [--gemini] [item ID]"
 disable-model-invocation: true
 ---
@@ -279,9 +279,9 @@ a step.
 
 ## 6. Docs
 
-The docs rules are `.claude/docs-rules.md`. Gemini 4 Hydrogen writes the docs through agy (the
-`docs-writer` agent of tinof/antigravity-config; owner, 2026-11-25). The `docs-keeper` agent is
-the fallback. Whoever writes, you check every line.
+The docs rules are `.claude/docs-rules.md`. Gemini writes the docs through agy (the `docs-writer`
+agent of tinof/antigravity-config; owner, 2026-11-25), on the model that step 1 prints. The
+`docs-keeper` agent is the fallback. Whoever writes, you check every line.
 
 1. **Pick the writer.** `~/.claude/skills/ship/scripts/gemini-model.sh docs` prints a model ID, or
    `fallback` when the shared Gemini quota is under 15%: a low pool is kept for the cold review,
