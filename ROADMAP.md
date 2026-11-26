@@ -81,9 +81,6 @@ release:
 
 - **WS6.9: metered, on the "Metered tests (later)" list below** (owner, 2026-10-29).
 - **FEL:** offline work reopened (owner, 2026-11-12); no step or gate on `main` yet.
-- **P10.5: the gate for a measured L1 minimum.** WS6.11 showed that the C9 reacts to L1 min: the
-  darkest four greys change with it (owner, 2026-11-25). The owner states the gate; WS7 cannot
-  judge the minimum (owner, 2026-11-07).
 
 ### Metered tests (later)
 
@@ -140,7 +137,7 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
    landed 2026-10-04; open: write L1 in-process (P10.3, max) and the measured minimum (P10.5).
    Outcome: the brightness values in the delivered file are the measured ones; where the
    generator changes one, the tool reports it.
-   Gate: the WS7 simulator decides P10.3 (owner, 2026-10-17); the owner states P10.5's after WS6.11.
+   Gate: the WS7 simulator decides P10.3 (owner, 2026-10-17); a blinded C9 A/B decides P10.5.
 4. **Narrow code defects** (E8, E9, P6, E7): histogram percentile reader, `--pre-denoise`
    values.
    Outcome: options and readouts do what they say, and a source that contradicts its own
@@ -284,7 +281,7 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
 
 - **Status:** Partial. Steps 1 and 2 (2026-10-04) and step 4 (2026-10-17) done; history in
   [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: P10.3, which waits for WS7.1 (owner,
-  2026-10-17: WS7 first, no playback test), and P10.5 (L1 minimum, owner gate).
+  2026-10-17: WS7 first, no playback test), and P10.5 (L1 minimum, blinded C9 A/B).
 - `dovi_tool generate` clamps L1 (minimum ≤ 12, maximum ≥ 2081, average ≥ 819). Numbers:
   [`docs/CM_ANALYZE_PARITY.md`](docs/CM_ANALYZE_PARITY.md).
 - **Gate:** the P10.3 and P10.5 gates (priority 3). Step 4's gate, done 2026-10-17: a blinded
@@ -293,9 +290,14 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
 - [P10.3][corpus] Decide whether to write L1 in-process so sub-100-nit maxima reach the RPU (the
   minimum is P10.5); raising the average floor to 1229 is not planned. Gate: the WS7 simulator
   shows that unclamped L1 is better (owner, 2026-10-17: WS7 first, no playback test). Needs: WS7.1.
-- [P10.5][owner] Decide whether the measured L1 minimum reaches the RPU (`dovi_tool generate` writes
-  at most 12). WS7 cannot judge it: libplacebo does not read L1 min (split from P10.3, owner,
-  2026-11-07). Gate: TODO(owner). Needs: WS6.11.
+- [P10.5][corpus] Decide whether the measured L1 minimum reaches the RPU (`dovi_tool generate`
+  writes at most 12; the C9 reacts to L1 min, WS6.11). The agent builds the A/B files; the viewing
+  is the owner's, on "Waiting for the owner" once delivered. Gate: a blinded A/B on the C9 of four
+  development cuts whose dark scenes measure well above 12 codes; a pair shares one base layer and
+  differs only in L1 min (capped against measured); each cut twice, sides swapped, in a scrambled
+  order (8 pairs, "which looks better", no difference allowed). Measured wins with at least 6 of 8
+  picks and both showings of at least 3 cuts; else the cap stays. A win makes it the default, in
+  its own step (owner, 2026-11-26).
 - **Checked 2026-11-25 @c8a9b4f:** the simulator may not reach P10.3's gate: it raises the input
   peak to the panel peak (`tools/display_sim/src/tm_shim.c:132`), and an L1 max below the panel
   peak changes nothing on every curve (`gate_tests.rs:149`). A sub-100-nit max clamped to 2081
