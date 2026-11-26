@@ -60,6 +60,7 @@ hdr-analyze-<version>-<target>/
 │   ├── mkvdovi_hifi_workflow.sh          (Linux, macOS)
 │   └── FFmpeg LGPL DLLs + FFMPEG-LICENSE.txt   (Windows)
 ├── docs/                              (the documentation linked from README.md)
+├── assets/                            (the image embedded in README.md)
 ├── README.md
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md

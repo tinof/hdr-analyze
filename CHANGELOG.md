@@ -6,6 +6,11 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Changed
+
+- Release archives now include `assets/` (`assets/readme/hero.svg`) next to `README.md` and
+  `docs/`, so the embedded README image displays in an extracted archive.
+
 ## [0.9.0] - 2026-11-26
 
 ### Upgrade notes
