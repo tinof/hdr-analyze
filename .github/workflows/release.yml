@@ -206,6 +206,8 @@ jobs:
           fi
           cp README.md CHANGELOG.md CONTRIBUTING.md ROADMAP.md LICENSE "$staging/"
           cp -R docs "$staging/docs"
+          # README.md embeds assets/readme/*; ship them so the image shows in the archive copy too.
+          cp -R assets "$staging/assets"
           # Every binary must start from the archive and report the tagged version.
           for bin in hdr_analyzer_mvp mkvdovi verifier; do
             out=$("$staging/bin/$bin$ext" --version)
