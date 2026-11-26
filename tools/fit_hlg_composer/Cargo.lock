@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "dovi84_composer"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "dolby_vision",
