@@ -498,14 +498,14 @@ fn constant_rate(n: usize, frame_ms: f64) -> VideoTimes {
 fn first_timing_takes_the_timestamps_file_when_the_stream_states_another_rate() {
     let file = MuxTiming::File(PathBuf::from("/t/video.timestamps.txt"));
     let source = constant_rate(10, 40.0);
-    // The stream's VUI says 30 fps, the container 25 fps (an RTX HDR encode).
+    // The stream's VUI says 30 fps, the source runs at 25 fps (an RTX HDR encode).
     let (timing, reason) = first_timing(&source, Some(1000.0 / 30.0), &file);
     assert_eq!(timing, file);
     let reason = reason.unwrap();
     assert!(reason.contains("30.000 fps"), "{reason}");
     assert!(reason.contains("25.000 fps"), "{reason}");
-    // 29.97 against 30 fps is a different rate too.
-    let ntsc = constant_rate(10, 1001.0 / 30.0);
+    // 29.97 against 30 fps drifts 33 ms over 1000 frames: the stream's timing would fail.
+    let ntsc = constant_rate(1000, 1001.0 / 30.0);
     assert_eq!(first_timing(&ntsc, Some(1000.0 / 30.0), &file).0, file);
 }
 
@@ -513,19 +513,23 @@ fn first_timing_takes_the_timestamps_file_when_the_stream_states_another_rate() 
 fn first_timing_keeps_the_streams_timing_when_the_rates_agree_or_one_is_unknown() {
     let file = MuxTiming::File(PathBuf::from("/t/video.timestamps.txt"));
     let film = constant_rate(10, 1001.0 / 24.0);
-    // mkvmerge's 41708333 ns for 24000/1001 fps against ffprobe's 41.708333... ms.
+    // mkvmerge's 41708333 ns for 24000/1001 fps against the frames' 41.708333... ms.
     let (timing, reason) = first_timing(&film, Some(41.708_333), &file);
     assert_eq!(timing, MuxTiming::Stream { sync_ms: 0 });
     assert_eq!(reason, None);
-    // No prediction, or no container rate: today's behaviour.
+    // 29.97 against 30 fps over 10 frames drifts 0.3 ms, within the check: stream timing.
+    let short = constant_rate(10, 1001.0 / 30.0);
+    assert_eq!(
+        first_timing(&short, Some(1000.0 / 30.0), &file).0,
+        MuxTiming::Stream { sync_ms: 0 }
+    );
+    // No prediction, or a single frame: today's behaviour.
     assert_eq!(
         first_timing(&film, None, &file).0,
         MuxTiming::Stream { sync_ms: 0 }
     );
-    let mut no_rate = constant_rate(10, 40.0);
-    no_rate.frame_ms = None;
     assert_eq!(
-        first_timing(&no_rate, Some(1000.0 / 30.0), &file).0,
+        first_timing(&constant_rate(1, 40.0), Some(1000.0 / 30.0), &file).0,
         MuxTiming::Stream { sync_ms: 0 }
     );
     // A late start is still kept with --sync.
@@ -535,6 +539,24 @@ fn first_timing_keeps_the_streams_timing_when_the_rates_agree_or_one_is_unknown(
         first_timing(&late, Some(40.0), &file).0,
         MuxTiming::Stream { sync_ms: 2000 }
     );
+}
+
+#[test]
+fn first_timing_reads_the_rate_from_the_frames_not_ffprobes_estimate() {
+    let file = MuxTiming::File(PathBuf::from("/t/video.timestamps.txt"));
+    // A 23.976 fps track without a default duration: whole-millisecond frames 0, 42, 83, 125...
+    // and ffprobe's avg_frame_rate estimate of 293/12 fps (40.956 ms), 1.8 % off.
+    let frames: Vec<f64> = (0..240)
+        .map(|k| (f64::from(k) * 1001.0 / 24.0).round())
+        .collect();
+    let source = VideoTimes {
+        end: None,
+        frame_ms: Some(12_000.0 / 293.0),
+        frames,
+    };
+    let (timing, reason) = first_timing(&source, Some(41.708_333), &file);
+    assert_eq!(timing, MuxTiming::Stream { sync_ms: 0 });
+    assert_eq!(reason, None);
 }
 
 #[test]
@@ -629,4 +651,29 @@ fn deliver_muxes_a_stream_whose_vui_rate_differs_with_the_timestamps_file_first(
     // One mux, with the source's timestamps: the stream's 30 fps is never muxed.
     assert_eq!(calls, [MuxTiming::File(temp.join(TIMESTAMPS_FILE))]);
     assert_eq!(default_duration(&output), Some(40_000_000));
+}
+
+#[test]
+fn first_timing_keeps_whole_millisecond_frames_of_a_matching_rate_on_the_stream_timing() {
+    let file = MuxTiming::File(PathBuf::from("/t/video.timestamps.txt"));
+    // 24000/1001 fps in whole milliseconds, as Matroska stores it, against mkvmerge's truncated
+    // 41708333 ns, at 24 consecutive lengths near 100k and 200k frames, from 0 and from a
+    // fractional start: the rounding of both ends must never read as another rate.
+    for start in [0.0, 0.4, 1000.6] {
+        for n in (99_990..100_014).chain(199_990..200_014) {
+            let frames: Vec<f64> = (0..n)
+                .map(|k| (start + f64::from(k) * 1001.0 / 24.0).round())
+                .collect();
+            let source = VideoTimes {
+                end: None,
+                frame_ms: Some(1001.0 / 24.0),
+                frames,
+            };
+            let (timing, reason) = first_timing(&source, Some(41.708_333), &file);
+            assert!(
+                matches!(timing, MuxTiming::Stream { .. }),
+                "{n} frames from {start} ms: {reason:?}"
+            );
+        }
+    }
 }

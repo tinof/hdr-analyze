@@ -63,11 +63,12 @@ pub fn run_command(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     Ok(output.status.success())
 }
 
-/// Runs `producer | consumer` (ROADMAP E7.5): the producer's stdout feeds the consumer's stdin,
+/// Runs `producer | consumer` (ROADMAP E7.4): the producer's stdout feeds the consumer's stdin,
 /// so no intermediate file is written. Each child's other output goes straight to its log file,
 /// never to a pipe this process would have to drain, so neither can block on a full pipe.
-/// True only when both exit successfully; a consumer that stops early makes the producer fail
-/// on its broken pipe.
+/// True only when both exit successfully. A consumer that stops early leaves the pipe without a
+/// reader, so the producer fails on its broken pipe; it is also killed, so a long producer does
+/// not run on.
 pub fn run_piped_commands(
     producer: &mut Command,
     producer_log: &Path,
@@ -89,15 +90,22 @@ pub fn run_piped_commands(
     consumer.stdin(Stdio::from(pipe));
     consumer.stdout(Stdio::from(consumer_file.try_clone()?));
     consumer.stderr(Stdio::from(consumer_file));
-    let mut second = match consumer.spawn() {
-        Ok(child) => child,
+    let spawned = consumer.spawn();
+    // `Command` keeps the read end it was given after the spawn. Dropping it here leaves the
+    // consumer as the pipe's only reader, so its exit gives the producer a broken pipe instead
+    // of a full pipe this process would hold open forever.
+    consumer.stdin(Stdio::null());
+    let consumer_ok = match spawned.and_then(|mut second| second.wait()) {
+        Ok(status) => status.success(),
         Err(error) => {
             let _ = first.kill();
             let _ = first.wait();
-            return Err(error).context("Failed to spawn command");
+            return Err(error).context("Failed to run command");
         }
     };
-    let consumer_ok = second.wait()?.success();
+    if !consumer_ok {
+        let _ = first.kill();
+    }
     let producer_ok = first.wait()?.success();
     Ok(producer_ok && consumer_ok)
 }
@@ -587,5 +595,56 @@ mod tests {
         assert!((2, 3, 4) > (2, 3, 3));
         assert!((2, 10, 0) > (2, 3, 4));
         assert!((3, 0, 0) > (2, 99, 99));
+    }
+
+    /// `run_piped_commands` on a thread, `None` when it has not returned within 30 s.
+    #[cfg(unix)]
+    fn piped_within_timeout(producer: &str, consumer: &str) -> Option<(bool, String)> {
+        let dir = tempfile::tempdir().unwrap();
+        let (producer, consumer) = (producer.to_owned(), consumer.to_owned());
+        let (tx, rx) = mpsc::channel();
+        let logs = dir.path().to_path_buf();
+        thread::spawn(move || {
+            let mut first = Command::new("sh");
+            first.arg("-c").arg(producer);
+            let mut second = Command::new("sh");
+            second.arg("-c").arg(consumer);
+            let ok = run_piped_commands(
+                &mut first,
+                &logs.join("producer.log"),
+                &mut second,
+                &logs.join("consumer.log"),
+            )
+            .unwrap();
+            let log = std::fs::read_to_string(logs.join("consumer.log")).unwrap();
+            let _ = tx.send((ok, log));
+        });
+        rx.recv_timeout(Duration::from_secs(30)).ok()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn piped_commands_feed_the_producers_output_to_the_consumer() {
+        let (ok, log) =
+            piped_within_timeout("head -c 300000 /dev/zero; echo done >&2", "wc -c").unwrap();
+        assert!(ok);
+        assert!(log.contains("300000"), "{log}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn piped_commands_return_when_the_consumer_stops_early() {
+        // 100 MB into a consumer that reads nothing: before the fix this process kept the
+        // pipe's read end open, and the producer blocked on the full pipe forever.
+        let run = piped_within_timeout("head -c 100000000 /dev/zero", "exit 1");
+        assert_eq!(run.map(|(ok, _)| ok), Some(false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn piped_commands_fail_when_the_producer_fails() {
+        let (ok, _) =
+            piped_within_timeout("head -c 1000 /dev/zero; exit 3", "cat > /dev/null").unwrap();
+        assert!(!ok);
     }
 }

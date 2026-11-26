@@ -1914,7 +1914,7 @@ fn called_with(calls: &[String], needle: &str) -> bool {
 }
 
 /// True when `--verify`'s extraction ran: ffmpeg writing raw HEVC to its stdout, the pipe into
-/// `dovi_tool extract-rpu -` (ROADMAP E7.5).
+/// `dovi_tool extract-rpu -` (ROADMAP E7.4).
 #[cfg(unix)]
 fn verify_extraction_ran(ffmpeg_calls: &[String]) -> bool {
     ffmpeg_calls.iter().any(|call| call.ends_with("-f hevc -"))

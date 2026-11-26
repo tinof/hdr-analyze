@@ -30,13 +30,16 @@ use crate::progress;
 /// mkvmerge and the source's muxer may round one frame time to different milliseconds.
 pub(super) const TOLERANCE_MS: f64 = 1.0;
 
-/// Largest relative difference between the container's and the stream's frame durations that
-/// still counts as one rate (ROADMAP E7.4). 29.97 against 30 fps is 0.1 %, which over an hour
-/// drifts 3.6 s.
-const RATE_MATCH_RELATIVE: f64 = 1e-4;
+/// Largest drift, by the source's last frame, between the source's frames and the stream's own
+/// timing that still muxes with the stream's timing (ROADMAP E7.4). The source's frame times
+/// are whole milliseconds, so a matching rate already reads up to 1 ms off over the clip (both
+/// ends rounded), plus mkvmerge's truncated nanoseconds; a miss only costs the retry, while a
+/// false hit would move ordinary files to a timestamps file. A real 0.1 % mismatch passes 3 ms
+/// within 3 s of video.
+const STREAM_DRIFT_MS: f64 = 3.0;
 
 /// The frame duration mkvmerge gives a raw HEVC stream without VUI timing (25 fps; checked with
-/// mkvmerge v104: `-J` reports no `default_duration`, the mux has 40 ms).
+/// mkvmerge v82: `-J` reports no `default_duration`, the mux has 40 ms).
 const MKVMERGE_DEFAULT_FRAME_MS: f64 = 40.0;
 
 /// The timestamps v2 file written for a `--timestamps` mux, in the temp dir.
@@ -188,10 +191,11 @@ pub(super) fn deliver(
 
 /// The timing of the first mux, and the notice that explains a timestamps file (ROADMAP E7.3,
 /// E7.4). A variable-rate source takes its timestamps. So does a constant-rate source whose
-/// frame duration differs from the one mkvmerge would give the raw stream (`stream_frame_ms`,
-/// from the stream's VUI): the stream's timing would mux at the wrong rate, so muxing it first
-/// would only be discarded by the check. Otherwise the stream's timing, shifted to the source's
-/// start.
+/// frames would drift from the stream's timing (`stream_frame_ms`, mkvmerge's reading of the
+/// stream's VUI) by more than [`STREAM_DRIFT_MS`] by its last frame: that mux would only be
+/// discarded by the check. The source's rate is its measured mean frame interval, not ffprobe's
+/// `avg_frame_rate`, which is an estimate when the track states no default duration. Otherwise
+/// the stream's timing, shifted to the source's start.
 pub(super) fn first_timing(
     source: &VideoTimes,
     stream_frame_ms: Option<f64>,
@@ -201,13 +205,14 @@ pub(super) fn first_timing(
         let reason = "The source has a variable frame rate; the output takes its timestamps.";
         return (file.clone(), Some(reason.to_owned()));
     }
-    if let (Some(container), Some(stream)) = (source.frame_ms, stream_frame_ms) {
-        if !same_frame_duration(container, stream) {
+    if let (Some(stream), Some(source_ms)) = (stream_frame_ms, mean_frame_ms(&source.frames)) {
+        let intervals = (source.frames.len() - 1) as f64;
+        if ((stream - source_ms) * intervals).abs() > STREAM_DRIFT_MS {
             let reason = format!(
-                "The video stream states {:.3} fps, the source's container {:.3} fps; the output \
+                "The video stream states {:.3} fps, the source runs at {:.3} fps; the output \
                  takes the source's timestamps.",
                 1000.0 / stream,
-                1000.0 / container
+                1000.0 / source_ms
             );
             return (file.clone(), Some(reason));
         }
@@ -218,10 +223,12 @@ pub(super) fn first_timing(
     (stream, None)
 }
 
-/// True when two frame durations give the same rate within [`RATE_MATCH_RELATIVE`]: 29.97 and
-/// 30 fps differ (0.1 %), while 41.708333 ms and mkvmerge's 41708333 ns agree.
-pub(super) fn same_frame_duration(a_ms: f64, b_ms: f64) -> bool {
-    (a_ms - b_ms).abs() <= RATE_MATCH_RELATIVE * a_ms.max(b_ms)
+/// The mean interval between presentation times, `None` below two frames.
+fn mean_frame_ms(frames: &[f64]) -> Option<f64> {
+    let [first, .., last] = frames else {
+        return None;
+    };
+    Some((last - first) / (frames.len() - 1) as f64)
 }
 
 /// The frame duration mkvmerge gives `hevc`'s video track (its `default_duration`, from the

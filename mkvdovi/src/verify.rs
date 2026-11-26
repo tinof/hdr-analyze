@@ -91,7 +91,7 @@ pub fn verify_post_mux_with_options(
 
     // 2. Extract RPU from the muxed output for structural inspection. ffmpeg's raw HEVC goes
     // straight into dovi_tool through a pipe: no full-size copy of the video is written
-    // (ROADMAP E7.5).
+    // (ROADMAP E7.4).
     println!("{}", "Checking with dovi_tool info...".cyan());
     let rpu_path = temp_dir.join("verify_rpu.bin");
     // A file from an earlier run must not stand in for an extraction that wrote nothing.
