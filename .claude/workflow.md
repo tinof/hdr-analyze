@@ -207,14 +207,17 @@ as P0/P1 and 2 as minor notes, Argon medium none, Argon high 2 minor in 10 cases
 stays parked; the owner decides when a new result justifies the default rows. While Codex is disabled, the
 plugin reads every `codex` cell as its review stand-in (`review-rules.md`, "Review stand-in"): the
 CodeRabbit CLI during its trial (owner decision 2026-11-26, to about 2026-12-10). On 10 of the 14 cases it
-caught 6 of the 20 known defects there. Tier 2 of a Claude-built change therefore has one family, Codex, on both surfaces (below):
-the round stays Tier 2 as `tier2Mode: single-family`, and both surfaces must complete. A diff that touches
+caught 6 of the 20 known defects there; pr43's catch did not repeat in two later runs. While Codex is
+disabled, Tier 2 of a Claude-built change has one family left, the stand-in, and runs as one pass recorded
+as Tier 1 (`review-rules.md`, worked table); `review-surfaces` has no effect. When Codex is enabled again,
+Tier 2 of a Claude-built change has one family, Codex, on both surfaces (below): the round stays Tier 2 as
+`tier2Mode: single-family`, and both surfaces must complete. A diff that touches
 this file is reviewed under the base's routing and surfaces, and still shows the owner its diff before
 the merge. The standalone
 `/pre-pr-review` Gemini pass is not part of `/ship:land` and runs only with `--gemini`; the `gemini-harness` entry stays
 in `## Gates`, which `/ship:land` still runs when its paths change.
 
-`review-surfaces: exec github` (contract 1.1, ship plugin 1.3.0): the `codex` reviewer is the local cold
+`review-surfaces: exec github` (contract 1.1, ship plugin 1.3.0; in effect only while Codex is enabled): the `codex` reviewer is the local cold
 `codex exec` pass and Codex's GitHub review (`chatgpt-codex-connector[bot]`, connected for this repo at
 chatgpt.com/settings/code-review on 2026-10-24). Automatic review did not fire on #70 or #71, so `/ship:land`
 waits a minute and then posts one `@codex review` per reviewed head. The GitHub review is not cold: it
