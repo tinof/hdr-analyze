@@ -1,6 +1,9 @@
+<p align="center"><img src="assets/readme/hero.svg" width="100%" alt="HDR-Analyze: the SMPTE ST 2084 PQ transfer curve plotted over luminance in nits with a scene's L1 minimum, average and maximum marked on it. Converts HDR10, HDR10+ and HLG video to Profile 8.1 or 8.4 Dolby Vision MKVs without re-encoding."></p>
+
 # HDR-Analyze
 
 [![CI](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml/badge.svg)](https://github.com/tinof/hdr-analyze/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tinof/hdr-analyze)](https://github.com/tinof/hdr-analyze/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-stable-blue.svg)](https://github.com/rust-lang/rust)
 
@@ -8,15 +11,59 @@ HDR-Analyze measures HDR10, HDR10+ and HLG video and converts it to Dolby Vision
 
 HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby Laboratories, and Dolby Vision is a Dolby trademark ([provenance](docs/PROVENANCE.md)). Current version: 0.9.0.
 
-## What you get
+## Performance and validation
 
-- HDR10 and HDR10+ files become Profile 8.1 MKVs, and HLG files become Profile 8.4 MKVs. The video stream is copied, not re-encoded: `mkvdovi` never encodes video.
-- An open-source analysis engine that measures decoded pixels and writes per-scene L1 plus L2, L6, L9 and L11 metadata. `dovi_tool` generates and injects the RPU.
-- Direct analysis of the compressed source. You do not need a ProRes or raw intermediate.
-- Optional NVDEC decode and CUDA analysis that works on the decoded frames in GPU memory: about 325 fps (4K HDR10) and 490 fps (4K HLG) end to end on an RTX 4070 ([details](docs/PERFORMANCE.md)). The Linux x64 and Windows x64 release archives include it and need only the NVIDIA driver (R560 or newer).
-- Published validation against synthetic references and Dolby-generated metadata, including an open gap on grainy content ([docs/VALIDATION.md](docs/VALIDATION.md)).
+Measured accuracy against synthetic references and Dolby-generated metadata, plus end-to-end CUDA throughput on an RTX 4070:
 
-It also reuses existing HDR10+ metadata, audits RPUs with `mkvdovi inspect`, rebuilds metadata on existing Dolby Vision files with `--mdfix`, and runs on the CPU under Linux, macOS and Windows.
+| Check | Measured result | Conditions and source |
+|---|---|---|
+| Synthetic patterns | Peaks within 0.25 of one 12-bit PQ code | Known-peak lossless test clips ([docs/VALIDATION.md](docs/VALIDATION.md)) |
+| Reference metadata (max-RGB peaks) | 12.8 codes high on average | Asset with Dolby-generated reference metadata ([docs/VALIDATION.md](docs/VALIDATION.md)) |
+| HDR10+ metadata alone (`--hdr10plus-l1 hdr10plus`) | Per-shot median error 1 code (max 17) | Compared with Dolby's v4 analyzer ([docs/VALIDATION.md](docs/VALIDATION.md)) |
+| Scene detection | 13 of 14 authored cuts matched (24 cuts emitted) | Real-content test asset ([docs/VALIDATION.md](docs/VALIDATION.md)) |
+| Grainy real-content assets (default `max` estimator) | +74 and +93 codes hot against reference | Open gap on two grainy assets ([docs/VALIDATION.md](docs/VALIDATION.md)) |
+| CUDA analysis (4K HDR10 / 4K HLG) | About 325 fps / 490 fps | RTX 4070, frames ÷ wall time of whole analyzer run ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)) |
+
+The weak spot is grain: the opt-in grain-rejecting estimator (`--peak-estimator`, see [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)) narrows the gap above on grainy real-content assets, but does not close it.
+
+Optional NVDEC decode and CUDA analysis work on decoded frames in GPU memory, with L1 output identical to earlier builds ([docs/PERFORMANCE.md](docs/PERFORMANCE.md) records the test conditions and reproduction recipe; [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md) explains how the GPU path reaches these rates). The Linux x64 and Windows x64 release archives include it and need only the NVIDIA driver (R560 or newer).
+
+CPU and GPU agreement shows the two paths are consistent. It says nothing about accuracy. The accuracy evidence is in [docs/VALIDATION.md](docs/VALIDATION.md), and the remaining gaps are in [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md). The only playback comparison so far is the HLG composer test on an LG OLED C9 ([docs/ROADMAP_LOG.md](docs/ROADMAP_LOG.md), 2026-10-13).
+
+## How it works
+
+`mkvdovi` copies the compressed HEVC video stream with `ffmpeg` without re-encoding while `mediainfo`/`ffprobe`, `hdr_analyzer_mvp` and (for HDR10+) `hdr10plus_tool` collect the stream and luminance metadata. `dovi_tool` generates the RPU and injects it into the copied stream, and `mkvmerge` packages the Dolby Vision MKV.
+
+```mermaid
+flowchart LR
+    SRC["Input MKV (HDR10, HDR10+ or HLG)"]:::source
+    PROBE["mediainfo / ffprobe (stream metadata)"]:::meta
+    ANALYZE["hdr_analyzer_mvp (CPU or CUDA pixel analysis)"]:::meta
+    H10P["hdr10plus_tool (HDR10+ only)"]:::meta
+    GEN["dovi_tool generate (RPU: L1, L2, L6, L9, L11)"]:::meta
+    COPY["ffmpeg -c:v copy (video copied, never re-encoded)"]:::video
+    INJ["dovi_tool inject-rpu"]:::pack
+    MUX["mkvmerge (final MKV packaging)"]:::pack
+    OUT["Dolby Vision MKV (Profile 8.1, or 8.4 for HLG)"]:::result
+
+    SRC --> PROBE --> GEN
+    SRC --> ANALYZE --> GEN
+    SRC --> COPY --> INJ
+    COPY -.-> H10P -.-> GEN
+    GEN --> INJ --> MUX --> OUT
+
+    classDef source fill:#fed7aa,stroke:#c2410c,color:#1f2937
+    classDef meta fill:#ddd6fe,stroke:#6d28d9,color:#1f2937
+    classDef video fill:#bae6fd,stroke:#0369a1,color:#1f2937
+    classDef pack fill:#fde68a,stroke:#b45309,color:#1f2937
+    classDef result fill:#a7f3d0,stroke:#047857,color:#1f2937
+```
+
+- `mkvdovi` never encodes video: HDR10 and HDR10+ inputs become Profile 8.1 MKVs, and HLG inputs become Profile 8.4 MKVs, with the video stream copied unchanged.
+- `hdr_analyzer_mvp` measures decoded pixels directly from the compressed HEVC source without a ProRes or raw intermediate, and `mkvdovi` writes per-scene L1 plus L2, L6, L9 and L11 metadata for `dovi_tool` to generate and inject the RPU.
+- `mkvdovi` also reuses existing HDR10+ metadata, audits RPUs with `mkvdovi inspect`, rebuilds metadata on existing Dolby Vision files with `--mdfix`, and runs on the CPU under Linux, macOS and Windows.
+
+Dolby provides its own professional tools for this job. If you already use them and the workflow suits you, keep using it. HDR-Analyze exists for command-line conversion of delivered HEVC files without exporting an intermediate, optional NVIDIA GPU measurement, published error figures including where the output is still wrong, and open-source code you can read and change down to how each metadata value is computed.
 
 ## Quick start
 
@@ -37,7 +84,12 @@ mkvdovi movie.mkv --keep-source
 > **The source file is deleted after a successful conversion** unless you pass `--keep-source`.
 > Inputs that already carry Dolby Vision metadata, and all `--mdfix` runs, keep the source.
 
-Install these tools separately and put them on `PATH`. `mkvdovi` checks for all but the last one at startup:
+Every conversion needs `ffmpeg`, `mkvmerge`, [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases) 2.3.2 or newer, and `mediainfo` (recommended) or `ffprobe` installed separately on `PATH`; HDR10+ inputs also need [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases).
+
+<details>
+<summary>External tools and runtime requirements</summary>
+
+`mkvdovi` checks for all of these on `PATH` at startup except `hdr10plus_tool`:
 
 | Tool | Needed for |
 |---|---|
@@ -49,6 +101,8 @@ Install these tools separately and put them on `PATH`. `mkvdovi` checks for all 
 | [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) | HDR10+ input. An HDR10+ file fails if the tool is missing. |
 
 HDR10+ conversions also run `hdr_analyzer_mvp`, which ships with `mkvdovi`. Without a current analyzer they take L1 from the HDR10+ metadata alone, with a warning.
+
+</details>
 
 To build from source instead, run `cargo build --release --workspace`. For GPU analysis on an NVIDIA host, add `cargo build --release -p hdr_analyzer_mvp --features cuda` (needs only the NVIDIA driver at runtime, no CUDA toolkit). FFmpeg dev libraries, clang and per-OS notes are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
@@ -65,26 +119,6 @@ To build from source instead, run `cargo build --release --workspace`. For GPU a
 
 Flag-level detail is in [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY.md) and [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
 
-## Performance and validation
-
-On an RTX 4070, CUDA analysis of 4K sources runs at about 325 fps (HDR10) and 490 fps (HLG), counted as frames ÷ wall time of the whole analyzer run, with L1 output identical to earlier builds. [docs/PERFORMANCE.md](docs/PERFORMANCE.md) records the test conditions and gives a reproduction recipe, and [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md) explains how the GPU path reaches these rates.
-
-On synthetic patterns, measured peaks land within 0.25 of one 12-bit PQ code. On an asset with Dolby-generated reference metadata, max-RGB peaks read 12.8 codes high on average. L1 derived from HDR10+ metadata alone (`--hdr10plus-l1 hdr10plus`) matched Dolby's v4 analyzer with a per-shot median error of 1 code (max 17), and scene detection matched 13 of 14 authored cuts while emitting 24 cuts in total.
-
-The weak spot is grain. With the default `max` estimator, two grainy real-content assets read +74 and +93 codes hot against the reference. An opt-in grain-rejecting estimator (`--peak-estimator`, see the CLI reference) narrows this but does not close it.
-
-CPU and GPU agreement shows the two paths are consistent. It says nothing about accuracy. The accuracy evidence is in [docs/VALIDATION.md](docs/VALIDATION.md), and the remaining gaps are in [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md). The only playback comparison so far is the HLG composer test on an LG OLED C9 ([docs/ROADMAP_LOG.md](docs/ROADMAP_LOG.md), 2026-10-13).
-
-## Why another HDR analyzer?
-
-Dolby provides its own professional tools for this job. If you already use them and the workflow suits you, keep using it. HDR-Analyze exists for other situations:
-
-- You have HDR10, HDR10+ or HLG files and want Dolby Vision output (Profile 8.1, or 8.4 for HLG) from a command-line conversion.
-- Reading and changing the analysis code matters to you, down to how each metadata value is computed.
-- Your source is a delivered HEVC file and you would rather not export an intermediate first.
-- You have an NVIDIA GPU and want to use it for the measurement pass.
-- You want published error figures, including where the output is still wrong.
-
 ## Limitations
 
 - The default peak estimator is sensitive to film grain (see above). The grain-rejecting estimator is opt-in (`--peak-estimator robust`, CPU and CUDA) and not yet accurate enough to be the default.
@@ -92,8 +126,17 @@ Dolby provides its own professional tools for this job. If you already use them 
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
 - There is no Profile 5 output and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
-- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer). HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the default 8.4 preset curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)); `--hlg-composer preset` writes the `dolby_vision` crate's preset instead, which tints neutral greys slightly blue. A playback test showed that an LG OLED C9 applies the fitted composer; other devices are untested.
+- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer).
 - Playback has been compared on one display only: the HLG composer test on an LG OLED C9 (2026-10-13). HDR10, HDR10+ and other devices are untested.
+
+The HLG 1000-nit range cap, the default BT.2100 composer and the `--hlg-composer preset` option are detailed below.
+
+<details>
+<summary>HLG Profile 8.4 measurement and composer details</summary>
+
+HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the default 8.4 preset curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)); `--hlg-composer preset` writes the `dolby_vision` crate's preset instead, which tints neutral greys slightly blue. A playback test showed that an LG OLED C9 applies the fitted composer; other devices are untested.
+
+</details>
 
 ## Documentation
 
