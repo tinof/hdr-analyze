@@ -209,6 +209,7 @@ fn deliver_with(
     let calls = RefCell::new(Vec::new());
     let delivery = deliver(
         source.to_str().unwrap(),
+        &source.with_file_name("clip.hevc"),
         output,
         temp,
         resume,
@@ -387,6 +388,7 @@ fn deliver_retry_with_the_timestamps_file_keeps_the_sources_frame_rate() {
     let mut calls = Vec::new();
     let delivery = deliver(
         late.to_str().unwrap(),
+        &raw,
         &output,
         &temp,
         false,
@@ -458,6 +460,7 @@ fn deliver_of_an_unreadable_source_muxes_unchecked() {
     let calls = RefCell::new(Vec::new());
     let delivery = deliver(
         source.to_str().unwrap(),
+        &source,
         &output,
         dir.path(),
         false,
@@ -472,6 +475,7 @@ fn deliver_of_an_unreadable_source_muxes_unchecked() {
 
     let failed = deliver(
         source.to_str().unwrap(),
+        &source,
         &output,
         dir.path(),
         false,
@@ -479,4 +483,150 @@ fn deliver_of_an_unreadable_source_muxes_unchecked() {
     )
     .unwrap();
     assert_eq!(failed, Delivery::Failed);
+}
+
+/// A constant-rate source from 0 ms: `n` frames of `frame_ms`, with the container's rate.
+fn constant_rate(n: usize, frame_ms: f64) -> VideoTimes {
+    VideoTimes {
+        frames: (0..n).map(|k| k as f64 * frame_ms).collect(),
+        end: Some(n as f64 * frame_ms),
+        frame_ms: Some(frame_ms),
+    }
+}
+
+#[test]
+fn first_timing_takes_the_timestamps_file_when_the_stream_states_another_rate() {
+    let file = MuxTiming::File(PathBuf::from("/t/video.timestamps.txt"));
+    let source = constant_rate(10, 40.0);
+    // The stream's VUI says 30 fps, the container 25 fps (an RTX HDR encode).
+    let (timing, reason) = first_timing(&source, Some(1000.0 / 30.0), &file);
+    assert_eq!(timing, file);
+    let reason = reason.unwrap();
+    assert!(reason.contains("30.000 fps"), "{reason}");
+    assert!(reason.contains("25.000 fps"), "{reason}");
+    // 29.97 against 30 fps is a different rate too.
+    let ntsc = constant_rate(10, 1001.0 / 30.0);
+    assert_eq!(first_timing(&ntsc, Some(1000.0 / 30.0), &file).0, file);
+}
+
+#[test]
+fn first_timing_keeps_the_streams_timing_when_the_rates_agree_or_one_is_unknown() {
+    let file = MuxTiming::File(PathBuf::from("/t/video.timestamps.txt"));
+    let film = constant_rate(10, 1001.0 / 24.0);
+    // mkvmerge's 41708333 ns for 24000/1001 fps against ffprobe's 41.708333... ms.
+    let (timing, reason) = first_timing(&film, Some(41.708_333), &file);
+    assert_eq!(timing, MuxTiming::Stream { sync_ms: 0 });
+    assert_eq!(reason, None);
+    // No prediction, or no container rate: today's behaviour.
+    assert_eq!(
+        first_timing(&film, None, &file).0,
+        MuxTiming::Stream { sync_ms: 0 }
+    );
+    let mut no_rate = constant_rate(10, 40.0);
+    no_rate.frame_ms = None;
+    assert_eq!(
+        first_timing(&no_rate, Some(1000.0 / 30.0), &file).0,
+        MuxTiming::Stream { sync_ms: 0 }
+    );
+    // A late start is still kept with --sync.
+    let mut late = constant_rate(10, 40.0);
+    late.frames.iter_mut().for_each(|t| *t += 2000.0);
+    assert_eq!(
+        first_timing(&late, Some(40.0), &file).0,
+        MuxTiming::Stream { sync_ms: 2000 }
+    );
+}
+
+#[test]
+fn first_timing_gives_a_variable_rate_source_its_timestamps_whatever_the_stream_says() {
+    let file = MuxTiming::File(PathBuf::from("/t/video.timestamps.txt"));
+    let mut vfr = constant_rate(10, 40.0);
+    vfr.frames[5] += 15.0;
+    let (timing, reason) = first_timing(&vfr, Some(40.0), &file);
+    assert_eq!(timing, file);
+    assert!(reason.unwrap().contains("variable frame rate"));
+}
+
+#[test]
+fn mkvmerge_identification_gives_the_video_tracks_frame_duration() {
+    let json = json!({"tracks": [
+        {"type": "audio", "properties": {"default_duration": 23_219_954}},
+        {"type": "video", "properties": {"default_duration": 33_333_333}},
+    ]});
+    let ms = stream_frame_ms_from_mkvmerge(&json).unwrap();
+    assert!((ms - 33.333_333).abs() < 1e-6, "{ms}");
+    // No VUI timing: mkvmerge muxes the raw stream at 25 fps.
+    for properties in [json!({}), json!({"default_duration": null})] {
+        let json = json!({"tracks": [{"type": "video", "properties": properties}]});
+        assert_eq!(stream_frame_ms_from_mkvmerge(&json), Some(40.0));
+    }
+    assert_eq!(stream_frame_ms_from_mkvmerge(&json!({"tracks": []})), None);
+    assert_eq!(
+        stream_frame_ms_from_mkvmerge(&json!({"container": {}})),
+        None
+    );
+}
+
+#[test]
+fn deliver_muxes_a_stream_whose_vui_rate_differs_with_the_timestamps_file_first() {
+    let test = "deliver_muxes_a_stream_whose_vui_rate_differs_with_the_timestamps_file_first";
+    let dir = tempfile::tempdir().unwrap();
+    // `clips` checks the tools; its own clip is not used here.
+    if clips(dir.path(), test).is_none() {
+        return;
+    }
+    // A 30 fps stream (VUI timing) in a 25 fps container, as an RTX HDR encode delivers it.
+    let raw = dir.path().join("vui30.hevc");
+    let encoded = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+        .arg("testsrc2=s=128x72:r=30")
+        .args(["-frames:v", "10", "-c:v", "libx265", "-preset", "ultrafast"])
+        .args(["-x265-params", "log-level=error", "-f", "hevc", "-y"])
+        .arg(&raw)
+        .status()
+        .unwrap();
+    assert!(encoded.success());
+    let source = dir.path().join("source25.mkv");
+    let muxed = Command::new("mkvmerge")
+        .arg("-q")
+        .arg("-o")
+        .arg(&source)
+        .args(["--default-duration", "0:25p"])
+        .arg(&raw)
+        .status()
+        .unwrap();
+    assert!(muxed.success());
+    assert_eq!(default_duration(&source), Some(40_000_000));
+    assert_eq!(
+        predicted_stream_frame_ms(&raw).map(|ms| ms.round()),
+        Some(33.0)
+    );
+
+    let (temp, output) = (dir.path().join("temp"), dir.path().join("out.mkv"));
+    fs::create_dir(&temp).unwrap();
+    let mut calls = Vec::new();
+    let delivery = deliver(
+        source.to_str().unwrap(),
+        &raw,
+        &output,
+        &temp,
+        false,
+        &mut |timing| {
+            calls.push(timing.clone());
+            let status = Command::new("mkvmerge")
+                .arg("-q")
+                .arg("-o")
+                .arg(&output)
+                .args(timing.mkvmerge_args())
+                .arg(&raw)
+                .status()
+                .unwrap();
+            Ok(status.success())
+        },
+    )
+    .unwrap();
+    assert_eq!(delivery, Delivery::Checked { video_frames: 10 });
+    // One mux, with the source's timestamps: the stream's 30 fps is never muxed.
+    assert_eq!(calls, [MuxTiming::File(temp.join(TIMESTAMPS_FILE))]);
+    assert_eq!(default_duration(&output), Some(40_000_000));
 }

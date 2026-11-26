@@ -1708,6 +1708,10 @@ fn shimmed_tools() -> Option<&'static [&'static str]> {
             // argument), LAST and REAL (the real tool) set. That script must exit itself.
             let script = format!(
                 r#"#!/bin/sh
+# mkvmerge's identification (`-J`, the mux timing's frame-rate prediction, ROADMAP E7.4) is
+# never scripted or counted: the real tool reads the fake stream, finds no rate, and the mux
+# keeps the stream's timing.
+case "{tool} $1" in "mkvmerge -J") exec '{real}' "$@" ;; esac
 root=
 for arg in "$@"; do
   case "$arg" in
@@ -1907,6 +1911,13 @@ fn run_mel_to_profile81(fake: &FakeTools, mode: DoviInput, resume: bool) -> bool
 #[cfg(unix)]
 fn called_with(calls: &[String], needle: &str) -> bool {
     calls.iter().any(|call| call.contains(needle))
+}
+
+/// True when `--verify`'s extraction ran: ffmpeg writing raw HEVC to its stdout, the pipe into
+/// `dovi_tool extract-rpu -` (ROADMAP E7.5).
+#[cfg(unix)]
+fn verify_extraction_ran(ffmpeg_calls: &[String]) -> bool {
+    ffmpeg_calls.iter().any(|call| call.ends_with("-f hevc -"))
 }
 
 #[cfg(unix)]
@@ -2436,7 +2447,7 @@ fn mel_fast_path_with_failed_verification_reports_failure_and_keeps_the_temp_dir
     fake.script("mkvmerge", &writes("muxed"));
     fake.script("ffmpeg", FAILS);
     assert!(!run_mel_fast_path(&fake, true));
-    assert!(called_with(&fake.calls("ffmpeg"), "verify_video.hevc"));
+    assert!(verify_extraction_ran(&fake.calls("ffmpeg")));
     assert!(fake.temp.exists());
     assert!(fake.input.exists());
 }
@@ -2559,13 +2570,10 @@ fn mel_fast_path_that_fails_to_convert_skips_verification() {
     // The failed direct MKV read falls back to an ffmpeg extraction, which works.
     fake.script(
         "ffmpeg",
-        &format!(
-            "case \"$OUT\" in *verify_video.hevc) exit 1 ;; esac\n{}",
-            writes("raw")
-        ),
+        &format!("case \"$OUT\" in -) exit 1 ;; esac\n{}", writes("raw")),
     );
     assert!(!run_mel_fast_path(&fake, true));
-    assert!(!called_with(&fake.calls("ffmpeg"), "verify_video.hevc"));
+    assert!(!verify_extraction_ran(&fake.calls("ffmpeg")));
     assert!(fake.temp.exists());
 }
 

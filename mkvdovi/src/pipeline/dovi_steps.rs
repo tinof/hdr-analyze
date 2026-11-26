@@ -321,6 +321,7 @@ pub(super) fn convert_mel_to_profile81(
 
     timing::deliver(
         input_file,
+        &converted_hevc,
         output_file,
         temp_dir,
         resume_enabled,

@@ -7,6 +7,10 @@
 //! puts every frame that lies on the source's frame-rate grid at its exact grid time: in whole
 //! milliseconds, 23.976 fps would get 42 ms, which players read as 23.81 fps.
 //!
+//! A constant-rate source whose raw stream states another frame rate in its VUI (an encoder
+//! that wrote 30 fps into a 25 fps file) would mux at the stream's rate, so its first mux takes
+//! the timestamps file (ROADMAP E7.4): mkvmerge's own reading of the stream (`-J`) predicts it.
+//!
 //! Every mux is then checked: the output's video frame times must equal the source's, which
 //! also fixes the start and the duration. A mismatch retries once with the timestamps file and
 //! then fails the run, so the source is kept.
@@ -25,6 +29,15 @@ use crate::progress;
 /// Largest difference between a source and an output frame time that still counts as equal:
 /// mkvmerge and the source's muxer may round one frame time to different milliseconds.
 pub(super) const TOLERANCE_MS: f64 = 1.0;
+
+/// Largest relative difference between the container's and the stream's frame durations that
+/// still counts as one rate (ROADMAP E7.4). 29.97 against 30 fps is 0.1 %, which over an hour
+/// drifts 3.6 s.
+const RATE_MATCH_RELATIVE: f64 = 1e-4;
+
+/// The frame duration mkvmerge gives a raw HEVC stream without VUI timing (25 fps; checked with
+/// mkvmerge v104: `-J` reports no `default_duration`, the mux has 40 ms).
+const MKVMERGE_DEFAULT_FRAME_MS: f64 = 40.0;
 
 /// The timestamps v2 file written for a `--timestamps` mux, in the temp dir.
 pub(super) const TIMESTAMPS_FILE: &str = "video.timestamps.txt";
@@ -93,6 +106,7 @@ pub(super) enum Delivery {
 /// false when mkvmerge failed, which it reports. A mismatch removes the output and its sentinel.
 pub(super) fn deliver(
     input_file: &str,
+    stream_hevc: &Path,
     output_file: &Path,
     temp_dir: &Path,
     resume_enabled: bool,
@@ -117,16 +131,15 @@ pub(super) fn deliver(
     };
 
     let file = MuxTiming::File(temp_dir.join(TIMESTAMPS_FILE));
-    let chosen = if is_variable_rate(&source.frames) {
-        progress::print_info(
-            "The source has a variable frame rate; the output takes its timestamps.",
-        );
-        file.clone()
+    let stream_frame_ms = if is_variable_rate(&source.frames) {
+        None
     } else {
-        MuxTiming::Stream {
-            sync_ms: source.frames[0].round() as i64,
-        }
+        predicted_stream_frame_ms(stream_hevc)
     };
+    let (chosen, reason) = first_timing(&source, stream_frame_ms, &file);
+    if let Some(reason) = reason {
+        progress::print_info(&reason);
+    }
     // A finished mux of an earlier run is checked as well; when it fails, the chosen timing is
     // muxed afresh before the timestamps file.
     let reused = resume_enabled && output_file.exists() && temp_dir.join(MUX_MARKER).exists();
@@ -171,6 +184,70 @@ pub(super) fn deliver(
         }
     }
     Ok(Delivery::Failed)
+}
+
+/// The timing of the first mux, and the notice that explains a timestamps file (ROADMAP E7.3,
+/// E7.4). A variable-rate source takes its timestamps. So does a constant-rate source whose
+/// frame duration differs from the one mkvmerge would give the raw stream (`stream_frame_ms`,
+/// from the stream's VUI): the stream's timing would mux at the wrong rate, so muxing it first
+/// would only be discarded by the check. Otherwise the stream's timing, shifted to the source's
+/// start.
+pub(super) fn first_timing(
+    source: &VideoTimes,
+    stream_frame_ms: Option<f64>,
+    file: &MuxTiming,
+) -> (MuxTiming, Option<String>) {
+    if is_variable_rate(&source.frames) {
+        let reason = "The source has a variable frame rate; the output takes its timestamps.";
+        return (file.clone(), Some(reason.to_owned()));
+    }
+    if let (Some(container), Some(stream)) = (source.frame_ms, stream_frame_ms) {
+        if !same_frame_duration(container, stream) {
+            let reason = format!(
+                "The video stream states {:.3} fps, the source's container {:.3} fps; the output \
+                 takes the source's timestamps.",
+                1000.0 / stream,
+                1000.0 / container
+            );
+            return (file.clone(), Some(reason));
+        }
+    }
+    let stream = MuxTiming::Stream {
+        sync_ms: source.frames[0].round() as i64,
+    };
+    (stream, None)
+}
+
+/// True when two frame durations give the same rate within [`RATE_MATCH_RELATIVE`]: 29.97 and
+/// 30 fps differ (0.1 %), while 41.708333 ms and mkvmerge's 41708333 ns agree.
+pub(super) fn same_frame_duration(a_ms: f64, b_ms: f64) -> bool {
+    (a_ms - b_ms).abs() <= RATE_MATCH_RELATIVE * a_ms.max(b_ms)
+}
+
+/// The frame duration mkvmerge gives `hevc`'s video track (its `default_duration`, from the
+/// stream's VUI timing), in milliseconds; `None` when mkvmerge cannot identify the file or
+/// reports none, which leaves the first mux on the stream's timing.
+fn predicted_stream_frame_ms(hevc: &Path) -> Option<f64> {
+    let mut command = Command::new("mkvmerge");
+    command.arg("-J").arg(hevc);
+    let output = external::get_command_output(&mut command).ok()?;
+    let json: Value = serde_json::from_str(&output).ok()?;
+    stream_frame_ms_from_mkvmerge(&json)
+}
+
+/// [`predicted_stream_frame_ms`] from mkvmerge's identification JSON. A raw video track without
+/// a `default_duration` has no VUI timing, and mkvmerge muxes it at its default of 25 fps
+/// ([`MKVMERGE_DEFAULT_FRAME_MS`]); no video track gives `None`.
+pub(super) fn stream_frame_ms_from_mkvmerge(json: &Value) -> Option<f64> {
+    let video = json
+        .get("tracks")?
+        .as_array()?
+        .iter()
+        .find(|track| track["type"] == "video")?;
+    match video["properties"]["default_duration"].as_u64() {
+        Some(nanoseconds) if nanoseconds > 0 => Some(nanoseconds as f64 / 1_000_000.0),
+        _ => Some(MKVMERGE_DEFAULT_FRAME_MS),
+    }
 }
 
 /// Removes the output and its mux sentinel, so a resumed run muxes afresh.

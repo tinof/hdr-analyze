@@ -63,6 +63,45 @@ pub fn run_command(cmd: &mut Command, log_path: &Path) -> Result<bool> {
     Ok(output.status.success())
 }
 
+/// Runs `producer | consumer` (ROADMAP E7.5): the producer's stdout feeds the consumer's stdin,
+/// so no intermediate file is written. Each child's other output goes straight to its log file,
+/// never to a pipe this process would have to drain, so neither can block on a full pipe.
+/// True only when both exit successfully; a consumer that stops early makes the producer fail
+/// on its broken pipe.
+pub fn run_piped_commands(
+    producer: &mut Command,
+    producer_log: &Path,
+    consumer: &mut Command,
+    consumer_log: &Path,
+) -> Result<bool> {
+    let mut producer_file = File::create(producer_log).context("Failed to create log file")?;
+    writeln!(producer_file, "Running command: {producer:?} |")?;
+    let mut consumer_file = File::create(consumer_log).context("Failed to create log file")?;
+    writeln!(consumer_file, "Running command: | {consumer:?}")?;
+
+    producer.stdin(Stdio::null());
+    producer.stdout(Stdio::piped());
+    producer.stderr(Stdio::from(producer_file));
+    let mut first = producer.spawn().context("Failed to spawn command")?;
+    // The consumer drains this pipe; it is moved into the consumer, not left on `first`.
+    let pipe = first.stdout.take().context("The producer has no stdout")?;
+
+    consumer.stdin(Stdio::from(pipe));
+    consumer.stdout(Stdio::from(consumer_file.try_clone()?));
+    consumer.stderr(Stdio::from(consumer_file));
+    let mut second = match consumer.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = first.kill();
+            let _ = first.wait();
+            return Err(error).context("Failed to spawn command");
+        }
+    };
+    let consumer_ok = second.wait()?.success();
+    let producer_ok = first.wait()?.success();
+    Ok(producer_ok && consumer_ok)
+}
+
 /// Run a command with a spinner, logging output to a file.
 /// Shows elapsed time and success/failure status.
 pub fn run_command_with_spinner(cmd: &mut Command, log_path: &Path, message: &str) -> Result<bool> {
