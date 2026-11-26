@@ -291,11 +291,13 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
   minimum is P10.5); raising the average floor to 1229 is not planned. Gate: the WS7 simulator
   shows that unclamped L1 is better (owner, 2026-10-17: WS7 first, no playback test). Needs: WS7.1.
 - [P10.5][corpus] Decide whether the measured L1 minimum reaches the RPU (`dovi_tool generate`
-  writes at most 12); the C9 reacts to L1 min (WS6.11). Gate (owner, 2026-11-26): a blinded A/B on
-  the C9 of four development cuts whose dark scenes measure well above 12 codes, capped against
-  measured minimum over one base layer, each cut twice with sides swapped (8 pairs, "which looks
-  better", no difference allowed). Measured wins with 6 of 8 picks and both showings of 3 cuts;
-  else the cap stays. A win makes it the default, in its own step.
+  writes at most 12; the C9 reacts to L1 min, WS6.11). The agent builds the A/B files; the viewing
+  is the owner's, on "Waiting for the owner" once delivered. Gate: a blinded A/B on the C9 of four
+  development cuts whose dark scenes measure well above 12 codes; a pair shares one base layer and
+  differs only in L1 min (capped against measured); each cut twice, sides swapped, in a scrambled
+  order (8 pairs, "which looks better", no difference allowed). Measured wins with at least 6 of 8
+  picks and both showings of at least 3 cuts; else the cap stays. A win makes it the default, in
+  its own step (owner, 2026-11-26).
 - **Checked 2026-11-25 @c8a9b4f:** the simulator may not reach P10.3's gate: it raises the input
   peak to the panel peak (`tools/display_sim/src/tm_shim.c:132`), and an L1 max below the panel
   peak changes nothing on every curve (`gate_tests.rs:149`). A sub-100-nit max clamped to 2081
