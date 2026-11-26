@@ -79,9 +79,9 @@ Every conversion needs `ffmpeg`, `mkvmerge`, [`dovi_tool`](https://github.com/qu
 | `ffprobe` (ships with FFmpeg) | the check that the output keeps the source's video timestamps. Without it a conversion still runs, warns, and keeps the source. |
 | [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) | HDR10+ input. An HDR10+ file fails if the tool is missing. |
 
-HDR10+ conversions also run `hdr_analyzer_mvp`, which ships with `mkvdovi`. Without a current analyzer they take L1 from the HDR10+ metadata alone, with a warning.
-
 </details>
+
+HDR10+ conversions also run `hdr_analyzer_mvp`, which ships with `mkvdovi`. Without a current analyzer they take L1 from the HDR10+ metadata alone, with a warning.
 
 To build from source instead, run `cargo build --release --workspace`. For GPU analysis on an NVIDIA host, add `cargo build --release -p hdr_analyzer_mvp --features cuda` (needs only the NVIDIA driver at runtime, no CUDA toolkit). FFmpeg dev libraries, clang and per-OS notes are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
