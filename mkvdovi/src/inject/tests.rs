@@ -717,6 +717,50 @@ fn real_stream_matches_reference() {
     assert_eq!(compare.position, reference_len);
 }
 
+/// A processor that panics on the first NAL units it gets, as the pinned parser can on a
+/// malformed header in a build that unwinds.
+#[derive(Default)]
+struct Panicker {
+    input: PathBuf,
+}
+
+impl IoProcessor for Panicker {
+    fn input(&self) -> &PathBuf {
+        &self.input
+    }
+
+    fn update_progress(&mut self, _delta: u64) {}
+
+    fn process_nals(&mut self, _: &HevcParser, _: &[NALUnit], _: &[u8]) -> Result<()> {
+        panic!("parser panic");
+    }
+
+    fn finalize(&mut self, _: &HevcParser) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_panic_while_parsing_unwinds_instead_of_waiting_for_the_watcher() {
+    // Before the fix the progress watcher never saw `done`, so the scope that joins it, and the
+    // whole pass, waited forever.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(|| {
+            let display = source::Display {
+                label: "test",
+                total: None,
+                stall_secs: 0,
+            };
+            let mut source = Source::RawFile(fixture("clip.hevc"));
+            let _ = source::run_pass(&mut source, 0, &mut Panicker::default(), 4096, &display);
+        });
+        let _ = tx.send(result.is_err());
+    });
+    let panicked = rx.recv_timeout(std::time::Duration::from_secs(20));
+    assert_eq!(panicked, Ok(true), "the pass must unwind, not hang");
+}
+
 /// Hands out `step` bytes per read and records the progress counter it sees at each read.
 struct Trickle<'a> {
     left: usize,

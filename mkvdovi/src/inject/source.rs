@@ -3,6 +3,7 @@
 
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -177,17 +178,33 @@ pub(super) fn run_pass(
     let done = AtomicBool::new(false);
     let bar = ByteProgress::new(display.label, display.total);
     let mut reader = FillReader::new(inner).counting_into(&progress);
+    // A parser panic (a build that unwinds; release aborts) is caught here so that the watcher
+    // stops, the pipe closes and ffmpeg is reaped before the panic goes on.
     let parsed = thread::scope(|scope| {
         let watcher = scope.spawn(|| watch(&bar, &progress, &done, display.stall_secs));
-        let parsed = parse_stream(&mut reader, processor, chunk_size);
-        done.store(true, Ordering::Relaxed);
-        watcher.thread().unpark();
-        parsed
+        let _stop = StopWatcher {
+            done: &done,
+            watcher: watcher.thread().clone(),
+        };
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            parse_stream(&mut reader, processor, chunk_size)
+        }))
     });
     bar.set_bytes(reader.bytes);
     // Dropping the reader closes the pipe: an ffmpeg still writing fails on it instead of
     // blocking on a full pipe while this process waits for it.
     drop(reader);
+    let parsed = match parsed {
+        Ok(parsed) => parsed,
+        Err(payload) => {
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            bar.finish_error(None);
+            panic::resume_unwind(payload);
+        }
+    };
     let exited = child.map(|mut child| {
         if parsed.is_err() {
             let _ = child.kill();
@@ -210,6 +227,19 @@ pub(super) fn run_pass(
         Err(_) => bar.finish_error(None),
     }
     outcome
+}
+
+/// Tells the watcher to stop when the parse ends, on every way out of it.
+struct StopWatcher<'a> {
+    done: &'a AtomicBool,
+    watcher: thread::Thread,
+}
+
+impl Drop for StopWatcher<'_> {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::Relaxed);
+        self.watcher.unpark();
+    }
 }
 
 /// Updates `bar` from `progress` twice a second and shows a stall warning once it has not grown
