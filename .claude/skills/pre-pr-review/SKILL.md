@@ -295,8 +295,8 @@ The docs rules are `.claude/docs-rules.md`. The `docs-keeper` agent writes the d
    was already untracked. Every line that differs must name a `*.md` file. Undo any other tracked
    change and report it as a blocker. A changed file that was already untracked cannot be restored
    from git: stop and report it.
-3. **Facts.** Read `git diff -- '*.md'` and every new untracked `*.md` file from the snapshot diff
-   before you commit.
+3. **Facts.** Read `git diff -- '*.md'` and every untracked `*.md` file the snapshot diff names,
+   new or changed, before you commit.
    Revert any edit you cannot verify against the code. Make the edits from its gaps that you can
    verify.
 4. **Readable.** Run `node ~/.claude/skills/copy-slop/scripts/check-copy-slop.mjs <each changed
