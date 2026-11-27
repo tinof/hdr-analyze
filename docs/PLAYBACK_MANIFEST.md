@@ -174,7 +174,8 @@ change L1 or the RPU, with the conversion's defaults: `--hlg-composer`, `--cm-ve
   whose `--help` does not name `au-table-v1`, and a missing `mediainfo` or `dovi_tool` (the
   format detection needs both to tell Dolby Vision and HDR10+ from HDR10).
 - The measurements are the conversion's (`--transfer hlg`, `--hlg-composer`, the sampling of
-  `--analysis-quality`) plus `--au-table`. A pair already in the work directory is reused only
+  `--analysis-quality`) plus `--au-table`. The manifest does not take mkvdovi's opt-in
+  `--peak-estimator`: it describes the RPUs of the default `max` estimator. A pair already in the work directory is reused only
   when the sidecar is valid for the input and composer, was sampled exactly as asked, the table
   is version 1 and bound to these sidecar bytes, its structure passes the parser's AU rules, its
   source still matches the file, and both count the same pictures and leading pictures.

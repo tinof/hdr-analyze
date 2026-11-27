@@ -14,6 +14,18 @@ This document provides a historical record of completed milestones, feature impl
   a warning. Users of `--legacy-madvr-l1` should delete their measurements files and re-measure:
   the `.bin` target nits of older analyzers read too low.
 
+### Added
+
+- mkvdovi `--peak-estimator <max|st2094-10|percentile>` passes the analyzer's L1 peak estimator
+  to every fresh analysis (ROADMAP WS1.7, opt-in). The default `max` and its resume fingerprint
+  are unchanged.
+  - `st2094-10` is refused before any temp work on HLG input, with `--analysis-quality balanced`
+    or `fast`, and with an analyzer whose `--help` does not name it.
+  - `--hdr10plus-l1 hybrid` accepts only `max`. The default HDR10+ mode uses the metadata with a
+    notice.
+  - Measurements taken with another estimator are re-analyzed, not reused. `mkvdovi manifest`
+    does not take the flag.
+
 ### Fixed
 
 - hdr_analyzer_mvp reads its 256-bin luminance histogram with the bin edges it writes (ROADMAP
