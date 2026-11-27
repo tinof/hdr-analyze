@@ -286,16 +286,21 @@ The docs rules are `.claude/docs-rules.md`. The `docs-keeper` agent writes the d
    file (base, diff command, file list), the item and step with the step's text, the fixes made,
    the gate results (standalone mode; in self-check mode say that `/ship:land` runs the gates
    after it), and whether the acceptance-gate evidence exists and where.
-2. **Only Markdown.** Save `git status --porcelain` before the run and compare after it: every new
-   or changed entry must be a `*.md` file. No guard enforces this: undo anything else and report it
-   as a blocker.
-3. **Facts.** Read `git diff -- '*.md'` and every new untracked `*.md` file before you commit.
+2. **Only Markdown.** No guard enforces this, so snapshot the tree before the run and after it:
+   `{ git status --porcelain --untracked-files=all; git ls-files -o --exclude-standard -z | xargs -0 -r shasum; }`.
+   `-uall` lists each file inside an untracked directory, and the hashes show an edit to a file that
+   was already untracked. Every line that differs must name a `*.md` file. Undo any other tracked
+   change and report it as a blocker. A changed file that was already untracked cannot be restored
+   from git: stop and report it.
+3. **Facts.** Read `git diff -- '*.md'` and every new untracked `*.md` file from the snapshot diff
+   before you commit.
    Revert any edit you cannot verify against the code. Make the edits from its gaps that you can
    verify.
 4. **Readable.** Run `node ~/.claude/skills/copy-slop/scripts/check-copy-slop.mjs <each changed
    .md>` and, when `README.md` changed, `python3 -I ~/.claude/skills/readme/scripts/readme-audit.py
    audit README.md`. Fix a hit, or a `long-sentence`, `repeated-phrase` or `emoji` warning, only
-   when it is in a line this step changed. Hits in untouched lines are not this PR's work.
+   when it is in a line this step changed. Hits in untouched lines are not this PR's work. When
+   `node` or either script is missing, say in the report that this check did not run.
 
 Commits, in both modes and this order: the code fixes (before the gates of step 5 in standalone
 mode) as `fix: address pre-PR review` with a one-line list of the findings, then the docs edits
