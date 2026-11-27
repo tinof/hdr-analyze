@@ -47,7 +47,8 @@ fn dovi_tool_shim(dir: &Path, body: &str) -> String {
     )
 }
 
-/// `inject-rpu` copies the base layer unchanged: the output carries no RPU.
+/// `inject-rpu` copies the base layer unchanged: the output carries no RPU. Only
+/// `--dovi-inject external` runs `inject-rpu`.
 const INJECTS_NOTHING: &str = "if [ \"$1\" = inject-rpu ]; then\n  in= out= prev=\n  \
     for arg in \"$@\"; do\n    case \"$prev\" in -i) in=$arg ;; -o) out=$arg ;; esac\n    \
     prev=$arg\n  done\n  exec cp \"$in\" \"$out\"\nfi";
@@ -140,7 +141,13 @@ fn an_output_without_rpus_fails_the_run_and_keeps_the_source() {
     let dir = tempfile::tempdir().unwrap();
     let source = pq_source(dir.path(), &[]);
     let path = dovi_tool_shim(dir.path(), INJECTS_NOTHING);
-    let (run, copy, output) = convert_copy(dir.path(), &source, &[], Some(&path));
+    // The shim replaces dovi_tool's injection, which only the external path runs.
+    let (run, copy, output) = convert_copy(
+        dir.path(),
+        &source,
+        &["--dovi-inject", "external"],
+        Some(&path),
+    );
     assert_failed_and_kept(
         &run,
         &copy,
