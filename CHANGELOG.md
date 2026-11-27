@@ -34,6 +34,15 @@ This document provides a historical record of completed milestones, feature impl
   by the timing check and muxed again.
 - `hdr_analyzer_mvp --pre-denoise` accepts only `off` and `median3` (ROADMAP E9.1). Any other
   value, such as `nlmeans`, is refused with the list of valid values. It used to be silently ignored.
+- mkvdovi checks a Dolby Vision Profile 8 configuration record against the file's RPU (ROADMAP
+  P6.3). When they disagree, the RPU decides, as for Profile 7, and a warning names both.
+  - A Profile 7 FEL RPU under a Profile 8 record is now refused as FEL. `--mdfix` used to rebuild
+    it. A Profile 7 MEL RPU takes the MEL path; another profile is unsupported.
+  - A Profile 8 record with compatibility ID 2 (Profile 8.2, SDR base layer) or ID 0 (no
+    backward-compatible base layer) is now refused by name before any temp work. Such a file used
+    to print "already converted", or be rebuilt under `--mdfix`.
+  - An unreadable RPU keeps the record's Profile 8, and an unreadable or missing record passes, as
+    before.
 
 ### Changed
 
