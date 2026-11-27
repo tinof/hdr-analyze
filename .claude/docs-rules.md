@@ -1,17 +1,12 @@
 # Docs rules
 
-How this repo's Markdown docs are brought in line with a finished code change. Two writers work
-from this file: the agy `docs-writer` agent on Gemini (the default, on the model that
-`~/.claude/skills/ship/scripts/gemini-model.sh docs` prints; the `pre-pr-review` skill, step 6,
-puts this file into its brief) and the `docs-keeper` agent
-(`.claude/agents/docs-keeper.md`, the fallback).
+How this repo's Markdown docs are brought in line with a finished code change. The `docs-keeper`
+agent (`.claude/agents/docs-keeper.md`, Opus at `low`) works from this file; the `pre-pr-review`
+skill, step 6, runs it.
 
 You update documentation so it matches the code on this branch. You edit Markdown files only.
 Never edit code, tests, scripts, config or reference data. Read with `git diff`, `git log` and
-`rg`. A binary's `--help` text is in the brief when the diff touches a CLI; the `docs-keeper`
-agent may also run a debug binary that is already built (`target/debug/<bin> --help`).
-The agy writer's guard refuses `AGENTS.md` and every file under `.claude/`: it lists such an edit
-as a gap, and the caller makes it.
+`rg`. A binary's `--help` text comes from the caller, built from HEAD when the diff touches a CLI.
 
 ## Input
 
@@ -33,7 +28,7 @@ the Next up block (promotes it, or writes a Reassess line).
 | The step's full story, measurements, numbers | Nothing in `docs/ROADMAP_LOG.md`: `/ship:land` step 10 writes the step's entry. Name the evidence in your output so the caller can put it in the PR body. |
 | User-visible behavior, flags, defaults, refusals | `CHANGELOG.md` `[Unreleased]`, in the section style already used there. |
 | A fact `README.md` states: a capability, an install step, a required tool, a Compatibility row, a headline number, a limitation | `README.md`, by the **README** rule below. |
-| A CLI flag or its help text | `docs/CLI_REFERENCE.md`; compare with the `--help` text (in the brief, or `target/debug/<bin> --help` when you can run it). |
+| A CLI flag or its help text | `docs/CLI_REFERENCE.md`; compare with the `--help` text the caller passes, built from HEAD; without it, list the comparison as a gap. |
 | What inputs are accepted, refused or converted | `docs/FORMAT_COMPATIBILITY.md`. |
 | A new or changed rule: a cross-binary contract, an invariant ("never", "must", "keep X ahead of Y"), a gate, a command | `CLAUDE.md`, the section that already covers the topic, as one sentence plus a pointer to the doc that explains it. Edit the sentence that is now wrong; do not append a second, contradicting one. |
 | mkvdovi internals: the reason for a rule, code paths, resume, measurements reuse, `--verify`, RPU generation | `docs/MKVDOVI_PIPELINE.md`. |
@@ -78,6 +73,17 @@ the Next up block (promotes it, or writes a Reassess line).
   is a gap. A redesign of the page is `/readme`'s job, not yours.
 - Keep each doc's voice: short declarative sentences, numbers with units, dates as YYYY-MM-DD.
   Wrap prose at about 100 columns; no line over 200 characters.
+- **Easy to read.** Every sentence you write or change holds one idea in at most 25 words. Explain
+  a term or an acronym where a doc first uses it, or link the doc that does. A table cell holds a
+  value or a short phrase, not a sentence. No emoji, and no bold label to open a new prose bullet.
+  These rules bind the text you write. When you edit an existing list or table, keep its format:
+  the bold `**Checked …:**` leads of `ROADMAP.md`, the bold-led rule bullets of `CLAUDE.md` and
+  `AGENTS.md`, a table whose cells already hold sentences.
+- Say what changed for a reader, not how the change was made: no session story, attempts or agent
+  instructions. State a fact once per doc; fix the existing sentence instead of adding a second.
+- Before you write, read the general AI-writing tells in
+  `~/.claude/skills/humanizer/reference/en-patterns.md`. The caller runs `copy-slop` on the
+  lines you changed and fixes each hit.
 - Do not invent numbers, results or dates. If a fact is not in the diff or the inputs, leave it
   out and list it as a gap.
 - Do not touch `docs/ROADMAP_LOG.md`.

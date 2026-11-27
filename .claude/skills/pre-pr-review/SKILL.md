@@ -1,6 +1,6 @@
 ---
 name: pre-pr-review
-description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), with `--gemini` a Gemini 4 Neon pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has Gemini (the agy docs-writer agent; fallback: the docs-keeper agent) update the docs. /ship:land step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
+description: Review a roadmap change before it ships. Scopes the diff once, runs the pre-pr-panel workflow (three Opus lenses at high effort, a spec lens on the step text, a Fable 5.2 whole-diff reviewer at high on a hard high-risk diff; each finding verified by an Opus skeptic), with `--gemini` a Gemini 4 Neon pass through Antigravity, optionally a Codex focused pass, fixes confirmed findings, runs the gates the touched paths require, then has the docs-keeper agent (Opus at low) update the docs. /ship:land step 3b runs its Claude panel and docs keeper as a builder self-check; the user can also type /pre-pr-review alone.
 argument-hint: "[--base <branch>] [--gemini] [item ID]"
 disable-model-invocation: true
 ---
@@ -279,52 +279,45 @@ a step.
 
 ## 6. Docs
 
-The docs rules are `.claude/docs-rules.md`. Gemini writes the docs through agy (the `docs-writer`
-agent of tinof/antigravity-config; owner, 2026-11-25), on the model that step 1 prints. The
-`docs-keeper` agent is the fallback. Whoever writes, you check every line.
+The docs rules are `.claude/docs-rules.md`. The `docs-keeper` agent writes the docs (Opus at
+`low`; owner, 2026-11-27). You check every line.
 
-1. **Pick the writer.** `~/.claude/skills/ship/scripts/gemini-model.sh docs` prints a model ID, or
-   `fallback` when the shared Gemini quota is under 15%: a low pool is kept for the cold review,
-   which has no substitute. On `fallback`, or when the script or `agy` is missing, go to 4.
-2. **Brief.** Write `<scratchpad>/docs-brief.md`, the context first: the scope (base, the diff
-   command and the file list of the scope file), the item and step with the step's text, the fixes
-   made, the gate results (standalone mode; in self-check mode say that `/ship:land` runs the gates
+1. **Run** the `docs-keeper` agent (Agent tool, `subagent_type: "docs-keeper"`) with: the scope
+   file (base, diff command, file list), the item and step with the step's text, the fixes made,
+   the gate results (standalone mode; in self-check mode say that `/ship:land` runs the gates
    after it), and whether the acceptance-gate evidence exists and where. When the diff touches a
-   CLI definition, add the `--help` text of the built debug binary: the writer's terminal is
-   read-only and runs no binary. Then append the rules whole
-   (`command cat .claude/docs-rules.md >> <scratchpad>/docs-brief.md`) and end with the line
-   `Task: bring the docs in line with the diff, following the docs rules above.`
-3. **Run** it from the repo root as a background Bash and wait for the notification. Edit no
-   Markdown file while it runs:
-   `AGY_TASK_AGENT=docs-writer AGY_TASK_MODEL=<model> ~/.claude/skills/agy-delegate/scripts/agy-task.sh "$PWD" <scratchpad>/docs-brief.md <scratchpad>/docs-writer`.
-   `<scratchpad>/docs-writer.result.json` with `ok: false` (quota, stall, timeout, denied): undo its
-   partial edits with `git apply -R <scratchpad>/docs-writer.diff` and go to 4. The diff is taken
-   against the tree as it was before the run, so the reverse removes a file the writer created and
-   keeps edits that were there before; `git checkout -- <path>` does neither. If it does not apply,
-   stop and report a blocker. Never rerun the writer on another Gemini model.
-4. **Fallback.** Run the `docs-keeper` agent (Agent tool, `subagent_type: "docs-keeper"`) with the
-   inputs of 2. Say in the report why Gemini did not write the docs.
-5. **Check.** After an agy run, `rg '^diff --git' <scratchpad>/docs-writer.diff` must name only
-   `*.md` files; undo anything else (`git apply -R --include=<path> <scratchpad>/docs-writer.diff`)
-   and report it as a blocker. Use the diff, not `files` in the
-   result: that list also holds edits the writer's guard refused. Read the `gaps` of its report
-   (`docs-writer.report.md`) and make the edits you can verify, among them any it could not make in
-   `AGENTS.md` or under `.claude/`. For either writer, read `git diff -- '*.md'` before you commit,
-   and every file that `docs-writer.diff` marks `new file mode`: it is untracked, so `git diff` does
-   not show it. Revert any edit you cannot verify against the code.
+   CLI definition, build the debug binary from HEAD first (`cargo build -p <crate>`) and pass its
+   `--help` text: the writer then compares against the current code, not an older build.
+2. **Only Markdown.** No guard enforces this. Before the run,
+   `git status --porcelain --untracked-files=no` must print nothing (the fixes are committed), so
+   any tracked change after it is the writer's and `git checkout` restores it. Snapshot the tree
+   before the run and after it:
+   `{ git status --porcelain --untracked-files=all; git ls-files -o --exclude-standard -z | xargs -0 -r shasum; }`.
+   `-uall` lists each file inside an untracked directory, and the hashes show an edit to a file that
+   was already untracked. Every line that differs must name a `*.md` file. Undo any other tracked
+   change and report it as a blocker. A changed file that was already untracked cannot be restored
+   from git: stop and report it.
+3. **Facts.** Read `git diff -- '*.md'` and every untracked `*.md` file the snapshot diff names,
+   new or changed, before you commit.
+   Revert any edit you cannot verify against the code. Make the edits from its gaps that you can
+   verify.
+4. **Readable.** Run `node ~/.claude/skills/copy-slop/scripts/check-copy-slop.mjs <each changed
+   .md>` and, when `README.md` changed, `python3 -I ~/.claude/skills/readme/scripts/readme-audit.py
+   audit README.md`. Fix a hit, or a `long-sentence`, `repeated-phrase` or `emoji` warning, only
+   when it is in a line this step changed. Hits in untouched lines are not this PR's work. When
+   `node` or either script is missing, say in the report that this check did not run.
 
 Commits, in both modes and this order: the code fixes (before the gates of step 5 in standalone
 mode) as `fix: address pre-PR review` with a one-line list of the findings, then the docs edits
 here as `docs: …`. The two are never mixed. Commit only task files; leave unrelated untracked files
-alone. The docs commit carries `Built-By: claude` also when Gemini wrote the text: you checked it,
-and the edits are Markdown only (`~/.claude/skills/ship/reference/review-rules.md`, "Who built it").
+alone. The docs commit carries `Built-By: claude`.
 
 ## 7. Report
 
 Write `<scratchpad>/pre-pr-review.md`: the reviewers that ran (model and effort, from
 `reviewers`, plus the Gemini and Codex passes and any that failed), findings table (priority, file:line, finders, verdict, fix
-commit or reason), gate results (standalone mode), blockers, docs changed, and the docs writer (the
-model, seconds and tokens from `docs-writer.result.json`, or the fallback and why).
+commit or reason), gate results (standalone mode), blockers, docs changed, and what the docs writer
+reported.
 
 **Reviewer yield.** The Fable 5.2 reviewer is on the panel on an assumption (owner, 2026-11-10):
 on a hard high-risk diff it catches defects the Opus lenses miss. The Sonnet reviewer of the
@@ -392,8 +385,8 @@ Then write the echoed path with the Write tool:
                "finders": ["correctness", "gemini"]}],
  "geminiPass": "done | failed | skipped", "geminiReason": "<reason when failed>",
  "geminiCost": {"seconds": 0, "attempts": 0, "thinkingTokens": 0, "outputTokens": 0, "partial": false},
- "docsWriter": {"by": "gemini | claude", "model": "<from docs-writer.result.json, or opus>",
-                "outcome": "<completed | no docs change needed | fallback: reason>", "seconds": 0},
+ "docsWriter": {"by": "claude", "model": "opus",
+                "outcome": "<completed | no docs change needed | blocked: reason>"},
  "report": "<full sha>.md", "scope": "<full sha>.scope.md"}
 ```
 
