@@ -27,18 +27,34 @@ pub(crate) struct DvConfigRecord {
 /// backward-compatible base layer. mkvdovi delivers only 8.1 (PQ) and 8.4 (HLG), so its
 /// `--mdfix` rebuild would describe a base layer it is not. `None` for any other record, and for
 /// one that is not Profile 8 or states no ID.
-pub(crate) fn profile8_compatibility_refusal(record: &DvConfigRecord) -> Option<String> {
+/// `hlg_signalled`: the stream itself signals HLG (in its VUI or an SEI), so an ID 2 that
+/// mkvmerge derived from a VUI without the HLG tag is named as the contradiction it is, not as
+/// an SDR base layer.
+pub(crate) fn profile8_compatibility_refusal(
+    record: &DvConfigRecord,
+    hlg_signalled: bool,
+) -> Option<String> {
     if record.profile != Some(8) {
         return None;
     }
     let kind = match record.compatibility_id? {
         0 => "compatibility ID 0: no backward-compatible base layer",
+        2 if hlg_signalled => {
+            "compatibility ID 2 (SDR), while the stream signals HLG, which Profile 8.4 states as ID 4"
+        }
         2 => "Profile 8.2, compatibility ID 2: an SDR base layer",
         _ => return None,
     };
     Some(format!(
         "Dolby Vision {kind} is not supported: mkvdovi delivers Profile 8.1 (PQ, compatibility ID 1) and 8.4 (HLG, ID 4) only."
     ))
+}
+
+impl DvConfigRecord {
+    /// The base layer's compatibility ID, when the record states one.
+    pub(crate) fn compatibility_id(&self) -> Option<u8> {
+        self.compatibility_id
+    }
 }
 
 /// The configuration record of `input`'s first video stream, for [`profile8_compatibility_refusal`].
@@ -503,18 +519,22 @@ TAG:NUMBER_OF_FRAMES=6
             "dv_bl_signal_compatibility_id",
             Some("2"),
         ));
-        let refusal = profile8_compatibility_refusal(&sdr).expect("8.2 is refused");
+        let refusal = profile8_compatibility_refusal(&sdr, false).expect("8.2 is refused");
         assert!(
             refusal.contains("Profile 8.2, compatibility ID 2"),
             "{refusal}"
         );
         assert!(refusal.contains("SDR base layer"), "{refusal}");
+        // An HLG stream whose VUI lacks the HLG tag: mkvmerge wrote ID 2, but it is no SDR base.
+        let hlg = profile8_compatibility_refusal(&sdr, true).expect("still refused");
+        assert!(hlg.contains("while the stream signals HLG"), "{hlg}");
+        assert!(!hlg.contains("SDR base layer"), "{hlg}");
         let none = record(&with_field(
             PQ_81,
             "dv_bl_signal_compatibility_id",
             Some("0"),
         ));
-        let refusal = profile8_compatibility_refusal(&none).expect("ID 0 is refused");
+        let refusal = profile8_compatibility_refusal(&none, false).expect("ID 0 is refused");
         assert!(refusal.contains("compatibility ID 0"), "{refusal}");
     }
 
@@ -522,11 +542,15 @@ TAG:NUMBER_OF_FRAMES=6
     fn a_profile_8_record_mkvdovi_delivers_or_cannot_name_passes() {
         // 8.1 (ID 1) and 8.4 (ID 4) are what mkvdovi delivers; 8.6 (ID 6) is not named by the
         // step; a record without an ID or of another profile is left to the later checks.
-        assert_eq!(profile8_compatibility_refusal(&record(PQ_81)), None);
-        assert_eq!(profile8_compatibility_refusal(&record(HLG_84)), None);
+        assert_eq!(profile8_compatibility_refusal(&record(PQ_81), false), None);
+        assert_eq!(profile8_compatibility_refusal(&record(HLG_84), true), None);
         for id in [Some("6"), None] {
             let other = record(&with_field(PQ_81, "dv_bl_signal_compatibility_id", id));
-            assert_eq!(profile8_compatibility_refusal(&other), None, "{id:?}");
+            assert_eq!(
+                profile8_compatibility_refusal(&other, false),
+                None,
+                "{id:?}"
+            );
         }
         let profile7 = with_field(PQ_81, "dv_profile", Some("7"));
         let profile7 = record(&with_field(
@@ -534,6 +558,6 @@ TAG:NUMBER_OF_FRAMES=6
             "dv_bl_signal_compatibility_id",
             Some("2"),
         ));
-        assert_eq!(profile8_compatibility_refusal(&profile7), None);
+        assert_eq!(profile8_compatibility_refusal(&profile7, false), None);
     }
 }

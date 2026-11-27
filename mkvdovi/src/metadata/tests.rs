@@ -3472,3 +3472,42 @@ fn a_profile_8_record_takes_the_format_its_rpu_names() {
         assert!(warning.contains(named), "{warning}");
     }
 }
+
+/// `clip` (an mkvmerge Profile 7 MKV) with its configuration record's profile rewritten to 8,
+/// the RPUs untouched: a file whose record contradicts its RPU (ROADMAP P6.3). No muxer writes
+/// one on purpose, so the record's profile field is patched: the `dvcC` payload follows its
+/// BlockAddIDExtraData header (`41 ED 98`, 24 bytes) and starts with version 1.0, then
+/// `dv_profile` in the top 7 bits of the third byte.
+fn with_profile8_record(clip: &Path) -> PathBuf {
+    let mut bytes = fs::read(clip).unwrap();
+    let at = bytes
+        .windows(4)
+        .position(|window| window == b"dvcC")
+        .expect("mkvmerge writes a dvcC record for Profile 7");
+    let payload = at + 4 + 3;
+    assert_eq!(&bytes[at + 4..payload], [0x41, 0xED, 0x98], "record layout");
+    assert_eq!(&bytes[payload..payload + 2], [1, 0], "record version 1.0");
+    assert_eq!(bytes[payload + 2] >> 1, 7, "a Profile 7 record");
+    bytes[payload + 2] = (8 << 1) | (bytes[payload + 2] & 1);
+    let patched = clip.with_file_name("p8-record.mkv");
+    fs::write(&patched, bytes).unwrap();
+    let mediainfo = mediainfo_dolby_vision_text(&patched);
+    assert!(mediainfo.contains("dvhe.08"), "{mediainfo}");
+    patched
+}
+
+#[test]
+fn a_profile_8_record_over_a_profile_7_rpu_takes_the_rpus_path() {
+    if let Some(reason) = missing_clip_tools(&[HDR_FORMAT_TOOLS, PROFILE81_TOOLS].concat()) {
+        eprintln!("Skipping a_profile_8_record_over_a_profile_7_rpu_takes_the_rpus_path: {reason}");
+        return;
+    }
+    for (fel, expected) in [
+        (false, HdrFormat::DolbyVisionMel),
+        (true, HdrFormat::DolbyVisionFel),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let clip = with_profile8_record(&profile7_clip(dir.path(), fel));
+        assert_eq!(hdr_format_of(&clip), expected, "fel={fel}");
+    }
+}
