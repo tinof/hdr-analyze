@@ -905,6 +905,13 @@ The detailed gap table and validation method live in
   `mkvdovi --require-measurements` converts without analysis and its RPU equals a local CPU
   run's; upload, T4 and total times in the log. Needs: E19.3.
 
+### E20: delivery throughput
+
+- **Status:** Open (owner, 2026-11-27): the delivery steps after analysis are disk-bound.
+- [E20.1] Inject the RPU in process from an ffmpeg pipe, byte-identical to `dovi_tool inject-rpu`
+  2.3.4, so no full-size `BL.hevc` is written; `--dovi-inject external` keeps the old path.
+  Gate: cmp-identical output on the test clips and a real episode; per-step wall time reported.
+
 ## Explicit non-goals
 
 - No proprietary Dolby code, LUTs, tone curves, or binary blobs in this repository; see
