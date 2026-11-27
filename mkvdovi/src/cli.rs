@@ -276,6 +276,16 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = DoviInput::Auto)]
     pub dovi_input: DoviInput,
 
+    /// The L1 peak estimator of a fresh analysis (ROADMAP WS1.7; opt-in, the default stays max).
+    /// max = the brightest max-RGB pixel of each frame. st2094-10 = the SMPTE ST 2094-10 reduced
+    /// pixel set (2x2 block means in linear light; PQ input only). percentile = the 99.99th
+    /// percentile of max-RGB pixels, which ignores a few overshooting pixels, for example on
+    /// sources made bright by an SDR-to-HDR upconversion. Measurements taken with another
+    /// estimator are re-analyzed, not reused. The HDR10+ hybrid L1 takes its peak from HDR10+ and
+    /// accepts only max.
+    #[arg(long, value_enum, default_value_t = PeakEstimatorChoice::Max)]
+    pub peak_estimator: PeakEstimatorChoice,
+
     /// How the RPU is written into the base layer. internal (default) = inside mkvdovi, byte
     /// for byte as dovi_tool inject-rpu 2.3.4 writes it, reading ffmpeg's HEVC through a pipe
     /// twice, so the full-size BL.hevc is never written. external = the previous path: ffmpeg
@@ -550,6 +560,27 @@ impl std::fmt::Display for HwAccel {
             HwAccel::Auto => write!(f, "auto"),
             HwAccel::None => write!(f, "none"),
             HwAccel::Cuda => write!(f, "cuda"),
+        }
+    }
+}
+
+/// The analyzer's `--peak-estimator` values mkvdovi passes on (ROADMAP WS1.7).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum PeakEstimatorChoice {
+    #[default]
+    Max,
+    #[value(name = "st2094-10")]
+    St2094_10,
+    Percentile,
+}
+
+impl PeakEstimatorChoice {
+    /// The value as the analyzer's `--peak-estimator` and its sidecar's `peak_estimator` name it.
+    pub fn analyzer_name(self) -> &'static str {
+        match self {
+            PeakEstimatorChoice::Max => "max",
+            PeakEstimatorChoice::St2094_10 => "st2094-10",
+            PeakEstimatorChoice::Percentile => "percentile",
         }
     }
 }

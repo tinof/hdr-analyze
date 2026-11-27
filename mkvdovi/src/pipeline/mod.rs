@@ -6,7 +6,7 @@ use anyhow::{bail, Result};
 use colored::Colorize;
 use dovi84_composer::Composer;
 
-use crate::cli::{Args, CmVersion, DoviInject, Hdr10PlusL1};
+use crate::cli::{Args, CmVersion, DoviInject, Hdr10PlusL1, PeakEstimatorChoice};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
@@ -435,6 +435,13 @@ fn resume_settings(args: &Args, hlg_composer: Option<Composer>, hdr10plus_hybrid
     }
     if args.dovi_inject == DoviInject::External {
         settings.push_str(" dovi_inject=external");
+    }
+    // Only a non-default estimator adds a token (ROADMAP WS1.7): the default fingerprint stays.
+    if args.peak_estimator != PeakEstimatorChoice::Max {
+        settings.push_str(&format!(
+            " peak_estimator={}",
+            args.peak_estimator.analyzer_name()
+        ));
     }
     settings
 }

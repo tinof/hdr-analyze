@@ -20,7 +20,7 @@ use super::hybrid;
 use super::mdfix_notice::print_mdfix_notice;
 use super::source_checks;
 use super::{add_optimizer_args, analyzer_executable, is_dolby_vision, FEL_UNSUPPORTED_MESSAGE};
-use crate::cli::{Args, Hdr10PlusL1, HwAccel};
+use crate::cli::{Args, Hdr10PlusL1, HwAccel, PeakEstimatorChoice};
 use crate::external;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
@@ -78,6 +78,12 @@ pub(super) fn resolve_hdr10plus_mode(
     match args.hdr10plus_l1 {
         Some(Hdr10PlusL1::Hdr10plus) => return Ok((Hdr10PlusMode::Metadata, None)),
         Some(Hdr10PlusL1::Hybrid) => {
+            if args.peak_estimator != PeakEstimatorChoice::Max {
+                return Err(format!(
+                    "--hdr10plus-l1 hybrid takes its peaks from HDR10+ and accepts only --peak-estimator max, not {}.",
+                    args.peak_estimator.analyzer_name()
+                ));
+            }
             return match super::hybrid_sampling_refusal(args) {
                 Some(refusal) => Err(refusal),
                 None => Ok((Hdr10PlusMode::ExplicitHybrid, None)),
@@ -88,6 +94,11 @@ pub(super) fn resolve_hdr10plus_mode(
     let (_, sample_rate) = analysis_sampling(args.analysis_quality);
     let obstacle = if args.legacy_madvr_l1 {
         Some("--legacy-madvr-l1 replaces the measured L1 sidecar it needs".to_string())
+    } else if args.peak_estimator != PeakEstimatorChoice::Max {
+        Some(format!(
+            "--peak-estimator {} applies to measured peaks, and hybrid L1 takes its peaks from HDR10+",
+            args.peak_estimator.analyzer_name()
+        ))
     } else if sample_rate != 1 {
         Some(format!(
             "--analysis-quality fast analyzes one frame in {sample_rate}; use balanced or accurate for hybrid L1"
@@ -674,6 +685,7 @@ pub(super) fn find_reusable_measurements(
         for existing in candidates {
             match metadata::load_l1_sidecar(&existing, &expect) {
                 Ok((sidecar, _)) if rejects_coarser_sidecar(&sidecar, &existing, args) => {}
+                Ok((sidecar, _)) if rejects_other_estimator(&sidecar, &existing, args) => {}
                 Ok((sidecar, _)) if rejects_for_hybrid(&sidecar, &existing, hybrid) => {}
                 Ok((sidecar, advisories)) => {
                     report_reused_sidecar(&sidecar, &existing, args);
@@ -715,6 +727,26 @@ pub(super) fn legacy_targets_notice(measurements: &Path) -> Option<String> {
         "--legacy-madvr-l1 delivers the target nits of '{}', measured by {measured_by}; analyzers before sidecar v{current} read their histogram bins low, so these targets can be too dark. Delete the measurements file to re-measure.",
         measurements.display()
     ))
+}
+
+/// Measurements whose peaks follow another estimator than `--peak-estimator` (a sidecar without
+/// one is `max`) are re-analyzed, not reused (ROADMAP WS1.7). Returns true when the candidate
+/// was rejected (and says so).
+pub(super) fn rejects_other_estimator(
+    sidecar: &metadata::L1Sidecar,
+    measurements: &Path,
+    args: &Args,
+) -> bool {
+    let measured = sidecar.peak_estimator.as_deref().unwrap_or("max");
+    let requested = args.peak_estimator.analyzer_name();
+    if measured == requested {
+        return false;
+    }
+    progress::print_warn(&format!(
+        "Existing measurements '{}' follow the {measured} peak estimator, not --peak-estimator {requested}; re-analyzing.",
+        measurements.display()
+    ));
+    true
 }
 
 /// Under `--hdr10plus-l1 hybrid` (`hybrid`: an HDR10+ input), only measurements that can carry
@@ -806,5 +838,36 @@ pub(super) fn fresh_analysis_args(
         }
         extra_args.extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
     }
+    if !add_peak_estimator_args(&mut extra_args, args, hlg) {
+        return None;
+    }
     Some(extra_args)
+}
+
+/// Adds `--peak-estimator` when it is not the default `max` (ROADMAP WS1.7). False, after an
+/// error, when the analyzer's `--help` does not name the value, or for `st2094-10` on HLG, which
+/// the analyzer measures for PQ input only.
+fn add_peak_estimator_args(extra_args: &mut Vec<String>, args: &Args, hlg: bool) -> bool {
+    let estimator = args.peak_estimator;
+    if estimator == PeakEstimatorChoice::Max {
+        return true;
+    }
+    if hlg && estimator == PeakEstimatorChoice::St2094_10 {
+        progress::print_error(
+            "--peak-estimator st2094-10 measures PQ input only; this input is HLG. Use max or percentile.",
+        );
+        return false;
+    }
+    if !external::analyzer_lists_option(&analyzer_executable(), estimator.analyzer_name()) {
+        progress::print_error(&format!(
+            "--peak-estimator {name} needs an hdr_analyzer_mvp whose --help names {name}; rebuild or update hdr_analyzer_mvp.",
+            name = estimator.analyzer_name()
+        ));
+        return false;
+    }
+    extra_args.extend([
+        "--peak-estimator".to_string(),
+        estimator.analyzer_name().to_string(),
+    ]);
+    true
 }
