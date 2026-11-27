@@ -6,6 +6,27 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-27: E9.1 Restrict `--pre-denoise` to `off` and `median3` (PR #160)
+
+Step text:
+
+- [E9.1][gpu] Restrict the values to `off` and `median3`. Gate: the item gate.
+
+Evidence: `hdr_analyzer_mvp/src/cli.rs` `cli::tests::pre_denoise_accepts_only_off_and_median3`
+(fails without the `value_parser`); gates: the test gate, fmt, clippy and CUDA clippy, the L1
+regression gate, `scripts/cuda-parity.sh` PASS; CI on the PR. No script, tool or mkvdovi code
+passes another value.
+
+Resolution: clap accepts `off` and `median3` and refuses any other value with the valid list;
+`nlmeans`, which the help used to name, did nothing.
+
+### E9: `--pre-denoise` values (moved from the roadmap)
+
+- **Status:** Open. Only `median3` works, other values do nothing; history in
+  [the log](ROADMAP_LOG.md) (2026-10-29). Open: E9.1.
+- **Gate:** a unit test for the option (priority 4).
+- [E9.1][gpu] Restrict the values to `off` and `median3`. Gate: the item gate.
+
 ### 2026-11-27: E8.1 One shared bin-edge function for writer and readers (PR #159)
 
 Step text:
