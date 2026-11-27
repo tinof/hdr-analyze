@@ -62,11 +62,12 @@ const requiredGates = [...gates]
 log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'none (no Rust, analysis, Gemini-pass, record-cleanup, reviewer-yield, hook or panel paths touched)'))
 
 // High-risk paths: the ones that require CUDA parity or the L1 regression gate, plus the
-// cross-binary contract modules named in CLAUDE.md, the PQ histogram dump's reader
+// cross-binary contract modules named in CLAUDE.md, the in-process RPU injector (mkvdovi
+// inject/, which writes the delivered bitstream; ROADMAP E20.1), the PQ histogram dump's reader
 // (tools/display_sim) and the libplacebo pin it measures with. A module counts as a file or as a
 // directory of submodules (metadata.rs or metadata/), so a split never drops the rule.
 const riskPaths = cuda || measurement ||
-  any(/^hdr_analyzer_mvp\/src\/(l1_sidecar|pq_hist_dump)(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume)(\.rs$|\/)|^dovi_rpu_builder\/src\/|^tools\/display_sim\/|^scripts\/build-libplacebo\.sh$/)
+  any(/^hdr_analyzer_mvp\/src\/(l1_sidecar|pq_hist_dump)(\.rs$|\/)|^mkvdovi\/src\/(metadata|pipeline|external|resume|inject)(\.rs$|\/)|^dovi_rpu_builder\/src\/|^tools\/display_sim\/|^scripts\/build-libplacebo\.sh$/)
 // Hard diffs (owner decision 2026-11-10: Fable reviews when the difficulty warrants it). Two of
 // the repo's hard criteria (.claude/workflow.md "## Notes") show in the paths, so they never
 // depend on who built the step or on a local log:
