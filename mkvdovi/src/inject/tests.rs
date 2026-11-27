@@ -716,3 +716,41 @@ fn real_stream_matches_reference() {
     assert_eq!(report.bytes_written, reference_len);
     assert_eq!(compare.position, reference_len);
 }
+
+/// Hands out `step` bytes per read and records the progress counter it sees at each read.
+struct Trickle<'a> {
+    left: usize,
+    step: usize,
+    progress: &'a std::sync::atomic::AtomicU64,
+    seen: Vec<u64>,
+}
+
+impl Read for Trickle<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.seen
+            .push(self.progress.load(std::sync::atomic::Ordering::Relaxed));
+        let n = self.step.min(self.left).min(buf.len());
+        buf[..n].fill(0);
+        self.left -= n;
+        Ok(n)
+    }
+}
+
+#[test]
+fn progress_counts_every_inner_read_of_a_slow_pipe() {
+    // A pipe that trickles 10 bytes per read into a 100-byte chunk: the bar and the stall
+    // warning see the bytes as they come, not only once the chunk is full.
+    let progress = std::sync::atomic::AtomicU64::new(0);
+    let mut trickle = Trickle {
+        left: 100,
+        step: 10,
+        progress: &progress,
+        seen: Vec::new(),
+    };
+    let mut reader = FillReader::new(&mut trickle).counting_into(&progress);
+    let mut chunk = [0u8; 100];
+    assert_eq!(reader.read(&mut chunk).unwrap(), 100);
+    drop(reader);
+    assert_eq!(trickle.seen, (0..10).map(|k| k * 10).collect::<Vec<u64>>());
+    assert_eq!(progress.load(std::sync::atomic::Ordering::Relaxed), 100);
+}

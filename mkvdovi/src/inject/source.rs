@@ -93,7 +93,7 @@ impl<'a, R: Read> FillReader<'a, R> {
     }
 
     /// Also stores the byte count in `progress` after every read, for the progress bar.
-    fn counting_into(mut self, progress: &'a AtomicU64) -> Self {
+    pub(super) fn counting_into(mut self, progress: &'a AtomicU64) -> Self {
         self.progress = Some(progress);
         self
     }
@@ -105,7 +105,14 @@ impl<R: Read> Read for FillReader<'_, R> {
         while filled < buf.len() {
             match self.inner.read(&mut buf[filled..]) {
                 Ok(0) => break,
-                Ok(n) => filled += n,
+                Ok(n) => {
+                    filled += n;
+                    // Per inner read, so a slow pipe moves the bar and never reads as a stall
+                    // while a chunk fills.
+                    if let Some(progress) = self.progress {
+                        progress.store(self.bytes + filled as u64, Ordering::Relaxed);
+                    }
+                }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                 Err(error) => {
                     let returned = io::Error::new(error.kind(), error.to_string());
