@@ -451,6 +451,8 @@ The detailed gap table and validation method live in
   definition frozen before the run on the unseen Skyfall and Joker holdout cuts (retail L1); shots
   below retail, the largest under-read and the WS7 display-unit cost beside the MAE.
   Needs: WS1.5, WS7.1, WS8.1.
+- [WS1.7] Pass an opt-in `--peak-estimator` (st2094-10, percentile) from mkvdovi to a fresh
+  analysis; default max unchanged. Gate: real-file tests of the reuse rule and the refusals.
 
 ### WS2: shots and scene averages
 
