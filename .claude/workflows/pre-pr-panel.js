@@ -63,7 +63,7 @@ log('required gates: ' + (requiredGates.length ? requiredGates.join(', ') : 'non
 
 // High-risk paths: the ones that require CUDA parity or the L1 regression gate, plus the
 // cross-binary contract modules named in CLAUDE.md, the in-process RPU injector (mkvdovi
-// inject/, which writes the delivered bitstream; ROADMAP E20.1), the PQ histogram dump's reader
+// inject/, which writes the delivered bitstream; owner decision 2026-11-27), the PQ histogram dump's reader
 // (tools/display_sim) and the libplacebo pin it measures with. A module counts as a file or as a
 // directory of submodules (metadata.rs or metadata/), so a split never drops the rule.
 const riskPaths = cuda || measurement ||
