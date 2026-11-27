@@ -747,13 +747,13 @@ fn a_panic_while_parsing_unwinds_instead_of_waiting_for_the_watcher() {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(|| {
-            let display = source::Display {
+            let display = Display {
                 label: "test",
                 total: None,
                 stall_secs: 0,
             };
             let mut source = Source::RawFile(fixture("clip.hevc"));
-            let _ = source::run_pass(&mut source, 0, &mut Panicker::default(), 4096, &display);
+            let _ = run_pass(&mut source, 0, &mut Panicker::default(), 4096, &display);
         });
         let _ = tx.send(result.is_err());
     });
