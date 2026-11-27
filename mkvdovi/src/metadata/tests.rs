@@ -897,8 +897,10 @@ fn sidecar_with_smoothed_averages_is_reused_with_an_advisory() {
         json["version"] = json!(version);
         let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
         let advisories = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap();
-        assert_eq!(advisories.len(), 1, "version {version}");
-        assert!(advisories[0].contains("smoothed over time"));
+        // Before v6 the sidecar also records no peak source (ROADMAP E8.1): two advisories.
+        assert_eq!(advisories.len(), 2, "version {version}: {advisories:?}");
+        assert!(advisories[0].contains("does not record its peak source"));
+        assert!(advisories[1].contains("smoothed over time"));
     }
 }
 
