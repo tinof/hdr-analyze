@@ -6,6 +6,30 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-27: WS1.7 Pass an opt-in --peak-estimator from mkvdovi (PR #164)
+
+Step text:
+
+- [WS1.7] Pass an opt-in `--peak-estimator` (st2094-10, percentile) from mkvdovi to a fresh
+  analysis; default max unchanged. Gate: real-file tests of the reuse rule and the refusals.
+
+Evidence:
+
+- Why: on an RTX-upconverted 4K HDR10 episode, three scene cuts read scene max 2971–3347 PQ codes
+  with `max`, 2878–3005 with `st2094-10` and 2763–2792 with `percentile` (99.99), against a
+  picture whose 99.99th pixel percentile is about 2771 (pixels above 500 nits: 0.001–0.004%).
+- `mkvdovi/tests/peak_estimator.rs`: a default run records `max`; `percentile` then re-analyzes
+  and records `percentile`; a second `percentile` run reuses the measurements. `st2094-10` on HLG
+  and with `--analysis-quality balanced` is refused with no temp dir. `--mdfix` on a Profile 8.1
+  clip measures with `percentile`; the test fails without the pass-through in `rebuild_profile8`.
+- Unit tests in `mkvdovi/src/pipeline/tests.rs`: the default adds no analyzer flag and keeps the
+  resume fingerprint; a percentile sidecar counts only at 99.99; a fresh sidecar of another
+  estimator is refused; hybrid HDR10+ takes only `max`.
+- `scripts/ci/test-gate.sh` at `8911354` and CI on PR #164 green.
+
+Resolution: `mkvdovi --peak-estimator <max|st2094-10|percentile>` reaches every fresh analysis;
+the default stays `max`, so the WS1 gate still governs a default change.
+
 ### 2026-11-27: P6.3 Check a Profile 8 record against its RPU (PR #163)
 
 Step text:

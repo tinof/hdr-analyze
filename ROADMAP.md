@@ -409,9 +409,9 @@ The detailed gap table and validation method live in
 
 ### WS1: grain-robust peak
 
-- **Status:** Partial. Measurement core, scene minimum, max-RGB-mean average, HLG max-RGB and the
-  opt-in PQ ST 2094-10 reduced-set peak (WS1.5, [log](docs/ROADMAP_LOG.md)) have shipped. Open:
-  the reduced set as default (WS1.6), the over-read explanation (WS1.1) and a grain-robust peak.
+- **Status:** Partial. Measurement core, scene minimum, max-RGB-mean average, HLG max-RGB, the
+  opt-in PQ ST 2094-10 reduced-set peak (WS1.5) and mkvdovi's opt-in `--peak-estimator` (WS1.7)
+  have shipped ([log](docs/ROADMAP_LOG.md)). Open: WS1.6, WS1.1 and a grain-robust peak.
 - A grain-robust peak is missing. Raw max-RGB reads hot against `cm_analyze` v2
   ([VALIDATION.md §7](docs/VALIDATION.md)). The current opt-in `robust` rule
   ([TECHNICAL_REFERENCE.md §2.4](docs/TECHNICAL_REFERENCE.md)) removes part of the grain bias but
@@ -451,8 +451,6 @@ The detailed gap table and validation method live in
   definition frozen before the run on the unseen Skyfall and Joker holdout cuts (retail L1); shots
   below retail, the largest under-read and the WS7 display-unit cost beside the MAE.
   Needs: WS1.5, WS7.1, WS8.1.
-- [WS1.7] Pass an opt-in `--peak-estimator` (st2094-10, percentile) from mkvdovi to a fresh
-  analysis; default max unchanged. Gate: real-file tests of the reuse rule and the refusals.
 
 ### WS2: shots and scene averages
 
