@@ -70,7 +70,7 @@ hdr_analyzer_mvp "video.mkv"
 | `--header-peak-source <max\|histogram99\|histogram999>` | none | MaxCLL source for the header only; per-frame peaks still use `--peak-source` |
 | `--hist-bin-ema-beta <0.0-1.0>` | `0.1` | EMA smoothing for histogram bins and the `.bin` frame average (lower = more smoothing, 0 = disabled). Does not affect the L1 sidecar averages. |
 | `--hist-temporal-median <N>` | `0` | Temporal median filter window in frames (3 = good for aggressive smoothing) |
-| `--pre-denoise <nlmeans\|median3\|off>` | `off` | Pre-analysis Y-plane denoising (`median3` good for grain; `nlmeans` reserved) |
+| `--pre-denoise <off\|median3>` | `off` | Pre-analysis Y-plane denoising: `median3` (3x3 luma median, CPU only, good for grain) or `off` |
 | `--min-percentile <0-100>` | `0.1` | Lower percentile used for the noise-rejected active-area minimum, in percent; `0` selects the absolute minimum |
 
 - `max`: direct max from `--peak-domain` (most responsive to noise). For PQ, `max-rgb` decodes

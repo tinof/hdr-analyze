@@ -191,8 +191,8 @@ pub struct Cli {
     #[arg(long, default_value_t = 0)]
     pub hist_temporal_median: usize,
 
-    /// Pre-analysis Y-plane denoising: nlmeans, median3, or off (default: off)
-    #[arg(long, default_value = "off")]
+    /// Pre-analysis Y-plane denoising: median3 (a 3x3 median of the luma plane, CPU only) or off
+    #[arg(long, default_value = "off", value_parser = ["off", "median3"])]
     pub pre_denoise: String,
 
     /// Low percentile used for the noise-rejected active-area minimum (percent). 0 uses the absolute minimum.
@@ -234,4 +234,30 @@ pub struct Cli {
     /// nothing, write no .bin and no sidecar.
     #[arg(long, conflicts_with = "au_table")]
     pub au_table_only: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `--pre-denoise` takes only the values the analysis implements (ROADMAP E9.1); `nlmeans`
+    /// and any other name used to be accepted and silently did nothing.
+    #[test]
+    fn pre_denoise_accepts_only_off_and_median3() {
+        let parse = |extra: &[&str]| {
+            Cli::try_parse_from(["hdr_analyzer_mvp", "-i", "in.mkv"].iter().chain(extra))
+                .map(|cli| cli.pre_denoise)
+        };
+        assert_eq!(parse(&[]).unwrap(), "off");
+        assert_eq!(parse(&["--pre-denoise", "off"]).unwrap(), "off");
+        assert_eq!(parse(&["--pre-denoise", "median3"]).unwrap(), "median3");
+        for rejected in ["nlmeans", "median", "MEDIAN3", ""] {
+            let error = parse(&["--pre-denoise", rejected]).unwrap_err();
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::InvalidValue,
+                "{rejected}"
+            );
+        }
+    }
 }

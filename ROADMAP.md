@@ -136,7 +136,7 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
    Outcome: the brightness values in the delivered file are the measured ones; where the
    generator changes one, the tool reports it.
    Gate: the WS7 simulator decides P10.3 (owner, 2026-10-17); a blinded C9 A/B decides P10.5.
-4. **Narrow code defects** (E8, E9, P6, E7): histogram percentile reader, `--pre-denoise`
+4. **Narrow code defects** (E8, P6, E7): histogram percentile reader, `--pre-denoise`
    values.
    Outcome: options and readouts do what they say, and a source that contradicts its own
    metadata gets a warning.
@@ -713,13 +713,6 @@ The detailed gap table and validation method live in
   validation case.
 - **Gate:** a bin-edge round-trip unit test and an optimizer unit test (CUDA parity and the L1 gate
   run with `--disable-optimizer`, so they do not cover it).
-
-### E9: `--pre-denoise` values
-
-- **Status:** Open. Only `median3` works, other values do nothing; history in
-  [the log](docs/ROADMAP_LOG.md) (2026-10-29). Open: E9.1.
-- **Gate:** a unit test for the option (priority 4).
-- [E9.1][gpu] Restrict the values to `off` and `median3`. Gate: the item gate.
 
 ### E11: `l1_diff` and open-GOP cuts
 

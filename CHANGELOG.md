@@ -32,6 +32,8 @@ This document provides a historical record of completed milestones, feature impl
   source's frames would drift more than 3 ms from it by the last frame, the first mux takes the
   source's timestamps and says so. Such a file used to be muxed once at the wrong rate, discarded
   by the timing check and muxed again.
+- `hdr_analyzer_mvp --pre-denoise` accepts only `off` and `median3` (ROADMAP E9.1). Any other
+  value, such as `nlmeans`, is refused with the list of valid values. It used to be silently ignored.
 
 ### Changed
 
