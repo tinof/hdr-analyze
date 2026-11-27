@@ -6,6 +6,40 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-27: E7.4 Mux once at the source's rate; pipe the `--verify` extraction (PR #155)
+
+Step text:
+
+- [E7.4] Choose the timestamps file before the first mux when the raw stream's frame rate
+  (mkvmerge `-J`; none means 25 fps) differs from the source's measured one; found on an RTX
+  HDR encode (30 fps VUI in a 25 fps file, one wasted mux). `--verify` pipes ffmpeg into
+  `dovi_tool extract-rpu -` instead of writing a full-size `verify_video.hevc`. Gate: unit
+  tests, a muxed 30-in-25 clip, the verify tests; the verify time saved is measured.
+
+Found on 2026-11-26 converting a 4K HDR10 episode encoded through NVIDIA RTX HDR (99,175 frames,
+9.4 GB): its HEVC VUI states 30 fps inside a 25 fps MKV. mkvmerge muxed the raw stream at 30 fps,
+the E7.3 check discarded the 9.4 GB output, and the retry with the timestamps file passed (2m40s
+lost). `mkvmerge -J` on that raw stream reports 33,333,333 ns.
+
+Evidence:
+
+- `mkvdovi/src/pipeline/timing/tests.rs`: `deliver_muxes_a_stream_whose_vui_rate_differs_with_the_timestamps_file_first`
+  (a 30 fps-VUI clip in a 25 fps container is muxed once, with the timestamps file; it fails
+  with the prediction disabled), `first_timing_reads_the_rate_from_the_frames_not_ffprobes_estimate`
+  and `first_timing_keeps_whole_millisecond_frames_of_a_matching_rate_on_the_stream_timing`
+  (24000/1001 fps at lengths near 100k and 200k frames; a 0.5 ms margin flipped at 99,997).
+- `mkvdovi/src/external.rs`: `piped_commands_*`, among them a 100 MB producer into a consumer
+  that exits at once (it hung until the 30 s timeout before the fix).
+- Verify extraction on the episode: the old path took 55.7 s (ffmpeg to `verify_video.hevc`)
+  plus 113.0 s (`extract-rpu` from the file), 168.7 s; the pipe took 17.2 s on an idle disk and
+  35.0 s beside the test gate, with a byte-identical `verify_rpu.bin`.
+- Gate: fmt, clippy, `scripts/ci/test-gate.sh` (allowed skips only); CI on the PR.
+
+Resolution: the first mux takes the timestamps file when the source's measured frames would drift
+more than 3 ms from the stream's own timing; `--verify` writes no full-size video. E7.5 was folded
+into this step on its branch. The cold review's one finding (a producer left unreaped on an early
+setup error) was fixed in the PR without a reproducing test (NEEDS-HUMAN in the round record).
+
 ### 2026-11-25: E19 remote GPU measurement, study and reuse test (no step closed)
 
 Question (owner): can the Modal GPU measurement that the owner's add-on runs for the NuvioTV fork

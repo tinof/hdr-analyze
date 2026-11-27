@@ -324,6 +324,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     progress::print_step(current_step, total_steps, "Muxing final MKV...");
     let delivery = timing::deliver(
         input_file,
+        &bl_rpu_hevc,
         &output_file,
         &temp_dir,
         resume_enabled,

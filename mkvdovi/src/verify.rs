@@ -89,10 +89,13 @@ pub fn verify_post_mux_with_options(
         ok = false;
     }
 
-    // 2. Extract RPU from the muxed output for structural inspection.
+    // 2. Extract RPU from the muxed output for structural inspection. ffmpeg's raw HEVC goes
+    // straight into dovi_tool through a pipe: no full-size copy of the video is written
+    // (ROADMAP E7.4).
     println!("{}", "Checking with dovi_tool info...".cyan());
-    let hevc_path = temp_dir.join("verify_video.hevc");
     let rpu_path = temp_dir.join("verify_rpu.bin");
+    // A file from an earlier run must not stand in for an extraction that wrote nothing.
+    let _ = std::fs::remove_file(&rpu_path);
 
     let mut ffmpeg = Command::new("ffmpeg");
     ffmpeg.args([
@@ -107,22 +110,21 @@ pub fn verify_post_mux_with_options(
         "copy",
         "-f",
         "hevc",
-        "-y",
-        hevc_path.to_str().unwrap(),
+        "-",
     ]);
 
     let mut extract_rpu = external::dovi_tool_command();
-    extract_rpu.args([
-        "extract-rpu",
-        "-i",
-        hevc_path.to_str().unwrap(),
-        "-o",
-        rpu_path.to_str().unwrap(),
-    ]);
+    extract_rpu.args(["extract-rpu", "-", "-o", rpu_path.to_str().unwrap()]);
 
-    if !run_logged_command(&mut ffmpeg, &temp_dir.join("verify_extract_hevc.log"))
-        || !run_logged_command(&mut extract_rpu, &temp_dir.join("verify_extract_rpu.log"))
-    {
+    if !matches!(
+        external::run_piped_commands(
+            &mut ffmpeg,
+            &temp_dir.join("verify_extract_hevc.log"),
+            &mut extract_rpu,
+            &temp_dir.join("verify_extract_rpu.log"),
+        ),
+        Ok(true)
+    ) {
         println!("{}", "RPU extraction for verification failed.".red());
         return false;
     }

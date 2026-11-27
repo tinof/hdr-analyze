@@ -697,8 +697,9 @@ The detailed gap table and validation method live in
 ### E7: completeness
 
 - **Status:** Done, no step open: every conversion checks the output's RPU count, video timing
-  and direct-MKV frame count (E7.1–E7.3; [log](docs/ROADMAP_LOG.md)). Kept because
-  `mkvdovi/src/pipeline/mod.rs` and Priorities 4 cite the E7 gate.
+  and direct-MKV frame count, and muxes once at the source's rate (E7.1–E7.4;
+  [log](docs/ROADMAP_LOG.md)). Kept because `mkvdovi/src/pipeline/mod.rs` and Priorities 4 cite
+  the E7 gate.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
