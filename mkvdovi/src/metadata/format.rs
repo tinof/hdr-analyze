@@ -54,11 +54,17 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
 
     if dv_probe.contains("dvhe") || dv_probe.contains("dolby vision") {
         if dv_probe.contains("dvhe.08") || dv_probe.contains("profile 8") {
-            return HdrFormat::DolbyVisionP8;
+            let rpu = probe_rpu_kind(input_file, "the configuration record's Profile 8 is kept");
+            let (format, warning) = route_profile8_record(rpu);
+            if let Some(warning) = warning {
+                crate::progress::print_warn(&warning);
+            }
+            return format;
         }
 
         if dv_probe.contains("dvhe.07") || dv_probe.contains("profile 7") {
-            return probe_profile7_kind(input_file).unwrap_or(HdrFormat::DolbyVisionFel);
+            return probe_rpu_kind(input_file, "it is refused")
+                .unwrap_or(HdrFormat::DolbyVisionFel);
         }
     }
 
@@ -461,7 +467,9 @@ pub(super) fn classify_hdr_hints(hints: &str, measurements: bool) -> Option<HdrF
     None
 }
 
-fn probe_profile7_kind(input_file: &str) -> Option<HdrFormat> {
+/// The format a sample of `input_file`'s RPU names; `None` when none could be read. An RPU the
+/// E15.1 guard refuses is `None` too, after a warning that says what follows (`consequence`).
+fn probe_rpu_kind(input_file: &str, consequence: &str) -> Option<HdrFormat> {
     let mut temp_dir = std::env::temp_dir();
     temp_dir.push(format!("mkvdovi_dv_probe_{}", std::process::id()));
     fs::create_dir_all(&temp_dir).ok()?;
@@ -470,7 +478,7 @@ fn probe_profile7_kind(input_file: &str) -> Option<HdrFormat> {
     // user is told the real cause.
     let result = rpu_check::extract_rpu_sample(input_file, &temp_dir)
         .ok()
-        .and_then(|rpu| classify_or_warn(&rpu).ok().flatten())
+        .and_then(|rpu| classify_or_warn(&rpu, consequence).ok().flatten())
         .map(hdr_format_from_rpu);
 
     let _ = fs::remove_dir_all(&temp_dir);
@@ -484,7 +492,7 @@ fn sniff_dolby_vision_rpu(input_file: &str) -> Option<HdrFormat> {
     let rpu_path = temp_dir.join("sniff_RPU.bin");
 
     let result = if rpu_check::try_extract_rpu_quiet(input_file, &rpu_path, Some(60)) {
-        match classify_or_warn(&rpu_path) {
+        match classify_or_warn(&rpu_path, "it is refused") {
             Ok(kind) => kind.map(hdr_format_from_rpu),
             // The file carries Dolby Vision RPUs that mkvdovi cannot read: refuse it rather
             // than convert it as HDR10, which would replace the authored metadata.
@@ -500,16 +508,37 @@ fn sniff_dolby_vision_rpu(input_file: &str) -> Option<HdrFormat> {
 
 /// `classify_rpu_format`, with the E15.1 guard's refusal as `Err` after a warning that names
 /// it; any other failure is `Ok(None)`, as before.
-fn classify_or_warn(rpu_path: &Path) -> Result<Option<RpuFormatKind>, ()> {
+fn classify_or_warn(rpu_path: &Path, consequence: &str) -> Result<Option<RpuFormatKind>, ()> {
     match rpu_check::classify_rpu_format(rpu_path) {
         Ok(kind) => Ok(Some(kind)),
         Err(error) if rpu_guard::is_unparseable(&error) => {
             crate::progress::print_warn(&format!(
-                "The source's Dolby Vision RPU cannot be parsed, so it is refused: {error:#}"
+                "The source's Dolby Vision RPU cannot be parsed, so {consequence}: {error:#}"
             ));
             Err(())
         }
         Err(_) => Ok(None),
+    }
+}
+
+/// The format of an input whose configuration record says Profile 8, from what its RPU says
+/// (`rpu`: the sampled RPU's format, `None` when none could be read). The RPU decides, as for
+/// Profile 7 (ROADMAP P6.3): a Profile 7 RPU goes the Profile 7 way (FEL is refused, MEL takes
+/// the MEL path) and any other profile is unsupported, each with a warning that names both.
+/// An unreadable RPU keeps the record's Profile 8, as before.
+pub(super) fn route_profile8_record(rpu: Option<HdrFormat>) -> (HdrFormat, Option<String>) {
+    match rpu {
+        None | Some(HdrFormat::DolbyVisionP8) => (HdrFormat::DolbyVisionP8, None),
+        Some(format) => (
+            format,
+            Some(format!(
+                "The Dolby Vision configuration record says Profile 8, but the RPU is {}; the RPU decides.",
+                match format {
+                    HdrFormat::Unsupported => "another profile".to_owned(),
+                    other => other.name().to_owned(),
+                }
+            )),
+        ),
     }
 }
 

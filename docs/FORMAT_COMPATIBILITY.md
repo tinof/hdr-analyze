@@ -15,7 +15,7 @@ analyzer accuracy and remaining technical gaps, see [CM_ANALYZE_PARITY.md](CM_AN
 | Dolby Vision Profile 7 FEL | None: the file is refused | – | Not supported ([plan](FEL_PLAN.md)) |
 | Dolby Vision Profile 8 or MEL with `--mdfix` | Profile 8.1 with rebuilt metadata, source kept | No | Works, not a guaranteed improvement over authored metadata |
 
-Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
+Not supported: Profile 7 FEL input, Profile 8.2 (SDR base) input, Profile 5 output, and XML metadata export.
 
 - HDR10: the base layer is copied unchanged. When no compatible measurements exist, `mkvdovi`
   runs `hdr_analyzer_mvp` and supplies its measurements to `dovi_tool generate`.
@@ -77,6 +77,12 @@ Not supported: Profile 7 FEL input, Profile 5 output, and XML metadata export.
   compositor and its re-encode were removed: the compositor did not match the Dolby Vision
   reconstruction specification (ETSI GS CCM 001) on real discs. A design that keeps the base layer
   bit-exact is planned in [FEL_PLAN.md](FEL_PLAN.md). `mkvdovi inspect` still reports FEL.
+- Profile 8 record vs. RPU: when the configuration record says Profile 8 and the RPU names another
+  profile, the RPU decides, with a warning. A Profile 7 FEL RPU is refused, a MEL RPU is converted
+  as MEL. An unreadable RPU keeps Profile 8.
+- Profile 8.2 (compatibility ID 2, SDR base layer) and compatibility ID 0 (no backward-compatible
+  base layer): refused by name before any temporary work, also under `--mdfix`. `mkvdovi` delivers
+  only Profile 8.1 (PQ, ID 1) and 8.4 (HLG, ID 4). A record ffprobe cannot read passes.
 
 `mkvdovi` never encodes video. On every path the picture data is copied unchanged, so conversion
 quality depends on metadata accuracy and the display's mapping.

@@ -181,7 +181,9 @@ fn quality_notice_warns_about_coarse_presets_only_with_gpu_analysis() {
 
 #[test]
 fn profile7_fel_input_is_refused() {
-    let error = reject_unsupported_input(HdrFormat::DolbyVisionFel).unwrap_err();
+    // No file there: the record is unreadable, so only the format decides.
+    let missing = "/nonexistent/in.mkv";
+    let error = reject_unsupported_input(HdrFormat::DolbyVisionFel, missing).unwrap_err();
     assert_eq!(error.to_string(), FEL_UNSUPPORTED_MESSAGE);
     assert!(FEL_UNSUPPORTED_MESSAGE.starts_with("Profile 7 FEL input is not supported"));
     assert!(FEL_UNSUPPORTED_MESSAGE.contains("docs/FEL_PLAN.md"));
@@ -195,7 +197,7 @@ fn profile7_fel_input_is_refused() {
         HdrFormat::DolbyVisionP8,
         HdrFormat::Unsupported,
     ] {
-        assert!(reject_unsupported_input(supported).is_ok());
+        assert!(reject_unsupported_input(supported, missing).is_ok());
     }
 }
 

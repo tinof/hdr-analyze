@@ -6,6 +6,37 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-27: P6.3 Check a Profile 8 record against its RPU (PR #163)
+
+Step text:
+
+- [P6.3][corpus] Check a Profile 8 record against its RPU: route by the RPU on a mismatch, as
+  Profile 7 does, and refuse compatibility ID 0 or 2 (8.2, SDR base) by name before temp work.
+  Gate: fixture tests on both sides; RPU baselines byte-identical.
+
+- **Checked 2026-11-25 @c8a9b4f:** P6.2's anchors hold (`static_metadata.rs:195`,
+  `pipeline/hdr10plus.rs:109`, `pipeline/hybrid.rs:361`); the sampled L6 moved to
+  `pipeline/measure.rs:172` in E13.14. For P6.3: `check_hdr_format` returns `DolbyVisionP8` from
+  the MediaInfo text alone, before any RPU is read (`mkvdovi/src/metadata/format.rs:55`), so its
+  tests need a record that contradicts the RPU, not only the post-mux `--verify` check.
+
+Evidence:
+
+- `mkvdovi/tests/p8_record.rs`: a real 8.2 clip (BT.709 VUI, so mkvmerge writes ID 2) is refused
+  by name before any temp work, also under `--mdfix`; a real 8.1 clip passes; a Profile 8.2
+  record over a Profile 7 MEL RPU is refused before temp work; an ID 2 record on a stream tagged
+  HLG in the container is refused as a contradiction, not as SDR.
+- `metadata::tests::a_profile_8_record_over_a_profile_7_rpu_takes_the_rpus_path`: real Profile 7
+  MEL and FEL clips whose record's profile bits are patched to 8 (no muxer writes such a record)
+  route as MEL and FEL. Each test fails on a mutant without its rule.
+- Corpus: 19 cases captured with main (`d19a8b8`) and with the branch: every RPU cmp-identical,
+  `rpu-baseline compare --require-identical-l1` clean; only the Profile 8 source under `--mdfix`
+  logs the new RPU probe.
+
+Resolution: for a Profile 8 record the RPU decides, as for Profile 7, with a warning naming both;
+a Profile 8 record with compatibility ID 0 or 2 is refused by name before any temp work (an FEL
+RPU under a Profile 8 record is now refused, and an 8.2 file is no longer rebuilt as 8.1).
+
 ### 2026-11-27: E20.1 Inject the RPU in process from an ffmpeg pipe (PR #162)
 
 Step text:

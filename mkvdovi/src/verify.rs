@@ -12,7 +12,7 @@ use crate::metadata;
 use crate::progress;
 
 mod authored_blocks;
-mod dv_record;
+pub(crate) mod dv_record;
 
 #[allow(dead_code)]
 pub fn verify_post_mux(

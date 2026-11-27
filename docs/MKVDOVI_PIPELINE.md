@@ -136,6 +136,17 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   compositor was removed because it did not match ETSI GS CCM 001 on real discs (measured mean
   chroma error 69 to 534 10-bit codes on seven of eight FEL test cuts). The plan for FEL without a
   re-encode is [FEL_PLAN.md](FEL_PLAN.md). `inspect` still reports FEL.
+- **Profile 8 record vs. RPU (P6.3).** When MediaInfo reports a Profile 8 configuration record,
+  `metadata::check_hdr_format` samples the RPU (`probe_rpu_kind`) and `route_profile8_record`
+  decides. The RPU wins, as for Profile 7: a Profile 7 FEL RPU is refused, MEL takes the MEL path,
+  another profile is unsupported. Each mismatch warns "the RPU decides". An unreadable RPU keeps
+  Profile 8; one the E15.1 guard refuses warns that the record's Profile 8 is kept.
+- **Profile 8 compatibility ID (P6.3).** `reject_unsupported_input` (`pipeline/mod.rs`, before any
+  temp work) reads the record of a Profile 8 or MEL input with ffprobe (`verify/dv_record.rs`
+  `probe_input`). A Profile 8 record with compatibility ID 0 or 2 is refused by name
+  (`dv_record::profile8_compatibility_refusal`): mkvdovi delivers only 8.1 (ID 1) and 8.4 (ID 4),
+  so a `--mdfix` rebuild would misdescribe the base layer. An ID 2 on a stream that signals HLG is
+  named as a contradiction, not as an SDR base. An unreadable or missing record passes.
 - Profile 7 MEL uses a fast metadata-only discard path unless `--mdfix` is requested. MEL/Profile 8
   `--mdfix` rebuilds metadata from a clean base layer.
 - **PQ range contract.** PQ inputs tagged full range (range only) are refused for every input whose
