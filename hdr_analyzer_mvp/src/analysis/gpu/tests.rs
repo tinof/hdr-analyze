@@ -459,8 +459,8 @@ fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
 }
 
 /// Every 10-bit chroma pair, binned on the CPU and by the kernel (ROADMAP E12.3): a 2048x2048
-/// frame whose chroma sample (cx, cy) is the pair (u = cx, v = cy), whole and as every row and
-/// every column of the table. The kernel used to bin with
+/// frame whose chroma sample (cx, cy) holds the pair (u_of(cx), v_of(cy)), whole and as every row
+/// and every column of the table. The kernel used to bin with
 /// its own f32 `atan2f`, which put the centred pairs (254, -109) and (508, -218) in bin 29 where
 /// the CPU puts them in bin 28; both now read the CPU's table.
 #[cfg(feature = "cuda")]
@@ -483,6 +483,11 @@ fn every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu() {
         }
     };
     const SIDE: u32 = 2048;
+    // The codes are a bijection of the chroma coordinates per axis, not the coordinates
+    // themselves: a kernel that looked the table up by position instead of by the decoded codes
+    // would then bin other pairs in each strip below.
+    let u_of = |cx: u32| ((cx * 389 + 7) & 1023) as u16;
+    let v_of = |cy: u32| ((cy * 601 + 13) & 1023) as u16;
     let mut frame = frame::Video::new(Pixel::YUV420P10LE, SIDE, SIDE);
     for plane in 0..3 {
         let stride = frame.stride(plane);
@@ -492,8 +497,8 @@ fn every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu() {
             for x in 0..side {
                 let code: u16 = match plane {
                     0 => 512,
-                    1 => x as u16,
-                    _ => y as u16,
+                    1 => u_of(x),
+                    _ => v_of(y),
                 };
                 let offset = y as usize * stride + x as usize * 2;
                 data[offset..offset + 2].copy_from_slice(&code.to_le_bytes());
@@ -536,7 +541,7 @@ fn every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu() {
     // The whole frame holds every pair once, so its totals cannot see a kernel index that maps
     // pairs one-to-one onto other entries (a transposed index, swapped U and V planes). Every row
     // (fixed v) and every column (fixed u) of the table, as a 2-pixel strip, can: a transposed
-    // lookup turns row j into column j.
+    // lookup turns a row into a column, and a lookup by position bins other pairs.
     let mut strips = Vec::with_capacity(2 * 1024);
     for index in 0..1024u32 {
         strips.push(CropRect {
