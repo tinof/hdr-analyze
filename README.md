@@ -96,7 +96,7 @@ Measured accuracy against synthetic references and Dolby-generated metadata, plu
 | HDR10+ metadata alone (`--hdr10plus-l1 hdr10plus`) | Per-shot median error 1 code (max 17) | Compared with Dolby's v4 analyzer ([docs/VALIDATION.md](docs/VALIDATION.md)) |
 | Scene detection | 13 of 14 authored cuts on Title A (24 emitted); 1 of 34 on a near-static asset | ±1 frame on Title A; base layer is nearly constant in luma on the near-static FEL test asset ([docs/VALIDATION.md](docs/VALIDATION.md)) |
 | Grainy real-content assets (default `max` estimator) | +74 and +93 codes hot against reference | Open gap on two grainy assets; opt-in grain-rejecting estimator (`--peak-estimator`, see [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)) narrows it but does not close it ([docs/VALIDATION.md](docs/VALIDATION.md)) |
-| CUDA analysis (4K HDR10 / 4K HLG) | About 325 fps / 490 fps | RTX 4070, frames ÷ wall time of whole analyzer run ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)) |
+| CUDA analysis (4K HDR10 / 4K HLG) | About 325–570 fps / 490 fps | RTX 4070, frames ÷ wall time of whole analyzer run: 325 fps on a short 64 Mb/s HDR10 clip, 569 fps on a 66-minute 19 Mb/s HDR10 episode with a newer build ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)) |
 
 Optional NVDEC decode and CUDA analysis work on decoded frames in GPU memory, with L1 output identical to earlier builds. The Linux x64 and Windows x64 release archives include it and need only the NVIDIA driver (R560 or newer). The test conditions and reproduction recipe are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). How the GPU path reaches these rates is explained in [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md).
 

@@ -10,6 +10,33 @@ frames) on the machine below, from a local ext4 disk, took 2 min 53 s to analyze
 included), 1 s to generate the RPU, 48 s to extract the base layer, 1 min 25 s to inject the RPU and
 49 s to mux.
 
+## Recorded result: a full 4K HDR10 episode, November 2026
+
+A whole 4K HDR10 episode (HEVC Main 10, 3840×2160, 25 fps, 99,175 frames, 66 min, 19.1 Mb/s
+overall), read from the local ext4 disk with build 0.9.0 (`d19a8b8`, `+cuda`) and the recipe's
+`COMMON` flags plus `--hwaccel cuda`. Frames ÷ wall time of the whole analyzer run:
+
+| Run | Wall time | Throughput | Peak memory |
+|---|---:|---:|---:|
+| `--no-crop`, first run | 175.1 s | 566 fps | 911 MiB |
+| `--no-crop`, second run (recorded) | 174.3 s | **569 fps** | 911 MiB |
+| crop probe and crop monitoring on (1,382 frames downloaded; crop 3840×2160+0+0) | 179.4 s | 553 fps | 1,216 MiB |
+
+`--profile-performance` puts decode and I/O at 127 s (about 775 fps effective) and the analysis
+kernel at 35 s (about 2,750 fps), so decode dominates this run. The crop probe and its monitoring
+add about 5 s per episode.
+
+This figure is not comparable one to one with the September clip below (325 fps). That clip is
+1,668 frames at 63.9 Mb/s, measured on an earlier build and driver, and a short run carries a fixed
+start-up cost that a 66-minute episode spreads thin. The September HLG clip has the episode's
+bitrate and still ran at 493 fps, so bitrate alone does not explain the gap. No run on one build
+has isolated it.
+
+Environment: Intel Core i5-13400F, NVIDIA GeForce RTX 4070 with driver 621.40 on the Windows host,
+Ubuntu 24.04.5 under WSL2 (kernel 6.6.87.2), the analyzer linked against the system FFmpeg 6.1.1
+libraries, kernel PTX from NVRTC 12.6; NVDEC frames analyzed in place (`CUDA in-place analysis:
+99175 NVDEC frames`).
+
 ## Recorded result: CUDA analysis, September 2026
 
 End-to-end throughput is frames ÷ wall-clock time of the whole analyzer run, measured with
