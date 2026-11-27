@@ -6,6 +6,42 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-27: E20.1 Inject the RPU in process from an ffmpeg pipe (PR #162)
+
+Step text:
+
+- [E20.1] Inject the RPU in process from an ffmpeg pipe, byte-identical to `dovi_tool inject-rpu`
+  2.3.4, so no full-size `BL.hevc` is written; `--dovi-inject external` keeps the old path.
+  Gate: cmp-identical output on the test clips and a real episode; per-step wall time reported.
+
+Found on 2026-11-26: the delivery steps of a 99,175-frame 4K HDR10 episode (9.4 GB) took about
+12 minutes against 3 minutes of CUDA analysis. Profiling showed `dovi_tool inject-rpu` I/O-bound
+(171 s wall, 24 s user CPU; its O(n²) frame lookup is not the cause), with the full-size `BL.hevc`
+write and its two re-reads as the cost. Plan: Fable (`fable-planner`), approved by the owner;
+built by `opus-professor`; owner decisions: an `RPU.bin` the in-process path cannot read falls
+back to `dovi_tool inject-rpu` with a warning, `mkvdovi/src/inject/**` is a Tier 2 path (#158).
+
+Evidence:
+
+- `mkvdovi/src/inject/tests/equivalence.rs`: 12 cases against dovi_tool 2.3.4 (open and closed
+  GOP, RASL cuts, POC wrap, IDR resets, concatenated streams, AUD and repeated headers, four
+  slices with suffix SEI, EOS/EOB with mixed start codes, HDR10+ SEI, HLG with the VUI edit, input
+  with RPUs, RPUs shorter and longer); `mkvdovi/tests/inject_equivalence.rs`: HDR10, HDR10+ and
+  HLG with both composers convert to the same stream in both modes.
+- The episode: `real_stream_matches_reference` from the MKV pipe and from `BL.hevc`, 9,411,896,373
+  bytes identical to dovi_tool's output.
+- Idle-host timing, four conversions alternating the modes, identical video SHA-256: base layer
+  plus injection 59 s and 68 s in process against 1 min 45 s and 2 min 33 s; the whole conversion
+  3 min 15 s and 3 min 21 s against 3 min 50 s and 4 min 46 s (`docs/PERFORMANCE.md`).
+- Gates: the test gate, fmt, clippy and CUDA clippy, the L1 gate, `scripts/cuda-parity.sh` PASS,
+  `cargo deny`, `cargo audit`; CI on the PR. The cold review's two findings (a hang when the
+  parser panics in a build that unwinds, progress counted only per full chunk) were fixed with
+  red-first tests.
+
+Resolution: `mkvdovi/src/inject/` writes the RPU into ffmpeg's raw HEVC in two passes over a pipe
+with an O(1) frame index, so no full-size `BL.hevc` is written; `--dovi-inject external` keeps
+the previous path for one release.
+
 ### 2026-11-27: E9.1 Restrict `--pre-denoise` to `off` and `median3` (PR #160)
 
 Step text:

@@ -907,10 +907,8 @@ The detailed gap table and validation method live in
 
 ### E20: delivery throughput
 
-- **Status:** Open (owner, 2026-11-27): the delivery steps after analysis are disk-bound.
-- [E20.1] Inject the RPU in process from an ffmpeg pipe, byte-identical to `dovi_tool inject-rpu`
-  2.3.4, so no full-size `BL.hevc` is written; `--dovi-inject external` keeps the old path.
-  Gate: cmp-identical output on the test clips and a real episode; per-step wall time reported.
+- **Status:** Done, no step open: mkvdovi injects the RPU in process (E20.1,
+  [log](docs/ROADMAP_LOG.md) 2026-11-27). Kept because the docs cite E20.1.
 
 ## Explicit non-goals
 
