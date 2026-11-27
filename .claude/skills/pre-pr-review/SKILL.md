@@ -286,7 +286,10 @@ The docs rules are `.claude/docs-rules.md`. The `docs-keeper` agent writes the d
    file (base, diff command, file list), the item and step with the step's text, the fixes made,
    the gate results (standalone mode; in self-check mode say that `/ship:land` runs the gates
    after it), and whether the acceptance-gate evidence exists and where.
-2. **Only Markdown.** No guard enforces this, so snapshot the tree before the run and after it:
+2. **Only Markdown.** No guard enforces this. Before the run,
+   `git status --porcelain --untracked-files=no` must print nothing (the fixes are committed), so
+   any tracked change after it is the writer's and `git checkout` restores it. Snapshot the tree
+   before the run and after it:
    `{ git status --porcelain --untracked-files=all; git ls-files -o --exclude-standard -z | xargs -0 -r shasum; }`.
    `-uall` lists each file inside an untracked directory, and the hashes show an edit to a file that
    was already untracked. Every line that differs must name a `*.md` file. Undo any other tracked
