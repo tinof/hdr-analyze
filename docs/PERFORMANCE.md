@@ -10,6 +10,27 @@ frames) on the machine below, from a local ext4 disk, took 2 min 53 s to analyze
 included), 1 s to generate the RPU, 48 s to extract the base layer, 1 min 25 s to inject the RPU and
 49 s to mux.
 
+## Recorded result: a full 4K HDR10 episode, November 2026
+
+A whole 4K HDR10 episode (HEVC Main 10, 3840×2160, 25 fps, 99,175 frames, 66 min, 19.1 Mb/s
+overall), read from the local ext4 disk with build 0.9.0 (`d19a8b8`, `+cuda`) and the recipe's
+`COMMON` flags plus `--hwaccel cuda`. Frames ÷ wall time of the whole analyzer run:
+
+| Run | Wall time | Throughput | Peak memory |
+|---|---:|---:|---:|
+| `--no-crop`, first run | 175.1 s | 566 fps | 910 MB |
+| `--no-crop`, second run (recorded) | 174.3 s | **569 fps** | 910 MB |
+| crop probe and crop monitoring on (1,382 scene-cut frames downloaded) | 179.4 s | 553 fps | 1,216 MB |
+
+`--profile-performance` reports decode and I/O at about 775 fps effective and the analysis kernel
+at about 2,750 fps, so NVDEC sets the rate: the same GPU reaches 325 fps on the 64 Mb/s HDR10 clip
+below and 569 fps on this 19 Mb/s episode. The crop probe and its monitoring add about 5 s per
+episode.
+
+Environment: Intel Core i5-13400F, NVIDIA GeForce RTX 4070 with driver 621.40 on the Windows host,
+Ubuntu 24.04.5 under WSL2 (kernel 6.6.87.2), the analyzer linked against the system FFmpeg 6.1.1
+libraries; NVDEC frames analyzed in place (`CUDA in-place analysis: 99175 NVDEC frames`).
+
 ## Recorded result: CUDA analysis, September 2026
 
 End-to-end throughput is frames ÷ wall-clock time of the whole analyzer run, measured with
