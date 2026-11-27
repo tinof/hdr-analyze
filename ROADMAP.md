@@ -905,6 +905,11 @@ The detailed gap table and validation method live in
   `mkvdovi --require-measurements` converts without analysis and its RPU equals a local CPU
   run's; upload, T4 and total times in the log. Needs: E19.3.
 
+### E20: delivery throughput
+
+- **Status:** Done, no step open: mkvdovi injects the RPU in process (E20.1,
+  [log](docs/ROADMAP_LOG.md) 2026-11-27). Kept because the docs cite E20.1.
+
 ## Explicit non-goals
 
 - No proprietary Dolby code, LUTs, tone curves, or binary blobs in this repository; see

@@ -8,6 +8,7 @@ use walkdir::WalkDir;
 
 mod cli;
 mod external;
+mod inject;
 mod metadata;
 mod pipeline;
 mod progress;

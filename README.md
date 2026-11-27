@@ -13,7 +13,7 @@ HDR-Analyze is an independent project, not affiliated with or endorsed by Dolby 
 
 ## How it works
 
-`mkvdovi` copies the compressed HEVC video stream with `ffmpeg` without re-encoding while `mediainfo`/`ffprobe`, `hdr_analyzer_mvp` and (for HDR10+) `hdr10plus_tool` collect the stream and luminance metadata. `dovi_tool` generates the RPU and injects it into the copied stream, and `mkvmerge` packages the Dolby Vision MKV.
+`mkvdovi` copies the compressed HEVC video stream with `ffmpeg` without re-encoding while `mediainfo`/`ffprobe`, `hdr_analyzer_mvp` and (for HDR10+) `hdr10plus_tool` collect the stream and luminance metadata. `dovi_tool` generates the RPU, `mkvdovi` writes it into the copied stream (byte for byte as `dovi_tool inject-rpu` does), and `mkvmerge` packages the Dolby Vision MKV.
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
     H10P["hdr10plus_tool (HDR10+ only)"]:::meta
     GEN["dovi_tool generate (RPU: L1, L2, L6, L9, L11)"]:::meta
     COPY["ffmpeg -c:v copy (video copied, never re-encoded)"]:::video
-    INJ["dovi_tool inject-rpu"]:::pack
+    INJ["mkvdovi RPU injection (as dovi_tool inject-rpu)"]:::pack
     MUX["mkvmerge (final MKV packaging)"]:::pack
     OUT["Dolby Vision MKV (Profile 8.1, or 8.4 for HLG)"]:::result
 
@@ -41,7 +41,7 @@ flowchart LR
 ```
 
 - `mkvdovi` never encodes video: HDR10 and HDR10+ inputs become Profile 8.1 MKVs, and HLG inputs become Profile 8.4 MKVs, with the video stream copied unchanged.
-- `hdr_analyzer_mvp` measures decoded pixels directly from the compressed HEVC source without a ProRes or raw intermediate. `mkvdovi` writes per-scene L1 plus L2, L6, L9 and L11 metadata for `dovi_tool` to generate and inject the RPU.
+- `hdr_analyzer_mvp` measures decoded pixels directly from the compressed HEVC source without a ProRes or raw intermediate. `mkvdovi` writes per-scene L1 plus L2, L6, L9 and L11 metadata for `dovi_tool` to generate the RPU, and injects it itself.
 - `mkvdovi` also reuses existing HDR10+ metadata and audits RPUs with `mkvdovi inspect`. It rebuilds metadata on existing Dolby Vision files with `--mdfix`. It runs on the CPU under Linux, macOS and Windows.
 
 ## Quick start
@@ -74,7 +74,7 @@ Every conversion needs `ffmpeg`, `mkvmerge`, [`dovi_tool`](https://github.com/qu
 |---|---|
 | `ffmpeg` | every conversion |
 | `mkvmerge` (MKVToolNix) | final MKV packaging |
-| [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases) 2.3.2 or newer | RPU generation and injection (2.3.4+ reads MKV directly) |
+| [`dovi_tool`](https://github.com/quietvoid/dovi_tool/releases) 2.3.2 or newer | RPU generation, reading and checking; injection with `--dovi-inject external` (2.3.4+ reads MKV directly) |
 | `mediainfo` (recommended) or `ffprobe` | stream inspection. MediaInfo supplies the L6 and L9 source values; with `ffprobe` alone they fall back to defaults. |
 | `ffprobe` (ships with FFmpeg) | the check that the output keeps the source's video timestamps. Without it a conversion still runs, warns, and keeps the source. |
 | [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) | HDR10+ input. An HDR10+ file fails if the tool is missing. |

@@ -1,21 +1,234 @@
-//! Delivery phases of `convert_file`: base-layer extraction, RPU injection and the mux.
+//! Delivery phases of `convert_file`: the base layer with its RPU (in process, or extracted and
+//! injected by dovi_tool) and the mux.
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
-use crate::cli::Args;
+use crate::cli::{Args, DoviInject};
 use crate::external::{self, run_command_with_progress};
+use crate::inject::{self, Outcome, Pass, Request, Rpus, Source};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
 
+use super::measure::Measured;
 use super::timing::MuxTiming;
 
-/// The raw HEVC base layer the RPU is injected into: `bl_source_file` itself when it already is
-/// one, else `BL.hevc` extracted into `temp_dir`. `None`: the extraction failed and was reported;
+/// The lossless SPS/VUI edit (slices untouched) that writes the HLG transfer into the bitstream:
+/// without an HLG tag in it mkvmerge would give the Profile 8.4 track compatibility ID 2 (SDR)
+/// instead of 4.
+const HLG_VUI_EDIT: &str =
+    "hevc_metadata=colour_primaries=9:transfer_characteristics=18:matrix_coefficients=9";
+
+/// Whether the base layer of `input_file` gets [`HLG_VUI_EDIT`]: HLG tagged only in the
+/// container. Probes the input once and says so when it does.
+fn needs_hlg_vui_edit(input_file: &str, hdr_type: HdrFormat) -> bool {
+    let edit = hdr_type == HdrFormat::Hlg && metadata::hlg_bitstream_lacks_transfer(input_file);
+    if edit {
+        progress::print_info(
+            "HLG is tagged only in the container; writing the HLG transfer into the HEVC VUI.",
+        );
+    }
+    edit
+}
+
+/// ffmpeg copying the first video stream of `bl_source_file` as raw HEVC, to `output` with a
+/// `-stats` readout or, for `None`, to its stdout. Both injection paths read this stream.
+fn base_layer_ffmpeg(bl_source_file: &Path, hlg_vui_edit: bool, output: Option<&Path>) -> Command {
+    let mut ffmpeg_cmd = Command::new("ffmpeg");
+    ffmpeg_cmd.args(["-hide_banner", "-loglevel", "error"]);
+    if output.is_some() {
+        ffmpeg_cmd.arg("-stats");
+    }
+    ffmpeg_cmd
+        .arg("-i")
+        .arg(bl_source_file)
+        .args(["-map", "0:v:0", "-c:v", "copy"]);
+    if hlg_vui_edit {
+        ffmpeg_cmd.args(["-bsf:v", HLG_VUI_EDIT]);
+    }
+    ffmpeg_cmd.args(["-f", "hevc"]);
+    match output {
+        Some(path) => ffmpeg_cmd.arg("-y").arg(path),
+        None => ffmpeg_cmd.arg("-"),
+    };
+    ffmpeg_cmd
+}
+
+/// The two steps that give `BL_RPU.hevc`, each with its step header (`steps`: the current step,
+/// advanced here, and the total). By default the RPU is written in process (`crate::inject`,
+/// ROADMAP E20.1) from the raw base layer, piped from ffmpeg unless it is a raw file already.
+/// Under `--dovi-inject external`, and with a warning for an `RPU.bin` the in-process path
+/// cannot read, ffmpeg extracts `BL.hevc` and `dovi_tool inject-rpu` writes the RPU. `None`: a
+/// step failed and was reported; `convert_file` returns `Ok(false)`.
+pub(super) fn inject_base_layer(
+    input_file: &str,
+    measured: &Measured,
+    rpu_path: &Path,
+    temp_dir: &Path,
+    resume_enabled: bool,
+    args: &Args,
+    steps: (&mut u8, u8),
+) -> Result<Option<PathBuf>> {
+    let (current_step, total_steps) = steps;
+    let mut step = |message: &str| {
+        *current_step += 1;
+        progress::print_step(*current_step, total_steps, message);
+    };
+    if args.dovi_inject == DoviInject::Internal {
+        let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
+        if resume_enabled && resume::is_complete(&bl_rpu_hevc) {
+            step("Reading base layer frame order...");
+            step("Injecting RPU into base layer...");
+            progress::print_info("Reusing RPU-injected base layer from a previous run.");
+            return Ok(Some(bl_rpu_hevc));
+        }
+        match Rpus::prepare(rpu_path) {
+            Ok(rpus) => {
+                return inject_in_process(
+                    input_file,
+                    measured,
+                    &rpus,
+                    temp_dir,
+                    resume_enabled,
+                    args,
+                    &mut step,
+                )
+            }
+            Err(error) => progress::print_warn(&format!(
+                "RPU injection: {error:#}. Writing the RPU with dovi_tool inject-rpu instead."
+            )),
+        }
+    }
+
+    step("Extracting base layer...");
+    let Some(bl_hevc) = extract_base_layer(
+        input_file,
+        &measured.bl_source_file,
+        temp_dir,
+        measured.hdr_type,
+        resume_enabled,
+        args,
+    )?
+    else {
+        return Ok(None);
+    };
+    step("Injecting RPU into base layer...");
+    inject_rpu(
+        &bl_hevc,
+        rpu_path,
+        temp_dir,
+        measured.measurements_file.is_some(),
+        resume_enabled,
+        args,
+    )
+}
+
+/// `inject::inject` into `BL_RPU.hevc`, which is sealed only when the injection succeeded and
+/// removed otherwise. A measured RPU whose length differs from the pictures is refused before
+/// anything is written.
+fn inject_in_process(
+    input_file: &str,
+    measured: &Measured,
+    rpus: &Rpus,
+    temp_dir: &Path,
+    resume_enabled: bool,
+    args: &Args,
+    step: &mut dyn FnMut(&str),
+) -> Result<Option<PathBuf>> {
+    step("Reading base layer frame order...");
+    let bl_source_file = &measured.bl_source_file;
+    let extracted = temp_dir.join("BL.hevc");
+    let mut source = if bl_source_file.extension().is_some_and(|ext| ext == "hevc") {
+        progress::print_info("Base layer is already a raw HEVC stream; reading it directly.");
+        Source::RawFile(bl_source_file.clone())
+    } else if resume_enabled && resume::is_complete(&extracted) {
+        progress::print_info("Reusing extracted base layer from a previous run.");
+        Source::RawFile(extracted)
+    } else {
+        let hlg_vui_edit = needs_hlg_vui_edit(input_file, measured.hdr_type);
+        Source::Ffmpeg {
+            command: base_layer_ffmpeg(bl_source_file, hlg_vui_edit, None),
+            logs: [
+                temp_dir.join("ffmpeg_inject_pass1.log"),
+                temp_dir.join("ffmpeg_inject_pass2.log"),
+            ],
+        }
+    };
+    let size_hint = match &source {
+        Source::RawFile(path) => fs::metadata(path),
+        Source::Ffmpeg { .. } => fs::metadata(bl_source_file),
+    }
+    .ok()
+    .map(|metadata| metadata.len());
+
+    let bl_rpu_hevc = temp_dir.join("BL_RPU.hevc");
+    let file = File::create(&bl_rpu_hevc)
+        .with_context(|| format!("creating {}", bl_rpu_hevc.display()))?;
+    let mut output = BufWriter::with_capacity(1 << 20, file);
+    let outcome = inject::inject(
+        Request {
+            source: &mut source,
+            rpus,
+            refuse_mismatch: measured.measurements_file.is_some(),
+            chunk_size: inject::CHUNK_SIZE,
+            size_hint,
+            stall_secs: args.stall_timeout,
+            announce: &mut |pass| {
+                if pass == Pass::Write {
+                    step("Injecting RPU into base layer...");
+                }
+            },
+        },
+        &mut output,
+    );
+    drop(output);
+
+    let report = match outcome {
+        Ok(Outcome::Injected(report)) => report,
+        Ok(Outcome::LengthMismatch { frames, rpus }) => {
+            progress::print_error(&format!(
+                "RPU injection: mismatched lengths. video {frames}, RPU {rpus}. The measured RPU does not match the video picture for picture; refusing to mux it."
+            ));
+            let _ = fs::remove_file(&bl_rpu_hevc);
+            return Ok(None);
+        }
+        Err(error) => {
+            progress::print_error(&format!(
+                "RPU injection failed: {error:#}. --dovi-inject external writes the RPU with dovi_tool inject-rpu instead."
+            ));
+            let _ = fs::remove_file(&bl_rpu_hevc);
+            return Ok(None);
+        }
+    };
+    if report.frames != report.rpus {
+        let rule = if report.rpus < report.frames {
+            "the last RPU is repeated to the end"
+        } else {
+            "the RPUs past the last picture are dropped"
+        };
+        progress::print_warn(&format!(
+            "RPU injection: mismatched lengths. video {}, RPU {}; {rule}.",
+            report.frames, report.rpus
+        ));
+    }
+    resume::mark_done(&bl_rpu_hevc)?;
+    // As after dovi_tool's injection: a temp-dir input is superseded (resume never re-reads it
+    // once BL_RPU.hevc is sealed); an input outside the temp dir is kept.
+    if let Source::RawFile(path) = &source {
+        if path.starts_with(temp_dir) {
+            let _ = fs::remove_file(path);
+        }
+    }
+    Ok(Some(bl_rpu_hevc))
+}
+
+/// `--dovi-inject external`, step 1: the raw HEVC base layer the RPU is injected into,
+/// `bl_source_file` itself when it already is one, else `BL.hevc` extracted into `temp_dir`. `None`: the extraction failed and was reported;
 /// `convert_file` returns `Ok(false)`.
 pub(super) fn extract_base_layer(
     input_file: &str,
@@ -36,31 +249,8 @@ pub(super) fn extract_base_layer(
         if resume_enabled && resume::is_complete(&bl_hevc) {
             progress::print_info("Reusing extracted base layer from a previous run.");
         } else {
-            let mut ffmpeg_cmd = Command::new("ffmpeg");
-            ffmpeg_cmd.args([
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-stats",
-                "-i",
-                bl_source_file.to_str().unwrap(),
-                "-map",
-                "0:v:0",
-                "-c:v",
-                "copy",
-            ]);
-            if hdr_type == HdrFormat::Hlg && metadata::hlg_bitstream_lacks_transfer(input_file) {
-                // Lossless SPS/VUI edit (slices untouched): without an HLG tag in the bitstream
-                // mkvmerge would give the Profile 8.4 track compatibility ID 2 (SDR) instead of 4.
-                progress::print_info(
-                    "HLG is tagged only in the container; writing the HLG transfer into the HEVC VUI.",
-                );
-                ffmpeg_cmd.args([
-                    "-bsf:v",
-                    "hevc_metadata=colour_primaries=9:transfer_characteristics=18:matrix_coefficients=9",
-                ]);
-            }
-            ffmpeg_cmd.args(["-f", "hevc", "-y", bl_hevc.to_str().unwrap()]);
+            let hlg_vui_edit = needs_hlg_vui_edit(input_file, hdr_type);
+            let mut ffmpeg_cmd = base_layer_ffmpeg(bl_source_file, hlg_vui_edit, Some(&bl_hevc));
 
             let bl_total = fs::metadata(bl_source_file).ok().map(|m| m.len());
             if !run_command_with_progress(
@@ -81,7 +271,8 @@ pub(super) fn extract_base_layer(
     Ok(Some(bl_hevc))
 }
 
-/// Injects the RPU into `bl_hevc`, giving `BL_RPU.hevc`. A length mismatch is fatal for a
+/// `--dovi-inject external`, step 2: `dovi_tool inject-rpu` of the RPU into `bl_hevc`, giving
+/// `BL_RPU.hevc`. A length mismatch is fatal for a
 /// measured RPU (`has_measurements`). `None`: the step failed and was reported; `convert_file`
 /// returns `Ok(false)`.
 pub(super) fn inject_rpu(

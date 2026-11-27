@@ -6,7 +6,7 @@ use anyhow::{bail, Result};
 use colored::Colorize;
 use dovi84_composer::Composer;
 
-use crate::cli::{Args, CmVersion, Hdr10PlusL1};
+use crate::cli::{Args, CmVersion, DoviInject, Hdr10PlusL1};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
@@ -28,7 +28,7 @@ mod timing;
 
 pub use self::analyzer::{analyzer_executable, resolve_auto_settings};
 use self::config::{prepare_configuration, Configured};
-use self::deliver::{extract_base_layer, inject_rpu, mux_output};
+use self::deliver::{inject_base_layer, mux_output};
 pub use self::dovi_steps::DOVI_TOOL_MKV_INPUT_MIN;
 use self::dovi_steps::{convert_mel_fast_path, generate_rpu};
 pub use self::manifest::manifest_file;
@@ -284,36 +284,15 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     }
     let rpu_path = rpu_path.unwrap();
 
-    // --- Extract base layer ---
-    current_step += 1;
-    progress::print_step(current_step, total_steps, "Extracting base layer...");
-
-    let Some(bl_hevc) = extract_base_layer(
+    // --- Base layer and RPU injection (two steps) ---
+    let Some(bl_rpu_hevc) = inject_base_layer(
         input_file,
-        &measured.bl_source_file,
-        &temp_dir,
-        measured.hdr_type,
-        resume_enabled,
-        args,
-    )?
-    else {
-        return Ok(false);
-    };
-
-    // --- Inject RPU ---
-    current_step += 1;
-    progress::print_step(
-        current_step,
-        total_steps,
-        "Injecting RPU into base layer...",
-    );
-    let Some(bl_rpu_hevc) = inject_rpu(
-        &bl_hevc,
+        &measured,
         &rpu_path,
         &temp_dir,
-        measured.measurements_file.is_some(),
         resume_enabled,
         args,
+        (&mut current_step, total_steps),
     )?
     else {
         return Ok(false);
@@ -407,6 +386,11 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
 /// changes the artifacts (an analyzer run, a different `extra.json`), and a temp dir of the other
 /// mode is discarded instead of resumed. A fallback after this point keeps the token; there the
 /// `extra.json` comparison withdraws the RPU.
+///
+/// ` dovi_inject=external` is appended only under `--dovi-inject external` (ROADMAP E20.1), so the
+/// default fingerprint is the one earlier builds wrote. Both paths write the same `BL_RPU.hevc`,
+/// but the escape hatch must not reuse what the in-process injector wrote: a temp dir of the
+/// other path is discarded, and the injection runs again.
 fn resume_settings(args: &Args, hlg_composer: Option<Composer>, hdr10plus_hybrid: bool) -> String {
     let mut settings = format!(
         "hwaccel={:?} analysis_quality={:?} optimizer={:?} boost={} boost_experimental={} cm={:?} content_type={:?} reference_mode={} source_primaries={:?} trim_targets={} peak_source={:?} mdfix={} legacy_madvr_l1={}",
@@ -429,6 +413,9 @@ fn resume_settings(args: &Args, hlg_composer: Option<Composer>, hdr10plus_hybrid
     }
     if hdr10plus_hybrid {
         settings.push_str(" hdr10plus_l1=hybrid");
+    }
+    if args.dovi_inject == DoviInject::External {
+        settings.push_str(" dovi_inject=external");
     }
     settings
 }

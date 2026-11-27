@@ -3188,3 +3188,6 @@ fn an_explicit_hybrid_takes_the_json_of_a_normal_extraction() {
     assert_eq!(measured.hdr_type, HdrFormat::Hdr10WithMeasurements);
     assert!(fake.temp.join(hdr10plus_coverage::COVERAGE_FILE).exists());
 }
+
+/// The base layer and RPU injection steps (ROADMAP E20.1).
+mod injection;

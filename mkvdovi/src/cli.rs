@@ -259,8 +259,8 @@ pub struct Args {
     #[arg(long)]
     pub no_resume: bool,
 
-    /// Warn when the current step's output file stops growing for this many seconds
-    /// (0 disables). Helps tell a stalled tool apart from merely slow storage.
+    /// Warn when the current step stops making progress for this many seconds (0 disables).
+    /// Helps tell a stalled tool apart from merely slow storage.
     #[arg(long, default_value_t = 300)]
     pub stall_timeout: u64,
 
@@ -275,6 +275,14 @@ pub struct Args {
     /// container first. A failed direct read falls back to extraction automatically.
     #[arg(long, value_enum, default_value_t = DoviInput::Auto)]
     pub dovi_input: DoviInput,
+
+    /// How the RPU is written into the base layer. internal (default) = inside mkvdovi, byte
+    /// for byte as dovi_tool inject-rpu 2.3.4 writes it, reading ffmpeg's HEVC through a pipe
+    /// twice, so the full-size BL.hevc is never written. external = the previous path: ffmpeg
+    /// extracts BL.hevc and dovi_tool inject-rpu writes BL_RPU.hevc; kept for one release. An
+    /// RPU.bin the internal path cannot read falls back to external with a warning.
+    #[arg(long, value_enum, default_value_t = DoviInject::Internal)]
+    pub dovi_inject: DoviInject,
 
     /// Verbose mode: show raw command output (useful for debugging).
     #[arg(short, long)]
@@ -349,6 +357,20 @@ mod tests {
             assert_eq!(args.dovi_input, expected);
             assert_eq!(args.dovi_input.to_string(), value);
         }
+    }
+
+    #[test]
+    fn dovi_inject_defaults_to_internal_and_parses_external() {
+        let args = Args::try_parse_from(["mkvdovi"]).unwrap();
+        assert_eq!(args.dovi_inject, DoviInject::Internal);
+        for (value, expected) in [
+            ("internal", DoviInject::Internal),
+            ("external", DoviInject::External),
+        ] {
+            let args = Args::try_parse_from(["mkvdovi", "--dovi-inject", value]).unwrap();
+            assert_eq!(args.dovi_inject, expected);
+        }
+        assert!(Args::try_parse_from(["mkvdovi", "--dovi-inject", "dovi_tool"]).is_err());
     }
 
     #[test]
@@ -547,6 +569,12 @@ impl std::fmt::Display for DoviInput {
             DoviInput::Mkv => write!(f, "mkv"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DoviInject {
+    Internal,
+    External,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
