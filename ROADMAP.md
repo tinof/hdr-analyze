@@ -696,19 +696,15 @@ The detailed gap table and validation method live in
 
 ### E7: completeness
 
-- **Status:** Partial: every conversion checks the output's RPU count, video timing and
-  direct-MKV frame count (E7.1–E7.3; [log](docs/ROADMAP_LOG.md)). Open: E7.4 (found
-  2026-11-26). `mkvdovi/src/pipeline/mod.rs` and Priorities 4 cite the E7 gate.
+- **Status:** Done, no step open: every conversion checks the output's RPU count, video timing
+  and direct-MKV frame count, and muxes once at the source's rate (E7.1–E7.4;
+  [log](docs/ROADMAP_LOG.md)). Kept because `mkvdovi/src/pipeline/mod.rs` and Priorities 4 cite
+  the E7 gate.
 - **Gate:** (owner, 2026-10-17) (1) a test in which a truncated direct-MKV output is caught by
   frame count and falls back to ffmpeg extraction; (2) the RPU frame count is compared with the
   muxed video on every run (full `--verify` stays opt-in), tested on both sides, with the added time
   per file measured and reported. (3) (owner, 2026-11-07) a failed check of (2) or of E7.3 fails
   the run and keeps the source, tested.
-- [E7.4] Choose the timestamps file before the first mux when the raw stream's frame rate
-  (mkvmerge `-J`; none means 25 fps) differs from the source's measured one; found on an RTX
-  HDR encode (30 fps VUI in a 25 fps file, one wasted mux). `--verify` pipes ffmpeg into
-  `dovi_tool extract-rpu -` instead of writing a full-size `verify_video.hevc`. Gate: unit
-  tests, a muxed 30-in-25 clip, the verify tests; the verify time saved is measured.
 
 ### E8: histogram percentile reader
 
