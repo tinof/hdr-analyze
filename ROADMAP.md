@@ -54,16 +54,13 @@ confirms the block instead of re-ranking unless something changed (its ready que
 Only IDs inside an owner-list entry's bold lead count as waiting for the owner.
 
 ### Next up (checked 2026-11-25 at main@c8a9b4f)
-<!-- roadmap-next: rev=7 scope=all config=0c8d247b8c5a probes=gpu:ok,corpus:ok ready=2c70e206e4e0 -->
+<!-- roadmap-next: rev=7 scope=all config=0c8d247b8c5a probes=gpu:ok,corpus:ok ready=186d2692f344 -->
 
 Order: the Focus (steering 2026-11-18); WS7.1 and WS6.10 are done, so the queue follows.
 
 1. **P10.3 Decide whether to write L1 in-process** (priority 3). Gate: the step gate. Why: the
    highest startable step outside the Focus, unblocked by WS7.1; see its Checked bullet first.
    Branch: `docs/p10-3-unclamped-l1`. Release: none
-2. **P6.3 Check a Profile 8 record against its RPU** (priority 4). Gate: fixture tests on both
-   sides; RPU baselines byte-identical. Why: the next conversion fix. Branch:
-   `fix/p6-3-p8-record-vs-rpu`. Release: patch
 
 **Reassess:** owner-decision (WS6.10, PR #146): the pulse files are on forplex, so WS6.11 waits
 for the owner's C9 viewing, and the Focus has no startable step left.
@@ -236,22 +233,14 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
 
 ### P6: source consistency warnings
 
-- **Status:** Partial. The five picked checks warn since P6.2 ([log](docs/ROADMAP_LOG.md),
-  2026-11-17); open: P6.3 (Profile 8 record against its RPU), P6.4 (HDR Vivid).
+- **Status:** Partial. The P6.2 checks warn and P6.3 checks a Profile 8 record against its RPU
+  ([log](docs/ROADMAP_LOG.md), 2026-11-17 and 2026-11-27); open: P6.4 (HDR Vivid).
 - **Gate:** step 1: a written list of concrete checks (for example MaxCLL above the mastering
   peak, HDR10+ and ST 2086 disagreeing) in `docs/ROADMAP_LOG.md`, from which the owner picks.
   Step 2: each picked check warns on a clip that has the problem and stays silent on one that does
   not, and all RPU baselines stay byte-identical (owner, 2026-10-17).
-- [P6.3][corpus] Check a Profile 8 record against its RPU: route by the RPU on a mismatch, as
-  Profile 7 does, and refuse compatibility ID 0 or 2 (8.2, SDR base) by name before temp work.
-  Gate: fixture tests on both sides; RPU baselines byte-identical.
 - [P6.4][corpus] Warn when an input carries HDR Vivid (CUVA T.35 SEI), whose dynamic metadata the
   conversion drops. Gate: the item's step 2 gate.
-- **Checked 2026-11-25 @c8a9b4f:** P6.2's anchors hold (`static_metadata.rs:195`,
-  `pipeline/hdr10plus.rs:109`, `pipeline/hybrid.rs:361`); the sampled L6 moved to
-  `pipeline/measure.rs:172` in E13.14. For P6.3: `check_hdr_format` returns `DolbyVisionP8` from
-  the MediaInfo text alone, before any RPU is read (`mkvdovi/src/metadata/format.rs:55`), so its
-  tests need a record that contradicts the RPU, not only the post-mux `--verify` check.
 
 ### P8: HLG → Profile 8.4 composer
 
