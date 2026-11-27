@@ -12,6 +12,7 @@ use super::analyzer::{
     run_hdr_analyzer,
 };
 use super::dovi_steps::extract_clean_base_layer;
+use super::estimator;
 use super::hdr10plus::{
     extract_hdr10plus_metadata, extracted_with_skip_reorder, skip_reorder_refusal,
 };
@@ -20,7 +21,7 @@ use super::hybrid;
 use super::mdfix_notice::print_mdfix_notice;
 use super::source_checks;
 use super::{add_optimizer_args, analyzer_executable, is_dolby_vision, FEL_UNSUPPORTED_MESSAGE};
-use crate::cli::{Args, Hdr10PlusL1, HwAccel};
+use crate::cli::{Args, Hdr10PlusL1, HwAccel, PeakEstimatorChoice};
 use crate::external;
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
@@ -78,6 +79,12 @@ pub(super) fn resolve_hdr10plus_mode(
     match args.hdr10plus_l1 {
         Some(Hdr10PlusL1::Hdr10plus) => return Ok((Hdr10PlusMode::Metadata, None)),
         Some(Hdr10PlusL1::Hybrid) => {
+            if args.peak_estimator != PeakEstimatorChoice::Max {
+                return Err(format!(
+                    "--hdr10plus-l1 hybrid takes its peaks from HDR10+ and accepts only --peak-estimator max, not {}.",
+                    args.peak_estimator.analyzer_name()
+                ));
+            }
             return match super::hybrid_sampling_refusal(args) {
                 Some(refusal) => Err(refusal),
                 None => Ok((Hdr10PlusMode::ExplicitHybrid, None)),
@@ -88,6 +95,11 @@ pub(super) fn resolve_hdr10plus_mode(
     let (_, sample_rate) = analysis_sampling(args.analysis_quality);
     let obstacle = if args.legacy_madvr_l1 {
         Some("--legacy-madvr-l1 replaces the measured L1 sidecar it needs".to_string())
+    } else if args.peak_estimator != PeakEstimatorChoice::Max {
+        Some(format!(
+            "--peak-estimator {} applies to measured peaks, and hybrid L1 takes its peaks from HDR10+",
+            args.peak_estimator.analyzer_name()
+        ))
     } else if sample_rate != 1 {
         Some(format!(
             "--analysis-quality fast analyzes one frame in {sample_rate}; use balanced or accurate for hybrid L1"
@@ -522,6 +534,7 @@ fn rebuild_mel(
 
     let mut extra_args = Vec::new();
     add_optimizer_args(&mut extra_args, args);
+    extra_args.extend(estimator::analyzer_args(args));
     // Analyze the original container, not the raw Annex B stream: without a container
     // duration the seek-based crop probes are unavailable and the in-stream fallback
     // can commit a degenerate active area on dark openings. MEL base-layer pixels are
@@ -572,6 +585,7 @@ fn rebuild_profile8(
 
     let mut extra_args = Vec::new();
     add_optimizer_args(&mut extra_args, args);
+    extra_args.extend(estimator::analyzer_args(args));
     // Same rationale as the MEL path: analyze the container so crop probing can seek.
     measured.measurements_file = run_hdr_analyzer(input_file, temp_dir, &extra_args, args)?;
     if measured.measurements_file.is_none() {
@@ -674,6 +688,8 @@ pub(super) fn find_reusable_measurements(
         for existing in candidates {
             match metadata::load_l1_sidecar(&existing, &expect) {
                 Ok((sidecar, _)) if rejects_coarser_sidecar(&sidecar, &existing, args) => {}
+                Ok((sidecar, _))
+                    if estimator::rejects_other_estimator(&sidecar, &existing, args) => {}
                 Ok((sidecar, _)) if rejects_for_hybrid(&sidecar, &existing, hybrid) => {}
                 Ok((sidecar, advisories)) => {
                     report_reused_sidecar(&sidecar, &existing, args);
@@ -806,5 +822,7 @@ pub(super) fn fresh_analysis_args(
         }
         extra_args.extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
     }
+    // Refused combinations stopped in `estimator::preflight_refusal` before any temp work.
+    extra_args.extend(estimator::analyzer_args(args));
     Some(extra_args)
 }

@@ -6,7 +6,7 @@ use anyhow::{bail, Result};
 use colored::Colorize;
 use dovi84_composer::Composer;
 
-use crate::cli::{Args, CmVersion, DoviInject, Hdr10PlusL1};
+use crate::cli::{Args, CmVersion, DoviInject, Hdr10PlusL1, PeakEstimatorChoice};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
@@ -16,6 +16,7 @@ mod analyzer;
 mod config;
 mod deliver;
 mod dovi_steps;
+mod estimator;
 mod hdr10plus;
 mod hdr10plus_coverage;
 mod hybrid;
@@ -147,6 +148,12 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     } else {
         Vec::new()
     };
+    // A --peak-estimator the analysis cannot apply is refused here too, before the fingerprint
+    // (its token would discard a resumable temp dir) and before any temp work (ROADMAP WS1.7).
+    if let Some(refusal) = estimator::preflight_refusal(args, hlg_composer.is_some()) {
+        progress::print_error(&refusal);
+        return Ok(false);
+    }
     // A PQ input whose Profile 8.1 RPU is generated here is refused when tagged full range, at
     // the same point: the analyzer interprets samples as limited range, the RPU's `ycc_to_rgb`
     // is limited range, and the base layer is copied unchanged. A Profile 8 input with an HLG
@@ -435,6 +442,13 @@ fn resume_settings(args: &Args, hlg_composer: Option<Composer>, hdr10plus_hybrid
     }
     if args.dovi_inject == DoviInject::External {
         settings.push_str(" dovi_inject=external");
+    }
+    // Only a non-default estimator adds a token (ROADMAP WS1.7): the default fingerprint stays.
+    if args.peak_estimator != PeakEstimatorChoice::Max {
+        settings.push_str(&format!(
+            " peak_estimator={}",
+            args.peak_estimator.analyzer_name()
+        ));
     }
     settings
 }

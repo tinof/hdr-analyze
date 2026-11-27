@@ -8,11 +8,12 @@ use super::dovi_steps::{
     convert_mel_fast_path, convert_mel_to_profile81, extract_clean_base_layer,
     feed_mkv_to_dovi_tool, parse_packet_count, resolve_dovi_input,
 };
+use super::estimator::{check_fresh, preflight_refusal, rejects_other_estimator};
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
 use super::hdr10plus_coverage;
 use super::measure::{
-    abort_unsupported, acquire_measurements, find_reusable_measurements, hybrid_refusal,
-    legacy_targets_notice, total_steps_for, Measured,
+    abort_unsupported, acquire_measurements, find_reusable_measurements, fresh_analysis_args,
+    hybrid_refusal, legacy_targets_notice, total_steps_for, Measured,
 };
 use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 use super::timing::{Delivery, MuxTiming};
@@ -132,6 +133,176 @@ fn coarser_sampling_compares_against_the_preset() {
         coarser_sampling(&metadata::L1Sidecar::default(), AnalysisQuality::Accurate),
         None
     );
+}
+
+#[test]
+fn peak_estimator_defaults_to_max_and_names_the_analyzers_values() {
+    let parse = |flags: &[&str]| {
+        Args::try_parse_from(["mkvdovi"].iter().chain(flags))
+            .map(|args| args.peak_estimator.analyzer_name())
+    };
+    assert_eq!(parse(&[]).unwrap(), "max");
+    assert_eq!(
+        parse(&["--peak-estimator", "st2094-10"]).unwrap(),
+        "st2094-10"
+    );
+    assert_eq!(
+        parse(&["--peak-estimator", "percentile"]).unwrap(),
+        "percentile"
+    );
+    assert!(
+        parse(&["--peak-estimator", "robust"]).is_err(),
+        "not offered"
+    );
+}
+
+#[test]
+fn measurements_of_another_peak_estimator_are_re_analyzed() {
+    let measurements = Path::new("clip_measurements.bin");
+    let estimator = |name: Option<&str>| metadata::L1Sidecar {
+        peak_estimator: name.map(str::to_owned),
+        ..Default::default()
+    };
+    let default = Args::parse_from(["mkvdovi"]);
+    let percentile = Args::parse_from(["mkvdovi", "--peak-estimator", "percentile"]);
+    // A sidecar without the field predates it and was measured with max.
+    assert!(!rejects_other_estimator(
+        &estimator(None),
+        measurements,
+        &default
+    ));
+    assert!(!rejects_other_estimator(
+        &estimator(Some("max")),
+        measurements,
+        &default
+    ));
+    assert!(rejects_other_estimator(
+        &estimator(Some("percentile")),
+        measurements,
+        &default
+    ));
+    assert!(rejects_other_estimator(
+        &estimator(None),
+        measurements,
+        &percentile
+    ));
+    assert!(!rejects_other_estimator(
+        &estimator(Some("percentile")),
+        measurements,
+        &percentile
+    ));
+}
+
+#[test]
+fn st2094_10_is_refused_for_hlg_or_reduced_analysis_before_any_temp_work() {
+    let args = |flags: &[&str]| Args::parse_from(["mkvdovi"].iter().chain(flags));
+    let hlg = preflight_refusal(&args(&["--peak-estimator", "st2094-10"]), true).unwrap();
+    assert!(hlg.contains("measures PQ input only"), "{hlg}");
+    for quality in ["balanced", "fast"] {
+        let refusal = preflight_refusal(
+            &args(&[
+                "--peak-estimator",
+                "st2094-10",
+                "--analysis-quality",
+                quality,
+            ]),
+            false,
+        )
+        .unwrap();
+        assert!(
+            refusal.contains("--analysis-quality accurate"),
+            "{quality}: {refusal}"
+        );
+    }
+    // max and percentile need neither, and add no analyzer flag for max.
+    assert_eq!(preflight_refusal(&args(&[]), true), None);
+    assert_eq!(
+        preflight_refusal(
+            &args(&[
+                "--peak-estimator",
+                "percentile",
+                "--analysis-quality",
+                "fast"
+            ]),
+            true
+        ),
+        None
+    );
+    let pq = fresh_analysis_args(&args(&[]), false, None).unwrap();
+    assert!(!pq.iter().any(|arg| arg == "--peak-estimator"), "{pq:?}");
+    let percentile = fresh_analysis_args(&args(&["--peak-estimator", "percentile"]), false, None);
+    let percentile = percentile.unwrap();
+    assert!(percentile
+        .windows(2)
+        .any(|w| w == ["--peak-estimator", "percentile"]));
+}
+
+#[test]
+fn a_percentile_sidecar_counts_only_at_the_percentile_mkvdovi_measures_with() {
+    let measurements = Path::new("clip_measurements.bin");
+    let percentile = Args::parse_from(["mkvdovi", "--peak-estimator", "percentile"]);
+    let sidecar = |p: Option<f64>| metadata::L1Sidecar {
+        peak_estimator: Some("percentile".into()),
+        peak_percentile: p,
+        ..Default::default()
+    };
+    assert!(!rejects_other_estimator(
+        &sidecar(Some(99.99)),
+        measurements,
+        &percentile
+    ));
+    assert!(rejects_other_estimator(
+        &sidecar(Some(99.9)),
+        measurements,
+        &percentile
+    ));
+    // A fresh analysis that measured something else is refused, never delivered.
+    assert!(check_fresh(&sidecar(Some(99.99)), &percentile).is_ok());
+    let max = metadata::L1Sidecar {
+        peak_estimator: Some("max".into()),
+        ..Default::default()
+    };
+    let error = check_fresh(&max, &percentile).unwrap_err();
+    assert!(
+        error.contains("measured with the max peak estimator"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_non_default_peak_estimator_has_its_own_resume_token() {
+    let default = Args::parse_from(["mkvdovi"]);
+    let reduced = Args::parse_from(["mkvdovi", "--peak-estimator", "st2094-10"]);
+    let base = resume_settings(&default, None, false);
+    assert!(
+        !base.contains("peak_estimator"),
+        "the default fingerprint is unchanged"
+    );
+    assert_eq!(
+        resume_settings(&reduced, None, false),
+        format!("{base} peak_estimator=st2094-10")
+    );
+}
+
+#[test]
+fn the_hdr10plus_hybrid_accepts_only_the_max_peak_estimator() {
+    let args = |flags: &[&str]| {
+        Args::try_parse_from(["mkvdovi"].iter().chain(flags)).expect("flags must parse")
+    };
+    let explicit = resolve_hdr10plus_mode(
+        &args(&["--hdr10plus-l1", "hybrid", "--peak-estimator", "percentile"]),
+        || true,
+    )
+    .unwrap_err();
+    assert!(
+        explicit.contains("accepts only --peak-estimator max"),
+        "{explicit}"
+    );
+    // The default falls back to the HDR10+ metadata path with a notice.
+    let (mode, notice) =
+        resolve_hdr10plus_mode(&args(&["--peak-estimator", "percentile"]), || true).unwrap();
+    assert_eq!(mode, Hdr10PlusMode::Metadata);
+    assert!(notice.unwrap().contains("--peak-estimator percentile"));
 }
 
 #[test]

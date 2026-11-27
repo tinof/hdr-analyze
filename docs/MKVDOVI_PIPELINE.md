@@ -174,6 +174,7 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
     failed analysis, the sidecar, the frame count) keeps the token and relies on the `extra.json`
     comparison below. ` dovi_inject=external` is appended only under `--dovi-inject external`,
     so the escape hatch never reuses a `BL_RPU.hevc` the in-process injector wrote.
+    ` peak_estimator=<value>` is appended only for a `--peak-estimator` other than `max`.
     **Add any new artifact-affecting flag to `resume_settings`.**
   - The HDR10+ payload count (`hdr10plus_coverage.json`) is sealed with `video.hevc` and changes no
     artifact, so it adds no token.
@@ -207,6 +208,23 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   (`rejects_coarser_sidecar`); other presets reuse it with a warning. After a fresh analysis,
   `warn_if_gpu_analysis_missing` warns when `--hwaccel cuda` with a `+cuda` analyzer produced
   `analysis.gpu: false`.
+- **`--peak-estimator`** (ROADMAP WS1.7, `pipeline/estimator.rs`) passes `max` (default, no
+  flag), `st2094-10` or `percentile` to every fresh analysis, the `--mdfix` rebuilds included.
+  - `estimator::preflight_refusal` runs before the fingerprint and any temp work. It refuses
+    `st2094-10` on HLG input, at downscale 2 (`balanced`, `fast`) and when the analyzer's
+    `--help` does not name it. A refusal there never discards a resumable temp dir.
+  - `--hdr10plus-l1 hybrid` with another estimator than `max` is refused
+    (`measure::resolve_hdr10plus_mode`). The default HDR10+ mode falls back to the metadata path
+    with a notice, because hybrid L1 takes its peaks from HDR10+.
+  - Reuse: `estimator::rejects_other_estimator` re-analyzes a candidate measured with another
+    estimator. A sidecar without `peak_estimator` counts as `max`. A `percentile` sidecar counts
+    only at `peak_percentile` 99.99, the analyzer default mkvdovi measures with.
+  - After a fresh analysis, `estimator::check_fresh` refuses a sidecar that names another
+    estimator than asked, with "update hdr_analyzer_mvp". mkvdovi's `L1Sidecar` reads
+    `peak_percentile` for this.
+  - Why: on an SDR-to-HDR upconverted 4K HDR10 episode the scene max read 2971–3347 PQ codes
+    with `max`, 2878–3005 with `st2094-10` and 2763–2792 with `percentile`. The picture's
+    99.99th percentile is about 2771 (500 nits). WS1's gate still governs any default change.
 - **`--hwaccel`** defaults to `auto`: `pipeline::resolve_auto_settings` (called once from
   `main.rs`) probes `nvidia-smi` (also `/usr/lib/wsl/lib/nvidia-smi` on WSL2) and resolves to `cuda`
   or `none` before any file is processed, so downstream code only sees concrete values. GPU
