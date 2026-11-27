@@ -79,16 +79,23 @@ pub fn run_piped_commands(
     writeln!(producer_file, "Running command: {producer:?} |")?;
     let mut consumer_file = File::create(consumer_log).context("Failed to create log file")?;
     writeln!(consumer_file, "Running command: | {consumer:?}")?;
+    // Every fallible setup step comes before the producer starts: an early return after its
+    // spawn would leave it running, unreaped.
+    let consumer_stdout = consumer_file.try_clone()?;
 
     producer.stdin(Stdio::null());
     producer.stdout(Stdio::piped());
     producer.stderr(Stdio::from(producer_file));
     let mut first = producer.spawn().context("Failed to spawn command")?;
     // The consumer drains this pipe; it is moved into the consumer, not left on `first`.
-    let pipe = first.stdout.take().context("The producer has no stdout")?;
+    let Some(pipe) = first.stdout.take() else {
+        let _ = first.kill();
+        let _ = first.wait();
+        anyhow::bail!("The producer has no stdout");
+    };
 
     consumer.stdin(Stdio::from(pipe));
-    consumer.stdout(Stdio::from(consumer_file.try_clone()?));
+    consumer.stdout(Stdio::from(consumer_stdout));
     consumer.stderr(Stdio::from(consumer_file));
     let spawned = consumer.spawn();
     // `Command` keeps the read end it was given after the spawn. Dropping it here leaves the
