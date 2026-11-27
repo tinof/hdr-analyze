@@ -657,6 +657,9 @@ pub(super) fn find_reusable_measurements(
     let candidates = metadata::measurements_candidates(input_path);
     if args.legacy_madvr_l1 {
         *measurements_file = candidates.into_iter().next();
+        if let Some(notice) = measurements_file.as_deref().and_then(legacy_targets_notice) {
+            progress::print_warn(&notice);
+        }
         measurements_file.is_some()
     } else if candidates.is_empty() {
         false
@@ -691,6 +694,27 @@ pub(super) fn find_reusable_measurements(
         }
         reused
     }
+}
+
+/// `--legacy-madvr-l1` delivers the `.bin`'s optimizer targets, which an analyzer before sidecar
+/// v8 derived from histogram bins read at the wrong PQ (ROADMAP E8.1). The legacy path reuses a
+/// `.bin` without validating it, so it only warns: when the sidecar beside it is missing,
+/// unreadable or older than v8. `None` for a v8 or newer sidecar.
+pub(super) fn legacy_targets_notice(measurements: &Path) -> Option<String> {
+    let version = fs::read(metadata::l1_sidecar_path(measurements))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|json| json.get("version").and_then(serde_json::Value::as_u64));
+    let current = u64::from(metadata::L1_SIDECAR_BIN_EDGES_VERSION);
+    let measured_by = match version {
+        Some(version) if version >= current => return None,
+        Some(version) => format!("an analyzer that wrote sidecar v{version}"),
+        None => "an analyzer of unknown version (no readable L1 sidecar beside it)".to_owned(),
+    };
+    Some(format!(
+        "--legacy-madvr-l1 delivers the target nits of '{}', measured by {measured_by}; analyzers before sidecar v{current} read their histogram bins low, so these targets can be too dark. Delete the measurements file to re-measure.",
+        measurements.display()
+    ))
 }
 
 /// Under `--hdr10plus-l1 hybrid` (`hybrid`: an HDR10+ input), only measurements that can carry

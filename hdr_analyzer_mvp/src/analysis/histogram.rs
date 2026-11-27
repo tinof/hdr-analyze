@@ -57,8 +57,10 @@ impl LumBins {
         bin.min(Self::BINS - 1)
     }
 
-    /// The PQ value at the lower edge of `bin`.
-    pub fn lower_pq(&self, bin: usize) -> f64 {
+    /// The PQ value at the lower edge of `bin`, the base of [`LumBins::center_pq`]. Not a
+    /// reader: the product of a bin index and a step can land a hair below the writer's
+    /// floor, so only the centre round-trips through [`LumBins::bin`].
+    fn lower_pq(&self, bin: usize) -> f64 {
         if bin < Self::SDR_BINS {
             bin as f64 * self.sdr_step
         } else {
@@ -211,9 +213,11 @@ pub fn compute_histogram_percentile_pq(histogram: &[f64], percentile: f64) -> f6
 /// # Returns
 /// Peak PQ value selected by the specified method
 pub fn select_peak_pq(histogram: &[f64], direct_max_pq: f64, peak_source: &str) -> f64 {
+    // A percentile is read at its bin's centre, which can lie above every pixel of the frame
+    // (up to half a bin), so it never exceeds the direct maximum (ROADMAP E8.1).
     match peak_source {
-        "histogram99" => compute_histogram_percentile_pq(histogram, 99.0),
-        "histogram999" => compute_histogram_percentile_pq(histogram, 99.9),
+        "histogram99" => compute_histogram_percentile_pq(histogram, 99.0).min(direct_max_pq),
+        "histogram999" => compute_histogram_percentile_pq(histogram, 99.9).min(direct_max_pq),
         _ => direct_max_pq, // "max" or unknown defaults to direct max
     }
 }
@@ -511,5 +515,23 @@ mod tests {
         assert!((knee - 1000.0).abs() < 30.0, "knee {knee} nits");
         let p99 = pq_to_nits(compute_histogram_percentile_pq(&histogram, 99.0));
         assert!((p99 - 1000.0).abs() < 30.0, "p99 {p99} nits");
+    }
+
+    #[test]
+    fn a_percentile_peak_never_exceeds_the_brightest_pixel() {
+        // A flat frame at exactly PQ(100 nits) opens bin 64, whose centre lies half a bin above
+        // every pixel: the peak stays at the direct maximum.
+        let bins = LumBins::new();
+        let flat = nits_to_pq(100.0);
+        let mut histogram = vec![0.0; 256];
+        histogram[bins.bin(flat)] = 100.0;
+        assert!(bins.center_pq(64) > flat);
+        assert_eq!(select_peak_pq(&histogram, flat, "histogram99"), flat);
+        assert_eq!(select_peak_pq(&histogram, flat, "histogram999"), flat);
+        // Below the direct maximum the percentile itself applies.
+        let direct = nits_to_pq(1000.0);
+        let read = select_peak_pq(&histogram, direct, "histogram99");
+        assert_eq!(read, bins.center_pq(64));
+        assert!(read < direct);
     }
 }

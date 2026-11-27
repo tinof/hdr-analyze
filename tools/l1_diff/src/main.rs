@@ -252,9 +252,10 @@ fn read_sidecar(path: &Path, required: bool) -> Result<Option<L1Sidecar>> {
     // Versions 2 and 3 only add provenance (full-resolution crop, luminance mapping); version 4
     // stores unfiltered averages; version 5 records the stream's picture count and undecodable
     // leading pictures (`leading_pictures`); version 6 adds a per-frame peak and the analyzer's
-    // peak source; version 7 reads NVDEC frames unconverted for CPU analysis at downscale 1. The
-    // L1 data layout, indexed by measured (decoded) frame, is unchanged.
-    if !matches!(sidecar.version, 1..=7) {
+    // peak source; version 7 reads NVDEC frames unconverted for CPU analysis at downscale 1;
+    // version 8 reads histogram percentile peaks at their bins' PQ. The L1 data layout, indexed
+    // by measured (decoded) frame, is unchanged.
+    if !matches!(sidecar.version, 1..=8) {
         bail!(
             "unsupported L1 sidecar version {} in {}",
             sidecar.version,
