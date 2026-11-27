@@ -389,6 +389,7 @@ extern "C" __global__ void analyze_frame(
     const unsigned char* v_plane,
     const float* transfer_lut,
     const unsigned short* luminance_bin_lut,
+    const unsigned char* hue_lut,
     const float* dovi_params,
     const float* composed_values,
     unsigned int* results,
@@ -520,17 +521,10 @@ extern "C" __global__ void analyze_frame(
 
             // One hue sample per chroma sample (only the even-even pixel of each quad).
             if ((x & 1) == 0 && (y & 1) == 0) {
-                const int u_centered = (int)cb_code - 512;
-                const int v_centered = (int)cr_code - 512;
-                if (u_centered * u_centered + v_centered * v_centered >= 100) {
-                    float hue = atan2f((float)v_centered, (float)u_centered);
-                    if (hue < 0.0f) {
-                        hue += TWO_PI;
-                    }
-                    int hue_bin = (int)(hue * ((float)HUE_BINS / TWO_PI));
-                    if (hue_bin > HUE_BINS - 1) {
-                        hue_bin = HUE_BINS - 1;
-                    }
+                // The CPU's table of every 10-bit chroma pair (histogram.rs `hue_lut`, 0xFF = no
+                // hue), so both backends bin every pixel alike (ROADMAP E12.3).
+                const unsigned int hue_bin = hue_lut[(cb_code << 10) | cr_code];
+                if (hue_bin != 0xFFu) {
                     atomicAdd(&s_hue[hue_bin], 1u);
                 }
             }

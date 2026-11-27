@@ -320,8 +320,47 @@ pub fn apply_histogram_temporal_median(histogram: &mut [f64], history: &[Vec<f64
 ///
 /// # Returns
 /// Vector of 31 f64 values representing percentage distribution across hue bins
+/// Bins of the hue histogram over the full hue circle.
+pub const HUE_BINS: usize = 31;
+/// [`hue_lut`] entry of a chroma pair too close to neutral to have a hue.
+pub const HUE_SKIP: u8 = u8::MAX;
+
+/// The hue bin of a 10-bit chroma pair, or [`HUE_SKIP`] when its magnitude is under 10 codes:
+/// the angle in f64 degrees, as the analyzer has always binned it on the CPU.
+pub fn hue_bin(u_code: u16, v_code: u16) -> u8 {
+    // Center around 512 (neutral chroma in 10-bit limited range)
+    let u_centered = i32::from(u_code) - 512;
+    let v_centered = i32::from(v_code) - 512;
+
+    // Skip near-zero chroma (grayscale/low saturation pixels don't contribute to hue)
+    let chroma_magnitude = f64::from(u_centered * u_centered + v_centered * v_centered).sqrt();
+    if chroma_magnitude < 10.0 {
+        return HUE_SKIP;
+    }
+
+    // Compute hue angle in degrees [0, 360)
+    let hue_radians = f64::from(v_centered).atan2(f64::from(u_centered));
+    let hue_degrees = (hue_radians.to_degrees() + 360.0) % 360.0;
+
+    // Map to bin [0, 30]
+    let bin = ((hue_degrees * HUE_BINS as f64) / 360.0).floor() as usize;
+    bin.min(HUE_BINS - 1) as u8
+}
+
+/// [`hue_bin`] of every 10-bit chroma pair, indexed `(u_code << 10) | v_code` (1 MiB). The CPU and
+/// the CUDA kernel both read this one table, so they bin every pixel alike (ROADMAP E12.3): the
+/// kernel's own f32 `atan2f` put 2 of the 2^20 pairs one bin off.
+pub fn hue_lut() -> &'static [u8] {
+    static LUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| {
+        (0..1u32 << 20)
+            .map(|index| hue_bin((index >> 10) as u16, (index & 1023) as u16))
+            .collect()
+    })
+}
+
 pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<f64> {
-    const HUE_BINS: usize = 31;
+    let lut = hue_lut();
     let mut hue_histogram = vec![0.0; HUE_BINS];
 
     // U and V planes (4:2:0 subsampled, so dimensions are halved)
@@ -357,26 +396,12 @@ pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<
             let u_code = u16::from_le_bytes([u_px[0], u_px[1]]) & 0x03FF;
             let v_code = u16::from_le_bytes([v_px[0], v_px[1]]) & 0x03FF;
 
-            // Center around 512 (neutral chroma in 10-bit limited range)
-            let u_centered = (u_code as i32) - 512;
-            let v_centered = (v_code as i32) - 512;
-
-            // Skip near-zero chroma (grayscale/low saturation pixels don't contribute to hue)
-            let chroma_magnitude =
-                ((u_centered * u_centered + v_centered * v_centered) as f64).sqrt();
-            if chroma_magnitude < 10.0 {
+            let bin = lut[(usize::from(u_code) << 10) | usize::from(v_code)];
+            if bin == HUE_SKIP {
                 continue;
             }
 
-            // Compute hue angle in degrees [0, 360)
-            let hue_radians = (v_centered as f64).atan2(u_centered as f64);
-            let hue_degrees = (hue_radians.to_degrees() + 360.0) % 360.0;
-
-            // Map to bin [0, 30]
-            let bin = ((hue_degrees * HUE_BINS as f64) / 360.0).floor() as usize;
-            let bin = bin.min(HUE_BINS - 1);
-
-            hue_histogram[bin] += 1.0;
+            hue_histogram[usize::from(bin)] += 1.0;
             total_pixels += 1;
         }
     }

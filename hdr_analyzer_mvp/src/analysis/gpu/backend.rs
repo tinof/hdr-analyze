@@ -97,6 +97,7 @@ pub struct GpuAnalyzer {
     extrema_host: [u32; 2],
     transfer_lut: CudaSlice<f32>,
     luminance_bin_lut: CudaSlice<u16>,
+    hue_lut: CudaSlice<u8>,
     dovi_params: CudaSlice<f32>,
     results: CudaSlice<u32>,
     results_host: Vec<u32>,
@@ -197,6 +198,9 @@ impl GpuAnalyzer {
         let luminance_bin_lut = stream
             .clone_htod(&build_luminance_bin_lut(transfer_function, composer))
             .map_err(|err| anyhow!("failed to upload luminance-bin LUT: {err:?}"))?;
+        let hue_lut = stream
+            .clone_htod(crate::analysis::histogram::hue_lut())
+            .map_err(|err| anyhow!("failed to upload the hue LUT: {err:?}"))?;
         let dovi_params = stream
             .clone_htod(&build_dovi84_params(dovi84_decoder(composer)))
             .map_err(|err| anyhow!("failed to upload DV 8.4 decode parameters: {err:?}"))?;
@@ -219,6 +223,7 @@ impl GpuAnalyzer {
             extrema_host: [0; 2],
             transfer_lut,
             luminance_bin_lut,
+            hue_lut,
             dovi_params,
             results,
             results_host: vec![0; RESULT_WORDS],
@@ -607,6 +612,7 @@ impl GpuAnalyzer {
             .arg(&planes.v)
             .arg(&self.transfer_lut)
             .arg(&self.luminance_bin_lut)
+            .arg(&self.hue_lut)
             .arg(&self.dovi_params)
             .arg(&composed)
             .arg(&mut self.results)

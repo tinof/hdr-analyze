@@ -458,6 +458,96 @@ fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
     assert!(error.to_string().contains("--downscale 1"), "{error}");
 }
 
+/// Every 10-bit chroma pair, binned on the CPU and by the kernel (ROADMAP E12.3): a 2048x2048
+/// frame whose chroma sample (cx, cy) is the pair (u = cx, v = cy). The kernel used to bin with
+/// its own f32 `atan2f`, which put the centred pairs (254, -109) and (508, -218) in bin 29 where
+/// the CPU puts them in bin 28; both now read the CPU's table.
+#[cfg(feature = "cuda")]
+#[test]
+fn every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu() {
+    use crate::analysis::frame::analyze_native_frame_cropped;
+    use crate::analysis::hlg::ChromaSiting;
+    use crate::cli::{PeakDomain, PeakEstimator};
+    use ffmpeg_next::format::Pixel;
+
+    let mut gpu = match GpuAnalyzer::new(TransferFunction::Pq, Composer::Preset) {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            assert!(
+                std::env::var_os("HDR_ANALYZE_CUDA_PARITY_REQUIRED").is_none(),
+                "no CUDA device: {error}"
+            );
+            eprintln!("Skipping: no CUDA device ({error})");
+            return;
+        }
+    };
+    const SIDE: u32 = 2048;
+    let mut frame = frame::Video::new(Pixel::YUV420P10LE, SIDE, SIDE);
+    for plane in 0..3 {
+        let stride = frame.stride(plane);
+        let side = if plane == 0 { SIDE } else { SIDE / 2 };
+        let data = frame.data_mut(plane);
+        for y in 0..side {
+            for x in 0..side {
+                let code: u16 = match plane {
+                    0 => 512,
+                    1 => x as u16,
+                    _ => y as u16,
+                };
+                let offset = y as usize * stride + x as usize * 2;
+                data[offset..offset + 2].copy_from_slice(&code.to_le_bytes());
+            }
+        }
+    }
+    let options = FrameAnalysisOptions {
+        denoise_mode: "none",
+        transfer_function: TransferFunction::Pq,
+        hlg_composer: Composer::Preset,
+        chroma_siting: ChromaSiting::Left,
+        peak_domain: PeakDomain::MaxRgb,
+        min_percentile: 0.1,
+        peak_estimator: PeakEstimator::Max,
+        peak_percentile: 99.99,
+        dump_max_rgb: false,
+    };
+    let crop = CropRect {
+        x: 0,
+        y: 0,
+        width: SIDE,
+        height: SIDE,
+    };
+    let cpu = analyze_native_frame_cropped(&frame, &crop, &options).expect("CPU analysis");
+    let gpu = gpu
+        .analyze(&frame, &crop, 1, &options)
+        .expect("GPU analysis");
+    let bits = |histogram: &Option<Vec<f64>>| -> Vec<u64> {
+        histogram
+            .as_ref()
+            .expect("a hue histogram")
+            .iter()
+            .map(|percent| percent.to_bits())
+            .collect()
+    };
+    assert_eq!(
+        bits(&gpu.frame.hue_histogram),
+        bits(&cpu.frame.hue_histogram)
+    );
+    // The table itself matches the CPU's f64 formula, including the two pairs the kernel's f32
+    // formula moved: an independent recomputation of their angle in degrees.
+    use crate::analysis::histogram::{hue_bin, hue_lut};
+    for (u, v) in [(254i32, -109i32), (508, -218)] {
+        let degrees = (f64::from(v).atan2(f64::from(u)).to_degrees() + 360.0) % 360.0;
+        let expected = (degrees * 31.0 / 360.0).floor() as u8;
+        let (u_code, v_code) = ((u + 512) as u16, (v + 512) as u16);
+        assert_eq!(hue_bin(u_code, v_code), expected, "({u}, {v})");
+        assert_eq!(expected, 28, "({u}, {v}) sits in bin 28");
+        assert_eq!(
+            hue_lut()[(usize::from(u_code) << 10) | usize::from(v_code)],
+            28
+        );
+    }
+}
+
 #[cfg(feature = "cuda")]
 const REDUCED_SET_TEST_WIDTH: u32 = 64;
 #[cfg(feature = "cuda")]
