@@ -38,6 +38,9 @@ const cases = [
   ['display_sim alone, hard: true', ['tools/display_sim/src/sim.rs'], true, true],
   ['libplacebo build script, hard: true (high-risk)', ['scripts/build-libplacebo.sh'], true, true],
   ['another script, hard: true (not high-risk)', ['scripts/rpu-baseline.sh'], true, false],
+  ['mkvdovi injector, hard: true (high-risk)', ['mkvdovi/src/inject/interleave.rs'], true, true],
+  ['mkvdovi injector as one file, hard: true (high-risk)', ['mkvdovi/src/inject.rs'], true, true],
+  ['another mkvdovi module, hard: true (not high-risk)', ['mkvdovi/src/injector_notes.rs'], true, false],
 ]
 ;(async () => {
   for (const [name, files, hard, want] of cases) {

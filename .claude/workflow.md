@@ -72,13 +72,15 @@ mkvdovi/src/external.rs
 mkvdovi/src/external/**
 mkvdovi/src/resume.rs
 mkvdovi/src/resume/**
+mkvdovi/src/inject.rs
+mkvdovi/src/inject/**
 dovi_rpu_builder/src/**
 ```
 
 The build inputs can change measured output without a code change. The analyzer, the composer, `l1_diff` and
 the two gate scripts decide the L1 output, CPU/CUDA bit identity and how L1 is scored. The mkvdovi modules
 hold the cross-binary contracts (L1 sidecar, `--help` probes, `+cuda` probe) and the `resume_settings`
-fingerprint; `dovi_rpu_builder` defines mkvdovi's `extra.json` (which resume compares) and the RPUs the NuvioTV
+fingerprint; `inject` (the in-process RPU injector, owner decision 2026-11-27) writes the delivered bitstream in place of `dovi_tool inject-rpu`; `dovi_rpu_builder` defines mkvdovi's `extra.json` (which resume compares) and the RPUs the NuvioTV
 fork delivers. `tools/display_sim` reads the analyzer's PQ histogram dump (`pq_hist_dump`) and reports through
 the libplacebo that `scripts/build-libplacebo.sh` pins. The set is the `highRisk` set of
 `.claude/workflows/pre-pr-panel.js`; `l1_sidecar` and `pq_hist_dump` are inside `hdr_analyzer_mvp/src/**`.
