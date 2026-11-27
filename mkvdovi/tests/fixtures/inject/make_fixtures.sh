@@ -1,6 +1,6 @@
 #!/bin/sh
 # Regenerates the fixtures of the in-process RPU injection tests (`mkvdovi/src/inject/tests.rs`,
-# `mkvdovi/src/pipeline/tests/inject.rs`). The expected output, BL_RPU.hevc, is written by
+# `mkvdovi/src/pipeline/tests/injection.rs`). The expected output, BL_RPU.hevc, is written by
 # dovi_tool itself, never by mkvdovi. Regenerate only on purpose: x265 and dovi_tool versions
 # change the bytes. Last run with FFmpeg n9.0.2 (libx265) and dovi_tool 2.3.4.
 #

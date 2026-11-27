@@ -10,6 +10,18 @@ frames) on the machine below, from a local ext4 disk, took 2 min 53 s to analyze
 included), 1 s to generate the RPU, 48 s to extract the base layer, 1 min 25 s to inject the RPU and
 49 s to mux.
 
+Since ROADMAP E20.1 mkvdovi injects the RPU itself from an ffmpeg pipe. On a 99,175-frame 4K HDR10
+episode (9.4 GB) on an idle host, with its measurements reused, four conversions alternating the
+two paths gave byte-identical video:
+
+| `--dovi-inject` | Base layer | Inject | Mux | Whole conversion |
+|---|---:|---:|---:|---:|
+| `external` (ffmpeg extract, `dovi_tool inject-rpu`) | 13 s, 41 s | 1 min 32 s, 1 min 52 s | 1 min 34 s, 1 min 32 s | 3 min 50 s, 4 min 46 s |
+| `internal` (default; the base layer step reads the frame order) | 20 s, 17 s | 39 s, 51 s | 1 min 29 s, 1 min 32 s | 3 min 15 s, 3 min 21 s |
+
+The two steps take about half the time, and the temp dir holds one full-size copy of the video
+less. The mux is unchanged: mkvmerge cannot read a pipe.
+
 ## Recorded result: a full 4K HDR10 episode, November 2026
 
 A whole 4K HDR10 episode (HEVC Main 10, 3840×2160, 25 fps, 99,175 frames, 66 min, 19.1 Mb/s

@@ -40,9 +40,9 @@ This document provides a historical record of completed milestones, feature impl
 - mkvdovi writes the RPU into the base layer itself (ROADMAP E20.1), byte for byte as
   `dovi_tool inject-rpu` 2.3.4 does. It reads ffmpeg's raw HEVC through a pipe twice and never
   writes the full-size `BL.hevc`, so the temp dir holds one full-size copy of the video less. On
-  a 99,175-frame 4K episode the base layer and injection steps took 44 s to 2m24s in three runs,
-  against 3m5s to 7m2s with ffmpeg and dovi_tool; the whole conversion's time varied too much
-  between runs on the test host to give one figure. A measured RPU whose length differs from
+  a 99,175-frame 4K episode on an idle host the base layer and injection steps took 59 s and
+  68 s in two runs, against 1m45s and 2m33s with ffmpeg and dovi_tool, and the whole conversion
+  3m15s and 3m21s against 3m50s and 4m46s. A measured RPU whose length differs from
   the video is refused before anything is written. `--dovi-inject external` keeps the previous
   path for one release; an `RPU.bin` that the in-process path cannot read falls back to it with
   a warning.
