@@ -6,7 +6,7 @@ use ffmpeg_next::frame;
 use madvr_parse::MadVRFrame;
 use rayon::prelude::*;
 
-use crate::analysis::histogram::{compute_hue_histogram, nits_to_pq, pq_to_nits};
+use crate::analysis::histogram::{compute_hue_histogram, pq_to_nits, LumBins};
 use crate::analysis::hlg::{
     dovi84_decoder, dovi84_pq_lut, downsample_luma, upsample_chroma, ChromaSiting, Dovi84Decoder,
 };
@@ -309,10 +309,8 @@ pub fn analyze_native_frame_cropped(
         y_plane_data_raw
     };
 
-    // madVR v5 binning setup
-    let sdr_peak_pq = nits_to_pq(100.0);
-    let sdr_step = sdr_peak_pq / 64.0;
-    let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
+    // madVR v5 binning, shared with the CUDA LUT and the readers (ROADMAP E8.1).
+    let lum_bins = LumBins::new();
 
     let x_start = crop_rect.x as usize;
     let y_start = crop_rect.y as usize;
@@ -471,12 +469,7 @@ pub fn analyze_native_frame_cropped(
                         }
 
                         // Histogram retains its existing Y-based semantics.
-                        let bin = if luma_pq < sdr_peak_pq {
-                            (luma_pq / sdr_step).floor() as usize
-                        } else {
-                            64 + ((luma_pq - sdr_peak_pq) / hdr_step).floor() as usize
-                        };
-                        accumulator.hist_bins[bin.min(255)] += 1.0;
+                        accumulator.hist_bins[lum_bins.bin(luma_pq)] += 1.0;
                     }
                 }
             }

@@ -435,4 +435,35 @@ mod tests {
         assert_eq!(frames[0].target_nits.unwrap(), 1000);
         assert_eq!(frames[5].target_nits.unwrap(), 500);
     }
+
+    #[test]
+    fn an_extreme_peak_targets_the_highlight_knee_in_nits() {
+        // A 4500-nit peak (above the balanced profile's 4000-nit extreme threshold) over a
+        // 10-nit picture with 1 % of its pixels at 1000 nits: the target is the knee. Before
+        // E8.1 the knee read bin b as PQ b / 255, so this targeted about 305 nits.
+        use crate::analysis::histogram::{nits_to_pq, LumBins};
+        let bins = LumBins::new();
+        let mut histogram = vec![0.0; 256];
+        histogram[bins.bin(nits_to_pq(10.0))] = 99.0;
+        histogram[bins.bin(nits_to_pq(1000.0))] = 1.0;
+        let mut frames: Vec<MadVRFrame> = (0..8)
+            .map(|_| MadVRFrame {
+                peak_pq_2020: nits_to_pq(4500.0),
+                avg_pq: nits_to_pq(10.0),
+                lum_histogram: histogram.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let scenes = vec![MadVRScene {
+            start: 0,
+            end: 7,
+            avg_pq: nits_to_pq(10.0),
+            ..Default::default()
+        }];
+        run_optimizer_pass(&scenes, &mut frames, &OptimizerProfile::balanced());
+        for frame in &frames {
+            let target = frame.target_nits.unwrap();
+            assert!((970..=1030).contains(&target), "target {target} nits");
+        }
+    }
 }

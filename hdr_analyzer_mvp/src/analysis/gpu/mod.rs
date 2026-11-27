@@ -27,7 +27,7 @@ use crate::analysis::frame::{AnalyzedFrame, FrameAnalysisOptions};
 #[cfg(any(feature = "cuda", test))]
 use crate::analysis::frame::{DIFF_BINS, DIFF_VALUE_BANDS};
 #[cfg(any(feature = "cuda", test))]
-use crate::analysis::histogram::nits_to_pq;
+use crate::analysis::histogram::LumBins;
 #[cfg(any(feature = "cuda", test))]
 use crate::analysis::hlg::{
     dovi84_decoder, dovi84_pq_lut, Dovi84Decoder, MMR_MAX_ORDER, MMR_TERMS,
@@ -180,20 +180,10 @@ fn build_dovi84_params(decoder: &Dovi84Decoder) -> Vec<f32> {
 
 #[cfg(any(feature = "cuda", test))]
 fn build_luminance_bin_lut(transfer_function: TransferFunction, composer: Composer) -> Vec<u16> {
-    // Must match the v5 binning constants in analyze_native_frame_cropped exactly.
-    let sdr_peak_pq = nits_to_pq(100.0);
-    let sdr_step = sdr_peak_pq / 64.0;
-    let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
+    // The same v5 binning as the CPU writer (ROADMAP E8.1).
+    let lum_bins = LumBins::new();
     (0..1024)
-        .map(|code| {
-            let pq = pq_for_code(code, transfer_function, composer);
-            let bin = if pq < sdr_peak_pq {
-                (pq / sdr_step).floor() as usize
-            } else {
-                64 + ((pq - sdr_peak_pq) / hdr_step).floor() as usize
-            };
-            bin.min(255) as u16
-        })
+        .map(|code| lum_bins.bin(pq_for_code(code, transfer_function, composer)) as u16)
         .collect()
 }
 
