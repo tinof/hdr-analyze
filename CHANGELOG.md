@@ -55,6 +55,9 @@ This document provides a historical record of completed milestones, feature impl
     to print "already converted", or be rebuilt under `--mdfix`.
   - An unreadable RPU keeps the record's Profile 8, and an unreadable or missing record passes, as
     before.
+- `hdr_analyzer_mvp --hwaccel cuda` writes the same hue histogram as CPU analysis (ROADMAP E12.3).
+  The CPU and the kernel now read one hue table built from the CPU formula. The kernel's own f32
+  angle used to put 2 of the 2^20 10-bit chroma pairs one bin off. CPU results and L1 are unchanged.
 
 ### Changed
 

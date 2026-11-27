@@ -254,8 +254,10 @@ the default PQ run: the option must not touch PQ input.
 Before the clips, the script runs the in-crate test
 `analysis::gpu::tests::reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops` (`--peak-estimator
 st2094-10` on odd crop anchors and sizes, planar and P010, consecutive frames; it also compares the
-4096 histogram bins and their total), because crop detection only yields even anchors. libtest exits 0 when its filter matches nothing, so the script
-fails unless exactly one test passed.
+4096 histogram bins and their total), because crop detection only yields even anchors. It then runs
+`analysis::gpu::tests::every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu`: one frame
+holding every 10-bit chroma pair, plus every row and column of the hue table as strips. libtest
+exits 0 when its filter matches nothing, so the script fails unless each test passed exactly once.
 
 `nvdec_cpu_analysis_matches_software_decode` (ROADMAP E12.2) checks CPU analysis of NVDEC frames:
 `--hwaccel cuda` without GPU analysis against `--hwaccel none`. It requires byte-identical `.bin`
@@ -338,7 +340,10 @@ symbol, and the driver could not JIT PTX ISA 8.5 anyway.
   CPU's `pq_rgb` in `frame/reduced_set.rs`.
 - The CPU computes the PQ max-RGB mix and the per-pixel PQ bin (`pixel_pq_bin`) in the kernel's f32
   arithmetic, and the kernel uses `_rn` intrinsics there, so histograms and maxima are
-  bit-identical. Cross-thread reductions use integer counts, u64 fixed-point sums and the max of
+  bit-identical. The hue bin comes from one 1 MiB table, `analysis::histogram::hue_lut()`, indexed
+  `(u_code << 10) | v_code` (0xFF means a magnitude under 10 codes, no hue). It is built from the
+  CPU's f64 `hue_bin`, read by `compute_hue_histogram` and uploaded once as the kernel's `hue_lut`.
+  Cross-thread reductions use integer counts, u64 fixed-point sums and the max of
   non-negative f32 bits.
 - `HDR_ANALYZER_DUMP_MAX_RGB=<dir>` writes every analyzed pixel's HLG max-RGB value per frame (both
   backends; on CUDA only at `--downscale 1`) for the P8 gate.

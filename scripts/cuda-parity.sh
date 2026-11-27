@@ -125,6 +125,17 @@ if ! grep -q 'test result: ok\. 1 passed' "$RS_LOG"; then
     echo "CUDA parity: the odd-crop reduced-set test did not run exactly once" >&2
     exit 1
 fi
+# Every 10-bit chroma pair, hue-binned on the GPU and the CPU (ROADMAP E12.3).
+HUE_LOG="$WORK/hue_bins_every_pair.log"
+HDR_ANALYZE_CUDA_PARITY_REQUIRED=1 \
+    cargo test -p hdr_analyzer_mvp --features cuda --bin hdr_analyzer_mvp \
+    analysis::gpu::tests::every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu -- --exact --nocapture \
+    > "$HUE_LOG" 2>&1 || { command cat "$HUE_LOG"; exit 1; }
+command cat "$HUE_LOG"
+if ! grep -q 'test result: ok\. 1 passed' "$HUE_LOG"; then
+    echo "CUDA parity: the every-chroma-pair hue test did not run exactly once" >&2
+    exit 1
+fi
 export HDR_ANALYZE_CUDA_PARITY_REQUIRED=1
 export HDR_ANALYZE_CUDA_PARITY_PQ="$PQ_CLIP"
 export HDR_ANALYZE_CUDA_PARITY_HLG="$HLG_CLIP"

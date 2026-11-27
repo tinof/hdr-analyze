@@ -170,7 +170,7 @@ call, so unblock priority 3: the simulator five steps wait on, and the pulse fil
     metadata can carry, never re-encoded.
     Gate: none until a step states one.
 11. **Engineering backlog** (E13, E14, E12, E1, E2, E3, E6, E11, E18, E19, P3, WS0, WS6): the
-    remaining E13 PRs (E13.6–E13.21), the E14 test audit, CUDA release binaries (E12.3), remote GPU
+    remaining E13 PRs (E13.6–E13.22), the E14 test audit, remote GPU
     measurement (E19, owner, 2026-11-25), CI and corpus
     gates (E1, WS0, WS6.1), crop and L5 per scene (E2, P3), debug options,
     provenance and open-GOP scoring (E3, E6, E11), hot-file
@@ -716,8 +716,9 @@ The detailed gap table and validation method live in
 
 ### E12: CUDA release binaries
 
-- **Status:** Partial. E12.1 (PR #86) and E12.2 (PR #136) are done, history in
-  [the log](docs/ROADMAP_LOG.md) (2026-11-18). Open: E12.3, the CPU/CUDA hue bin mismatch.
+- **Status:** Done. E12.1 (PR #86), E12.2 (PR #136) and E12.3 (PR #165) are in
+  [the log](docs/ROADMAP_LOG.md); no step is open. Kept because `release.yml` and
+  `scripts/gen-kernels-ptx.sh` cite ROADMAP E12 for the CUDA release build.
 - **Decided 2026-11-18 (owner):** E12.2's sidecar v7 changed no field, so it does not restart the
   1.0.0 "unchanged for one minor cycle" clock (Release plan).
 - **Plan:** build Linux x64 and Windows x64 with the feature (no toolkit needed at build time;
@@ -734,15 +735,6 @@ The detailed gap table and validation method live in
   without libcuda; the Windows archive runs GPU analysis with only the driver present;
   `v0.8.0-rc.1` tested on the Windows side of the RTX 4070 dev host with the CUDA toolkits hidden
   from `PATH` (Release plan).
-- **Defect (found 2026-11-02, E12.1 research):** the GPU hue bin (f32 `atan2f`,
-  `analysis/kernels.cu:513-517`) and the CPU one (f64, `analysis/histogram.rs:304-308`) differ for
-  2 of the 2^20 centred chroma pairs, (254, −109) and (508, −218): CPU bin 28, GPU bin 29, within
-  f32 rounding of the 336.77° bin edge (both NVRTC 12.6 and 13.1). The hue histogram is in the
-  `.bin`, not in L1; `scripts/cuda-parity.sh` passes because its clips never hit those pairs.
-- [E12.3][gpu] Make the hue bin match between CPU and CUDA for every chroma pair (for example one
-  integer lookup table both sides index). Gate: a test over all 2^20 centred chroma pairs, CPU
-  against the kernel's formula, with 0 mismatches; `scripts/cuda-parity.sh` passes; the L1
-  regression gate passes without `--update`.
 ### E13: module size refactor
 
 - **Status:** Partial. Steps 2-5, E13.11 and E13.14-E13.17 done; history in

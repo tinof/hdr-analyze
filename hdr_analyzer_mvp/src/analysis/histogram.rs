@@ -307,6 +307,45 @@ pub fn apply_histogram_temporal_median(histogram: &mut [f64], history: &[Vec<f64
     }
 }
 
+/// Bins of the hue histogram over the full hue circle.
+pub const HUE_BINS: usize = 31;
+/// [`hue_lut`] entry of a chroma pair too close to neutral to have a hue.
+pub const HUE_SKIP: u8 = u8::MAX;
+
+/// The hue bin of a 10-bit chroma pair, or [`HUE_SKIP`] when its magnitude is under 10 codes:
+/// the angle in f64 degrees, as the analyzer has always binned it on the CPU.
+pub fn hue_bin(u_code: u16, v_code: u16) -> u8 {
+    // Center around 512 (neutral chroma in 10-bit limited range)
+    let u_centered = i32::from(u_code) - 512;
+    let v_centered = i32::from(v_code) - 512;
+
+    // Skip near-zero chroma (grayscale/low saturation pixels don't contribute to hue)
+    let chroma_magnitude = f64::from(u_centered * u_centered + v_centered * v_centered).sqrt();
+    if chroma_magnitude < 10.0 {
+        return HUE_SKIP;
+    }
+
+    // Compute hue angle in degrees [0, 360)
+    let hue_radians = f64::from(v_centered).atan2(f64::from(u_centered));
+    let hue_degrees = (hue_radians.to_degrees() + 360.0) % 360.0;
+
+    // Map to bin [0, 30]
+    let bin = ((hue_degrees * HUE_BINS as f64) / 360.0).floor() as usize;
+    bin.min(HUE_BINS - 1) as u8
+}
+
+/// [`hue_bin`] of every 10-bit chroma pair, indexed `(u_code << 10) | v_code` (1 MiB). The CPU and
+/// the CUDA kernel both read this one table, so they bin every pixel alike (ROADMAP E12.3): the
+/// kernel's own f32 `atan2f` put 2 of the 2^20 pairs one bin off.
+pub fn hue_lut() -> &'static [u8] {
+    static LUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| {
+        (0..1u32 << 20)
+            .map(|index| hue_bin((index >> 10) as u16, (index & 1023) as u16))
+            .collect()
+    })
+}
+
 /// Compute hue histogram (31 bins) from chroma planes (U and V).
 ///
 /// This function generates a hue distribution histogram by analyzing the color
@@ -321,7 +360,7 @@ pub fn apply_histogram_temporal_median(histogram: &mut [f64], history: &[Vec<f64
 /// # Returns
 /// Vector of 31 f64 values representing percentage distribution across hue bins
 pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<f64> {
-    const HUE_BINS: usize = 31;
+    let lut = hue_lut();
     let mut hue_histogram = vec![0.0; HUE_BINS];
 
     // U and V planes (4:2:0 subsampled, so dimensions are halved)
@@ -357,26 +396,12 @@ pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<
             let u_code = u16::from_le_bytes([u_px[0], u_px[1]]) & 0x03FF;
             let v_code = u16::from_le_bytes([v_px[0], v_px[1]]) & 0x03FF;
 
-            // Center around 512 (neutral chroma in 10-bit limited range)
-            let u_centered = (u_code as i32) - 512;
-            let v_centered = (v_code as i32) - 512;
-
-            // Skip near-zero chroma (grayscale/low saturation pixels don't contribute to hue)
-            let chroma_magnitude =
-                ((u_centered * u_centered + v_centered * v_centered) as f64).sqrt();
-            if chroma_magnitude < 10.0 {
+            let bin = lut[(usize::from(u_code) << 10) | usize::from(v_code)];
+            if bin == HUE_SKIP {
                 continue;
             }
 
-            // Compute hue angle in degrees [0, 360)
-            let hue_radians = (v_centered as f64).atan2(u_centered as f64);
-            let hue_degrees = (hue_radians.to_degrees() + 360.0) % 360.0;
-
-            // Map to bin [0, 30]
-            let bin = ((hue_degrees * HUE_BINS as f64) / 360.0).floor() as usize;
-            let bin = bin.min(HUE_BINS - 1);
-
-            hue_histogram[bin] += 1.0;
+            hue_histogram[usize::from(bin)] += 1.0;
             total_pixels += 1;
         }
     }
@@ -395,6 +420,54 @@ pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `compute_hue_histogram` on a frame whose chroma pairs are not symmetric under swapping U
+    /// and V, against bins worked out by hand (ROADMAP E12.3): a transposed table index or a
+    /// swapped plane read moves counts between bins 0 and 7 and between bins 3 and 4.
+    #[test]
+    fn the_hue_histogram_bins_an_asymmetric_frame_as_worked_out_by_hand() {
+        use ffmpeg_next::format::Pixel;
+
+        // Centred (u, v) per chroma sample of an 8x4 frame (4x2 chroma samples).
+        // (100, 0): 0 degrees, bin 0. (0, 100): 90 degrees, 90 * 31 / 360 = 7.75, bin 7.
+        // (-100, 0): 180 degrees, 15.5, bin 15. (0, -100): 270 degrees, 23.25, bin 23.
+        // (6, 8): magnitude 10, kept; atan(8/6) = 53.13 degrees, 4.58, bin 4 (transposed: bin 3).
+        // (6, 7): magnitude 9.22, under 10, skipped.
+        let pairs: [(i32, i32); 8] = [
+            (100, 0),
+            (100, 0),
+            (100, 0),
+            (0, 100),
+            (-100, 0),
+            (0, -100),
+            (6, 8),
+            (6, 7),
+        ];
+        let mut frame = frame::Video::new(Pixel::YUV420P10LE, 8, 4);
+        for plane in 1..3 {
+            let stride = frame.stride(plane);
+            let data = frame.data_mut(plane);
+            for (index, &(u, v)) in pairs.iter().enumerate() {
+                let code = (512 + if plane == 1 { u } else { v }) as u16;
+                let offset = (index / 4) * stride + (index % 4) * 2;
+                data[offset..offset + 2].copy_from_slice(&code.to_le_bytes());
+            }
+        }
+        let crop = CropRect {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 4,
+        };
+        let histogram = compute_hue_histogram(&frame, &crop);
+        let mut expected = vec![0.0; HUE_BINS];
+        for (bin, count) in [(0, 3.0), (7, 1.0), (15, 1.0), (23, 1.0), (4, 1.0)] {
+            expected[bin] = (count / 7.0) * 100.0;
+        }
+        assert_eq!(histogram, expected);
+        assert_eq!(hue_bin(512 + 6, 512 + 7), HUE_SKIP);
+        assert_eq!(hue_bin(512 + 8, 512 + 6), 3);
+    }
 
     #[test]
     fn applied_peak_source_names_what_select_peak_pq_does() {

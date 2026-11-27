@@ -6,6 +6,38 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-27: E12.3 Make the hue bin match between CPU and CUDA (PR #165)
+
+Step text:
+
+- [E12.3][gpu] Make the hue bin match between CPU and CUDA for every chroma pair (for example one
+  integer lookup table both sides index). Gate: a test over all 2^20 centred chroma pairs, CPU
+  against the kernel's formula, with 0 mismatches; `scripts/cuda-parity.sh` passes; the L1
+  regression gate passes without `--update`.
+
+- **Defect (found 2026-11-02, E12.1 research):** the GPU hue bin (f32 `atan2f`,
+  `analysis/kernels.cu:513-517`) and the CPU one (f64, `analysis/histogram.rs:304-308`) differ for
+  2 of the 2^20 centred chroma pairs, (254, −109) and (508, −218): CPU bin 28, GPU bin 29, within
+  f32 rounding of the 336.77° bin edge (both NVRTC 12.6 and 13.1). The hue histogram is in the
+  `.bin`, not in L1; `scripts/cuda-parity.sh` passes because its clips never hit those pairs.
+
+Evidence:
+
+- `analysis::gpu::tests::every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu`, run by
+  `scripts/cuda-parity.sh` (PASS on the RTX 4070 host): one 2048x2048 frame that holds every
+  10-bit chroma pair once, plus every row and every column of the table as 2-pixel strips, GPU
+  against CPU bit for bit. The codes are a per-axis bijection of the coordinates. It fails on
+  main's kernel (bins 28 and 29), and it fails on a transposed-index mutant and on a mutant
+  that looks the table up by position. It compares histograms, not each pair's bin, but every row
+  and every column of the table must agree.
+- `analysis::histogram::tests::the_hue_histogram_bins_an_asymmetric_frame_as_worked_out_by_hand`
+  pins the CPU lookup without CUDA; a transposed CPU lookup fails it.
+- CPU unchanged: on two 4K HDR10 cuts the CPU `.bin` of main (0.9.0) and of the branch are
+  byte-identical. The L1 regression gate passes without `--update`; CI on PR #165 green.
+
+Resolution: both backends index one 1 MiB table, `analysis::histogram::hue_lut()`, built from the
+CPU's f64 formula; CUDA hue histograms now match the CPU.
+
 ### 2026-11-27: WS1.7 Pass an opt-in --peak-estimator from mkvdovi (PR #164)
 
 Step text:
