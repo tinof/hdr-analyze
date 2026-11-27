@@ -54,7 +54,11 @@ pub fn check_hdr_format(input_file: &str) -> HdrFormat {
 
     if dv_probe.contains("dvhe") || dv_probe.contains("dolby vision") {
         if dv_probe.contains("dvhe.08") || dv_probe.contains("profile 8") {
-            return HdrFormat::DolbyVisionP8;
+            let (format, warning) = route_profile8_record(probe_profile7_kind(input_file));
+            if let Some(warning) = warning {
+                crate::progress::print_warn(&warning);
+            }
+            return format;
         }
 
         if dv_probe.contains("dvhe.07") || dv_probe.contains("profile 7") {
@@ -510,6 +514,27 @@ fn classify_or_warn(rpu_path: &Path) -> Result<Option<RpuFormatKind>, ()> {
             Err(())
         }
         Err(_) => Ok(None),
+    }
+}
+
+/// The format of an input whose configuration record says Profile 8, from what its RPU says
+/// (`rpu`: the sampled RPU's format, `None` when none could be read). The RPU decides, as for
+/// Profile 7 (ROADMAP P6.3): a Profile 7 RPU goes the Profile 7 way (FEL is refused, MEL takes
+/// the MEL path) and any other profile is unsupported, each with a warning that names both.
+/// An unreadable RPU keeps the record's Profile 8, as before.
+pub(super) fn route_profile8_record(rpu: Option<HdrFormat>) -> (HdrFormat, Option<String>) {
+    match rpu {
+        None | Some(HdrFormat::DolbyVisionP8) => (HdrFormat::DolbyVisionP8, None),
+        Some(format) => (
+            format,
+            Some(format!(
+                "The Dolby Vision configuration record says Profile 8, but the RPU is {}; the RPU decides.",
+                match format {
+                    HdrFormat::Unsupported => "another profile".to_owned(),
+                    other => other.name().to_owned(),
+                }
+            )),
+        ),
     }
 }
 

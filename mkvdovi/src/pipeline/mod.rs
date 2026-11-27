@@ -10,6 +10,7 @@ use crate::cli::{Args, CmVersion, DoviInject, Hdr10PlusL1};
 use crate::metadata::{self, HdrFormat};
 use crate::progress;
 use crate::resume;
+use crate::verify::dv_record;
 
 mod analyzer;
 mod config;
@@ -45,9 +46,19 @@ pub(crate) const FEL_UNSUPPORTED_MESSAGE: &str = "Profile 7 FEL input is not sup
 
 /// Refuse formats mkvdovi detects but cannot convert. Called before any temp-directory work,
 /// so a refused input leaves no artifacts behind and an old temp directory stays untouched.
-fn reject_unsupported_input(hdr_type: HdrFormat) -> Result<()> {
+/// A Profile 8 input is also refused when its configuration record names a base layer that
+/// mkvdovi does not deliver (compatibility ID 0 or 2, ROADMAP P6.3); an unreadable or missing
+/// record lets it through, as before.
+fn reject_unsupported_input(hdr_type: HdrFormat, input_file: &str) -> Result<()> {
     if hdr_type == HdrFormat::DolbyVisionFel {
         bail!(FEL_UNSUPPORTED_MESSAGE);
+    }
+    if hdr_type == HdrFormat::DolbyVisionP8 {
+        if let dv_record::Probe::Record(record) = dv_record::probe_input(Path::new(input_file)) {
+            if let Some(refusal) = dv_record::profile8_compatibility_refusal(&record) {
+                bail!(refusal);
+            }
+        }
     }
     Ok(())
 }
@@ -111,7 +122,7 @@ pub fn convert_file(input_file: &str, args: &Args) -> Result<bool> {
     // Detect the format before the temp directory is created, resumed or discarded: an input
     // that is refused (Profile 7 FEL, also under --mdfix) must not cause any temp work.
     let detected_hdr_type = metadata::check_hdr_format(input_file);
-    reject_unsupported_input(detected_hdr_type)?;
+    reject_unsupported_input(detected_hdr_type, input_file)?;
 
     // HLG becomes Profile 8.4 with the base layer copied unchanged, so a stream tagged with
     // colorimetry the RPU cannot describe is refused here, before any temp work or extraction

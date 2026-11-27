@@ -3451,3 +3451,24 @@ fn profile7_fel_clip_is_dolby_vision_fel() {
     let clip = profile7_clip(dir.path(), true);
     assert_eq!(hdr_format_of(&clip), HdrFormat::DolbyVisionFel);
 }
+
+#[test]
+fn a_profile_8_record_takes_the_format_its_rpu_names() {
+    use super::format::route_profile8_record;
+    // The RPU agrees, or none could be read: Profile 8 as the record says, silently.
+    for rpu in [None, Some(HdrFormat::DolbyVisionP8)] {
+        assert_eq!(route_profile8_record(rpu), (HdrFormat::DolbyVisionP8, None));
+    }
+    // The RPU disagrees: its format, with a warning that names both (ROADMAP P6.3).
+    for (rpu, named) in [
+        (HdrFormat::DolbyVisionMel, "Dolby Vision Profile 7 MEL"),
+        (HdrFormat::DolbyVisionFel, "Dolby Vision Profile 7 FEL"),
+        (HdrFormat::Unsupported, "another profile"),
+    ] {
+        let (format, warning) = route_profile8_record(Some(rpu));
+        assert_eq!(format, rpu);
+        let warning = warning.expect("a mismatch warns");
+        assert!(warning.contains("says Profile 8"), "{warning}");
+        assert!(warning.contains(named), "{warning}");
+    }
+}
