@@ -594,7 +594,7 @@ fn check_nvdec_cpu_analysis(case: &DecodeCase) {
     let nvdec = run("nvdec.bin", "cuda");
 
     for (name, run) in [("software", &software), ("nvdec", &nvdec)] {
-        assert_eq!(run.sidecar["version"], 7, "{label}: {name} sidecar version");
+        assert_eq!(run.sidecar["version"], 8, "{label}: {name} sidecar version");
         assert_eq!(
             run.sidecar["analysis"]["gpu"],
             Value::Bool(false),
