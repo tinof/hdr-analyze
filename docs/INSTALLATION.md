@@ -110,9 +110,10 @@ Notes:
 - Without `ffprobe` on `PATH` the startup check still passes with MediaInfo alone, but no run can
   read the source's video frame times: each conversion muxes with the stream's own timing, warns,
   skips the timing check and keeps the source. The same holds for a non-Matroska input.
-- `dovi_tool` 2.3.2 is the minimum version. `mkvdovi` relies on its fix for duplicated end padding
-  in `inject-rpu`. The startup check does not verify this version, so check it yourself with
-  `dovi_tool --version`.
+- `dovi_tool` 2.3.2 is the minimum version. `--dovi-inject external` relies on its fix for
+  duplicated end padding in `inject-rpu`; the default writes the RPU inside `mkvdovi`, byte for
+  byte as 2.3.4's `inject-rpu` does, and needs `dovi_tool` for everything else. The startup check
+  does not verify this version, so check it yourself with `dovi_tool --version`.
 - `dovi_tool` 2.3.4 or newer lets `mkvdovi` pass the MKV to `dovi_tool` directly and skip a
   full-size HEVC extraction (`--dovi-input auto`, the default). With an older `dovi_tool`,
   `mkvdovi` extracts the stream with `ffmpeg` instead.

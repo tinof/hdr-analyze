@@ -21,6 +21,14 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   each RPU with the exact slice it parsed; it is stricter (bytes before the first start code, an
   empty file and any refused RPU are errors). The `manifest --rpu` import uses it.
 - `external.rs`: tool checks and invocation.
+- `inject/`: the in-process RPU injection (ROADMAP E20.1, "RPU injection" below). `inject::inject`
+  writes an `RPU.bin` into a raw HEVC stream byte for byte as `dovi_tool inject-rpu` 2.3.4 does,
+  on the same parser (`hevc_parser`, pinned `=0.6.12` in `mkvdovi/Cargo.toml`) and the same
+  100,000-byte chunks. Pass 1 reads the frame order (`frame_index.rs`); pass 2 writes each access
+  unit with an AUD first and its RPU last (`interleave.rs`, a port of dovi_tool's
+  `rpu_injector.rs`). `source.rs` reads an ffmpeg pipe or a raw file through a fill-reader, so a
+  pipe gives the parser the chunks a file read gives. It has no fallback;
+  `pipeline::deliver::inject_base_layer` chooses the path.
 - `metadata/`: `CmV40Config`, L2/L5/L9/L11 generation; submodules `format`, `probe`, `rpu_config`,
   `sidecar`, `static_metadata`.
 - `pipeline/`: `convert_file` in `mod.rs`; by phase `temp_dir`, `measure`, `config`, `deliver`;
@@ -36,14 +44,36 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 - `external::check_dependencies` checks the tools at runtime: `ffmpeg`, `mkvmerge`, `dovi_tool`, and
   either `mediainfo` or `ffprobe`. HDR10+ processing also runs `hdr10plus_tool`; keep it in `PATH`
   for HDR10+ inputs. It runs `hdr_analyzer_mvp` too, unless `--hdr10plus-l1 hdr10plus` is given. `inspect` dispatches before the dependency checks.
-- `dovi_tool` 2.3.2 is the floor: the existing orchestration relies on its `inject-rpu` padding
-  fix. 2.3.4+ lets mkvdovi pass the MKV directly to remove/convert/demux
+- `dovi_tool` 2.3.2 is the floor: `--dovi-inject external` relies on its `inject-rpu` padding
+  fix. dovi_tool stays required with the default in-process injection: it generates every RPU and
+  extracts and counts them. 2.3.4+ lets mkvdovi pass the MKV directly to remove/convert/demux
   (`--dovi-input auto|raw|mkv`; auto = on when `dovi_tool --version` reports 2.3.4+), with an
   automatic per-step fallback to ffmpeg extraction. A direct output is accepted only when its
   access units (ffprobe `-count_packets` on the raw HEVC, `dovi_steps::count_access_units`) equal
   the source's video packets (`timing::read_video_times`); a mismatch or an unreadable output
   count removes it and falls back with a warning, and a source whose packets cannot be counted
   skips the direct read (ROADMAP E7.1). Direct attempts log to `*_mkv.log` in the temp dir.
+- **RPU injection** (`--dovi-inject`, ROADMAP E20.1). By default the base layer is read twice
+  from ffmpeg's stdout (the arguments of the external extraction, with the HLG VUI edit, without
+  `-stats`; stderr goes to `ffmpeg_inject_pass{1,2}.log`), so the full-size `BL.hevc` is never
+  written. A raw `.hevc` base layer (the `--mdfix` paths) and a sealed `BL.hevc` of a resumed run
+  are read as files; a temp-dir input is removed after the injection, as before.
+  - `RPU.bin` is parsed behind `rpu_guard` and every RPU is serialised before pass 1. A file that
+    fails either falls back to the external path with a warning.
+  - A measured RPU whose length differs from the pictures is refused after pass 1, before anything
+    is written ("RPU injection: mismatched lengths. …"). A metadata RPU follows dovi_tool's rule
+    (the last RPU repeats, or the extra ones are dropped) with a warning.
+  - `BL_RPU.hevc` is sealed only when both passes read the same bytes (length and SHA-256), NAL
+    units and pictures, ffmpeg exited 0 both times and every picture got one RPU. Any failure
+    removes it and fails the file with a message that names `--dovi-inject external`.
+  - A panic in `hevc_parser` aborts the whole run (`panic = "abort"`), where it only ended the
+    dovi_tool child before; `--dovi-inject external` is the escape. The parser keeps a record of
+    every NAL unit, as dovi_tool does: about 290 MB on a 99,175-frame 4K episode.
+  - `--dovi-inject external` keeps the previous path for one release: ffmpeg extracts `BL.hevc`,
+    `dovi_tool inject-rpu` writes `BL_RPU.hevc` (`deliver::extract_base_layer`, `inject_rpu`).
+  - The equivalence tests (`inject::tests`, `inject::tests::equivalence`) compare both injectors on
+    x265 streams and a committed dovi_tool golden; a `hevc_parser` or dovi_tool bump must pass them
+    unchanged ([TESTING.md](TESTING.md) §6).
 - FFmpeg 9's `dovi_split`/`dovi_rpu` filters do not replace `dovi_tool`: they have no profile
   conversion, injection or generation; `dovi_split=mode=bl` is slower than `remove` on the
   direct-MKV path and changes the bytes; `dovi_rpu=strip` misses RPUs before EOS. Evaluation and
@@ -117,7 +147,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
 ## Interruption and resume
 
 - Extract, inject and mux show a live byte-progress bar (throughput and ETA) and warn after
-  `--stall-timeout` (default 300 s, `0` disables) when the output file stops growing.
+  `--stall-timeout` (default 300 s, `0` disables) when the step stops making progress: its output
+  file stops growing, or, for the in-process injection, no byte of the base layer is read.
 - An interrupted run (for example SSH `SIGHUP`) keeps `mkvdovi_temp_*` and prints a resume hint. A
   re-run **auto-resumes** by reusing completed steps, gated by `<artifact>.done` sentinels plus a
   `resume.json` fingerprint (input name/size/mtime, mkvdovi version, and the artifact-affecting
@@ -130,7 +161,9 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
     HDR10+ input that `measure::resolve_hdr10plus_mode` sets to the hybrid, by default or by the
     flag. That resolution runs before the fingerprint. A fallback after it (HDR10+ structure, a
     failed analysis, the sidecar, the frame count) keeps the token and relies on the `extra.json`
-    comparison below. **Add any new artifact-affecting flag to `resume_settings`.**
+    comparison below. ` dovi_inject=external` is appended only under `--dovi-inject external`,
+    so the escape hatch never reuses a `BL_RPU.hevc` the in-process injector wrote.
+    **Add any new artifact-affecting flag to `resume_settings`.**
   - The HDR10+ payload count (`hdr10plus_coverage.json`) is sealed with `video.hevc` and changes no
     artifact, so it adds no token.
   - The fingerprint does not cover the measurements. `config::withdraw_stale_rpu` (called from
@@ -231,14 +264,15 @@ This section covers the code on each side.
   so `measure::legacy_targets_notice` only warns when the sidecar beside it is missing, unreadable
   or older than v8: its optimizer targets came from the old reading.
 - **Stream frames (v5):** an open-GOP cut at a CRA starts with RASL pictures that no decoder
-  outputs, but `dovi_tool inject-rpu` maps RPU `n` to presentation picture `n`, and those pictures
-  come first. The analyzer counts them from the packets' NAL types (`leading_pictures.rs`) and fails
+  outputs, but the injection (`dovi_tool inject-rpu`, and its in-process port) maps RPU `n` to
+  presentation picture `n`, and those pictures come first. The analyzer counts them from the packets' NAL types (`leading_pictures.rs`) and fails
   on any other difference between decoded frames and pictures (packets that carry a slice)
   (`pipeline::account_stream_frames`). `metadata::generate_extra_json` shifts the shots by the count
   (`L1Sidecar::stream_frame_count` = RPU length), `verify.rs` compares in stream frames, and
   `tools/l1_diff` shifts our frames by the count against a stream-frame reference and labels
-  `--export-reference` rows in stream frames. Inject output containing "mismatched lengths" is a
-  hard failure for a measured RPU.
+  `--export-reference` rows in stream frames. A length mismatch at injection is a hard failure for
+  a measured RPU: the in-process injector refuses it after its first pass, and under
+  `--dovi-inject external` dovi_tool's "mismatched lengths" output is refused.
 - **HLG names:** HLG inputs require v3 or later and exactly the selected composer's name in
   `analysis.luminance_mapping` (`metadata::check_luminance_mapping`). A sidecar of the other
   composer, an unknown `dovi84-*` name or the luma-only `dovi84-v1` (pre-release builds) is
