@@ -41,8 +41,8 @@ flowchart LR
 ```
 
 - `mkvdovi` never encodes video: HDR10 and HDR10+ inputs become Profile 8.1 MKVs, and HLG inputs become Profile 8.4 MKVs, with the video stream copied unchanged.
-- `hdr_analyzer_mvp` measures decoded pixels directly from the compressed HEVC source without a ProRes or raw intermediate, and `mkvdovi` writes per-scene L1 plus L2, L6, L9 and L11 metadata for `dovi_tool` to generate and inject the RPU.
-- `mkvdovi` also reuses existing HDR10+ metadata, audits RPUs with `mkvdovi inspect`, rebuilds metadata on existing Dolby Vision files with `--mdfix`, and runs on the CPU under Linux, macOS and Windows.
+- `hdr_analyzer_mvp` measures decoded pixels directly from the compressed HEVC source without a ProRes or raw intermediate. `mkvdovi` writes per-scene L1 plus L2, L6, L9 and L11 metadata for `dovi_tool` to generate and inject the RPU.
+- `mkvdovi` also reuses existing HDR10+ metadata and audits RPUs with `mkvdovi inspect`. It rebuilds metadata on existing Dolby Vision files with `--mdfix`. It runs on the CPU under Linux, macOS and Windows.
 
 ## Quick start
 
@@ -98,9 +98,9 @@ Measured accuracy against synthetic references and Dolby-generated metadata, plu
 | Grainy real-content assets (default `max` estimator) | +74 and +93 codes hot against reference | Open gap on two grainy assets; opt-in grain-rejecting estimator (`--peak-estimator`, see [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)) narrows it but does not close it ([docs/VALIDATION.md](docs/VALIDATION.md)) |
 | CUDA analysis (4K HDR10 / 4K HLG) | About 325 fps / 490 fps | RTX 4070, frames ÷ wall time of whole analyzer run ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)) |
 
-Optional NVDEC decode and CUDA analysis work on decoded frames in GPU memory, with L1 output identical to earlier builds ([docs/PERFORMANCE.md](docs/PERFORMANCE.md) records the test conditions and reproduction recipe; [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md) explains how the GPU path reaches these rates). The Linux x64 and Windows x64 release archives include it and need only the NVIDIA driver (R560 or newer).
+Optional NVDEC decode and CUDA analysis work on decoded frames in GPU memory, with L1 output identical to earlier builds. The Linux x64 and Windows x64 release archives include it and need only the NVIDIA driver (R560 or newer). The test conditions and reproduction recipe are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). How the GPU path reaches these rates is explained in [docs/CUDA_PIPELINE.md](docs/CUDA_PIPELINE.md).
 
-CPU and GPU agreement shows the two paths are consistent. It says nothing about accuracy. The accuracy evidence is in [docs/VALIDATION.md](docs/VALIDATION.md), and the remaining gaps are in [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md). The only playback comparison so far is the HLG composer test on an LG OLED C9 ([docs/ROADMAP_LOG.md](docs/ROADMAP_LOG.md), 2026-10-13).
+CPU and GPU agreement shows the two paths are consistent. It says nothing about accuracy. The accuracy evidence is in [docs/VALIDATION.md](docs/VALIDATION.md), and the remaining gaps are in [docs/CM_ANALYZE_PARITY.md](docs/CM_ANALYZE_PARITY.md). The only playback comparison so far is one HLG composer test, recorded in [docs/ROADMAP_LOG.md](docs/ROADMAP_LOG.md) (see Limitations).
 
 ## Why another HDR analyzer?
 
@@ -132,7 +132,7 @@ Flag-level detail is in [docs/FORMAT_COMPATIBILITY.md](docs/FORMAT_COMPATIBILITY
 - Hardware decode in the analyzer is CUDA only. VAAPI and VideoToolbox requests fall back to software decode.
 - There is no Profile 5 output and no XML metadata export.
 - The metadata is format-compatible with CM v4.0. It is produced by this project's own measurements and does not implement Dolby's analysis algorithm.
-- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1 (Apple TV and LG TVs handle it; many players ignore the RPU and play the HLG base layer).
+- HLG sources become Profile 8.4. Player support for 8.4 is narrower than for 8.1. Apple TV and LG TVs handle 8.4. Many players ignore the RPU and play the HLG base layer.
 - Playback has been compared on one display only: the HLG composer test on an LG OLED C9 (2026-10-13). HDR10, HDR10+ and other devices are untested.
 
 The HLG 1000-nit range cap, the default BT.2100 composer and the `--hlg-composer preset` option are detailed below.
@@ -140,7 +140,7 @@ The HLG 1000-nit range cap, the default BT.2100 composer and the `--hlg-composer
 <details>
 <summary>HLG Profile 8.4 measurement and composer details</summary>
 
-HLG L1 is capped at the RPU's declared source range of about 1000 nits, so the brightest HLG codes (which the default 8.4 preset curves decode above it) read at that cap; peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)); `--hlg-composer preset` writes the `dolby_vision` crate's preset instead, which tints neutral greys slightly blue. A playback test showed that an LG OLED C9 applies the fitted composer; other devices are untested.
+HLG L1 is capped at the RPU's declared source range of about 1000 nits. The default 8.4 preset curves decode the brightest HLG codes above that range, so those codes read at the cap. Peaks are max-RGB of the full 8.4 decode (luma and chroma curves). By default the RPU carries a composer fitted to the BT.2100 HLG-to-PQ conversion ([docs/HLG_COMPOSER.md](docs/HLG_COMPOSER.md)). `--hlg-composer preset` writes the `dolby_vision` crate's preset instead. That preset tints neutral greys slightly blue. The one playback test (see Limitations) showed that the tested display applies the fitted composer. Other devices are untested.
 
 </details>
 
