@@ -142,13 +142,18 @@ pub struct L1SidecarAnalysis {
 }
 
 /// Newest sidecar version this build reads.
-pub const L1_SIDECAR_MAX_VERSION: u32 = 7;
+pub const L1_SIDECAR_MAX_VERSION: u32 = 8;
 
 /// From this version on, CPU analysis of a 10-bit 4:2:0 source at downscale 1 reads the decoder's
 /// codes unconverted on every decode route. Before it, the analyzer converted NVDEC frames with
 /// swscale for CPU analysis, which moves the codes, and the sidecar does not say which decoder
 /// ran; [`SidecarExpectation::nvdec_route`] re-analyzes such sidecars.
 pub const L1_SIDECAR_EXACT_DECODE_VERSION: u32 = 7;
+
+/// From this version on a histogram percentile peak (`peak_source` `histogram99` or
+/// `histogram999`) is read at the PQ of its bin. Before it the analyzer read bin `b` as PQ
+/// `b / 255` (ROADMAP E8.1), so those frame peaks read low; such sidecars are re-analyzed.
+pub const L1_SIDECAR_BIN_EDGES_VERSION: u32 = 8;
 
 /// From this version on the sidecar has a per-frame peak and the analyzer's applied peak source.
 pub const L1_SIDECAR_FRAME_PEAK_VERSION: u32 = 6;
@@ -356,6 +361,8 @@ pub enum SidecarError {
     LuminanceMappingMismatch(String),
     #[error("L1 sidecar v{0} records CPU analysis at downscale 1, which before v7 moved the codes of NVDEC-decoded frames, and this run decodes with NVDEC (re-analysis required)")]
     InexactNvdecRoute(u32),
+    #[error("L1 sidecar v{version} follows the {peak_source} peak source, which before v8 read its histogram bins low (re-analysis required)")]
+    StaleHistogramPeaks { version: u32, peak_source: String },
 }
 
 /// What the caller knows about the input the sidecar must describe. Leave fields `None` for a
@@ -520,6 +527,7 @@ pub fn validate_l1_sidecar(
     }
     check_luminance_mapping(sidecar, expect.hlg_composer)?;
     check_decode_route(sidecar, expect.nvdec_route)?;
+    check_histogram_peaks(sidecar)?;
     let invalid = |reason: String| Err(SidecarError::Invalid(reason));
     let Some(first) = sidecar.scenes.first() else {
         return invalid("no scenes".into());
@@ -541,6 +549,12 @@ pub fn validate_l1_sidecar(
         }
     }
     let mut advisories = ordering_advisories(sidecar);
+    if sidecar.version < L1_SIDECAR_BIN_EDGES_VERSION && sidecar.peak_source.is_none() {
+        advisories.push(format!(
+            "L1 sidecar v{} does not record its peak source. If it was measured with --peak-source histogram99 or histogram999 (or --peak-domain luma), its peaks read low: delete the measurements file to re-measure with an hdr_analyzer_mvp that writes sidecar v{L1_SIDECAR_BIN_EDGES_VERSION}.",
+            sidecar.version
+        ));
+    }
     if sidecar.version < L1_SIDECAR_UNFILTERED_AVERAGES_VERSION {
         advisories.push(format!(
             "L1 sidecar v{} stores averages that were smoothed over time, so the L1 average of a scene that changes (a fade, a flash) can read wrong. To re-measure, delete the measurements file and run again with an hdr_analyzer_mvp from this version.",
@@ -614,6 +628,23 @@ pub fn validate_l1_sidecar(
         }
     }
     Ok(advisories)
+}
+
+/// A sidecar older than [`L1_SIDECAR_BIN_EDGES_VERSION`] whose frame peaks follow a histogram
+/// percentile was read with the old bin edges, so it is refused (ROADMAP E8.1). A `max` peak
+/// source, or none recorded (before v6, an advisory), passes.
+fn check_histogram_peaks(sidecar: &L1Sidecar) -> Result<(), SidecarError> {
+    match sidecar.peak_source.as_deref() {
+        Some(source @ ("histogram99" | "histogram999"))
+            if sidecar.version < L1_SIDECAR_BIN_EDGES_VERSION =>
+        {
+            Err(SidecarError::StaleHistogramPeaks {
+                version: sidecar.version,
+                peak_source: source.to_owned(),
+            })
+        }
+        _ => Ok(()),
+    }
 }
 
 /// A sidecar older than [`L1_SIDECAR_EXACT_DECODE_VERSION`] with CPU analysis at downscale 1 is

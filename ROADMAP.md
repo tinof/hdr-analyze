@@ -104,7 +104,7 @@ tagged `Release: minor` merges.
 |---|---|---|
 | none | E13.6–E13.21, E14.3–E14.6 (tests and the pre-PR gate only; order in E14) | No user-visible change |
 | a later minor | E8.1 and E9.1 (they move the default `.bin`; unblocked by E13.5, #59); WS1.6 (default estimator change; the opt-in WS1.5 shipped in v0.9.0) | MINOR |
-| 1.0.0 | P8 playback verified on the LG OLED C9 (met 2026-10-13) and the WS6 `code / 1023` question answered (met 2026-10-29, WS6.6); a second device is not required (owner, 2026-10-17); sidecar schema and CLI unchanged for one minor cycle (the semantics-only sidecar v7 does not restart it: owner, 2026-11-18); no open priority-1 defect | Owner decision |
+| 1.0.0 | P8 playback verified on the LG OLED C9 (met 2026-10-13) and the WS6 `code / 1023` question answered (met 2026-10-29, WS6.6); a second device is not required (owner, 2026-10-17); sidecar schema and CLI unchanged for one minor cycle (the semantics-only sidecars v7 and v8 do not restart it: owner, 2026-11-18 and 2026-11-27); no open priority-1 defect | Owner decision |
 
 ## Priorities
 
@@ -708,20 +708,11 @@ The detailed gap table and validation method live in
 
 ### E8: histogram percentile reader
 
-- **Status:** Open. Readers convert a bin index with bin/255, though the bins split 64/192 at
-  PQ(100 nits), so 1000 nits reads as about 305; history in [the log](docs/ROADMAP_LOG.md)
-  (2026-10-29). Open: E8.1, in a later minor release.
+- **Status:** Done, no step open: readers and writers share the v5 bin layout and the sidecar is
+  v8 (E8.1, [log](docs/ROADMAP_LOG.md) 2026-11-27). Kept because E13 and E14 name E8 as their
+  validation case.
 - **Gate:** a bin-edge round-trip unit test and an optimizer unit test (CUDA parity and the L1 gate
   run with `--disable-optimizer`, so they do not cover it).
-- **Checked 2026-11-01 @4e55715:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
-  on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
-  (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
-  `--disable-optimizer`, so a round-trip and optimizer unit test is the gate. The bin edges are
-  written in `analysis/frame/mod.rs:442` and `analysis/gpu/mod.rs:157`; `analyze_native_frame`
-  (`frame/mod.rs:584`) bins uniformly. The default max-RGB run's direct peak is untouched
-  (`pipeline/scenes.rs:157`); `--peak-source histogram99` and `histogram999` move (`scenes.rs:231`).
-- [E8.1][gpu] One shared bin-edge function for writer and readers, with a round-trip test. Gate:
-  the item gate.
 
 ### E9: `--pre-denoise` values
 

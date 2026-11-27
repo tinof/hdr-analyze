@@ -6,6 +6,42 @@ detail that used to sit inside the roadmap items. `ROADMAP.md` keeps the open wo
 
 ## Progress log
 
+### 2026-11-27: E8.1 One shared bin-edge function for writer and readers (PR #159)
+
+Step text:
+
+- [E8.1][gpu] One shared bin-edge function for writer and readers, with a round-trip test. Gate:
+  the item gate.
+
+- **Checked 2026-11-01 @4e55715:** `find_highlight_knee_nits` feeds the optimizer's `target_nits`
+  on every default run (`optimizer.rs:152`), so the fix changes the default `.bin`. CUDA parity
+  (`cuda_parity.rs:94`) and the L1 gate (`scripts/ci/l1-regression-gate.sh:76`) both pass
+  `--disable-optimizer`, so a round-trip and optimizer unit test is the gate. The bin edges are
+  written in `analysis/frame/mod.rs:442` and `analysis/gpu/mod.rs:157`; `analyze_native_frame`
+  (`frame/mod.rs:584`) bins uniformly. The default max-RGB run's direct peak is untouched
+  (`pipeline/scenes.rs:157`); `--peak-source histogram99` and `histogram999` move (`scenes.rs:231`).
+
+Evidence:
+
+- `hdr_analyzer_mvp/src/analysis/histogram.rs`: `every_bin_reads_back_as_itself` (the round
+  trip through `LumBins`), `readers_take_a_bin_at_the_pq_it_was_written_with` and
+  `a_percentile_peak_never_exceeds_the_brightest_pixel`; `optimizer.rs`:
+  `an_extreme_peak_targets_the_highlight_knee_in_nits` (a 1000-nit knee targets 970 to 1030 nits;
+  the old reader gave about 305). The reader and optimizer tests fail with the old `b / 255`
+  readers.
+- Main's and the branch's analyzer on a 471-frame 4K HDR10 cut, default flags: the sidecars are
+  identical apart from `version` and `analyzer_version`; the `.bin` differs in 471 bytes, all in
+  the per-frame target block, whose median rose from 12 to 168 nits (5–22 before, 106–233 after).
+- Gates: `scripts/cuda-parity.sh` PASS (written histograms unchanged on both backends), the L1
+  regression gate without `--update`, `tool:l1_diff`, the test gate; CI on the PR.
+
+Resolution: one `LumBins` serves the CPU writer, the CUDA bin LUT and the readers, which take a bin
+at its centre's PQ; a percentile peak is capped at the frame's direct maximum; the dead uniform
+binner `analyze_native_frame` is gone. Sidecar v8 (no field change) lets mkvdovi re-analyze a
+pre-v8 sidecar whose peaks follow `histogram99`/`histogram999`; a pre-v6 one passes with an
+advisory, and `--legacy-madvr-l1` warns for a `.bin` without a v8 sidecar. The owner ruled on
+2026-11-27 that v8, like v7, does not restart the 1.0.0 clock.
+
 ### 2026-11-27: E7.4 Mux once at the source's rate; pipe the `--verify` extraction (PR #155)
 
 Step text:

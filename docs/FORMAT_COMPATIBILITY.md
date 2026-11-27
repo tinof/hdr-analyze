@@ -183,14 +183,24 @@ value records what was applied, not what was asked for: `--peak-source` works on
 smoothing pass, so with `--hist-bin-ema-beta 0` and `--hist-temporal-median 0` it stays `max`, and an
 unknown name is applied, and recorded, as `max`.
 
-Version 7 (current) changes no field. From it on, CPU analysis of a 10-bit 4:2:0 source at
+Version 7 changes no field. From it on, CPU analysis of a 10-bit 4:2:0 source at
 `--downscale 1` reads the decoder's codes unconverted on every decode route. With `--hwaccel cuda`
 and CPU analysis (an analyzer without `+cuda`, `--pre-denoise median3`, a CUDA start that fails),
 the analyzer copies the NVDEC P010 frames into its analysis frames with each sample shifted down by
 6; up to version 6 it converted them with swscale, which moved the codes. A version 6 or older
 sidecar does not record which decoder ran.
 
-`mkvdovi` accepts versions 1–7. When it decodes with NVDEC (`--hwaccel cuda`, which `auto` becomes on
+Version 8 (current) changes no field. From it on, the analyzer reads a luminance histogram bin at
+the PQ of its centre, with the bin edges the writer used. Up to version 7 it read bin `b` as PQ
+`b / 255`, so 1000 nits read as about 305. With `peak_source` `histogram99` or `histogram999` the
+frame peaks now read up to about three times higher. They never exceed the frame's direct maximum.
+The default `max` peak source gives the same L1 as version 7.
+
+`mkvdovi` re-analyzes, with a warning, a version 7 or older sidecar whose `peak_source` is
+`histogram99` or `histogram999`. It reuses a sidecar without `peak_source` (before version 6) with
+an advisory that its peaks may read low.
+
+`mkvdovi` accepts versions 1–8. When it decodes with NVDEC (`--hwaccel cuda`, which `auto` becomes on
 an NVIDIA host), it analyzes again instead of reusing a version 6 or older sidecar with
 `analysis.gpu: false` at downscale 1, in a conversion and in `mkvdovi manifest`. GPU analysis,
 downscale 2 and a sidecar without `analysis` (version 1) stay reusable, and with `--hwaccel none`

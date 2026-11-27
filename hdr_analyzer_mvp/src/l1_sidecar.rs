@@ -10,6 +10,10 @@ use crate::analysis::histogram::pq_to_nits;
 use crate::cli::{PeakDomain, PeakEstimator};
 use crate::crop::CropRect;
 
+/// Version 8 changes no field. From it on, the histogram readers take a luminance bin at the PQ
+/// it was written with (ROADMAP E8.1), so `--peak-source histogram99`/`histogram999` frame
+/// peaks read up to about three times higher than before (bin `b` used to read as PQ `b / 255`);
+/// mkvdovi re-analyzes an older sidecar whose `peak_source` is one of them.
 /// Version 7 changes no field. From it on, CPU analysis of a 10-bit 4:2:0 source at downscale 1
 /// reads the decoder's codes unconverted on every decode route: an NVDEC P010 frame is repacked
 /// (`pipeline::analyze::scale_to_yuv420p10`), so `--hwaccel cuda` without GPU analysis measures
@@ -46,7 +50,7 @@ use crate::crop::CropRect;
 /// (`dovi84_composer::LEGACY_LUMINANCE_MAPPINGS`), and the version stays 5. Version 2 added analyzer/source/analysis
 /// provenance and moved `crop` to full-resolution source coordinates (`crop_space: "full"`).
 /// Version 1 stored the crop in analysis space.
-pub const L1_SIDECAR_VERSION: u32 = 7;
+pub const L1_SIDECAR_VERSION: u32 = 8;
 
 /// Coordinate space of `L1Sidecar::crop` since version 2.
 pub const CROP_SPACE_FULL: &str = "full";

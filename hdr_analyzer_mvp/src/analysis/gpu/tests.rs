@@ -1,4 +1,5 @@
 use super::*;
+use crate::analysis::histogram::nits_to_pq;
 use crate::analysis::hlg::{downsample_luma, upsample_chroma, ChromaSiting};
 
 #[test]

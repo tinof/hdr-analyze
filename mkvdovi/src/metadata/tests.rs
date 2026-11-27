@@ -744,12 +744,72 @@ fn under_nvdec_a_cpu_sidecar_before_v7_at_downscale_1_is_re_analyzed() {
     }
     assert!(validate(7, analysis(false, 1), true).is_ok());
     assert!(validate(1, None, true).is_ok());
+    assert!(validate(8, analysis(false, 1), true).is_ok());
     for nvdec_route in [true, false] {
         assert!(matches!(
-            validate(8, analysis(false, 1), nvdec_route),
-            Err(SidecarError::UnsupportedVersion(8))
+            validate(9, analysis(false, 1), nvdec_route),
+            Err(SidecarError::UnsupportedVersion(9))
         ));
     }
+}
+
+/// `route_sidecar` with a recorded peak source (`None`: the field is absent, as before v6).
+fn peak_source_sidecar(version: u32, peak_source: Option<&str>) -> L1Sidecar {
+    let mut sidecar = route_sidecar(version, None);
+    sidecar.peak_source = peak_source.map(str::to_owned);
+    sidecar
+}
+
+#[test]
+fn a_histogram_peak_sidecar_before_v8_is_re_analyzed() {
+    let expect = SidecarExpectation::default();
+    for version in [6, 7] {
+        for source in ["histogram99", "histogram999"] {
+            let error = validate_l1_sidecar(&peak_source_sidecar(version, Some(source)), &expect)
+                .unwrap_err();
+            assert!(
+                matches!(&error, SidecarError::StaleHistogramPeaks { version: v, peak_source: s }
+                    if *v == version && s == source),
+                "v{version} {source}: {error:?}"
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("the {source} peak source"))
+                    && error.to_string().contains("re-analysis required"),
+                "{error}"
+            );
+        }
+        // The default direct peak never read the histogram: reused as before.
+        let advisories =
+            validate_l1_sidecar(&peak_source_sidecar(version, Some("max")), &expect).unwrap();
+        assert!(
+            !advisories.iter().any(|a| a.contains("peak source")),
+            "{advisories:?}"
+        );
+    }
+    // From v8 the histogram peaks are read at their bins' PQ.
+    for source in ["histogram99", "histogram999", "max"] {
+        assert!(validate_l1_sidecar(&peak_source_sidecar(8, Some(source)), &expect).is_ok());
+    }
+}
+
+#[test]
+fn a_sidecar_without_a_recorded_peak_source_before_v8_is_reused_with_an_advisory() {
+    let expect = SidecarExpectation::default();
+    let advisories = validate_l1_sidecar(&peak_source_sidecar(5, None), &expect).unwrap();
+    assert!(
+        advisories.iter().any(
+            |a| a.contains("L1 sidecar v5 does not record its peak source")
+                && a.contains("--peak-source histogram99")
+        ),
+        "{advisories:?}"
+    );
+    let advisories = validate_l1_sidecar(&peak_source_sidecar(8, None), &expect).unwrap();
+    assert!(
+        !advisories.iter().any(|a| a.contains("peak source")),
+        "{advisories:?}"
+    );
 }
 
 #[test]
@@ -837,8 +897,10 @@ fn sidecar_with_smoothed_averages_is_reused_with_an_advisory() {
         json["version"] = json!(version);
         let sidecar: L1Sidecar = serde_json::from_value(json).unwrap();
         let advisories = validate_l1_sidecar(&sidecar, &SidecarExpectation::default()).unwrap();
-        assert_eq!(advisories.len(), 1, "version {version}");
-        assert!(advisories[0].contains("smoothed over time"));
+        // Before v6 the sidecar also records no peak source (ROADMAP E8.1): two advisories.
+        assert_eq!(advisories.len(), 2, "version {version}: {advisories:?}");
+        assert!(advisories[0].contains("does not record its peak source"));
+        assert!(advisories[1].contains("smoothed over time"));
     }
 }
 

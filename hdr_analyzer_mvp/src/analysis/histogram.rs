@@ -17,6 +17,74 @@ pub fn nits_to_pq(nits: f64) -> f64 {
         .powf(ST2084_M2)
 }
 
+/// The 256-bin luminance histogram of the madVR v5 `.bin` (ROADMAP E8.1): bins 0 to 63 split PQ
+/// [0, PQ(100 nits)) evenly, bins 64 to 255 split [PQ(100 nits), 1]. The CPU writer
+/// (`analysis::frame`), the CUDA bin LUT (`analysis::gpu`) and every reader below share it, so a
+/// reader returns the PQ of the bin a value was written to; before E8.1 the readers took bin `b`
+/// as PQ `b / 255`, which read 1000 nits as about 305.
+#[derive(Clone, Copy, Debug)]
+pub struct LumBins {
+    sdr_peak_pq: f64,
+    sdr_step: f64,
+    hdr_step: f64,
+}
+
+impl LumBins {
+    /// Bins below PQ(100 nits).
+    pub const SDR_BINS: usize = 64;
+    /// Bins from PQ(100 nits) to PQ 1.
+    pub const HDR_BINS: usize = 192;
+    /// All bins.
+    pub const BINS: usize = Self::SDR_BINS + Self::HDR_BINS;
+
+    pub fn new() -> Self {
+        let sdr_peak_pq = nits_to_pq(100.0);
+        Self {
+            sdr_peak_pq,
+            sdr_step: sdr_peak_pq / Self::SDR_BINS as f64,
+            hdr_step: (1.0 - sdr_peak_pq) / Self::HDR_BINS as f64,
+        }
+    }
+
+    /// The bin of a PQ value, clamped to the last bin. The arithmetic is the writers' since
+    /// v5, operation for operation, so the written `.bin` stays byte-identical.
+    pub fn bin(&self, pq: f64) -> usize {
+        let bin = if pq < self.sdr_peak_pq {
+            (pq / self.sdr_step).floor() as usize
+        } else {
+            Self::SDR_BINS + ((pq - self.sdr_peak_pq) / self.hdr_step).floor() as usize
+        };
+        bin.min(Self::BINS - 1)
+    }
+
+    /// The PQ value at the lower edge of `bin`, the base of [`LumBins::center_pq`]. Not a
+    /// reader: the product of a bin index and a step can land a hair below the writer's
+    /// floor, so only the centre round-trips through [`LumBins::bin`].
+    fn lower_pq(&self, bin: usize) -> f64 {
+        if bin < Self::SDR_BINS {
+            bin as f64 * self.sdr_step
+        } else {
+            self.sdr_peak_pq + (bin - Self::SDR_BINS) as f64 * self.hdr_step
+        }
+    }
+
+    /// The PQ value at the centre of `bin`: what a reader takes for the pixels counted in it.
+    pub fn center_pq(&self, bin: usize) -> f64 {
+        let width = if bin < Self::SDR_BINS {
+            self.sdr_step
+        } else {
+            self.hdr_step
+        };
+        self.lower_pq(bin) + width / 2.0
+    }
+}
+
+impl Default for LumBins {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Calculate average PQ from histogram data.
 ///
 /// The histogram represents PQ values directly, with each bin corresponding to a PQ range.
@@ -30,14 +98,13 @@ pub fn nits_to_pq(nits: f64) -> f64 {
 /// Weighted average PQ value in range [0.0, 1.0]
 #[allow(dead_code)]
 pub fn calculate_avg_pq_from_histogram(histogram: &[f64]) -> f64 {
+    let bins = LumBins::new();
     let mut weighted_sum = 0.0;
     let mut total_weight = 0.0;
 
     for (bin_index, &weight) in histogram.iter().enumerate() {
         if weight > 0.0 {
-            // Convert bin index back to PQ value
-            // Each bin represents a PQ range from 0.0 to 1.0
-            let pq_value = (bin_index as f64) / 255.0;
+            let pq_value = bins.center_pq(bin_index);
 
             weighted_sum += pq_value * weight;
             total_weight += weight;
@@ -84,6 +151,7 @@ pub fn pq_to_nits(pq: f64) -> f64 {
 /// # Returns
 /// Luminance value in nits representing the 99th percentile
 pub fn find_highlight_knee_nits(histogram: &[f64]) -> f64 {
+    let bins = LumBins::new();
     let mut cumulative_percentage = 0.0;
 
     // Start from the highest bin and work backwards
@@ -92,9 +160,7 @@ pub fn find_highlight_knee_nits(histogram: &[f64]) -> f64 {
 
         // When we reach 1% (99th percentile), this is our highlight knee
         if cumulative_percentage >= 1.0 {
-            // Convert bin index back to approximate nits value
-            let pq_value = (bin_index as f64) / 255.0;
-            return pq_to_nits(pq_value);
+            return pq_to_nits(bins.center_pq(bin_index));
         }
     }
 
@@ -114,6 +180,7 @@ pub fn find_highlight_knee_nits(histogram: &[f64]) -> f64 {
 /// # Returns
 /// PQ value (0.0-1.0) at the requested percentile
 pub fn compute_histogram_percentile_pq(histogram: &[f64], percentile: f64) -> f64 {
+    let bins = LumBins::new();
     let target_cumulative = 100.0 - percentile; // Convert to upper tail
     let mut cumulative_percentage = 0.0;
 
@@ -122,15 +189,14 @@ pub fn compute_histogram_percentile_pq(histogram: &[f64], percentile: f64) -> f6
         cumulative_percentage += percentage;
 
         if cumulative_percentage >= target_cumulative {
-            // Convert bin index back to PQ value
-            return (bin_index as f64) / 255.0;
+            return bins.center_pq(bin_index);
         }
     }
 
     // Fallback: return max bin with data
     for (bin_index, &percentage) in histogram.iter().enumerate().rev() {
         if percentage > 0.0 {
-            return (bin_index as f64) / 255.0;
+            return bins.center_pq(bin_index);
         }
     }
 
@@ -147,9 +213,11 @@ pub fn compute_histogram_percentile_pq(histogram: &[f64], percentile: f64) -> f6
 /// # Returns
 /// Peak PQ value selected by the specified method
 pub fn select_peak_pq(histogram: &[f64], direct_max_pq: f64, peak_source: &str) -> f64 {
+    // A percentile is read at its bin's centre, which can lie above every pixel of the frame
+    // (up to half a bin), so it never exceeds the direct maximum (ROADMAP E8.1).
     match peak_source {
-        "histogram99" => compute_histogram_percentile_pq(histogram, 99.0),
-        "histogram999" => compute_histogram_percentile_pq(histogram, 99.9),
+        "histogram99" => compute_histogram_percentile_pq(histogram, 99.0).min(direct_max_pq),
+        "histogram999" => compute_histogram_percentile_pq(histogram, 99.9).min(direct_max_pq),
         _ => direct_max_pq, // "max" or unknown defaults to direct max
     }
 }
@@ -337,8 +405,13 @@ mod tests {
         let select = |source| select_peak_pq(&histogram, direct, source);
         // The three sources must give different peaks for the comparison below to mean anything.
         assert_eq!(select("max"), direct);
-        assert_eq!(select("histogram99"), 100.0 / 255.0);
-        assert_eq!(select("histogram999"), 200.0 / 255.0);
+        // The centre of bins 100 and 200 in the v5 layout (ROADMAP E8.1): 64 bins below
+        // PQ(100 nits), 192 equal bins above it.
+        let sdr_peak_pq = nits_to_pq(100.0);
+        let hdr_step = (1.0 - sdr_peak_pq) / 192.0;
+        let centre = |bin: f64| sdr_peak_pq + (bin - 64.0 + 0.5) * hdr_step;
+        assert!((select("histogram99") - centre(100.0)).abs() < 1e-12);
+        assert!((select("histogram999") - centre(200.0)).abs() < 1e-12);
 
         for (source, applied) in [
             ("max", "max"),
@@ -407,5 +480,58 @@ mod tests {
             "Knee should be in high range, got {} nits",
             knee_nits
         );
+    }
+
+    #[test]
+    fn every_bin_reads_back_as_itself() {
+        let bins = LumBins::new();
+        let sdr_peak_pq = nits_to_pq(100.0);
+        assert_eq!(bins.bin(0.0), 0);
+        assert_eq!(
+            bins.bin(sdr_peak_pq),
+            64,
+            "PQ(100 nits) opens the first HDR bin"
+        );
+        assert_eq!(bins.bin(1.0), 255);
+        assert_eq!(bins.bin(2.0), 255, "above PQ 1 clamps to the last bin");
+        let mut previous = -1.0;
+        for bin in 0..LumBins::BINS {
+            let centre = bins.center_pq(bin);
+            assert_eq!(bins.bin(centre), bin, "bin {bin} centre {centre}");
+            assert!(centre > previous, "bin {bin} centres must rise");
+            previous = centre;
+        }
+    }
+
+    #[test]
+    fn readers_take_a_bin_at_the_pq_it_was_written_with() {
+        // 1 % of the pixels at 1000 nits over a 10-nit picture. Before E8.1 the readers took
+        // bin b as PQ b / 255 and read this as about 305 nits.
+        let bins = LumBins::new();
+        let mut histogram = vec![0.0; 256];
+        histogram[bins.bin(nits_to_pq(10.0))] = 99.0;
+        histogram[bins.bin(nits_to_pq(1000.0))] = 1.0;
+        let knee = find_highlight_knee_nits(&histogram);
+        assert!((knee - 1000.0).abs() < 30.0, "knee {knee} nits");
+        let p99 = pq_to_nits(compute_histogram_percentile_pq(&histogram, 99.0));
+        assert!((p99 - 1000.0).abs() < 30.0, "p99 {p99} nits");
+    }
+
+    #[test]
+    fn a_percentile_peak_never_exceeds_the_brightest_pixel() {
+        // A flat frame at exactly PQ(100 nits) opens bin 64, whose centre lies half a bin above
+        // every pixel: the peak stays at the direct maximum.
+        let bins = LumBins::new();
+        let flat = nits_to_pq(100.0);
+        let mut histogram = vec![0.0; 256];
+        histogram[bins.bin(flat)] = 100.0;
+        assert!(bins.center_pq(64) > flat);
+        assert_eq!(select_peak_pq(&histogram, flat, "histogram99"), flat);
+        assert_eq!(select_peak_pq(&histogram, flat, "histogram999"), flat);
+        // Below the direct maximum the percentile itself applies.
+        let direct = nits_to_pq(1000.0);
+        let read = select_peak_pq(&histogram, direct, "histogram99");
+        assert_eq!(read, bins.center_pq(64));
+        assert!(read < direct);
     }
 }

@@ -760,11 +760,15 @@ fn sidecar_records_the_applied_peak_source_with_its_frame_peaks() {
     }
     let dir = tempfile::tempdir().expect("tempdir");
     // Flat Y 769 is PQ 0.8048, in histogram bin 179 of 256 (64 bins below PQ(100 nits), 192
-    // above): the direct peak is code 3296, histogram99 reads 179 / 255 of 4095.
+    // above): the direct peak is code 3296, and histogram99 reads the centre of bin 179 (ROADMAP
+    // E8.1; before it, 179 / 255 of 4095 = 2875).
     let clip = encode_clip(dir.path(), 769, 512, 512);
     let direct = pq_12bit_of(769);
     assert_eq!(direct, 3296);
-    let histogram = 2875;
+    let sdr_peak_pq = nits_to_pq(100.0);
+    let bin_179_centre = sdr_peak_pq + (179.0 - 64.0 + 0.5) * (1.0 - sdr_peak_pq) / 192.0;
+    let histogram = (bin_179_centre * 4095.0).round() as u16;
+    assert_eq!(histogram, 3292);
     for (flags, applied, expected) in [
         (&["--disable-optimizer"][..], "max", direct),
         (
@@ -1085,7 +1089,7 @@ fn hlg_flat_frame_measures_through_dovi84_curve() {
     let sidecar: serde_json::Value =
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
-    assert_eq!(sidecar["version"], 7);
+    assert_eq!(sidecar["version"], 8);
     assert_eq!(sidecar["analysis"]["luminance_mapping"], "dovi84-v3");
     assert_eq!(sidecar["peak_domain"], "max-rgb");
 
@@ -1162,7 +1166,7 @@ fn hlg_flat_frame_measures_through_the_bt2100_composer() {
     let sidecar: serde_json::Value =
         serde_json::from_slice(&std::fs::read(sidecar_path(&bin)).expect("read L1 sidecar"))
             .expect("parse L1 sidecar");
-    assert_eq!(sidecar["version"], 7);
+    assert_eq!(sidecar["version"], 8);
     assert_eq!(
         sidecar["analysis"]["luminance_mapping"],
         "dovi84-bt2100-v1-spec420"

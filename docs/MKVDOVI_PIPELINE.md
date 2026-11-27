@@ -191,10 +191,10 @@ The field-by-field schema per version is in FORMAT_COMPATIBILITY.md ("L1 measure
 This section covers the code on each side.
 
 - The analyzer writes per-scene L1 stats to `<measurements>.l1.json`
-  (`hdr_analyzer_mvp/src/l1_sidecar.rs`, currently `version: 7`); mkvdovi reads it through
+  (`hdr_analyzer_mvp/src/l1_sidecar.rs`, currently `version: 8`); mkvdovi reads it through
   `metadata::load_l1_sidecar` for source-honest per-scene L1. Version 2's full-resolution `crop`
   becomes mkvdovi's L5 offsets.
-- **Versions accepted:** mkvdovi and `tools/l1_diff` accept 1–7 (`metadata::L1_SIDECAR_MAX_VERSION`).
+- **Versions accepted:** mkvdovi and `tools/l1_diff` accept 1–8 (`metadata::L1_SIDECAR_MAX_VERSION`).
   mkvdovi reuses a pre-v4 sidecar with an advisory about smoothed averages, and a pre-v5 sidecar
   only on an exact MediaInfo frame count. A missing, invalid or unknown-version sidecar produces a
   visible warning and re-analysis, never a silent fallback. A schema change must bump the version
@@ -222,6 +222,14 @@ This section covers the code on each side.
   cannot reuse them. `verify.rs` never sets the route. The resume fingerprint does not cover the
   measurements; `withdraw_stale_rpu` withdraws an RPU built before a re-analysis changed
   `extra.json`.
+- **Bin edges (v8):** the layout is v7's. From v8 the analyzer's histogram readers take a bin at
+  its centre's PQ through `analysis::histogram::LumBins`, the edges the writer uses; before, they
+  read bin `b` as PQ `b / 255`. `validate_l1_sidecar` rejects an older sidecar whose `peak_source`
+  is `histogram99` or `histogram999` (`SidecarError::StaleHistogramPeaks`), so existing
+  measurements are re-analyzed instead of reused (mkvdovi's own analyses pass no `--peak-source`). A pre-v8 sidecar with no `peak_source` (before v6) passes with an advisory
+  (`metadata::L1_SIDECAR_BIN_EDGES_VERSION`). `--legacy-madvr-l1` reuses the `.bin` unvalidated,
+  so `measure::legacy_targets_notice` only warns when the sidecar beside it is missing, unreadable
+  or older than v8: its optimizer targets came from the old reading.
 - **Stream frames (v5):** an open-GOP cut at a CRA starts with RASL pictures that no decoder
   outputs, but `dovi_tool inject-rpu` maps RPU `n` to presentation picture `n`, and those pictures
   come first. The analyzer counts them from the packets' NAL types (`leading_pictures.rs`) and fails

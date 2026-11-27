@@ -12,7 +12,7 @@ use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10Plu
 use super::hdr10plus_coverage;
 use super::measure::{
     abort_unsupported, acquire_measurements, find_reusable_measurements, hybrid_refusal,
-    total_steps_for, Measured,
+    legacy_targets_notice, total_steps_for, Measured,
 };
 use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 use super::timing::{Delivery, MuxTiming};
@@ -1286,6 +1286,30 @@ fn acquire_measurements_legacy_madvr_l1_reuses_the_first_candidate_without_sidec
     assert!(measured.hdr10plus_json.is_none());
     assert!(measured.bl_source_file.ends_with("in.mkv"));
     assert_eq!((total, current), (6, 1), "reuse adds no analysis step");
+}
+
+#[test]
+fn legacy_madvr_l1_warns_about_targets_from_an_analyzer_before_sidecar_v8() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("in_measurements.bin");
+    fs::write(&bin, b"madvr").unwrap();
+    let sidecar = metadata::l1_sidecar_path(&bin);
+    // No sidecar beside the .bin: its analyzer is unknown.
+    let notice = legacy_targets_notice(&bin).expect("warns without a sidecar");
+    assert!(notice.contains("unknown version"), "{notice}");
+    assert!(notice.contains("Delete the measurements file"), "{notice}");
+    fs::write(&sidecar, br#"{"version": 7}"#).unwrap();
+    let notice = legacy_targets_notice(&bin).expect("warns for v7");
+    assert!(notice.contains("wrote sidecar v7"), "{notice}");
+    fs::write(&sidecar, b"not json").unwrap();
+    assert!(
+        legacy_targets_notice(&bin).is_some(),
+        "an unreadable sidecar warns"
+    );
+    for current in [8, 9] {
+        fs::write(&sidecar, format!(r#"{{"version": {current}}}"#)).unwrap();
+        assert_eq!(legacy_targets_notice(&bin), None, "v{current}");
+    }
 }
 
 #[test]
