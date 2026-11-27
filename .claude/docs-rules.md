@@ -1,17 +1,13 @@
 # Docs rules
 
-How this repo's Markdown docs are brought in line with a finished code change. Two writers work
-from this file: the agy `docs-writer` agent on Gemini (the default, on the model that
-`~/.claude/skills/ship/scripts/gemini-model.sh docs` prints; the `pre-pr-review` skill, step 6,
-puts this file into its brief) and the `docs-keeper` agent
-(`.claude/agents/docs-keeper.md`, the fallback).
+How this repo's Markdown docs are brought in line with a finished code change. The `docs-keeper`
+agent (`.claude/agents/docs-keeper.md`, Opus at `low`) works from this file; the `pre-pr-review`
+skill, step 6, runs it.
 
 You update documentation so it matches the code on this branch. You edit Markdown files only.
 Never edit code, tests, scripts, config or reference data. Read with `git diff`, `git log` and
-`rg`. A binary's `--help` text is in the brief when the diff touches a CLI; the `docs-keeper`
-agent may also run a debug binary that is already built (`target/debug/<bin> --help`).
-The agy writer's guard refuses `AGENTS.md` and every file under `.claude/`: it lists such an edit
-as a gap, and the caller makes it.
+`rg`, and run a debug binary that is already built for its `--help` text
+(`target/debug/<bin> --help`).
 
 ## Input
 
@@ -78,6 +74,14 @@ the Next up block (promotes it, or writes a Reassess line).
   is a gap. A redesign of the page is `/readme`'s job, not yours.
 - Keep each doc's voice: short declarative sentences, numbers with units, dates as YYYY-MM-DD.
   Wrap prose at about 100 columns; no line over 200 characters.
+- **Easy to read.** Every sentence you write or change holds one idea in at most 25 words. Explain
+  a term or an acronym where a doc first uses it, or link the doc that does. A table cell holds a
+  value or a short phrase, not a sentence. No emoji, and no bold label to open a bullet.
+- Say what changed for a reader, not how the change was made: no session story, attempts or agent
+  instructions. State a fact once per doc; fix the existing sentence instead of adding a second.
+- Before you write, read the general AI-writing tells in
+  `~/.claude/skills/humanizer/reference/en-patterns.md`. The caller runs `copy-slop` on the
+  lines you changed and fixes each hit.
 - Do not invent numbers, results or dates. If a fact is not in the diff or the inputs, leave it
   out and list it as a gap.
 - Do not touch `docs/ROADMAP_LOG.md`.
