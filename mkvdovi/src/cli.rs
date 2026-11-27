@@ -14,7 +14,8 @@ pub enum SubCmd {
 
 /// `mkvdovi manifest`. The flags after `--work-dir` are the conversion's flags that change the
 /// measured L1 or the RPU, with the same defaults, so the manifest describes the RPUs a
-/// conversion with the same flags writes.
+/// conversion with the same flags writes. The opt-in `--peak-estimator` (ROADMAP WS1.7) is not
+/// one of them: a manifest describes the RPUs of the default `max` estimator.
 #[derive(Parser, Debug, Clone)]
 pub struct ManifestArgs {
     /// Input MKV (HDR10 or HLG, one HEVC video track).

@@ -85,6 +85,9 @@ pub struct L1Sidecar {
     /// How the frame peak was taken: `"max"`, `"percentile"`, `"robust"`, ...
     #[serde(default)]
     pub peak_estimator: Option<String>,
+    /// The analyzer's `--peak-percentile`, which a `"percentile"` peak follows.
+    #[serde(default)]
+    pub peak_percentile: Option<f64>,
     /// The histogram source the analyzer applied to the frame peak: `"max"`, `"histogram99"` or
     /// `"histogram999"` (version 6+). This is the analyzer's `--peak-source`, unrelated to
     /// mkvdovi's flag of that name, which selects an HDR10+ statistic.

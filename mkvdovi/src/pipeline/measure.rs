@@ -12,6 +12,7 @@ use super::analyzer::{
     run_hdr_analyzer,
 };
 use super::dovi_steps::extract_clean_base_layer;
+use super::estimator;
 use super::hdr10plus::{
     extract_hdr10plus_metadata, extracted_with_skip_reorder, skip_reorder_refusal,
 };
@@ -533,6 +534,7 @@ fn rebuild_mel(
 
     let mut extra_args = Vec::new();
     add_optimizer_args(&mut extra_args, args);
+    extra_args.extend(estimator::analyzer_args(args));
     // Analyze the original container, not the raw Annex B stream: without a container
     // duration the seek-based crop probes are unavailable and the in-stream fallback
     // can commit a degenerate active area on dark openings. MEL base-layer pixels are
@@ -583,6 +585,7 @@ fn rebuild_profile8(
 
     let mut extra_args = Vec::new();
     add_optimizer_args(&mut extra_args, args);
+    extra_args.extend(estimator::analyzer_args(args));
     // Same rationale as the MEL path: analyze the container so crop probing can seek.
     measured.measurements_file = run_hdr_analyzer(input_file, temp_dir, &extra_args, args)?;
     if measured.measurements_file.is_none() {
@@ -685,7 +688,8 @@ pub(super) fn find_reusable_measurements(
         for existing in candidates {
             match metadata::load_l1_sidecar(&existing, &expect) {
                 Ok((sidecar, _)) if rejects_coarser_sidecar(&sidecar, &existing, args) => {}
-                Ok((sidecar, _)) if rejects_other_estimator(&sidecar, &existing, args) => {}
+                Ok((sidecar, _))
+                    if estimator::rejects_other_estimator(&sidecar, &existing, args) => {}
                 Ok((sidecar, _)) if rejects_for_hybrid(&sidecar, &existing, hybrid) => {}
                 Ok((sidecar, advisories)) => {
                     report_reused_sidecar(&sidecar, &existing, args);
@@ -727,26 +731,6 @@ pub(super) fn legacy_targets_notice(measurements: &Path) -> Option<String> {
         "--legacy-madvr-l1 delivers the target nits of '{}', measured by {measured_by}; analyzers before sidecar v{current} read their histogram bins low, so these targets can be too dark. Delete the measurements file to re-measure.",
         measurements.display()
     ))
-}
-
-/// Measurements whose peaks follow another estimator than `--peak-estimator` (a sidecar without
-/// one is `max`) are re-analyzed, not reused (ROADMAP WS1.7). Returns true when the candidate
-/// was rejected (and says so).
-pub(super) fn rejects_other_estimator(
-    sidecar: &metadata::L1Sidecar,
-    measurements: &Path,
-    args: &Args,
-) -> bool {
-    let measured = sidecar.peak_estimator.as_deref().unwrap_or("max");
-    let requested = args.peak_estimator.analyzer_name();
-    if measured == requested {
-        return false;
-    }
-    progress::print_warn(&format!(
-        "Existing measurements '{}' follow the {measured} peak estimator, not --peak-estimator {requested}; re-analyzing.",
-        measurements.display()
-    ));
-    true
 }
 
 /// Under `--hdr10plus-l1 hybrid` (`hybrid`: an HDR10+ input), only measurements that can carry
@@ -838,36 +822,7 @@ pub(super) fn fresh_analysis_args(
         }
         extra_args.extend(["--hlg-composer".to_string(), composer.cli_name().into()]);
     }
-    if !add_peak_estimator_args(&mut extra_args, args, hlg) {
-        return None;
-    }
+    // Refused combinations stopped in `estimator::preflight_refusal` before any temp work.
+    extra_args.extend(estimator::analyzer_args(args));
     Some(extra_args)
-}
-
-/// Adds `--peak-estimator` when it is not the default `max` (ROADMAP WS1.7). False, after an
-/// error, when the analyzer's `--help` does not name the value, or for `st2094-10` on HLG, which
-/// the analyzer measures for PQ input only.
-fn add_peak_estimator_args(extra_args: &mut Vec<String>, args: &Args, hlg: bool) -> bool {
-    let estimator = args.peak_estimator;
-    if estimator == PeakEstimatorChoice::Max {
-        return true;
-    }
-    if hlg && estimator == PeakEstimatorChoice::St2094_10 {
-        progress::print_error(
-            "--peak-estimator st2094-10 measures PQ input only; this input is HLG. Use max or percentile.",
-        );
-        return false;
-    }
-    if !external::analyzer_lists_option(&analyzer_executable(), estimator.analyzer_name()) {
-        progress::print_error(&format!(
-            "--peak-estimator {name} needs an hdr_analyzer_mvp whose --help names {name}; rebuild or update hdr_analyzer_mvp.",
-            name = estimator.analyzer_name()
-        ));
-        return false;
-    }
-    extra_args.extend([
-        "--peak-estimator".to_string(),
-        estimator.analyzer_name().to_string(),
-    ]);
-    true
 }

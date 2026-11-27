@@ -8,11 +8,12 @@ use super::dovi_steps::{
     convert_mel_fast_path, convert_mel_to_profile81, extract_clean_base_layer,
     feed_mkv_to_dovi_tool, parse_packet_count, resolve_dovi_input,
 };
+use super::estimator::{check_fresh, preflight_refusal, rejects_other_estimator};
 use super::hdr10plus::{hdr10plus_peak_nits, hdr10plus_scene_peak_stats, Hdr10PlusPeakStats};
 use super::hdr10plus_coverage;
 use super::measure::{
     abort_unsupported, acquire_measurements, find_reusable_measurements, fresh_analysis_args,
-    hybrid_refusal, legacy_targets_notice, rejects_other_estimator, total_steps_for, Measured,
+    hybrid_refusal, legacy_targets_notice, total_steps_for, Measured,
 };
 use super::temp_dir::{locate_temp_dir, prepare_temp_dir, settle_leftover_temp_dir};
 use super::timing::{Delivery, MuxTiming};
@@ -193,13 +194,79 @@ fn measurements_of_another_peak_estimator_are_re_analyzed() {
 }
 
 #[test]
-fn st2094_10_is_refused_for_hlg_before_any_analysis() {
-    let args = Args::parse_from(["mkvdovi", "--peak-estimator", "st2094-10"]);
-    assert_eq!(fresh_analysis_args(&args, true, None), None);
-    // max adds nothing, so PQ and HLG analyses run as before.
-    let default = Args::parse_from(["mkvdovi"]);
-    let pq = fresh_analysis_args(&default, false, None).unwrap();
+fn st2094_10_is_refused_for_hlg_or_reduced_analysis_before_any_temp_work() {
+    let args = |flags: &[&str]| Args::parse_from(["mkvdovi"].iter().chain(flags));
+    let hlg = preflight_refusal(&args(&["--peak-estimator", "st2094-10"]), true).unwrap();
+    assert!(hlg.contains("measures PQ input only"), "{hlg}");
+    for quality in ["balanced", "fast"] {
+        let refusal = preflight_refusal(
+            &args(&[
+                "--peak-estimator",
+                "st2094-10",
+                "--analysis-quality",
+                quality,
+            ]),
+            false,
+        )
+        .unwrap();
+        assert!(
+            refusal.contains("--analysis-quality accurate"),
+            "{quality}: {refusal}"
+        );
+    }
+    // max and percentile need neither, and add no analyzer flag for max.
+    assert_eq!(preflight_refusal(&args(&[]), true), None);
+    assert_eq!(
+        preflight_refusal(
+            &args(&[
+                "--peak-estimator",
+                "percentile",
+                "--analysis-quality",
+                "fast"
+            ]),
+            true
+        ),
+        None
+    );
+    let pq = fresh_analysis_args(&args(&[]), false, None).unwrap();
     assert!(!pq.iter().any(|arg| arg == "--peak-estimator"), "{pq:?}");
+    let percentile = fresh_analysis_args(&args(&["--peak-estimator", "percentile"]), false, None);
+    let percentile = percentile.unwrap();
+    assert!(percentile
+        .windows(2)
+        .any(|w| w == ["--peak-estimator", "percentile"]));
+}
+
+#[test]
+fn a_percentile_sidecar_counts_only_at_the_percentile_mkvdovi_measures_with() {
+    let measurements = Path::new("clip_measurements.bin");
+    let percentile = Args::parse_from(["mkvdovi", "--peak-estimator", "percentile"]);
+    let sidecar = |p: Option<f64>| metadata::L1Sidecar {
+        peak_estimator: Some("percentile".into()),
+        peak_percentile: p,
+        ..Default::default()
+    };
+    assert!(!rejects_other_estimator(
+        &sidecar(Some(99.99)),
+        measurements,
+        &percentile
+    ));
+    assert!(rejects_other_estimator(
+        &sidecar(Some(99.9)),
+        measurements,
+        &percentile
+    ));
+    // A fresh analysis that measured something else is refused, never delivered.
+    assert!(check_fresh(&sidecar(Some(99.99)), &percentile).is_ok());
+    let max = metadata::L1Sidecar {
+        peak_estimator: Some("max".into()),
+        ..Default::default()
+    };
+    let error = check_fresh(&max, &percentile).unwrap_err();
+    assert!(
+        error.contains("measured with the max peak estimator"),
+        "{error}"
+    );
 }
 
 #[test]

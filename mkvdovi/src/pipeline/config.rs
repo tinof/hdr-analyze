@@ -308,6 +308,14 @@ fn load_fresh_sidecar(
             // a later run with --hwaccel none would reuse them.
             match metadata::load_l1_sidecar(measurements, &expect) {
                 Ok((sidecar, advisories)) => {
+                    // An analyzer that ignored or lacks the requested estimator (ROADMAP WS1.7)
+                    // measured something else: refuse, never deliver it as the requested one.
+                    if let Err(reason) = super::estimator::check_fresh(&sidecar, args) {
+                        progress::print_error(&format!(
+                            "The analyzer's L1 sidecar cannot be used: {reason}."
+                        ));
+                        return false;
+                    }
                     print_sidecar_advisories(&advisories);
                     warn_if_gpu_analysis_missing(&sidecar, args);
                     measured.l1_sidecar = Some(sidecar);
