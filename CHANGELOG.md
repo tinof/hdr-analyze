@@ -6,7 +6,25 @@ This document provides a historical record of completed milestones, feature impl
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Update `mkvdovi` and `hdr_analyzer_mvp` together:** the analyzer writes L1 sidecar version 8,
+  which `mkvdovi` 0.9.0 does not read.
+- Measurements made with `--peak-source histogram99` or `histogram999` are re-analyzed once, with
+  a warning. Users of `--legacy-madvr-l1` should delete their measurements files and re-measure:
+  the `.bin` target nits of older analyzers read too low.
+
 ### Fixed
+
+- hdr_analyzer_mvp reads its 256-bin luminance histogram with the bin edges it writes (ROADMAP
+  E8.1). It used to read bin `b` as PQ `b / 255`, so 1000 nits read as about 305. The written
+  histograms are byte-identical, and the default L1 (`--peak-source max`) is unchanged.
+  - The optimizer's per-frame target nits in the `.bin` change on every run. On a 471-frame 4K
+    clip their median rose from 12 to 168 nits (range 5–22 before, 106–233 after).
+  - `--peak-source histogram99`/`histogram999` frame peaks read up to about three times higher.
+    They are now capped at the frame's direct maximum.
+  - The L1 sidecar is version 8, with no field change. mkvdovi reads versions 1–8 and warns
+    under `--legacy-madvr-l1` when the reused `.bin` has no v8 or newer sidecar beside it.
 
 - mkvdovi muxes a constant-rate source at the source's rate when its video stream states another
   one (ROADMAP E7.4), for example 30 fps in the VUI of a 25 fps file. Before the first mux it reads

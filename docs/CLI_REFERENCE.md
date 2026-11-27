@@ -12,7 +12,7 @@ All defaults below are taken directly from `--help`; run `<binary> --help` to co
 
 Analyzes an HDR10/HLG video and writes a madVR-compatible `.bin` measurement file plus an
 analyzer-owned `<output>.l1.json` sidecar containing explicit full-precision-derived L1 statistics and
-provenance (sidecar version 7: analyzer version, input identity, sampling settings, full-resolution
+provenance (sidecar version 8: analyzer version, input identity, sampling settings, full-resolution
 crop, `analysis.luminance_mapping`, the stream frame count with the leading pictures no decoder
 outputs, `source.stream_frames` / `source.leading_skipped_frames`, the per-frame peak
 `frames.max_pq_12bit`, and the applied `peak_source`). Inputs tagged with a non-HDR

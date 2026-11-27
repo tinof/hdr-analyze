@@ -19,6 +19,12 @@ the front page concise.
 - Histogram binning follows the v5 layout:
     -   SDR portion (bins 0-63) and HDR portion (bins 64-255).
     -   The histogram is retained for distribution, scene detection, and madVR compatibility.
+    -   Bins 0-63 split PQ [0, PQ(100 nits)) evenly; bins 64-255 split [PQ(100 nits), 1].
+    -   `analysis::histogram::LumBins` holds these edges for the CPU writer, the CUDA bin LUT and
+        every reader.
+    -   The readers (highlight knee, percentile peaks, histogram average) take a bin at its
+        centre's PQ. Before L1 sidecar v8 they read bin `b` as PQ `b / 255`.
+    -   A `histogram99`/`histogram999` frame peak is capped at the frame's direct maximum.
 - The active per-frame analysis path normalizes HDR10 limited-range codes (nominal 64-940) to
   `[0,1]` before mapping into the v5 histogram bins (aligns with practical HDR10 limited-range
   content).
