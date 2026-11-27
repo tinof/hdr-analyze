@@ -56,7 +56,6 @@ static_assert(SUMS_WORD == 4386 && DIFF_WORD == 4392 && DIFF_WORD + DIFF_WORDS =
 // 2^32 as f32. x * 2^32 is an exact exponent shift for finite x in [0, 1], so truncating
 // it with __float2ull_rz equals the former (unsigned long long)((double)x * 2^32).
 #define FIXED_POINT_SCALE 4294967296.0f
-#define TWO_PI 6.28318530717958647692f
 #define FULL_WARP 0xffffffffu
 
 __device__ __forceinline__ unsigned long long fixed_point(float x) {

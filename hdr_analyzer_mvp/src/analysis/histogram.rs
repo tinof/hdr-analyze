@@ -307,19 +307,6 @@ pub fn apply_histogram_temporal_median(histogram: &mut [f64], history: &[Vec<f64
     }
 }
 
-/// Compute hue histogram (31 bins) from chroma planes (U and V).
-///
-/// This function generates a hue distribution histogram by analyzing the color
-/// information in the U (Cb) and V (Cr) chroma planes. The hue angle is computed
-/// from the chroma components and quantized into 31 bins covering the full 360-degree
-/// hue circle.
-///
-/// # Arguments
-/// * `frame` - Native FFmpeg video frame in YUV420P10LE format
-/// * `crop_rect` - Active area to analyze (chroma is subsampled 2x2)
-///
-/// # Returns
-/// Vector of 31 f64 values representing percentage distribution across hue bins
 /// Bins of the hue histogram over the full hue circle.
 pub const HUE_BINS: usize = 31;
 /// [`hue_lut`] entry of a chroma pair too close to neutral to have a hue.
@@ -359,6 +346,19 @@ pub fn hue_lut() -> &'static [u8] {
     })
 }
 
+/// Compute hue histogram (31 bins) from chroma planes (U and V).
+///
+/// This function generates a hue distribution histogram by analyzing the color
+/// information in the U (Cb) and V (Cr) chroma planes. The hue angle is computed
+/// from the chroma components and quantized into 31 bins covering the full 360-degree
+/// hue circle.
+///
+/// # Arguments
+/// * `frame` - Native FFmpeg video frame in YUV420P10LE format
+/// * `crop_rect` - Active area to analyze (chroma is subsampled 2x2)
+///
+/// # Returns
+/// Vector of 31 f64 values representing percentage distribution across hue bins
 pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<f64> {
     let lut = hue_lut();
     let mut hue_histogram = vec![0.0; HUE_BINS];
@@ -420,6 +420,54 @@ pub fn compute_hue_histogram(frame: &frame::Video, crop_rect: &CropRect) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `compute_hue_histogram` on a frame whose chroma pairs are not symmetric under swapping U
+    /// and V, against bins worked out by hand (ROADMAP E12.3): a transposed table index or a
+    /// swapped plane read moves counts between bins 0 and 7 and between bins 3 and 4.
+    #[test]
+    fn the_hue_histogram_bins_an_asymmetric_frame_as_worked_out_by_hand() {
+        use ffmpeg_next::format::Pixel;
+
+        // Centred (u, v) per chroma sample of an 8x4 frame (4x2 chroma samples).
+        // (100, 0): 0 degrees, bin 0. (0, 100): 90 degrees, 90 * 31 / 360 = 7.75, bin 7.
+        // (-100, 0): 180 degrees, 15.5, bin 15. (0, -100): 270 degrees, 23.25, bin 23.
+        // (6, 8): magnitude 10, kept; atan(8/6) = 53.13 degrees, 4.58, bin 4 (transposed: bin 3).
+        // (6, 7): magnitude 9.22, under 10, skipped.
+        let pairs: [(i32, i32); 8] = [
+            (100, 0),
+            (100, 0),
+            (100, 0),
+            (0, 100),
+            (-100, 0),
+            (0, -100),
+            (6, 8),
+            (6, 7),
+        ];
+        let mut frame = frame::Video::new(Pixel::YUV420P10LE, 8, 4);
+        for plane in 1..3 {
+            let stride = frame.stride(plane);
+            let data = frame.data_mut(plane);
+            for (index, &(u, v)) in pairs.iter().enumerate() {
+                let code = (512 + if plane == 1 { u } else { v }) as u16;
+                let offset = (index / 4) * stride + (index % 4) * 2;
+                data[offset..offset + 2].copy_from_slice(&code.to_le_bytes());
+            }
+        }
+        let crop = CropRect {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 4,
+        };
+        let histogram = compute_hue_histogram(&frame, &crop);
+        let mut expected = vec![0.0; HUE_BINS];
+        for (bin, count) in [(0, 3.0), (7, 1.0), (15, 1.0), (23, 1.0), (4, 1.0)] {
+            expected[bin] = (count / 7.0) * 100.0;
+        }
+        assert_eq!(histogram, expected);
+        assert_eq!(hue_bin(512 + 6, 512 + 7), HUE_SKIP);
+        assert_eq!(hue_bin(512 + 8, 512 + 6), 3);
+    }
 
     #[test]
     fn applied_peak_source_names_what_select_peak_pq_does() {

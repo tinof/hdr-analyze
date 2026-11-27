@@ -459,7 +459,8 @@ fn reduced_set_on_the_gpu_matches_the_cpu_on_odd_crops() {
 }
 
 /// Every 10-bit chroma pair, binned on the CPU and by the kernel (ROADMAP E12.3): a 2048x2048
-/// frame whose chroma sample (cx, cy) is the pair (u = cx, v = cy). The kernel used to bin with
+/// frame whose chroma sample (cx, cy) is the pair (u = cx, v = cy), whole and as every row and
+/// every column of the table. The kernel used to bin with
 /// its own f32 `atan2f`, which put the centred pairs (254, -109) and (508, -218) in bin 29 where
 /// the CPU puts them in bin 28; both now read the CPU's table.
 #[cfg(feature = "cuda")]
@@ -517,7 +518,7 @@ fn every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu() {
         height: SIDE,
     };
     let cpu = analyze_native_frame_cropped(&frame, &crop, &options).expect("CPU analysis");
-    let gpu = gpu
+    let whole = gpu
         .analyze(&frame, &crop, 1, &options)
         .expect("GPU analysis");
     let bits = |histogram: &Option<Vec<f64>>| -> Vec<u64> {
@@ -529,9 +530,39 @@ fn every_chroma_pair_gets_the_same_hue_bin_on_the_gpu_and_the_cpu() {
             .collect()
     };
     assert_eq!(
-        bits(&gpu.frame.hue_histogram),
+        bits(&whole.frame.hue_histogram),
         bits(&cpu.frame.hue_histogram)
     );
+    // The whole frame holds every pair once, so its totals cannot see a kernel index that maps
+    // pairs one-to-one onto other entries (a transposed index, swapped U and V planes). Every row
+    // (fixed v) and every column (fixed u) of the table, as a 2-pixel strip, can: a transposed
+    // lookup turns row j into column j.
+    let mut strips = Vec::with_capacity(2 * 1024);
+    for index in 0..1024u32 {
+        strips.push(CropRect {
+            x: 0,
+            y: 2 * index,
+            width: SIDE,
+            height: 2,
+        });
+        strips.push(CropRect {
+            x: 2 * index,
+            y: 0,
+            width: 2,
+            height: SIDE,
+        });
+    }
+    for strip in &strips {
+        let cpu = analyze_native_frame_cropped(&frame, strip, &options).expect("CPU analysis");
+        let gpu_strip = gpu
+            .analyze(&frame, strip, 1, &options)
+            .expect("GPU analysis");
+        assert_eq!(
+            bits(&gpu_strip.frame.hue_histogram),
+            bits(&cpu.frame.hue_histogram),
+            "{strip:?}"
+        );
+    }
     // The table itself matches the CPU's f64 formula, including the two pairs the kernel's f32
     // formula moved: an independent recomputation of their angle in degrees.
     use crate::analysis::histogram::{hue_bin, hue_lut};
