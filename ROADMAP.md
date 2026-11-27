@@ -747,9 +747,9 @@ The detailed gap table and validation method live in
   regression gate passes without `--update`.
 ### E13: module size refactor
 
-- **Status:** Partial. Steps 2-5, E13.11 and E13.14-E13.17 done, no production file over the
-  800-line limit; history in [the log](docs/ROADMAP_LOG.md). Open: E13.6-E13.10, E13.12, E13.13 and
-  E13.18-E13.21; each function over 150 lines carries an `#[expect]` marker naming its step.
+- **Status:** Partial. Steps 2-5, E13.11 and E13.14-E13.17 done; history in
+  [the log](docs/ROADMAP_LOG.md). Open: E13.6-E13.10, E13.12, E13.13 and E13.18-E13.22; each
+  function over 150 lines carries an `#[expect]` marker naming its step.
 - **Gate:** per move (E13.18, E13.19): fmt, clippy (also `--features cuda`), tests;
   the L1 regression gate without `--update`; `scripts/cuda-parity.sh` for analysis paths; for
   mkvdovi, `scripts/rpu-baseline.sh compare --require-identical-l1` against the baselines captured
@@ -799,6 +799,8 @@ The detailed gap table and validation method live in
   report: about 30 warnings at @dc4882d (doc list indentation, empty format literals, a regex
   compiled in a loop, one function with 11 arguments). Gate: fmt, clippy (also `--features cuda`),
   tests; the L1 gate without `--update`; `scripts/cuda-parity.sh` when analysis code changes.
+- [E13.22][desk] Split `mkvdovi/src/pipeline/measure.rs` (828 lines, limit 800) as a pure move.
+  Gate: the gates its paths trigger, plus a diff that shows only moved blocks.
 - **Simplification candidates for later PRs (not in a move):** `read_static_metadata` stores
   `md_*` mastering primaries that nothing reads, and its parser does not match MediaInfo 24.01's
   spellings anyway; two `impl L1Sidecar` blocks.
