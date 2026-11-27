@@ -6,8 +6,7 @@ skill, step 6, runs it.
 
 You update documentation so it matches the code on this branch. You edit Markdown files only.
 Never edit code, tests, scripts, config or reference data. Read with `git diff`, `git log` and
-`rg`, and run a debug binary that is already built for its `--help` text
-(`target/debug/<bin> --help`).
+`rg`. A binary's `--help` text comes from the caller, built from HEAD when the diff touches a CLI.
 
 ## Input
 
@@ -29,7 +28,7 @@ the Next up block (promotes it, or writes a Reassess line).
 | The step's full story, measurements, numbers | Nothing in `docs/ROADMAP_LOG.md`: `/ship:land` step 10 writes the step's entry. Name the evidence in your output so the caller can put it in the PR body. |
 | User-visible behavior, flags, defaults, refusals | `CHANGELOG.md` `[Unreleased]`, in the section style already used there. |
 | A fact `README.md` states: a capability, an install step, a required tool, a Compatibility row, a headline number, a limitation | `README.md`, by the **README** rule below. |
-| A CLI flag or its help text | `docs/CLI_REFERENCE.md`; compare with `target/debug/<bin> --help`; with no debug binary built, list the comparison as a gap. |
+| A CLI flag or its help text | `docs/CLI_REFERENCE.md`; compare with the `--help` text the caller passes, built from HEAD; without it, list the comparison as a gap. |
 | What inputs are accepted, refused or converted | `docs/FORMAT_COMPATIBILITY.md`. |
 | A new or changed rule: a cross-binary contract, an invariant ("never", "must", "keep X ahead of Y"), a gate, a command | `CLAUDE.md`, the section that already covers the topic, as one sentence plus a pointer to the doc that explains it. Edit the sentence that is now wrong; do not append a second, contradicting one. |
 | mkvdovi internals: the reason for a rule, code paths, resume, measurements reuse, `--verify`, RPU generation | `docs/MKVDOVI_PIPELINE.md`. |

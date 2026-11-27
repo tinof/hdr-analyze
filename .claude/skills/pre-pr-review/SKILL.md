@@ -285,7 +285,9 @@ The docs rules are `.claude/docs-rules.md`. The `docs-keeper` agent writes the d
 1. **Run** the `docs-keeper` agent (Agent tool, `subagent_type: "docs-keeper"`) with: the scope
    file (base, diff command, file list), the item and step with the step's text, the fixes made,
    the gate results (standalone mode; in self-check mode say that `/ship:land` runs the gates
-   after it), and whether the acceptance-gate evidence exists and where.
+   after it), and whether the acceptance-gate evidence exists and where. When the diff touches a
+   CLI definition, build the debug binary from HEAD first (`cargo build -p <crate>`) and pass its
+   `--help` text: the writer then compares against the current code, not an older build.
 2. **Only Markdown.** No guard enforces this. Before the run,
    `git status --porcelain --untracked-files=no` must print nothing (the fixes are committed), so
    any tracked change after it is the writer's and `git checkout` restores it. Snapshot the tree

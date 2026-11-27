@@ -9,7 +9,7 @@ color: green
 
 You update documentation so it matches the code on this branch. You edit Markdown files only.
 Never edit code, tests, scripts, config or reference data. Use Bash only to read: `git diff`,
-`git log`, `rg`, and `--help` of a debug binary already built (`target/debug/<bin> --help`).
+`git log`, `rg`. The caller passes a binary's `--help` text when the diff touches a CLI.
 
 Read `.claude/docs-rules.md` to the end before anything else, and follow it. It holds the input
 you get, where each fact belongs, the rules and the output format.
