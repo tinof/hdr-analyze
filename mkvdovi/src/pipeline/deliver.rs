@@ -221,10 +221,18 @@ fn inject_in_process(
     // once BL_RPU.hevc is sealed); an input outside the temp dir is kept.
     if let Source::RawFile(path) = &source {
         if path.starts_with(temp_dir) {
-            let _ = fs::remove_file(path);
+            remove_superseded(path);
         }
     }
     Ok(Some(bl_rpu_hevc))
+}
+
+/// Removes a sealed temp-dir stream that `BL_RPU.hevc` supersedes, its sentinel first. A
+/// sentinel left beside the missing file would seal whatever a later run starts to write there
+/// and does not finish, and the run after that would resume from the partial stream.
+fn remove_superseded(stream: &Path) {
+    let _ = resume::invalidate(stream);
+    let _ = fs::remove_file(stream);
 }
 
 /// `--dovi-inject external`, step 1: the raw HEVC base layer the RPU is injected into,
@@ -334,7 +342,7 @@ pub(super) fn inject_rpu(
         // does not need both full-size streams on disk. Resume never re-reads it once
         // BL_RPU.hevc is sealed. Inputs outside the temp dir (e.g. the source MKV) are kept.
         if bl_hevc.starts_with(temp_dir) {
-            let _ = fs::remove_file(bl_hevc);
+            remove_superseded(bl_hevc);
         }
     }
     Ok(Some(bl_rpu_hevc))
