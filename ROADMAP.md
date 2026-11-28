@@ -890,8 +890,22 @@ The detailed gap table and validation method live in
 
 ### E20: delivery throughput
 
-- **Status:** Done, no step open: mkvdovi injects the RPU in process (E20.1,
-  [log](docs/ROADMAP_LOG.md) 2026-11-27). Kept because the docs cite E20.1.
+- **Status:** Partial: mkvdovi injects the RPU in process (E20.1, [log](docs/ROADMAP_LOG.md)
+  2026-11-27); two small steps from the 2026-11-28 review are open (owner, 2026-11-28).
+- [E20.2][desk] `--verify` reads the RPU file that the RPU count step (`pipeline/rpu_count.rs`)
+  extracted from the same output, which the count then keeps for it, instead of extracting it a
+  second time. The count's direct Matroska read (`--dovi-input mkv`) is another reading than
+  `--verify`'s ffmpeg pipe, so its file is reused only when it is shown to hold the same bytes;
+  without a reusable file `--verify` extracts as now. Gate: a test in which `--verify` after
+  the count runs no extraction of its own and still fails on an RPU that differs from the
+  expectation; the reused file byte-identical to the one `--verify`'s own pipe writes, on the
+  test clips and the episode; the episode's per-step wall time before and after.
+- [E20.3][desk] `docs/PERFORMANCE.md` says that on WSL2 the delivery steps follow the latency of
+  the Windows drive under `ext4.vhdx`: about 3 ms more per disk request while Windows' drive
+  optimizer runs in a maintenance window (measured 2026-11-28; mkvmerge reads in 128 KB requests,
+  so the mux slows most), and how to check it. Gate: the note gives the measurement and commands
+  that run as written on the WSL host; the November 2026 episode result names the state it was
+  timed in.
 
 ## Explicit non-goals
 
