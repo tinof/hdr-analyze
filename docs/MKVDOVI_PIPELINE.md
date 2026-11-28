@@ -57,7 +57,8 @@ the reasons and the code paths. What users see: [FORMAT_COMPATIBILITY.md](FORMAT
   from ffmpeg's stdout (the arguments of the external extraction, with the HLG VUI edit, without
   `-stats`; stderr goes to `ffmpeg_inject_pass{1,2}.log`), so the full-size `BL.hevc` is never
   written. A raw `.hevc` base layer (the `--mdfix` paths) and a sealed `BL.hevc` of a resumed run
-  are read as files; a temp-dir input is removed after the injection, as before.
+  are read as files. A temp-dir input is removed after the injection with its `.done` sentinel
+  (`deliver::remove_superseded`, both modes), so a later partial rewrite is never taken as sealed.
   - `RPU.bin` is parsed behind `rpu_guard` and every RPU is serialised before pass 1. A file that
     fails either falls back to the external path with a warning.
   - A measured RPU whose length differs from the pictures is refused after pass 1, before anything
