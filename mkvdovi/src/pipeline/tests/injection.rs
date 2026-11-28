@@ -224,6 +224,19 @@ fn a_sealed_extracted_base_layer_is_read_without_ffmpeg_when_resuming() {
         !bl_hevc.exists(),
         "the superseded temp-dir input is removed"
     );
+    assert_not_sealed_when_rewritten(&bl_hevc);
+}
+
+/// A removed stream leaves no sentinel: the start of a later extraction that was interrupted
+/// must not count as a finished file.
+fn assert_not_sealed_when_rewritten(removed: &Path) {
+    assert!(!removed.exists(), "{} was removed", removed.display());
+    fs::write(removed, b"the start of an interrupted extraction").unwrap();
+    assert!(
+        !resume::is_complete(removed),
+        "{} is sealed by the sentinel of the stream removed before it",
+        removed.display()
+    );
 }
 
 #[cfg(unix)]
@@ -243,6 +256,8 @@ fn a_raw_hevc_base_layer_is_read_directly_and_removed_only_inside_the_temp_dir()
         };
         let clean_bl = dir.join("BL_clean.hevc");
         fs::copy(fixture("clip.hevc"), &clean_bl).unwrap();
+        // Sealed, as `extract_clean_base_layer` leaves it.
+        resume::mark_done(&clean_bl).unwrap();
         let rpu = rpu_in(&fake);
         let measured = measured(clean_bl.clone(), HdrFormat::Hdr10WithMeasurements, true);
         let (injected, _) = run_injection(&fake, &measured, &rpu, true, &default_args());
@@ -251,6 +266,11 @@ fn a_raw_hevc_base_layer_is_read_directly_and_removed_only_inside_the_temp_dir()
         assert!(fs::read(&bl_rpu_hevc).unwrap() == fs::read(fixture("BL_RPU.hevc")).unwrap());
         assert!(fake.calls("ffmpeg").is_empty());
         assert_eq!(clean_bl.exists(), !inside, "inside the temp dir: {inside}");
+        if inside {
+            assert_not_sealed_when_rewritten(&clean_bl);
+        } else {
+            assert!(resume::is_complete(&clean_bl), "a kept input stays sealed");
+        }
     }
 }
 
@@ -341,6 +361,8 @@ fn external_mode_extracts_bl_hevc_and_runs_dovi_tool_inject_rpu() {
         rpu.display()
     );
     assert!(called_with(&fake.calls("dovi_tool"), &inject_call));
+    // dovi_tool's injection supersedes the sealed BL.hevc it read.
+    assert_not_sealed_when_rewritten(&fake.temp.join("BL.hevc"));
 }
 
 #[cfg(unix)]
